@@ -1,8 +1,10 @@
 import Phaser from 'phaser';
+import { runnerTexture, type RunnerFrame } from '../../art/cosmetics';
 import { TEXTURE, type SpriteKey } from '../../art/sprites';
 import { COLOR, CSS, GAME_WIDTH, SCENE } from '../../config';
 import { vibrate } from '../../core/haptics';
 import { sfx } from '../../core/sfx';
+import { store } from '../../core/store';
 import { addBackdrop, addText } from '../../core/ui';
 import { floatText, GameHud, HUD_HEIGHT, showBanner } from '../../scenes/GameHud';
 import { MiniGameScene } from '../../scenes/MiniGameScene';
@@ -103,6 +105,8 @@ export class JumpRunnerScene extends MiniGameScene {
 
   private hud!: GameHud;
   private runner!: Phaser.GameObjects.Image;
+  /** 달리는 캐릭터의 꾸미기 id */
+  private skin = '';
   private hills!: Phaser.GameObjects.TileSprite;
   private clouds: Phaser.GameObjects.Image[] = [];
   private edge!: Phaser.GameObjects.TileSprite;
@@ -141,8 +145,9 @@ export class JumpRunnerScene extends MiniGameScene {
       .setOrigin(0, 0)
       .setDepth(DEPTH.ground);
 
+    this.skin = store.data.cosmetics.equipped.runner;
     this.runner = this.add
-      .image(RUNNER_X, this.groundY, 'runner-run1')
+      .image(RUNNER_X, this.groundY, runnerTexture(this.skin, 'run1'))
       .setOrigin(0.5, 1)
       .setScale(SPRITE_SCALE)
       .setDepth(DEPTH.runner);
@@ -433,7 +438,7 @@ export class JumpRunnerScene extends MiniGameScene {
     // 튕겨 올랐다가 화면 아래로 떨어진다.
     const { height } = this.scale;
     this.tweens.killTweensOf(this.runner);
-    this.runner.setTexture('runner-hit').setScale(SPRITE_SCALE);
+    this.runner.setTexture(runnerTexture(this.skin, 'hit')).setScale(SPRITE_SCALE);
     this.tweens.add({
       targets: this.runner,
       y: this.runner.y - 30,
@@ -464,12 +469,12 @@ export class JumpRunnerScene extends MiniGameScene {
   /** 지금 상태를 화면에 옮긴다. 흔들림이 없도록 좌표는 정수로 맞춘다. */
   private draw(): void {
     this.runner.y = this.groundY - Math.round(this.body.y);
-    const frame: SpriteKey = !this.body.grounded
-      ? 'runner-jump'
+    const frame: RunnerFrame = !this.body.grounded
+      ? 'jump'
       : Math.floor(this.distance / STRIDE_PIXELS) % 2 === 0
-        ? 'runner-run1'
-        : 'runner-run2';
-    this.runner.setTexture(frame);
+        ? 'run1'
+        : 'run2';
+    this.runner.setTexture(runnerTexture(this.skin, frame));
 
     const flap = Math.floor(this.elapsed / BAT_FLAP_SECONDS) % 2;
     for (const obstacle of this.obstacles) {

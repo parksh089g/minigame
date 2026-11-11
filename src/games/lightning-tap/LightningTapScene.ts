@@ -1,9 +1,11 @@
 import Phaser from 'phaser';
+import { ORB_LOOKS } from '../../art/cosmetics';
 import { TEXTURE } from '../../art/sprites';
 import { ORB_SIZE } from '../../art/textures';
-import { COLOR, CSS, GAME_WIDTH, SCENE } from '../../config';
+import { COLOR, CSS, GAME_WIDTH, paletteColor, SCENE } from '../../config';
 import { vibrate } from '../../core/haptics';
 import { sfx } from '../../core/sfx';
+import { store } from '../../core/store';
 import { addBackdrop, addText, drawPanel } from '../../core/ui';
 import { floatText, GameHud, HUD_HEIGHT, showBanner } from '../../scenes/GameHud';
 import { MiniGameScene } from '../../scenes/MiniGameScene';
@@ -57,6 +59,9 @@ export class LightningTapScene extends MiniGameScene {
 
   private hud!: GameHud;
   private rings!: Phaser.GameObjects.Graphics;
+  /** 보통 구슬의 텍스처와 남은 시간 고리의 색. 고른 꾸미기에 따라 달라진다. */
+  private orbTexture = '';
+  private ringColor: number = COLOR.sky;
   private sparks!: Record<OrbKind, Phaser.GameObjects.Particles.ParticleEmitter>;
 
   constructor() {
@@ -84,8 +89,12 @@ export class LightningTapScene extends MiniGameScene {
     });
 
     this.rings = this.add.graphics().setDepth(DEPTH.ring);
+    // 보통 구슬의 생김새는 상점에서 고른 꾸미기를 따른다.
+    this.orbTexture = store.data.cosmetics.equipped.orb;
+    const look = ORB_LOOKS[this.orbTexture];
+    this.ringColor = paletteColor(look.ring);
     this.sparks = {
-      normal: this.createSparks([COLOR.cyan, COLOR.sky, COLOR.white]),
+      normal: this.createSparks(look.sparks.map(paletteColor)),
       gold: this.createSparks([COLOR.yellow, COLOR.orange, COLOR.white]),
     };
 
@@ -195,7 +204,7 @@ export class LightningTapScene extends MiniGameScene {
 
       const kind: OrbKind = Math.random() < goldChance(this.elapsed) ? 'gold' : 'normal';
       const sprite = this.add
-        .image(x, y, kind === 'gold' ? TEXTURE.orbGold : TEXTURE.orb)
+        .image(x, y, kind === 'gold' ? TEXTURE.orbGold : this.orbTexture)
         .setDepth(DEPTH.orb)
         .setScale(0.3);
       this.tweens.add({ targets: sprite, scale: 1, duration: 90, ease: 'Back.Out' });
@@ -215,7 +224,7 @@ export class LightningTapScene extends MiniGameScene {
         continue;
       }
       // 남은 시간을 줄어드는 고리로 보여 주고, 거의 끝나면 깜빡인다.
-      this.rings.lineStyle(1, orb.kind === 'gold' ? COLOR.yellow : COLOR.sky, 0.9);
+      this.rings.lineStyle(1, orb.kind === 'gold' ? COLOR.yellow : this.ringColor, 0.9);
       this.rings.strokeCircle(orb.sprite.x, orb.sprite.y, ORB_RADIUS + 1 + Math.round(remaining * 8));
       const blinking = remaining < 0.3 && Math.floor(orb.age * 16) % 2 === 0;
       orb.sprite.setAlpha(blinking ? 0.45 : 1);

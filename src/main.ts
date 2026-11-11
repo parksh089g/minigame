@@ -12,6 +12,7 @@ import { HubScene } from './scenes/HubScene';
 import { PauseScene } from './scenes/PauseScene';
 import { ResultScene } from './scenes/ResultScene';
 import { SettingsScene } from './scenes/SettingsScene';
+import { ShopScene } from './scenes/ShopScene';
 
 declare global {
   interface Window {
@@ -59,6 +60,7 @@ async function boot(): Promise<void> {
       BootScene,
       HubScene,
       SettingsScene,
+      ShopScene,
       LightningTapScene,
       MemoryCardsScene,
       JumpRunnerScene,

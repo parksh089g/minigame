@@ -6,10 +6,13 @@ import { createStore, get, set, type UseStore } from 'idb-keyval';
 import type { DailyChallenge } from './daily';
 import {
   applyPlayResult,
+  buyCosmetic,
+  equipCosmetic,
   createDefaultSave,
   looksLikeSave,
   normalizeSave,
   resetProgress,
+  type BuyResult,
   type PlayResult,
   type SaveData,
 } from './save';
@@ -65,6 +68,25 @@ class SaveStore {
     this.data = result.save;
     this.commit();
     return result;
+  }
+
+  /** 코인으로 꾸미기를 사서 바로 끼운다. */
+  buyCosmetic(itemId: string): BuyResult {
+    const result = buyCosmetic(this.data, itemId);
+    if (result.ok) {
+      this.data = result.save;
+      this.commit();
+    }
+    return result;
+  }
+
+  /** 가진 꾸미기로 바꿔 끼운다. 바뀌었으면 true. */
+  equipCosmetic(itemId: string): boolean {
+    const next = equipCosmetic(this.data, itemId);
+    if (next === this.data) return false;
+    this.data = next;
+    this.commit();
+    return true;
   }
 
   exportJson(): string {

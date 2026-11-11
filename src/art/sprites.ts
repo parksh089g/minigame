@@ -133,6 +133,17 @@ export const SPRITES = {
     '.c......',
   ],
 
+  'icon-check': [
+    '.......c',
+    '......cc',
+    '.....cc.',
+    'c...cc..',
+    'cc.cc...',
+    '.ccc....',
+    '..c.....',
+    '........',
+  ],
+
   'icon-star': [
     '....4....',
     '....4....',
@@ -504,13 +515,10 @@ export const CARD_SYMBOLS = [
   'card-note',
 ] as const satisfies readonly SpriteKey[];
 
-/** 코드로 그리는 텍스처의 이름. */
+/** 코드로 그리는 텍스처의 이름. 꾸미기로 바뀌는 것(배경, 카드 뒷면, 구슬)은 art/cosmetics.ts에 있다. */
 export const TEXTURE = {
-  orb: 'orb',
   orbGold: 'orb-gold',
   spark: 'spark',
-  backdrop: 'backdrop',
-  cardBack: 'card-back',
   cardFront: 'card-front',
   runnerSoil: 'runner-soil',
   runnerEdge: 'runner-edge',

@@ -11,7 +11,16 @@ import {
 import { getRecord } from '../core/save';
 import { sfx } from '../core/sfx';
 import { store } from '../core/store';
-import { addBackdrop, addText, drawPanel, fadeIn, fadeToScene, PixelButton } from '../core/ui';
+import {
+  addBackdrop,
+  addTapZone,
+  addText,
+  CoinCounter,
+  drawPanel,
+  fadeIn,
+  fadeToScene,
+  PixelButton,
+} from '../core/ui';
 import { GAMES, getGame, todaysChallenge, type MiniGameInfo } from '../games/registry';
 
 const MARGIN = 12;
@@ -78,7 +87,19 @@ export class HubScene extends Phaser.Scene {
       onTap: () => fadeToScene(this, SCENE.settings),
     });
 
-    this.addCoinCounter();
+    // 오른쪽 위: 가진 코인과, 그 코인을 쓰는 꾸미기 상점
+    const shopWidth = 50;
+    new PixelButton(this, {
+      x: GAME_WIDTH - 8 - shopWidth,
+      y: 8,
+      width: shopWidth,
+      height: 26,
+      label: '꾸미기',
+      style: 'blue',
+      hitPadding: 6,
+      onTap: () => fadeToScene(this, SCENE.shop),
+    });
+    new CoinCounter(this, GAME_WIDTH - 8 - shopWidth - 6, 11, store.data.coins);
 
     addText(this, GAME_WIDTH / 2, 38, APP_NAME, {
       size: FONT_SIZE.large,
@@ -139,49 +160,11 @@ export class HubScene extends Phaser.Scene {
       addText(this, x + 34, y + 22, `${game.title} ${challenge.target}점 이상`, { color: CSS.white });
     }
 
-    this.addTapZone(x, y, CARD_WIDTH, DAILY_HEIGHT, drawFrame, () => {
+    addTapZone(this, x, y, CARD_WIDTH, DAILY_HEIGHT, drawFrame, () => {
       sfx.click();
       vibrate(8);
       fadeToScene(this, sceneKey);
     });
-  }
-
-  /** 누르는 동안 모양이 바뀌고, 그 위에서 손을 떼면 onTap이 불리는 영역을 만든다. */
-  private addTapZone(
-    x: number,
-    y: number,
-    width: number,
-    height: number,
-    draw: (pressed: boolean) => void,
-    onTap: () => void,
-  ): void {
-    const zone = this.add.zone(x, y, width, height).setOrigin(0, 0).setInteractive({ useHandCursor: true });
-    let pressed = false;
-    const release = (): void => {
-      pressed = false;
-      draw(false);
-    };
-    zone.on(Phaser.Input.Events.GAMEOBJECT_POINTER_DOWN, () => {
-      pressed = true;
-      draw(true);
-    });
-    zone.on(Phaser.Input.Events.GAMEOBJECT_POINTER_OUT, release);
-    zone.on(Phaser.Input.Events.GAMEOBJECT_POINTER_UP, () => {
-      if (!pressed) return;
-      release();
-      onTap();
-    });
-  }
-
-  private addCoinCounter(): void {
-    const amount = addText(this, 0, 0, String(store.data.coins), { color: CSS.yellow });
-    const width = Math.ceil(amount.width) + 24;
-    const x = GAME_WIDTH - 8 - width;
-    const y = 11;
-    const panel = this.add.graphics();
-    drawPanel(panel, x, y, width, 20, { fill: COLOR.ink, border: COLOR.slate, highlight: COLOR.ink });
-    this.add.image(x + 6, y + 6, 'coin').setOrigin(0, 0);
-    amount.setPosition(x + 18, y + 4).setDepth(1);
   }
 
   private addCard(game: MiniGameInfo, x: number, y: number): void {
@@ -224,7 +207,7 @@ export class HubScene extends Phaser.Scene {
       card.add([soon, lock]);
     }
 
-    this.addTapZone(x, y, CARD_WIDTH, CARD_HEIGHT, (pressed) => drawFrame(pressed && playable), () => {
+    addTapZone(this, x, y, CARD_WIDTH, CARD_HEIGHT, (pressed) => drawFrame(pressed && playable), () => {
       if (game.sceneKey) {
         sfx.click();
         vibrate(8);
@@ -249,7 +232,7 @@ export class HubScene extends Phaser.Scene {
     const message = !isStandalone()
       ? "앱처럼 쓰려면 브라우저 메뉴에서 '홈 화면에 추가'를 눌러 주세요."
       : plays > 0
-        ? `지금까지 ${plays}판을 플레이했어요. 모은 코인은 곧 꾸미기에 쓸 수 있게 돼요.`
+        ? `지금까지 ${plays}판을 플레이했어요. 모은 코인은 꾸미기에서 쓸 수 있어요.`
         : '인터넷이 없어도 언제든 플레이할 수 있어요.';
 
     const text = addText(this, MARGIN + 10, 0, message, {
