@@ -120,8 +120,8 @@ export const GAMES: readonly MiniGameInfo[] = [
     tagline: '먹을수록 길어지는 꼬리',
     icon: 'icon-tail',
     sceneKey: SCENE.tailChase,
-    coinsFor: (score) => Math.floor(score / 15),
-    dailyTargets: [60, 100, 150],
+    coinsFor: (score) => Math.floor(score / 20),
+    dailyTargets: [100, 200, 300],
   },
   {
     id: 'logic-tiles',

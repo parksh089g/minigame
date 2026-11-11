@@ -106,6 +106,8 @@ export const ACHIEVEMENTS: readonly Achievement[] = [
   { id: 'screw-1400', group: 'score', title: '나사의 달인', description: '나사 풀기 1400점 이상', goal: 1400, reward: 50, measure: bestOf('screw-sort') },
   { id: 'merge-500', group: 'score', title: '쓱쓱 합치기', description: '머지 타일 500점 이상', goal: 500, reward: 20, measure: bestOf('merge-tiles') },
   { id: 'merge-1000', group: 'score', title: '머지의 달인', description: '머지 타일 1000점 이상', goal: 1000, reward: 50, measure: bestOf('merge-tiles') },
+  { id: 'tail-300', group: 'score', title: '쑥쑥 애벌레', description: '꼬리 잡기 300점 이상', goal: 300, reward: 20, measure: bestOf('tail-chase') },
+  { id: 'tail-450', group: 'score', title: '꼬리의 달인', description: '꼬리 잡기 450점 이상', goal: 450, reward: 50, measure: bestOf('tail-chase') },
   { id: 'number-350', group: 'score', title: '숫자 탐정', description: '숫자 퍼즐 350점 이상', goal: 350, reward: 20, measure: bestOf('number-puzzle') },
   { id: 'number-700', group: 'score', title: '숫자의 달인', description: '숫자 퍼즐 700점 이상', goal: 700, reward: 50, measure: bestOf('number-puzzle') },
 
