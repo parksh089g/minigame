@@ -19,7 +19,7 @@ export interface MiniGameInfo {
   sceneKey: string | null;
   /** 점수에 따라 주는 코인 수 */
   coinsFor: (score: number) => number;
-  /** 오늘의 도전에 쓰는 목표 점수. 쉬운 것부터 어려운 것 순서로 세 단계. */
+  /** 오늘의 도전에 쓰는 목표 점수. 쉬운 것부터 어려운 것 순서로 세 단계. 비워 두면 오늘의 도전에 나오지 않는다. */
   dailyTargets: readonly number[];
 }
 
@@ -58,7 +58,8 @@ export const GAMES: readonly MiniGameInfo[] = [
     icon: 'icon-lantern',
     sceneKey: LANTERN_SCENE,
     coinsFor: lanternCoins,
-    dailyTargets: [300, 700, 1300],
+    // 한 판이 10분까지 가므로 오늘의 도전에는 넣지 않는다.
+    dailyTargets: [],
   },
 ];
 

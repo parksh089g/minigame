@@ -29,8 +29,10 @@ describe('게임 목록', () => {
     }
   });
 
-  it('플레이할 수 있는 게임은 오늘의 도전 목표가 세 단계이고 갈수록 높다', () => {
-    for (const game of GAMES.filter((item) => item.sceneKey !== null)) {
+  it('오늘의 도전에 나오는 게임은 목표가 세 단계이고 갈수록 높다', () => {
+    // 목표를 비워 둔 게임은 오늘의 도전에서 빠진다.
+    for (const game of GAMES.filter((item) => item.dailyTargets.length > 0)) {
+      expect(game.sceneKey).not.toBeNull();
       expect(game.dailyTargets).toHaveLength(3);
       expect(game.dailyTargets[0]).toBeGreaterThan(0);
       expect(game.dailyTargets[1]).toBeGreaterThan(game.dailyTargets[0]);
@@ -50,7 +52,9 @@ describe('게임 목록', () => {
       expect(challenge!.dateKey).toBe(dateKeyOf(date));
       seen.add(challenge!.gameId);
     }
-    expect(seen.size).toBe(GAMES.filter((item) => item.sceneKey !== null).length);
+    expect(seen.size).toBe(
+      GAMES.filter((item) => item.sceneKey !== null && item.dailyTargets.length > 0).length,
+    );
   });
 
   it('id로 게임을 찾는다', () => {
