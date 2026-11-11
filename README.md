@@ -32,25 +32,23 @@ npm run preview   # 빌드 결과 실행. 오프라인 동작은 여기서 확�
 
 ## 휴대폰에서 플레이하기
 
-[Cloudflare Pages](https://pages.cloudflare.com/)가 이 저장소를 직접 읽어서 빌드하고 배포합니다. 저장소는 비공개여도 됩니다.
+[Cloudflare Workers](https://workers.cloudflare.com/)가 이 저장소를 직접 읽어서 빌드하고, 빌드 결과물(`dist/`)을 정적 파일로 배포합니다. 저장소는 비공개여도 됩니다. 배포 설정은 `wrangler.jsonc`에 있습니다.
 
 ### 처음 한 번: 저장소 연결
 
-1. [Cloudflare 대시보드](https://dash.cloudflare.com/)에 가입하거나 로그인한 뒤 **Workers & Pages**로 갑니다.
-2. **Create application → Pages → Connect to Git**을 누르고 **GitHub**을 고릅니다.
-3. 이 저장소를 고르고 **Install & Authorize**, **Begin setup**을 차례로 누릅니다.
-4. 빌드 설정을 아래처럼 넣고 **Save and Deploy**를 누릅니다.
+1. [Cloudflare 대시보드](https://dash.cloudflare.com/)에 가입하거나 로그인한 뒤 **Workers & Pages**에서 **Create application**을 누릅니다.
+2. GitHub 계정을 연결하고 이 저장소를 고릅니다. 저장소가 목록에 없으면 GitHub의 [설치된 앱 설정](https://github.com/settings/installations)에서 **Cloudflare Workers and Pages**의 **Configure**를 눌러 이 저장소에 접근할 권한을 줍니다.
+3. **Set up your application** 화면에 아래 값을 넣고 **Deploy**를 누릅니다.
 
 | 항목 | 값 |
 | --- | --- |
-| Production branch | `main` |
-| Framework preset | None |
+| Project name | `minigame` |
 | Build command | `npm run build` |
-| Build output directory | `dist` |
+| Deploy command | `npx wrangler deploy` |
 
-배포가 끝나면 `https://<프로젝트 이름>.pages.dev` 꼴의 주소가 나옵니다. 그 뒤로는 `main`에 합쳐질 때마다 자동으로 다시 배포되고, 다른 브랜치와 PR에는 미리 보기 주소가 따로 생깁니다.
+Project name은 `wrangler.jsonc`의 `name`과 같아야 합니다. 다르면 빌드가 실패하므로, 이름을 바꾸려면 두 곳을 함께 바꿉니다.
 
-Node.js 버전은 `.nvmrc`를, 응답 헤더는 `public/_headers`를 따릅니다.
+배포가 끝나면 `https://minigame.<계정 이름>.workers.dev` 꼴의 주소가 나옵니다. 그 뒤로는 `main`에 합쳐질 때마다 자동으로 다시 배포됩니다. 빌드에 쓰는 Node.js 버전은 `.nvmrc`를 따릅니다.
 
 ### 설치
 
@@ -98,7 +96,7 @@ scripts/gen-icons.mjs  앱 아이콘을 코드로 생성
 | 오프라인 | vite-plugin-pwa (Workbox 사전 캐시) |
 | 저장 | IndexedDB (idb-keyval) |
 | 논리 해상도 | 가로 240px 고정, 세로는 화면 비율에 따라 400~560px |
-| 배포 | Cloudflare Pages (Git 연결) |
+| 배포 | Cloudflare Workers 정적 파일 (Git 연결) |
 
 ## 크레딧
 

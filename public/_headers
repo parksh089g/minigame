@@ -1,4 +1,0 @@
-# Cloudflare Pages 응답 헤더.
-# /assets 아래 파일은 이름에 내용 해시가 붙어서, 내용이 바뀌면 이름도 바뀐다. 오래 캐시해도 안전하다.
-/assets/*
-  Cache-Control: public, max-age=31556952, immutable
