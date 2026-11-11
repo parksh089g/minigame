@@ -4,7 +4,7 @@ import type { PlayResult } from '../core/save';
 import { sfx } from '../core/sfx';
 import { store } from '../core/store';
 import { fadeIn, PixelButton } from '../core/ui';
-import { getGame } from '../games/registry';
+import { getGame, todaysChallenge } from '../games/registry';
 
 /** 결과 화면에 덧붙여 보여 줄 한 줄. 예: ['최대 콤보', '12'] */
 export type ResultStat = readonly [label: string, value: string];
@@ -79,7 +79,12 @@ export abstract class MiniGameScene extends Phaser.Scene {
     sfx.finish();
 
     const game = getGame(this.gameId);
-    const result = store.recordPlay(this.gameId, score, game?.coinsFor(score) ?? 0);
+    const result = store.recordPlay(
+      this.gameId,
+      score,
+      game?.coinsFor(score) ?? 0,
+      todaysChallenge(),
+    );
     const data: ResultData = {
       title: game?.title ?? '결과',
       sceneKey: this.scene.key,

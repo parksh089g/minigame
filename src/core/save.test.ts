@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { DailyChallenge } from './daily';
 import {
   applyPlayResult,
   createDefaultSave,
@@ -24,10 +25,28 @@ describe('normalizeSave', () => {
       coins: 12,
       settings: { sound: false, vibration: true },
       games: { 'lightning-tap': { best: 80, plays: 4, lastPlayedAt: NOW - 1000 } },
+      daily: { lastClearedOn: '2026-11-11', streak: 3, totalCleared: 8 },
       createdAt: NOW - 5000,
       updatedAt: NOW - 1000,
     };
     expect(normalizeSave(save, NOW)).toEqual(save);
+  });
+
+  it('오늘의 도전이 생기기 전의 세이브도 기록을 잃지 않고 읽는다', () => {
+    const old = {
+      version: 1,
+      coins: 30,
+      settings: { sound: true, vibration: false },
+      games: { 'memory-cards': { best: 200, plays: 2, lastPlayedAt: NOW - 1000 } },
+      createdAt: NOW - 5000,
+      updatedAt: NOW - 1000,
+    };
+    const save = normalizeSave(old, NOW);
+    expect(save.version).toBe(SAVE_VERSION);
+    expect(save.coins).toBe(30);
+    expect(save.games).toEqual(old.games);
+    expect(save.settings).toEqual(old.settings);
+    expect(save.daily).toEqual({ lastClearedOn: null, streak: 0, totalCleared: 0 });
   });
 
   it('빠지거나 잘못된 항목을 기본값으로 채운다', () => {
@@ -113,6 +132,55 @@ describe('applyPlayResult', () => {
   });
 });
 
+describe('오늘의 도전과 한 판의 결과', () => {
+  const challenge: DailyChallenge = { dateKey: '2026-11-11', gameId: 'g', target: 100, reward: 25 };
+  const nextDay: DailyChallenge = { dateKey: '2026-11-12', gameId: 'g', target: 100, reward: 15 };
+
+  it('도전을 넘기지 않으면 달성 여부를 따지지 않는다', () => {
+    const result = applyPlayResult(createDefaultSave(NOW), 'g', 500, 5, NOW);
+    expect(result.daily).toBeNull();
+    expect(result.save.daily.totalCleared).toBe(0);
+  });
+
+  it('목표 점수 이상이면 달성하고 보상을 받는다', () => {
+    const result = applyPlayResult(createDefaultSave(NOW), 'g', 100, 5, NOW, challenge);
+    expect(result.daily).toEqual({ cleared: true, reward: 25, streak: 1, shortBy: 0 });
+    expect(result.coinsEarned).toBe(5);
+    expect(result.save.coins).toBe(30);
+    expect(result.save.daily).toEqual({ lastClearedOn: '2026-11-11', streak: 1, totalCleared: 1 });
+  });
+
+  it('목표에 못 미치면 모자란 점수를 알려 주고 보상은 없다', () => {
+    const result = applyPlayResult(createDefaultSave(NOW), 'g', 77, 3, NOW, challenge);
+    expect(result.daily).toEqual({ cleared: false, reward: 0, streak: 0, shortBy: 23 });
+    expect(result.save.coins).toBe(3);
+    expect(result.save.daily.lastClearedOn).toBeNull();
+  });
+
+  it('다른 게임을 한 판은 도전과 상관없다', () => {
+    const result = applyPlayResult(createDefaultSave(NOW), 'other', 999, 9, NOW, challenge);
+    expect(result.daily).toBeNull();
+    expect(result.save.coins).toBe(9);
+    expect(result.save.daily.totalCleared).toBe(0);
+  });
+
+  it('같은 날 다시 넘겨도 보상은 한 번만 받는다', () => {
+    const first = applyPlayResult(createDefaultSave(NOW), 'g', 150, 0, NOW, challenge).save;
+    const again = applyPlayResult(first, 'g', 300, 0, NOW + 10, challenge);
+    expect(again.daily).toBeNull();
+    expect(again.save.coins).toBe(25);
+    expect(again.save.daily).toEqual(first.daily);
+  });
+
+  it('다음 날에도 달성하면 연속 보너스가 붙는다', () => {
+    const first = applyPlayResult(createDefaultSave(NOW), 'g', 150, 0, NOW, challenge).save;
+    const second = applyPlayResult(first, 'g', 120, 0, NOW + 10, nextDay);
+    expect(second.daily).toEqual({ cleared: true, reward: 15 + 5, streak: 2, shortBy: 0 });
+    expect(second.save.coins).toBe(25 + 20);
+    expect(second.save.daily).toEqual({ lastClearedOn: '2026-11-12', streak: 2, totalCleared: 2 });
+  });
+});
+
 describe('resetProgress', () => {
   it('기록과 코인은 지우고 설정은 남긴다', () => {
     let save = createDefaultSave(NOW);
@@ -122,5 +190,15 @@ describe('resetProgress', () => {
     expect(reset.coins).toBe(0);
     expect(reset.games).toEqual({});
     expect(reset.settings).toEqual({ sound: false, vibration: true });
+  });
+
+  it('오늘의 도전 기록도 지운다', () => {
+    const challenge: DailyChallenge = { dateKey: '2026-11-11', gameId: 'g', target: 1, reward: 15 };
+    const save = applyPlayResult(createDefaultSave(NOW), 'g', 10, 0, NOW, challenge).save;
+    expect(resetProgress(save, NOW + 100).daily).toEqual({
+      lastClearedOn: null,
+      streak: 0,
+      totalCleared: 0,
+    });
   });
 });
