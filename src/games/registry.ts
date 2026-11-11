@@ -91,8 +91,8 @@ export const GAMES: readonly MiniGameInfo[] = [
     tagline: '막힌 차를 차례로 빼기',
     icon: 'icon-car',
     sceneKey: SCENE.parkingOut,
-    coinsFor: (score) => Math.floor(score / 15),
-    dailyTargets: [60, 100, 150],
+    coinsFor: (score) => Math.floor(score / 25),
+    dailyTargets: [150, 280, 450],
   },
   {
     id: 'screw-sort',
