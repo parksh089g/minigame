@@ -111,8 +111,8 @@ export const GAMES: readonly MiniGameInfo[] = [
     tagline: '같은 숫자를 밀어 합치기',
     icon: 'icon-merge',
     sceneKey: SCENE.mergeTiles,
-    coinsFor: (score) => Math.floor(score / 15),
-    dailyTargets: [60, 100, 150],
+    coinsFor: (score) => Math.floor(score / 35),
+    dailyTargets: [200, 380, 600],
   },
   {
     id: 'tail-chase',
