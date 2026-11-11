@@ -11,6 +11,7 @@ import {
   normalizeDaily,
   streakBonus,
   type DailyGame,
+  type DailyState,
 } from './daily';
 
 const GAMES: DailyGame[] = [
@@ -93,11 +94,11 @@ describe('연속 달성', () => {
     expect(activeStreak(state, '2026-11-11')).toBe(0);
 
     state = clearDaily(state, '2026-11-11');
-    expect(state).toEqual({ lastClearedOn: '2026-11-11', streak: 1, totalCleared: 1 });
+    expect(state).toEqual({ lastClearedOn: '2026-11-11', streak: 1, bestStreak: 1, totalCleared: 1 });
     expect(isCleared(state, '2026-11-11')).toBe(true);
 
     state = clearDaily(state, '2026-11-12');
-    expect(state).toEqual({ lastClearedOn: '2026-11-12', streak: 2, totalCleared: 2 });
+    expect(state).toEqual({ lastClearedOn: '2026-11-12', streak: 2, bestStreak: 2, totalCleared: 2 });
   });
 
   it('같은 날 두 번 달성해도 한 번만 센다', () => {
@@ -106,23 +107,34 @@ describe('연속 달성', () => {
   });
 
   it('다음 날까지는 연속이 살아 있고, 하루를 건너뛰면 끊긴다', () => {
-    const state = { lastClearedOn: '2026-11-11', streak: 4, totalCleared: 9 };
+    const state = { lastClearedOn: '2026-11-11', streak: 4, bestStreak: 6, totalCleared: 9 };
     expect(activeStreak(state, '2026-11-11')).toBe(4);
     expect(activeStreak(state, '2026-11-12')).toBe(4);
     expect(activeStreak(state, '2026-11-13')).toBe(0);
+    // 연속은 끊겨도 가장 길었던 기록은 남는다.
     expect(clearDaily(state, '2026-11-13')).toEqual({
       lastClearedOn: '2026-11-13',
       streak: 1,
+      bestStreak: 6,
       totalCleared: 10,
     });
   });
 
+  it('가장 긴 연속 기록은 지금의 연속이 넘어설 때만 늘어난다', () => {
+    let state: DailyState = { lastClearedOn: '2026-11-11', streak: 2, bestStreak: 3, totalCleared: 9 };
+    state = clearDaily(state, '2026-11-12');
+    expect([state.streak, state.bestStreak]).toEqual([3, 3]);
+    state = clearDaily(state, '2026-11-13');
+    expect([state.streak, state.bestStreak]).toEqual([4, 4]);
+  });
+
   it('기기 시계가 과거로 돌아가도 깨지지 않고 1일부터 다시 센다', () => {
-    const state = { lastClearedOn: '2026-11-20', streak: 3, totalCleared: 3 };
+    const state = { lastClearedOn: '2026-11-20', streak: 3, bestStreak: 3, totalCleared: 3 };
     expect(activeStreak(state, '2026-11-11')).toBe(0);
     expect(clearDaily(state, '2026-11-11')).toEqual({
       lastClearedOn: '2026-11-11',
       streak: 1,
+      bestStreak: 3,
       totalCleared: 4,
     });
   });
@@ -140,12 +152,26 @@ describe('normalizeDaily', () => {
   });
 
   it('올바른 값은 그대로 두고, 숫자는 정리한다', () => {
-    const good = { lastClearedOn: '2026-11-11', streak: 3, totalCleared: 7 };
+    const good = { lastClearedOn: '2026-11-11', streak: 3, bestStreak: 5, totalCleared: 7 };
     expect(normalizeDaily(good)).toEqual(good);
     expect(normalizeDaily({ lastClearedOn: '2026-11-11', streak: -2, totalCleared: 'many' })).toEqual({
       lastClearedOn: '2026-11-11',
       streak: 1,
+      bestStreak: 1,
       totalCleared: 1,
     });
+  });
+
+  it('가장 긴 연속 기록이 없던 예전 값은 지금의 연속으로 채운다', () => {
+    expect(normalizeDaily({ lastClearedOn: '2026-11-11', streak: 4, totalCleared: 6 })).toEqual({
+      lastClearedOn: '2026-11-11',
+      streak: 4,
+      bestStreak: 4,
+      totalCleared: 6,
+    });
+    // 지금의 연속보다 짧게 적혀 있으면 바로잡는다.
+    expect(
+      normalizeDaily({ lastClearedOn: '2026-11-11', streak: 4, bestStreak: 2, totalCleared: 6 }).bestStreak,
+    ).toBe(4);
   });
 });

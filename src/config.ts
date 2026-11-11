@@ -97,6 +97,7 @@ export const SCENE = {
   hub: 'Hub',
   settings: 'Settings',
   shop: 'Shop',
+  achievements: 'Achievements',
   result: 'Result',
   pause: 'Pause',
   lightningTap: 'LightningTap',

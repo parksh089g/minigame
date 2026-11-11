@@ -26,6 +26,8 @@ export interface DailyState {
   lastClearedOn: string | null;
   /** lastClearedOn까지 하루도 빠지지 않고 이어진 일수 */
   streak: number;
+  /** 지금까지 가장 길게 이어 간 일수. 연속이 끊겨도 줄지 않는다(업적에 쓴다). */
+  bestStreak: number;
   /** 지금까지 달성한 횟수 */
   totalCleared: number;
 }
@@ -96,7 +98,7 @@ export function challengeFor(dateKey: string, games: readonly DailyGame[]): Dail
 }
 
 export function createDailyState(): DailyState {
-  return { lastClearedOn: null, streak: 0, totalCleared: 0 };
+  return { lastClearedOn: null, streak: 0, bestStreak: 0, totalCleared: 0 };
 }
 
 /** 저장소에서 읽은 값을 안전한 DailyState로 바꾼다. */
@@ -111,10 +113,12 @@ export function normalizeDaily(raw: unknown): DailyState {
       ? value.lastClearedOn
       : null;
   if (lastClearedOn === null) return createDailyState();
-  // 달성한 날이 있으면 연속 일수와 횟수는 적어도 1이다.
+  // 달성한 날이 있으면 연속 일수와 횟수는 적어도 1이고, 가장 긴 연속은 지금의 연속보다 짧을 수 없다.
+  const streak = Math.max(1, count(value.streak));
   return {
     lastClearedOn,
-    streak: Math.max(1, count(value.streak)),
+    streak,
+    bestStreak: Math.max(streak, count(value.bestStreak)),
     totalCleared: Math.max(1, count(value.totalCleared)),
   };
 }
@@ -139,9 +143,11 @@ export function activeStreak(state: DailyState, dateKey: string): number {
 /** 그 날짜의 도전을 달성한 것으로 기록한 새 상태를 돌려준다. 이미 달성했으면 그대로다. */
 export function clearDaily(state: DailyState, dateKey: string): DailyState {
   if (isCleared(state, dateKey) || dayNumber(dateKey) === null) return state;
+  const streak = activeStreak(state, dateKey) + 1;
   return {
     lastClearedOn: dateKey,
-    streak: activeStreak(state, dateKey) + 1,
+    streak,
+    bestStreak: Math.max(state.bestStreak, streak),
     totalCleared: state.totalCleared + 1,
   };
 }

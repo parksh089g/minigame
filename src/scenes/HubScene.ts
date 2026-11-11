@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { APP_NAME, APP_VERSION, COLOR, CSS, FONT_SIZE, GAME_WIDTH, SCENE } from '../config';
+import { claimable, statsOf } from '../core/achievements';
 import { activeStreak, dateKeyOf, isCleared, streakBonus } from '../core/daily';
 import { vibrate } from '../core/haptics';
 import {
@@ -19,6 +20,7 @@ import {
   drawPanel,
   fadeIn,
   fadeToScene,
+  fillChamfer,
   PixelButton,
 } from '../core/ui';
 import { GAMES, getGame, todaysChallenge, type MiniGameInfo } from '../games/registry';
@@ -86,6 +88,24 @@ export class HubScene extends Phaser.Scene {
       hitPadding: 6,
       onTap: () => fadeToScene(this, SCENE.settings),
     });
+
+    // 설정 옆: 업적. 받을 보상이 있으면 노랗게 바뀌고 빨간 점이 붙는다.
+    const waiting = claimable(store.data.achievements, statsOf(store.data)).length;
+    new PixelButton(this, {
+      x: 40,
+      y: 8,
+      width: 40,
+      height: 26,
+      label: '업적',
+      style: waiting > 0 ? 'yellow' : 'neutral',
+      hitPadding: 4,
+      onTap: () => fadeToScene(this, SCENE.achievements),
+    });
+    if (waiting > 0) {
+      const dot = this.add.graphics();
+      fillChamfer(dot, 75, 5, 7, 7, COLOR.ink);
+      fillChamfer(dot, 76, 6, 5, 5, COLOR.red);
+    }
 
     // 오른쪽 위: 가진 코인과, 그 코인을 쓰는 꾸미기 상점
     const shopWidth = 50;
