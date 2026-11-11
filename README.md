@@ -18,7 +18,7 @@
 
 ## 실행
 
-Node.js 22.12 이상이 필요합니다.
+Node.js 22.12 이상이 필요합니다. CI와 배포는 `.nvmrc`에 적힌 버전을 씁니다.
 
 ```bash
 npm install
@@ -32,12 +32,30 @@ npm run preview   # 빌드 결과 실행. 오프라인 동작은 여기서 확�
 
 ## 휴대폰에서 플레이하기
 
-`main`에 합쳐지면 GitHub Actions가 GitHub Pages에 자동으로 배포합니다.
+[Cloudflare Pages](https://pages.cloudflare.com/)가 이 저장소를 직접 읽어서 빌드하고 배포합니다. 저장소는 비공개여도 됩니다.
 
-1. 처음 한 번만, 저장소의 **Settings → Pages → Build and deployment → Source**를 **GitHub Actions**로 바꿉니다.
-2. `main`에 푸시되면 `Deploy` 워크플로가 실행되고, 끝나면 `https://<사용자 이름>.github.io/<저장소 이름>/`에서 열립니다.
-3. 휴대폰 브라우저에서 그 주소를 열고 메뉴에서 **홈 화면에 추가**를 누르면 앱처럼 설치됩니다.
-4. 허브 오른쪽 아래에 "오프라인 준비 완료"가 보이면 비행기 모드에서도 실행됩니다.
+### 처음 한 번: 저장소 연결
+
+1. [Cloudflare 대시보드](https://dash.cloudflare.com/)에 가입하거나 로그인한 뒤 **Workers & Pages**로 갑니다.
+2. **Create application → Pages → Connect to Git**을 누르고 **GitHub**을 고릅니다.
+3. 이 저장소를 고르고 **Install & Authorize**, **Begin setup**을 차례로 누릅니다.
+4. 빌드 설정을 아래처럼 넣고 **Save and Deploy**를 누릅니다.
+
+| 항목 | 값 |
+| --- | --- |
+| Production branch | `main` |
+| Framework preset | None |
+| Build command | `npm run build` |
+| Build output directory | `dist` |
+
+배포가 끝나면 `https://<프로젝트 이름>.pages.dev` 꼴의 주소가 나옵니다. 그 뒤로는 `main`에 합쳐질 때마다 자동으로 다시 배포되고, 다른 브랜치와 PR에는 미리 보기 주소가 따로 생깁니다.
+
+Node.js 버전은 `.nvmrc`를, 응답 헤더는 `public/_headers`를 따릅니다.
+
+### 설치
+
+1. 휴대폰 브라우저에서 배포된 주소를 열고 메뉴에서 **홈 화면에 추가**를 누르면 앱처럼 설치됩니다.
+2. 허브 오른쪽 아래에 "오프라인 준비 완료"가 보이면 비행기 모드에서도 실행됩니다.
 
 iOS Safari는 홈 화면에 추가하지 않고 오래 쓰지 않으면 저장 데이터를 지울 수 있습니다. 기록이 아깝다면 홈 화면에 추가하거나 설정의 "내보내기"로 백업해 두세요.
 
@@ -80,7 +98,7 @@ scripts/gen-icons.mjs  앱 아이콘을 코드로 생성
 | 오프라인 | vite-plugin-pwa (Workbox 사전 캐시) |
 | 저장 | IndexedDB (idb-keyval) |
 | 논리 해상도 | 가로 240px 고정, 세로는 화면 비율에 따라 400~560px |
-| 배포 | GitHub Pages |
+| 배포 | Cloudflare Pages (Git 연결) |
 
 ## 크레딧
 

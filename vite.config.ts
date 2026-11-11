@@ -6,7 +6,7 @@ const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 
   version: string;
 };
 
-// GitHub Pages처럼 하위 경로에 올릴 때는 BASE_PATH=/저장소이름/ 으로 빌드한다.
+// 도메인 루트가 아닌 하위 경로에 올릴 때는 BASE_PATH=/경로/ 로 빌드한다.
 const base = process.env.BASE_PATH ?? '/';
 
 export default defineConfig({
