@@ -128,15 +128,33 @@ describe('연속 달성', () => {
     expect([state.streak, state.bestStreak]).toEqual([4, 4]);
   });
 
-  it('기기 시계가 과거로 돌아가도 깨지지 않고 1일부터 다시 센다', () => {
+  it('기기 시계를 마지막 달성일보다 앞으로 되돌리면 이미 달성한 것으로 친다', () => {
     const state = { lastClearedOn: '2026-11-20', streak: 3, bestStreak: 3, totalCleared: 3 };
-    expect(activeStreak(state, '2026-11-11')).toBe(0);
-    expect(clearDaily(state, '2026-11-11')).toEqual({
-      lastClearedOn: '2026-11-11',
-      streak: 1,
-      bestStreak: 3,
+    for (const earlier of ['2026-11-19', '2026-11-11', '2025-12-31']) {
+      expect(isCleared(state, earlier)).toBe(true);
+      // 다시 달성해도 기록이 바뀌지 않으니 보상도 연속도 늘지 않는다.
+      expect(clearDaily(state, earlier)).toBe(state);
+      expect(activeStreak(state, earlier)).toBe(3);
+    }
+  });
+
+  it('시계를 되돌렸다가 제자리로 돌려놓으면 원래대로 이어진다', () => {
+    const state = { lastClearedOn: '2026-11-20', streak: 3, bestStreak: 3, totalCleared: 3 };
+    expect(clearDaily(state, '2026-11-19')).toBe(state);
+    expect(isCleared(state, '2026-11-21')).toBe(false);
+    expect(clearDaily(state, '2026-11-21')).toEqual({
+      lastClearedOn: '2026-11-21',
+      streak: 4,
+      bestStreak: 4,
       totalCleared: 4,
     });
+  });
+
+  it('달성한 적이 없거나 날짜가 잘못됐으면 달성한 것으로 치지 않는다', () => {
+    expect(isCleared(createDailyState(), '2026-11-11')).toBe(false);
+    const state = { lastClearedOn: '2026-11-20', streak: 3, bestStreak: 3, totalCleared: 3 };
+    expect(isCleared(state, '어제')).toBe(false);
+    expect(isCleared(state, '2026-02-30')).toBe(false);
   });
 
   it('연속 보너스는 이틀째부터 5개씩 늘어 25개에서 멈춘다', () => {

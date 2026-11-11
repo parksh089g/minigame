@@ -12,6 +12,9 @@ const RIGHT = GAME_WIDTH - 16;
 const CONTENT_WIDTH = RIGHT - LEFT;
 const RESET_CONFIRM_MS = 3000;
 
+/** 저장 공간 보호가 꺼져 있을 때 저장 데이터 버튼 아래에 보여 주는 안내 */
+const BACKUP_HINT = '브라우저가 기록을 지울 수 있어요.\n내보내기로 백업해 두세요.';
+
 const OFFLINE_TEXT: Record<OfflineStatus, string> = {
   ready: '준비 완료',
   preparing: '준비 중',
@@ -166,7 +169,20 @@ export class SettingsScene extends Phaser.Scene {
   }
 
   private showNotice(text: string, ok: boolean): void {
-    this.noticeText.setText(text).setColor(ok ? THEME_CSS.good : THEME_CSS.bad);
+    this.noticeText
+      .setFontSize(FONT_SIZE.normal)
+      .setText(text)
+      .setColor(ok ? THEME_CSS.good : THEME_CSS.bad);
+  }
+
+  /**
+   * 브라우저가 세이브를 지켜 주지 않을 때 백업을 권한다.
+   * 방금 한 일의 결과를 알리는 문구가 떠 있으면 그것을 가리지 않는다.
+   * 두 줄이라 아래의 "정보" 제목에 붙지 않도록 작은 글자로 쓴다.
+   */
+  private showBackupHint(): void {
+    if (this.noticeText.text !== '') return;
+    this.noticeText.setFontSize(FONT_SIZE.small).setText(BACKUP_HINT).setColor(THEME_CSS.sub);
   }
 
   private addInfoRows(top: number): void {
@@ -185,6 +201,7 @@ export class SettingsScene extends Phaser.Scene {
     void store.isPersisted().then((value) => {
       if (!persisted.active) return;
       persisted.setText(value === null ? '확인 불가' : value ? '켜짐' : '꺼짐');
+      if (value === false) this.showBackupHint();
     });
 
     row(2, '버전', APP_VERSION);

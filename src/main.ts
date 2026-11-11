@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import './style.css';
 import { computeGameHeight, FONT_FAMILY, FONT_SIZE, GAME_WIDTH, THEME } from './config';
+import { initAppShell, untilUpright } from './core/shell';
 import { HiDpiPlugin, pickRenderScale, renderScale, setRenderScale } from './core/hidpi';
 import { initPwa, isStandalone } from './core/pwa';
 import { initAudioUnlock } from './core/sfx';
@@ -34,7 +35,8 @@ async function loadFonts(): Promise<void> {
 }
 
 async function boot(): Promise<void> {
-  await Promise.all([loadFonts(), store.load()]);
+  // 휴대폰을 가로로 눕힌 채 켰으면, 세로로 돌린 뒤에 화면 크기를 잰다(core/orientation.ts).
+  await Promise.all([loadFonts(), store.load(), untilUpright()]);
 
   const parent = document.getElementById('app');
   if (!parent) throw new Error('#app 요소가 없습니다.');
@@ -82,6 +84,7 @@ async function boot(): Promise<void> {
   document.getElementById('boot')?.remove();
   initAudioUnlock();
   initPwa();
+  initAppShell(game, parent);
 
   // 홈 화면에 설치해 쓰는 경우에는 브라우저가 세이브를 지우지 않도록 요청한다.
   if (isStandalone()) void store.requestPersistence();

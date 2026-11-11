@@ -10,6 +10,7 @@
  * - 글자는 core/ui.ts의 addText로 만든다(배율에 맞는 해상도로 그린다).
  */
 import Phaser from 'phaser';
+import { applyPendingRefit } from './refit';
 import { renderScale } from './render-scale';
 
 export { pickRenderScale, renderScale, setRenderScale } from './render-scale';
@@ -48,6 +49,8 @@ export class HiDpiPlugin extends Phaser.Plugins.ScenePlugin {
   private apply(): void {
     const scene = this.scene;
     if (!scene) return;
+    // 화면 크기가 바뀌어 있었다면, 씬이 자리를 잡기 전에 게임 화면의 길이부터 맞춘다.
+    applyPendingRefit(scene);
     scene.cameras.main.setOrigin(0, 0).setZoom(renderScale());
     scene.scale = logicalScaleManager(scene.game.scale);
   }

@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { FONT_SIZE, GAME_WIDTH, SCENE } from '../config';
+import type { BackAware } from '../core/app-events';
 import { addPanel, addScrim, addText, fadeToScene, PixelButton } from '../core/ui';
 import type { PauseData } from './MiniGameScene';
 
@@ -7,13 +8,27 @@ const PANEL_WIDTH = 176;
 const PANEL_HEIGHT = 168;
 
 /** 게임 위에 겹쳐 뜨는 일시정지 화면. 뒤의 게임 씬은 멈춘 채로 보인다. */
-export class PauseScene extends Phaser.Scene {
+export class PauseScene extends Phaser.Scene implements BackAware {
+  /** 멈춰 둔 게임 씬의 이름 */
+  private gameKey = '';
+
   constructor() {
     super(SCENE.pause);
   }
 
+  /** 일시정지 화면에서 뒤로 가기를 한 번 더 누르면 "그만하기"와 같다. */
+  onBackRequest(): void {
+    this.quit();
+  }
+
+  private quit(): void {
+    this.scene.stop(this.gameKey);
+    fadeToScene(this, SCENE.hub);
+  }
+
   create(data: PauseData): void {
     this.input.enabled = true;
+    this.gameKey = data.sceneKey;
     const { height } = this.scale;
     const left = Math.round((GAME_WIDTH - PANEL_WIDTH) / 2);
     const top = Math.round((height - PANEL_HEIGHT) / 2);
@@ -54,10 +69,7 @@ export class PauseScene extends Phaser.Scene {
       width: buttonWidth,
       height: 30,
       label: '그만하기',
-      onTap: () => {
-        this.scene.stop(data.sceneKey);
-        fadeToScene(this, SCENE.hub);
-      },
+      onTap: () => this.quit(),
     });
   }
 }
