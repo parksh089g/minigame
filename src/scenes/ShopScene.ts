@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
-import { cardBackPreviewTexture, runnerTexture } from '../art/cosmetics';
-import { COLOR, CSS, FONT_SIZE, GAME_WIDTH, SCENE } from '../config';
+import { backdropPreviewTexture, mascotTexture } from '../art/cosmetics';
+import { CARD_HEIGHT, CARD_WIDTH, MASCOT_SIZE } from '../art/vector';
+import { FONT_SIZE, GAME_WIDTH, SCENE, THEME, THEME_CSS } from '../config';
 import { vibrate } from '../core/haptics';
 import { sfx } from '../core/sfx';
 import {
@@ -30,10 +31,16 @@ const TABS_TOP = 44;
 const TAB_GAP = 4;
 const TAB_HEIGHT = 24;
 const HINT_TOP = 76;
-const ROWS_TOP = 94;
-const ROW_HEIGHT = 52;
-const ROW_GAP = 6;
-const PREVIEW_SIZE = 40;
+const GRID_TOP = 94;
+const COLUMNS = 2;
+const CELL_GAP = 8;
+const CELL_WIDTH = (CONTENT_WIDTH - CELL_GAP * (COLUMNS - 1)) / COLUMNS;
+/** 칸의 높이는 화면 길이에 맞춰 이 사이에서 정한다. */
+const CELL_HEIGHT = { min: 76, max: 98 } as const;
+/** 칸 아래쪽의 이름과 상태 두 줄이 차지하는 높이 */
+const CELL_LABELS = 36;
+/** 목록 아래에 안내 문구를 쓸 자리 */
+const NOTICE_SPACE = 32;
 /**
  * 사기 전에 한 번 더 눌러야 하는 시간(ms). 그 안에 다시 누르지 않으면 취소된다.
  * 아직 사지 않은 배경을 화면에 깔아 미리 보여 주는 시간이기도 하다.
@@ -56,6 +63,7 @@ export class ShopScene extends Phaser.Scene {
   /** 지금 탭의 줄들을 이루는 것들. 탭을 바꾸거나 사고 나면 지우고 다시 만든다. */
   private rowObjects: Phaser.GameObjects.GameObject[] = [];
   private rowsDirty = false;
+  private cellHeight: number = CELL_HEIGHT.min;
   /** 한 번 눌러서 살지 묻고 있는 꾸미기 */
   private armedId: string | null = null;
   /** 묻는 것과 미리 보기를 끝내는 타이머 */
@@ -82,12 +90,7 @@ export class ShopScene extends Phaser.Scene {
       hitPadding: 6,
       onTap: () => fadeToScene(this, SCENE.hub),
     });
-    addText(this, GAME_WIDTH / 2, 9, '꾸미기', {
-      size: FONT_SIZE.large,
-      bold: true,
-      originX: 0.5,
-      shadow: CSS.navy,
-    });
+    addText(this, GAME_WIDTH / 2, 8, '꾸미기', { size: FONT_SIZE.large, originX: 0.5 });
     this.coins = new CoinCounter(this, GAME_WIDTH - 8, 11, store.data.coins);
 
     const tabWidth = (CONTENT_WIDTH - TAB_GAP * (SLOTS.length - 1)) / SLOTS.length;
@@ -104,9 +107,16 @@ export class ShopScene extends Phaser.Scene {
     });
     this.tabs = tabs as Record<CosmeticSlot, PixelButton>;
 
-    this.hint = addText(this, MARGIN + 2, HINT_TOP, '', { color: CSS.silver });
-    const rowCount = Math.max(...SLOTS.map((slot) => itemsIn(slot).length));
-    const noticeTop = ROWS_TOP + rowCount * (ROW_HEIGHT + ROW_GAP) + 2;
+    this.hint = addText(this, MARGIN + 2, HINT_TOP, '', { color: THEME_CSS.sub });
+    // 가장 많은 탭(캐릭터)이 한 화면에 다 들어가도록 칸의 높이를 정한다.
+    const rowCount = Math.ceil(Math.max(...SLOTS.map((slot) => itemsIn(slot).length)) / COLUMNS);
+    const room = this.scale.height - GRID_TOP - NOTICE_SPACE;
+    this.cellHeight = Phaser.Math.Clamp(
+      Math.floor((room - CELL_GAP * (rowCount - 1)) / rowCount) - 3,
+      CELL_HEIGHT.min,
+      CELL_HEIGHT.max,
+    );
+    const noticeTop = GRID_TOP + rowCount * (this.cellHeight + CELL_GAP) + 2;
     this.notice = addText(this, GAME_WIDTH / 2, noticeTop, '', {
       originX: 0.5,
       align: 'center',
@@ -128,13 +138,13 @@ export class ShopScene extends Phaser.Scene {
   private showSlot(slot: CosmeticSlot, announce = true): void {
     this.slot = slot;
     this.disarm();
-    for (const key of SLOTS) this.tabs[key].setStyle(key === slot ? 'blue' : 'neutral');
+    for (const key of SLOTS) this.tabs[key].setStyle(key === slot ? 'pink' : 'neutral');
     this.hint.setText(SLOT_INFO[slot].hint);
     if (announce) this.setNotice('');
     this.rowsDirty = true;
   }
 
-  private setNotice(text: string, color: string = CSS.silver): void {
+  private setNotice(text: string, color: string = THEME_CSS.sub): void {
     this.notice.setText(text).setColor(color);
   }
 
@@ -162,16 +172,24 @@ export class ShopScene extends Phaser.Scene {
     for (const object of this.rowObjects) object.destroy();
     this.rowObjects = [];
     itemsIn(this.slot).forEach((item, index) => {
-      this.addRow(item, MARGIN, ROWS_TOP + index * (ROW_HEIGHT + ROW_GAP));
+      const column = index % COLUMNS;
+      const row = Math.floor(index / COLUMNS);
+      this.addCell(
+        item,
+        MARGIN + column * (CELL_WIDTH + CELL_GAP),
+        GRID_TOP + row * (this.cellHeight + CELL_GAP),
+      );
     });
   }
 
-  private addRow(item: CosmeticItem, x: number, y: number): void {
+  private addCell(item: CosmeticItem, x: number, y: number): void {
     const cosmetics = store.data.cosmetics;
     const owned = isOwned(cosmetics, item.id);
     const equipped = isEquipped(cosmetics, item.id);
     const armed = this.armedId === item.id;
     const affordable = store.data.coins >= item.price;
+    const height = this.cellHeight;
+    const centerX = x + CELL_WIDTH / 2;
     const keep = <T extends Phaser.GameObjects.GameObject>(object: T): T => {
       this.rowObjects.push(object);
       return object;
@@ -180,48 +198,46 @@ export class ShopScene extends Phaser.Scene {
     const frame = keep(this.add.graphics());
     const drawFrame = (pressed: boolean): void => {
       frame.clear();
-      drawPanel(frame, x, y, CONTENT_WIDTH, ROW_HEIGHT, {
-        fill: pressed ? COLOR.navy : COLOR.charcoal,
-        border: armed ? COLOR.yellow : equipped ? COLOR.lime : pressed ? COLOR.sky : COLOR.ink,
-        highlight: pressed ? COLOR.navy : COLOR.slate,
-      });
-      drawPanel(frame, x + 6, y + 6, PREVIEW_SIZE, PREVIEW_SIZE, {
-        fill: COLOR.ink,
-        border: COLOR.navy,
-        highlight: COLOR.ink,
+      drawPanel(frame, x, y, CELL_WIDTH, height, {
+        fill: pressed ? THEME.dim : equipped ? THEME.mintSoft : THEME.card,
+        border: armed ? THEME.gold : equipped ? THEME.mintDeep : undefined,
+        shadow: armed ? THEME.butterDeep : equipped ? THEME.mintDeep : THEME.shadow,
+        radius: 14,
       });
     };
     drawFrame(false);
-    keep(this.addPreview(item, x + 6 + PREVIEW_SIZE / 2, y + 6 + PREVIEW_SIZE / 2));
+    const previewHeight = height - CELL_LABELS - 10;
+    keep(this.addPreview(item, centerX, y + 7 + previewHeight / 2, previewHeight));
 
-    keep(addText(this, x + 54, y + 8, item.name, { bold: true }));
-    const right = x + CONTENT_WIDTH - 10;
+    const nameY = y + height - CELL_LABELS + 2;
+    const statusY = nameY + 16;
+    keep(addText(this, centerX, nameY, item.name, { originX: 0.5 }));
     if (equipped) {
-      keep(addText(this, x + 54, y + 28, '사용 중', { color: CSS.lime }));
-      keep(this.add.image(right, y + ROW_HEIGHT / 2, 'icon-check').setOrigin(1, 0.5).setTint(COLOR.lime));
+      keep(addText(this, centerX, statusY, '사용 중', { color: THEME_CSS.good, originX: 0.5 }));
+      keep(this.add.image(x + CELL_WIDTH - 7, y + 7, 'icon-check').setOrigin(1, 0));
     } else if (owned) {
-      keep(addText(this, x + 54, y + 28, '눌러서 바꾸기', { color: CSS.silver }));
+      keep(addText(this, centerX, statusY, '눌러서 바꾸기', { color: THEME_CSS.sub, originX: 0.5 }));
+    } else if (armed) {
+      keep(addText(this, centerX, statusY, '한 번 더!', { color: THEME_CSS.accent, originX: 0.5 }));
     } else {
-      keep(this.add.image(x + 54, y + 30, 'coin').setOrigin(0, 0));
-      keep(
-        addText(this, x + 66, y + 28, String(item.price), {
-          color: affordable ? CSS.yellow : CSS.slate,
+      const price = keep(
+        addText(this, 0, statusY, String(item.price), {
+          color: affordable ? THEME_CSS.ink : THEME_CSS.faint,
         }),
       );
-      if (armed) {
-        keep(addText(this, right, y + 28, '한 번 더!', { bold: true, color: CSS.yellow, originX: 1 }));
-      } else {
-        keep(
-          this.add
-            .image(right, y + ROW_HEIGHT / 2, 'icon-lock')
-            .setOrigin(1, 0.5)
-            .setAlpha(affordable ? 1 : 0.5),
-        );
-      }
+      const left = Math.round(centerX - (15 + price.width) / 2);
+      keep(this.add.image(left, statusY + 8, 'coin').setOrigin(0, 0.5).setAlpha(affordable ? 1 : 0.6));
+      price.setX(left + 15);
+      keep(
+        this.add
+          .image(x + CELL_WIDTH - 7, y + 7, 'icon-lock')
+          .setOrigin(1, 0)
+          .setAlpha(affordable ? 0.9 : 0.4),
+      );
     }
 
     keep(
-      addTapZone(this, x, y, CONTENT_WIDTH, ROW_HEIGHT, drawFrame, () => {
+      addTapZone(this, x, y, CELL_WIDTH, height, drawFrame, () => {
         if (equipped) {
           this.disarm();
           sfx.click();
@@ -233,7 +249,7 @@ export class ShopScene extends Phaser.Scene {
           this.disarm();
           this.tryOn(item, () => undefined);
           sfx.deny();
-          this.setNotice(`코인이 ${item.price - store.data.coins}개 모자라요.`, CSS.orange);
+          this.setNotice(`코인이 ${item.price - store.data.coins}개 모자라요.`, THEME_CSS.bad);
           this.rowsDirty = true;
         } else if (armed) {
           this.buy(item);
@@ -244,23 +260,33 @@ export class ShopScene extends Phaser.Scene {
     );
   }
 
-  /** 미리보기 칸 한가운데에 놓을 그림 */
-  private addPreview(item: CosmeticItem, centerX: number, centerY: number): Phaser.GameObjects.GameObject {
+  /** 칸 위쪽 한가운데에 놓을 그림. room은 그림에 쓸 수 있는 높이다. */
+  private addPreview(
+    item: CosmeticItem,
+    centerX: number,
+    centerY: number,
+    room: number,
+  ): Phaser.GameObjects.GameObject {
     switch (item.slot) {
-      case 'backdrop': {
-        // 무늬가 드문드문해서, 두 배로 키워 한 귀퉁이를 보여 준다.
-        const size = PREVIEW_SIZE - 4;
+      case 'backdrop':
+        return this.add.image(centerX, centerY, backdropPreviewTexture(item.id));
+      case 'runner': {
+        const height = Math.min(room + 4, MASCOT_SIZE.height);
+        const width = (height * MASCOT_SIZE.width) / MASCOT_SIZE.height;
         return this.add
-          .tileSprite(centerX, centerY, size, size, item.id)
-          .setTileScale(2)
-          .setTilePosition(-1, -1);
+          .image(centerX, centerY + 1, mascotTexture(item.id, 'idle'))
+          .setDisplaySize(width, height);
       }
-      case 'runner':
-        return this.add.image(centerX, centerY, runnerTexture(item.id, 'run1')).setScale(2);
-      case 'cardBack':
-        return this.add.image(centerX, centerY, cardBackPreviewTexture(item.id));
-      case 'orb':
-        return this.add.image(centerX, centerY, item.id);
+      case 'cardBack': {
+        const height = Math.min(room, 46);
+        return this.add
+          .image(centerX, centerY, item.id)
+          .setDisplaySize((height * CARD_WIDTH) / CARD_HEIGHT, height);
+      }
+      case 'orb': {
+        const size = Math.min(room - 2, 36);
+        return this.add.image(centerX, centerY, item.id).setDisplaySize(size, size);
+      }
     }
   }
 
@@ -269,7 +295,7 @@ export class ShopScene extends Phaser.Scene {
     this.disarm();
     sfx.flip();
     vibrate(8);
-    this.setNotice(`바꿨어요: ${item.name}`, CSS.lime);
+    this.setNotice(`바꿨어요: ${item.name}`, THEME_CSS.good);
     this.rowsDirty = true;
   }
 
@@ -282,7 +308,7 @@ export class ShopScene extends Phaser.Scene {
       this.rowsDirty = true;
     });
     sfx.click();
-    this.setNotice(`한 번 더 누르면 코인 ${item.price}개로 사요.`, CSS.yellow);
+    this.setNotice(`한 번 더 누르면 코인 ${item.price}개로 사요.`, THEME_CSS.accent);
     this.rowsDirty = true;
   }
 
@@ -293,10 +319,10 @@ export class ShopScene extends Phaser.Scene {
       sfx.gold();
       vibrate([15, 30, 15]);
       this.coins.set(store.data.coins);
-      this.setNotice(`샀어요: ${item.name}`, CSS.lime);
+      this.setNotice(`샀어요: ${item.name}`, THEME_CSS.good);
     } else {
       sfx.deny();
-      this.setNotice('지금은 살 수 없어요.', CSS.orange);
+      this.setNotice('지금은 살 수 없어요.', THEME_CSS.bad);
     }
     this.rowsDirty = true;
   }

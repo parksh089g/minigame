@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { CARD_SYMBOLS, TEXTURE } from '../../art/sprites';
 import { CARD_HEIGHT, CARD_WIDTH } from '../../art/textures';
-import { COLOR, CSS, GAME_WIDTH, SCENE } from '../../config';
+import { GAME_WIDTH, SCENE, THEME, THEME_CSS } from '../../config';
 import { vibrate } from '../../core/haptics';
 import { sfx } from '../../core/sfx';
 import { store } from '../../core/store';
@@ -98,7 +98,7 @@ export class MemoryCardsScene extends MiniGameScene {
         speed: { min: 40, max: 110 },
         lifespan: { min: 200, max: 380 },
         alpha: { start: 1, end: 0 },
-        tint: [COLOR.yellow, COLOR.lime, COLOR.white],
+        tint: [THEME.gold, THEME.pink, THEME.mintDeep],
         emitting: false,
       })
       .setDepth(DEPTH.effect);
@@ -183,10 +183,10 @@ export class MemoryCardsScene extends MiniGameScene {
     const isFirstBoard = this.boardIndex === 0;
     const hint = isFirstBoard
       ? addText(this, GAME_WIDTH / 2, centers[0].y - CARD_HEIGHT / 2 - 8, '카드를 잘 기억해 두세요!', {
-          color: CSS.silver,
+          color: THEME_CSS.sub,
           originX: 0.5,
           originY: 1,
-          shadow: CSS.ink,
+          stroke: THEME_CSS.white,
         }).setDepth(DEPTH.banner)
       : null;
 
@@ -195,7 +195,7 @@ export class MemoryCardsScene extends MiniGameScene {
       hint?.destroy();
       for (const card of this.cards) this.setFace(card, false);
       sfx.go();
-      if (isFirstBoard) showBanner(this, this.area.centerY, '시작!', CSS.lime, 520, DEPTH.banner);
+      if (isFirstBoard) showBanner(this, this.area.centerY, '시작!', THEME_CSS.good, 520, DEPTH.banner);
       // 카드가 다 덮인 뒤부터 누를 수 있고 시간이 흐른다.
       this.time.delayedCall(FLIP_HALF_MS * 2, () => {
         this.playing = true;
@@ -206,7 +206,8 @@ export class MemoryCardsScene extends MiniGameScene {
   private createCard(symbol: number, center: { x: number; y: number }, index: number): Card {
     const back = this.add.image(0, 0, store.data.cosmetics.equipped.cardBack).setVisible(false);
     const front = this.add.image(0, 0, TEXTURE.cardFront);
-    const icon = this.add.image(0, -1, CARD_SYMBOLS[symbol]).setScale(2);
+    // 카드 그림은 아래 두께(3px)를 뺀 윗면의 가운데에 놓는다.
+    const icon = this.add.image(0, -1.5, CARD_SYMBOLS[symbol]);
     const container = this.add.container(center.x, center.y, [back, front, icon]).setScale(0);
     this.board.add(container);
 
@@ -284,7 +285,8 @@ export class MemoryCardsScene extends MiniGameScene {
 
   private onPointerDown(pointer: Phaser.Input.Pointer): void {
     if (!this.playing) return;
-    const card = this.cardAt(pointer.x, pointer.y);
+    // 카메라가 화면을 확대해 그리므로 화면 좌표가 아니라 게임 좌표로 본다.
+    const card = this.cardAt(pointer.worldX, pointer.worldY);
     if (!card || card.matched) return;
 
     // 틀린 두 장이 아직 보이는 중이면 기다리지 않고 바로 덮는다. 빠른 손을 막지 않기 위해서다.
@@ -332,7 +334,7 @@ export class MemoryCardsScene extends MiniGameScene {
           onComplete: () => card.container.setAlpha(0.55),
         });
       }
-      floatText(this, b.x, b.y - CARD_HEIGHT / 2 + 4, `+${points}`, CSS.yellow, this.area, DEPTH.effect);
+      floatText(this, b.x, b.y - CARD_HEIGHT / 2 + 4, `+${points}`, THEME_CSS.accent, this.area, DEPTH.effect);
     });
 
     if (this.cards.every((card) => card.matched)) this.onBoardCleared();
@@ -370,8 +372,8 @@ export class MemoryCardsScene extends MiniGameScene {
     this.time.delayedCall(FLIP_HALF_MS * 2 + 200, () => {
       sfx.gold();
       vibrate([15, 30, 15]);
-      showBanner(this, this.area.centerY, '클리어!', CSS.lime, NEXT_BOARD_MS - 200, DEPTH.banner);
-      floatText(this, GAME_WIDTH / 2, this.area.centerY + 40, `+${bonus}`, CSS.yellow, this.area, DEPTH.banner);
+      showBanner(this, this.area.centerY, '클리어!', THEME_CSS.good, NEXT_BOARD_MS - 200, DEPTH.banner);
+      floatText(this, GAME_WIDTH / 2, this.area.centerY + 40, `+${bonus}`, THEME_CSS.accent, this.area, DEPTH.banner);
     });
 
     this.time.delayedCall(NEXT_BOARD_MS, () => {
@@ -402,7 +404,7 @@ export class MemoryCardsScene extends MiniGameScene {
     for (const card of this.cards) {
       if (!card.faceUp) this.setFace(card, true);
     }
-    showBanner(this, this.area.centerY, '끝!', CSS.yellow, 900, DEPTH.banner);
+    showBanner(this, this.area.centerY, '끝!', THEME_CSS.accent, 900, DEPTH.banner);
     this.finishMiniGame(this.score, [
       ['맞춘 짝', `${this.pairsFound}쌍`],
       ['깬 판', `${this.boardsCleared}판`],

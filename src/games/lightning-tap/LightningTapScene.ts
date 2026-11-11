@@ -1,8 +1,8 @@
 import Phaser from 'phaser';
-import { ORB_LOOKS } from '../../art/cosmetics';
+import { GOLD_ORB, ORB_LOOKS } from '../../art/cosmetics';
 import { TEXTURE } from '../../art/sprites';
 import { ORB_SIZE } from '../../art/textures';
-import { COLOR, CSS, GAME_WIDTH, paletteColor, SCENE } from '../../config';
+import { GAME_WIDTH, SCENE, THEME, THEME_CSS } from '../../config';
 import { vibrate } from '../../core/haptics';
 import { sfx } from '../../core/sfx';
 import { store } from '../../core/store';
@@ -30,7 +30,7 @@ interface Orb {
   lifetime: number;
 }
 
-const FIELD_MARGIN = 6;
+const FIELD_MARGIN = 8;
 const ORB_RADIUS = ORB_SIZE / 2;
 /** 구슬 가장자리 바깥으로 이만큼까지는 명중으로 쳐 준다. 손가락은 마우스보다 덜 정확하다. */
 const HIT_FORGIVENESS = 6;
@@ -61,7 +61,7 @@ export class LightningTapScene extends MiniGameScene {
   private rings!: Phaser.GameObjects.Graphics;
   /** 보통 구슬의 텍스처와 남은 시간 고리의 색. 고른 꾸미기에 따라 달라진다. */
   private orbTexture = '';
-  private ringColor: number = COLOR.sky;
+  private ringColor: number = THEME.skyDeep;
   private sparks!: Record<OrbKind, Phaser.GameObjects.Particles.ParticleEmitter>;
 
   constructor() {
@@ -77,25 +77,23 @@ export class LightningTapScene extends MiniGameScene {
       FIELD_MARGIN,
       HUD_HEIGHT,
       GAME_WIDTH - FIELD_MARGIN * 2,
-      height - HUD_HEIGHT - FIELD_MARGIN,
+      height - HUD_HEIGHT - FIELD_MARGIN - 3,
     );
 
     addBackdrop(this);
     const fieldFrame = this.add.graphics();
     drawPanel(fieldFrame, this.field.x, this.field.y, this.field.width, this.field.height, {
-      fill: COLOR.ink,
-      border: COLOR.navy,
-      highlight: COLOR.ink,
+      radius: 16,
     });
 
     this.rings = this.add.graphics().setDepth(DEPTH.ring);
     // 보통 구슬의 생김새는 상점에서 고른 꾸미기를 따른다.
     this.orbTexture = store.data.cosmetics.equipped.orb;
     const look = ORB_LOOKS[this.orbTexture];
-    this.ringColor = paletteColor(look.ring);
+    this.ringColor = look.ring;
     this.sparks = {
-      normal: this.createSparks(look.sparks.map(paletteColor)),
-      gold: this.createSparks([COLOR.yellow, COLOR.orange, COLOR.white]),
+      normal: this.createSparks([...look.sparks]),
+      gold: this.createSparks([...GOLD_ORB.sparks]),
     };
 
     this.addPauseButton();
@@ -158,7 +156,7 @@ export class LightningTapScene extends MiniGameScene {
     const centerX = GAME_WIDTH / 2;
     const centerY = Math.round(this.field.centerY);
     const hint = addText(this, centerX, centerY + 34, '구슬이 사라지기 전에 터치!\n금색 구슬은 5점', {
-      color: CSS.silver,
+      color: THEME_CSS.sub,
       align: 'center',
       originX: 0.5,
     }).setDepth(DEPTH.banner);
@@ -169,7 +167,7 @@ export class LightningTapScene extends MiniGameScene {
         const isGo = index === steps.length - 1;
         if (isGo) sfx.go();
         else sfx.count();
-        this.showBanner(label, isGo ? CSS.lime : CSS.white, 520);
+        this.showBanner(label, isGo ? THEME_CSS.good : THEME_CSS.ink, 520);
         if (isGo) {
           hint.destroy();
           this.playing = true;
@@ -224,8 +222,8 @@ export class LightningTapScene extends MiniGameScene {
         continue;
       }
       // 남은 시간을 줄어드는 고리로 보여 주고, 거의 끝나면 깜빡인다.
-      this.rings.lineStyle(1, orb.kind === 'gold' ? COLOR.yellow : this.ringColor, 0.9);
-      this.rings.strokeCircle(orb.sprite.x, orb.sprite.y, ORB_RADIUS + 1 + Math.round(remaining * 8));
+      this.rings.lineStyle(1.5, orb.kind === 'gold' ? GOLD_ORB.ring : this.ringColor, 0.9);
+      this.rings.strokeCircle(orb.sprite.x, orb.sprite.y, ORB_RADIUS + 1.5 + remaining * 8);
       const blinking = remaining < 0.3 && Math.floor(orb.age * 16) % 2 === 0;
       orb.sprite.setAlpha(blinking ? 0.45 : 1);
     }
@@ -253,12 +251,14 @@ export class LightningTapScene extends MiniGameScene {
   // ───────── 입력과 점수 ─────────
 
   private onPointerDown(pointer: Phaser.Input.Pointer): void {
-    if (!this.playing || !this.field.contains(pointer.x, pointer.y)) return;
+    // 카메라가 화면을 확대해 그리므로 화면 좌표가 아니라 게임 좌표로 본다.
+    const { worldX, worldY } = pointer;
+    if (!this.playing || !this.field.contains(worldX, worldY)) return;
 
     let target: Orb | null = null;
     let nearest = ORB_RADIUS + HIT_FORGIVENESS;
     for (const orb of this.orbs) {
-      const distance = Phaser.Math.Distance.Between(pointer.x, pointer.y, orb.sprite.x, orb.sprite.y);
+      const distance = Phaser.Math.Distance.Between(worldX, worldY, orb.sprite.x, orb.sprite.y);
       if (distance <= nearest) {
         nearest = distance;
         target = orb;
@@ -266,7 +266,7 @@ export class LightningTapScene extends MiniGameScene {
     }
 
     if (target) this.hitOrb(target);
-    else this.missAt(pointer.x, pointer.y);
+    else this.missAt(worldX, worldY);
   }
 
   private hitOrb(orb: Orb): void {
@@ -288,7 +288,7 @@ export class LightningTapScene extends MiniGameScene {
     else sfx.hit(this.combo);
     vibrate(orb.kind === 'gold' ? 25 : 10);
     this.sparks[orb.kind].explode(orb.kind === 'gold' ? 18 : 10, x, y);
-    this.floatText(x, y - ORB_RADIUS, `+${points}`, orb.kind === 'gold' ? CSS.yellow : CSS.white);
+    this.floatText(x, y - ORB_RADIUS, `+${points}`, orb.kind === 'gold' ? THEME_CSS.accent : THEME_CSS.ink);
   }
 
   private missAt(x: number, y: number): void {
@@ -297,7 +297,7 @@ export class LightningTapScene extends MiniGameScene {
     sfx.miss();
     vibrate(20);
     this.cameras.main.shake(90, 0.006);
-    this.floatText(x, y - 6, '빗나감', CSS.red);
+    this.floatText(x, y - 6, '빗나감', THEME_CSS.bad);
   }
 
   private breakCombo(): void {
@@ -336,7 +336,7 @@ export class LightningTapScene extends MiniGameScene {
       });
     }
     this.orbs = [];
-    this.showBanner('끝!', CSS.yellow, 900);
+    this.showBanner('끝!', THEME_CSS.accent, 900);
     this.finishMiniGame(this.score, [
       ['명중', `${this.hits}번`],
       ['최대 콤보', String(this.maxCombo)],

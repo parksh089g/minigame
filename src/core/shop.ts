@@ -17,7 +17,7 @@ export interface SlotInfo {
 
 export const SLOT_INFO: Record<CosmeticSlot, SlotInfo> = {
   backdrop: { label: '배경', hint: '모든 화면에 깔리는 배경 무늬예요.' },
-  runner: { label: '캐릭터', hint: '점프 러너에서 달리는 친구예요.' },
+  runner: { label: '캐릭터', hint: '함께 노는 친구예요. 점프 러너에서 달려요.' },
   cardBack: { label: '카드', hint: '기억 카드의 뒷면 무늬예요.' },
   orb: { label: '구슬', hint: '번개 탭에 나오는 구슬이에요.' },
 };
@@ -33,22 +33,25 @@ export interface CosmeticItem {
 
 /** 살 수 있는 것 전부. 자리마다 첫 번째가 기본(무료)이다. */
 export const CATALOG: readonly CosmeticItem[] = [
-  { id: 'backdrop-night', slot: 'backdrop', name: '밤하늘', price: 0 },
-  { id: 'backdrop-forest', slot: 'backdrop', name: '숲속', price: 40 },
-  { id: 'backdrop-sunset', slot: 'backdrop', name: '노을', price: 100 },
-  { id: 'backdrop-galaxy', slot: 'backdrop', name: '은하수', price: 180 },
+  // id는 픽셀 디자인 시절에 정한 것이라 이름과 다를 수 있다(backdrop-night는 지금 크림색이다).
+  { id: 'backdrop-night', slot: 'backdrop', name: '복숭아 크림', price: 0 },
+  { id: 'backdrop-forest', slot: 'backdrop', name: '민트 숲', price: 40 },
+  { id: 'backdrop-sunset', slot: 'backdrop', name: '살구 노을', price: 100 },
+  { id: 'backdrop-galaxy', slot: 'backdrop', name: '라벤더 별밤', price: 180 },
 
   { id: 'runner-sprout', slot: 'runner', name: '새싹이', price: 0 },
   { id: 'runner-drop', slot: 'runner', name: '물방울', price: 40 },
+  { id: 'runner-duck', slot: 'runner', name: '오리', price: 70 },
   { id: 'runner-chick', slot: 'runner', name: '병아리', price: 100 },
+  { id: 'runner-dog', slot: 'runner', name: '강아지', price: 140 },
   { id: 'runner-ghost', slot: 'runner', name: '꼬마 유령', price: 180 },
 
-  { id: 'cardback-blue', slot: 'cardBack', name: '파란 마름모', price: 0 },
+  { id: 'cardback-blue', slot: 'cardBack', name: '하늘 마름모', price: 0 },
   { id: 'cardback-green', slot: 'cardBack', name: '풀빛 물방울', price: 40 },
   { id: 'cardback-red', slot: 'cardBack', name: '딸기 바둑판', price: 100 },
   { id: 'cardback-gold', slot: 'cardBack', name: '황금 줄무늬', price: 180 },
 
-  { id: 'orb-blue', slot: 'orb', name: '파란 구슬', price: 0 },
+  { id: 'orb-blue', slot: 'orb', name: '하늘 구슬', price: 0 },
   { id: 'orb-green', slot: 'orb', name: '풀빛 구슬', price: 40 },
   { id: 'orb-red', slot: 'orb', name: '딸기 구슬', price: 100 },
   { id: 'orb-moon', slot: 'orb', name: '달빛 구슬', price: 180 },

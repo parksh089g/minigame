@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "온·오프라인에서 즐기는 픽셀 아트 미니게임 모음 (PWA)",
+  "description": "온·오프라인에서 즐기는 말랑한 미니게임 모음 (PWA)",
   "scripts": {
     "dev": "vite --host",
     "build": "tsc --noEmit && vite build",

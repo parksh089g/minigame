@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { COLOR, CSS, FONT_SIZE, GAME_WIDTH, SCENE } from '../config';
+import { FONT_SIZE, GAME_WIDTH, SCENE, THEME, THEME_CSS } from '../config';
 import {
   ACHIEVEMENTS,
   achievementsIn,
@@ -37,8 +37,9 @@ const TAB_GAP = 4;
 const TAB_HEIGHT = 24;
 const SUMMARY_TOP = 76;
 const ROWS_TOP = 94;
-const ROW_HEIGHT = 44;
-const ROW_GAP = 4;
+// 줄 아래로 그림자가 3px 내려오므로 간격을 그보다 넉넉히 둔다.
+const ROW_HEIGHT = 42;
+const ROW_GAP = 6;
 /** 줄 하나가 간격까지 쳐서 차지하는 높이 */
 const ROW_STEP = ROW_HEIGHT + ROW_GAP;
 const BOTTOM_MARGIN = 4;
@@ -86,12 +87,7 @@ export class AchievementsScene extends Phaser.Scene {
       hitPadding: 6,
       onTap: () => fadeToScene(this, SCENE.hub),
     });
-    addText(this, GAME_WIDTH / 2, 9, '업적', {
-      size: FONT_SIZE.large,
-      bold: true,
-      originX: 0.5,
-      shadow: CSS.navy,
-    });
+    addText(this, GAME_WIDTH / 2, 8, '업적', { size: FONT_SIZE.large, originX: 0.5 });
     this.coins = new CoinCounter(this, GAME_WIDTH - 8, 11, store.data.coins);
 
     const tabWidth = (CONTENT_WIDTH - TAB_GAP * (GROUPS.length - 1)) / GROUPS.length;
@@ -108,9 +104,9 @@ export class AchievementsScene extends Phaser.Scene {
     });
     this.tabs = tabs as Record<AchievementGroup, PixelButton>;
 
-    this.summary = addText(this, MARGIN + 2, SUMMARY_TOP, '', { color: CSS.silver });
+    this.summary = addText(this, MARGIN + 2, SUMMARY_TOP, '', { color: THEME_CSS.sub });
     this.waiting = addText(this, GAME_WIDTH - MARGIN - 2, SUMMARY_TOP, '', {
-      color: CSS.yellow,
+      color: THEME_CSS.accent,
       originX: 1,
     });
 
@@ -160,7 +156,7 @@ export class AchievementsScene extends Phaser.Scene {
     const ready = claimable(store.data.achievements, stats);
     for (const group of GROUPS) {
       const hasReward = ready.some((achievement) => achievement.group === group);
-      this.tabs[group].setStyle(group === this.group ? 'blue' : hasReward ? 'yellow' : 'neutral');
+      this.tabs[group].setStyle(group === this.group ? 'pink' : hasReward ? 'yellow' : 'neutral');
     }
     const done = ACHIEVEMENTS.filter((achievement) => progressOf(achievement, stats).complete);
     this.summary.setText(`달성 ${done.length}/${ACHIEVEMENTS.length}`);
@@ -201,58 +197,71 @@ export class AchievementsScene extends Phaser.Scene {
     const drawFrame = (pressed: boolean): void => {
       frame.clear();
       drawPanel(frame, x, y, CONTENT_WIDTH, ROW_HEIGHT, {
-        fill: claimed ? COLOR.ink : ready ? (pressed ? COLOR.blue : COLOR.navy) : COLOR.charcoal,
-        border: ready ? COLOR.yellow : claimed ? COLOR.navy : COLOR.ink,
-        highlight: claimed ? COLOR.ink : ready ? COLOR.blue : COLOR.slate,
+        fill: ready ? (pressed ? THEME.butterSoft : THEME.butter) : claimed ? THEME.dim : THEME.card,
+        shadow: ready ? THEME.butterDeep : THEME.shadow,
       });
+      // 별이 놓이는 동그란 자리
+      frame.fillStyle(ready ? THEME.white : claimed ? THEME.card : THEME.dim, 1);
+      frame.fillCircle(x + 19, y + ROW_HEIGHT / 2, 13);
     };
     drawFrame(false);
 
-    const star = keep(this.add.image(x + 16, y + ROW_HEIGHT / 2, 'icon-star').setScale(2));
-    if (!progress.complete) {
-      star.setTint(COLOR.slate).setTintMode(Phaser.TintModes.FILL).setAlpha(0.6);
-    } else if (claimed) {
-      star.setAlpha(0.55);
-    } else {
-      this.tweens.add({ targets: star, alpha: 0.35, duration: 320, yoyo: true, repeat: -1 });
+    const star = keep(
+      this.add.image(x + 19, y + ROW_HEIGHT / 2, progress.complete ? 'icon-star' : 'icon-star-empty'),
+    );
+    if (claimed) {
+      star.setAlpha(0.6);
+    } else if (ready) {
+      this.tweens.add({
+        targets: star,
+        scale: 1.18,
+        duration: 320,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.InOut',
+      });
     }
 
-    const right = x + CONTENT_WIDTH - 8;
+    const right = x + CONTENT_WIDTH - 9;
     keep(
-      addText(this, x + 32, y + 6, achievement.title, {
-        bold: true,
-        color: ready ? CSS.yellow : claimed ? CSS.silver : CSS.white,
+      addText(this, x + 38, y + 6, achievement.title, {
+        color: claimed ? THEME_CSS.sub : THEME_CSS.inkDeep,
       }),
     );
-    keep(
-      addText(this, x + 32, y + 24, achievement.description, {
-        color: claimed ? CSS.slate : CSS.silver,
-      }),
-    );
+    keep(addText(this, x + 38, y + 23, achievement.description, { size: FONT_SIZE.small, color: THEME_CSS.sub }));
 
     if (claimed) {
-      keep(this.add.image(right, y + 13, 'icon-check').setOrigin(1, 0.5).setTint(COLOR.lime));
+      keep(this.add.image(right, y + 13, 'icon-check').setOrigin(1, 0.5));
     } else if (ready) {
-      keep(addText(this, right, y + 6, '받기', { bold: true, color: CSS.lime, originX: 1 }));
+      const label = keep(addText(this, right - 7, y + 12, '받기', { color: THEME_CSS.inkDeep, originX: 1, originY: 0.5 }));
+      const pill = keep(this.add.graphics());
+      const pillWidth = Math.ceil(label.width) + 14;
+      pill.fillStyle(THEME.pinkDeep, 1);
+      pill.fillRoundedRect(right - pillWidth, y + 6, pillWidth, 16, 8);
+      pill.fillStyle(THEME.pink, 1);
+      pill.fillRoundedRect(right - pillWidth, y + 4, pillWidth, 16, 8);
+      label.setDepth(1);
     } else {
       keep(
         addText(this, right, y + 6, `${progress.current}/${progress.goal}`, {
-          color: CSS.silver,
+          color: THEME_CSS.sub,
           originX: 1,
         }),
       );
     }
     const reward = keep(
       addText(this, right, y + 24, `+${achievement.reward}`, {
-        color: claimed ? CSS.slate : CSS.yellow,
+        size: FONT_SIZE.small,
+        color: claimed ? THEME_CSS.faint : THEME_CSS.ink,
         originX: 1,
       }),
     );
     keep(
       this.add
-        .image(Math.round(right - reward.width - 11), y + 26, 'coin')
-        .setOrigin(0, 0)
-        .setAlpha(claimed ? 0.4 : 1),
+        .image(Math.round(right - reward.width - 2), y + 30, 'coin')
+        .setOrigin(1, 0.5)
+        .setDisplaySize(10, 10)
+        .setAlpha(claimed ? 0.5 : 1),
     );
 
     if (!ready) return;
@@ -272,7 +281,11 @@ export class AchievementsScene extends Phaser.Scene {
 
   /** 받은 코인 수가 줄 위로 떠오른다. */
   private showReward(x: number, y: number, amount: number): void {
-    const text = addText(this, x, y, `+${amount}`, { bold: true, color: CSS.yellow, originX: 1 });
+    const text = addText(this, x, y, `+${amount}`, {
+      color: THEME_CSS.accent,
+      originX: 1,
+      stroke: THEME_CSS.white,
+    });
     text.setDepth(10);
     this.tweens.add({
       targets: text,
