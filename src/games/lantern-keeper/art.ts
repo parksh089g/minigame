@@ -2,7 +2,7 @@
  * 등불지기 전용 픽셀 텍스처. 공용 art/ 폴더를 건드리지 않도록 이 게임 안에서 만든다.
  * 문자열 한 글자가 한 픽셀이고, 0~f는 config.ts의 PALETTE 번호, '.'은 투명이다.
  */
-import type Phaser from 'phaser';
+import Phaser from 'phaser';
 import { COLOR, PALETTE } from '../../config';
 
 type Rows = readonly string[];
@@ -312,11 +312,16 @@ function drawDarkness(width: number, height: number, clear: number, reach: numbe
   return canvas;
 }
 
+/** 게임 전체의 픽셀 그림 설정과 상관없이, 이 게임의 텍스처는 늘 또렷한 픽셀로 보이게 등록한다. */
+function addPixelTexture(scene: Phaser.Scene, key: string, canvas: HTMLCanvasElement): void {
+  scene.textures.addCanvas(key, canvas)?.setFilter(Phaser.Textures.FilterMode.NEAREST);
+}
+
 /** 화면 크기에 맞는 어둠 덮개 텍스처를 만들고 그 이름을 돌려준다. */
 export function darknessTexture(scene: Phaser.Scene, width: number, height: number): string {
   const key = `lk-dark-${width}x${height}`;
   if (!scene.textures.exists(key)) {
-    scene.textures.addCanvas(key, drawDarkness(width, height, 64, 150));
+    addPixelTexture(scene, key, drawDarkness(width, height, 64, 150));
   }
   return key;
 }
@@ -324,7 +329,7 @@ export function darknessTexture(scene: Phaser.Scene, width: number, height: numb
 /** 이 게임에서 쓰는 텍스처를 모두 만든다. 이미 있으면 건너뛴다. */
 export function registerLanternTextures(scene: Phaser.Scene): void {
   const add = (key: string, canvas: HTMLCanvasElement): void => {
-    if (!scene.textures.exists(key)) scene.textures.addCanvas(key, canvas);
+    if (!scene.textures.exists(key)) addPixelTexture(scene, key, canvas);
   };
   const addWithFlash = (key: string, rows: Rows): void => {
     add(key, drawRows(rows));
