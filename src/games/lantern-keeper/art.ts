@@ -43,9 +43,16 @@ export const LOOK = {
   fire: COLOR.orange,
   fireCore: COLOR.yellow,
   fireEvo: COLOR.red,
-  bolt: COLOR.cyan,
-  boltEvo: COLOR.white,
+  bolt: COLOR.white,
+  boltGlow: COLOR.cyan,
+  boltEvoGlow: COLOR.yellow,
 } as const;
+
+/**
+ * 이 게임의 패널은 밤 분위기에 맞춰 어둡게 그린다. 앱의 기본 패널(밝은 카드, 옅은 그림자) 대신
+ * drawPanel에 이 색을 넘긴다.
+ */
+export const DARK_PANEL = { fill: COLOR.charcoal, shadow: COLOR.ink } as const;
 
 /** 맞았을 때 잠깐 하얗게 보이는 텍스처의 이름 */
 export const flashOf = (key: string): string => `${key}-flash`;

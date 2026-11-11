@@ -21,6 +21,7 @@ import {
 import {
   auraStats,
   boltStats,
+  buildSummary,
   coinsFor,
   damageScale,
   embersFor,
@@ -282,6 +283,13 @@ describe('레벨업 선택지', () => {
     expect(upgradeDescription(evolve)).toBe(WEAPONS.star.evolved.description);
     expect(weaponName('star', MAX_LEVEL)).toBe(WEAPONS.star.name);
     expect(weaponName('star', EVOLVE_LEVEL)).toBe(WEAPONS.star.evolved.name);
+  });
+
+  it('지금 든 무기를 정해진 순서로, 진화한 것은 진화형 이름으로 적는다', () => {
+    expect(buildSummary({ bolt: 2, ember: EVOLVE_LEVEL, aura: MAX_LEVEL })).toBe(
+      `${WEAPONS.ember.evolved.name} 진화 · ${WEAPONS.aura.name} ${MAX_LEVEL} · ${WEAPONS.bolt.name} 2`,
+    );
+    expect(buildSummary({})).toBe('');
   });
 
   it('무기 강화권은 가진 무기 가운데 덜 올린 것을 모두 보여 준다', () => {

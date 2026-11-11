@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { COLOR, CSS, FONT_SIZE, GAME_WIDTH } from '../../config';
 import { sfx } from '../../core/sfx';
 import { addText, drawPanel, PixelButton } from '../../core/ui';
-import { LK } from './art';
+import { DARK_PANEL, LK } from './art';
 import { META, META_ORDER, type MetaId } from './data';
 import { buyMeta, type LanternMeta } from './meta';
 import { formatClock, metaCost } from './rules';
@@ -55,7 +55,7 @@ export function buildLobby(scene: Phaser.Scene, handlers: LobbyHandlers): void {
 
   // 가진 불씨와 지금까지의 기록
   const info = scene.add.graphics();
-  drawPanel(info, MARGIN, 60, ROW_WIDTH, 24, { fill: COLOR.ink, border: COLOR.navy, highlight: COLOR.ink });
+  drawPanel(info, MARGIN, 60, ROW_WIDTH, 24, { fill: COLOR.ink, border: COLOR.navy, shadow: null });
   scene.add.image(MARGIN + 8, 72, LK.ember).setOrigin(0, 0.5);
   const embers = addText(scene, MARGIN + 18, 66, '', { color: CSS.orange, bold: true });
   const meta = handlers.getMeta();
@@ -78,7 +78,7 @@ export function buildLobby(scene: Phaser.Scene, handlers: LobbyHandlers): void {
     const item = META[id];
     const y = ROWS_TOP + index * (ROW_HEIGHT + ROW_GAP);
     const panel = scene.add.graphics();
-    drawPanel(panel, MARGIN, y, ROW_WIDTH, ROW_HEIGHT);
+    drawPanel(panel, MARGIN, y, ROW_WIDTH, ROW_HEIGHT, DARK_PANEL);
     const name = addText(scene, MARGIN + 8, y + 4, item.name, { bold: true, color: CSS.white });
     addText(scene, MARGIN + 8, y + 19, item.perLevel, { color: CSS.silver });
     const pips = scene.add.graphics();

@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { playRun } from './bot';
-import { ENEMIES, EVOLVE_LEVEL, MAX_LEVEL, MID_BOSS_COUNT, MID_BOSS_EVERY, MID_BOSS_TIERS, RUN_SECONDS, SURGES } from './data';
+import {
+  ENEMIES,
+  EVOLVE_LEVEL,
+  MAX_LEVEL,
+  MAX_WEAPONS,
+  MID_BOSS_COUNT,
+  MID_BOSS_EVERY,
+  MID_BOSS_TIERS,
+  RUN_SECONDS,
+  SURGES,
+} from './data';
 import { maxAlive, seededRandom, xpToNext, type Upgrade } from './rules';
 import { createRun, looksLikeRun, Sim, type Enemy, type RunState, type SimEvent } from './sim';
 
@@ -464,6 +474,15 @@ describe('자동 플레이로 본 밸런스', () => {
     expect(result.seconds).toBeGreaterThan(150);
     expect(result.level).toBeGreaterThan(5);
   });
+
+  it('영구 강화를 다 올리면 중간 보스를 모두 잡고, 받은 강화권으로 무기가 진화한다', () => {
+    const result = playRun(1, 'kite', { ...config, meta: { vigor: 5, swift: 5, might: 5, greed: 5, reach: 3 } }, 600);
+    expect(result.bossKills).toBeGreaterThanOrEqual(MID_BOSS_COUNT);
+    const levels = Object.values(result.weapons);
+    expect(levels.length).toBeLessThanOrEqual(MAX_WEAPONS);
+    expect(levels.filter((level) => level === EVOLVE_LEVEL).length).toBeGreaterThanOrEqual(2);
+    expect(Math.max(...levels)).toBe(EVOLVE_LEVEL);
+  }, 20000);
 
   it('적의 수가 상한을 크게 넘지 않는다', () => {
     const result = playRun(4, 'kite', { ...config, meta: { vigor: 5, might: 5, swift: 5 } }, 400);

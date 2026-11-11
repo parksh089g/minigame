@@ -3,16 +3,8 @@ import { COLOR, CSS, FONT_SIZE, GAME_WIDTH } from '../../config';
 import { vibrate } from '../../core/haptics';
 import { sfx } from '../../core/sfx';
 import { addTapZone, addText, drawPanel } from '../../core/ui';
-import { MAX_LEVEL, type WeaponId } from './data';
-import {
-  isEvolved,
-  ownedWeapons,
-  upgradeDescription,
-  upgradeTitle,
-  weaponName,
-  type Levels,
-  type Upgrade,
-} from './rules';
+import { MAX_LEVEL } from './data';
+import { isEvolved, upgradeDescription, upgradeTitle, type Upgrade } from './rules';
 
 const CARD_WIDTH = 208;
 const CARD_HEIGHT = 56;
@@ -45,16 +37,6 @@ export interface ChoiceHeader {
   shadow: string;
 }
 
-/** 지금 든 무기를 한 줄로 적는다. 선택 화면 아래에 보여 줘서 무엇을 올릴지 정하기 쉽게 한다. */
-export function buildSummary(weapons: Levels<WeaponId>): string {
-  return ownedWeapons(weapons)
-    .map((id) => {
-      const level = weapons[id] ?? 0;
-      return isEvolved(level) ? `${weaponName(id, level)} 진화` : `${weaponName(id, level)} ${level}`;
-    })
-    .join(' · ');
-}
-
 /** 레벨이 올랐을 때의 머리글 */
 export const levelUpHeader = (level: number): ChoiceHeader => ({
   title: '레벨 업!',
@@ -81,6 +63,7 @@ export function showChoices(
   options: readonly Upgrade[],
   depth: number,
   onPick: (upgrade: Upgrade) => void,
+  /** 카드 아래에 적는 한 줄. 지금 든 무기를 보여 주는 데 쓴다. */
   footer = '',
 ): void {
   const { width, height } = scene.scale;
@@ -133,8 +116,8 @@ export function showChoices(
       frame.clear();
       drawPanel(frame, left, y, CARD_WIDTH, CARD_HEIGHT, {
         fill: pressed ? COLOR.navy : COLOR.charcoal,
-        border: pressed ? COLOR.sky : special ? COLOR.yellow : COLOR.ink,
-        highlight: pressed ? COLOR.navy : special ? COLOR.orange : COLOR.slate,
+        border: pressed ? COLOR.sky : special ? COLOR.yellow : COLOR.slate,
+        shadow: COLOR.ink,
       });
     };
     draw(false);

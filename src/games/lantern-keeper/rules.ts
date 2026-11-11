@@ -297,6 +297,16 @@ export function ownedWeapons(weapons: Levels<WeaponId>): WeaponId[] {
   return WEAPON_ORDER.filter((id) => (weapons[id] ?? 0) > 0);
 }
 
+/** 지금 든 무기와 레벨을 한 줄로 적는다. 선택 화면 아래에 보여 줘서 무엇을 올릴지 정하기 쉽게 한다. */
+export function buildSummary(weapons: Levels<WeaponId>): string {
+  return ownedWeapons(weapons)
+    .map((id) => {
+      const level = weapons[id] ?? 0;
+      return isEvolved(level) ? `${weaponName(id, level)} 진화` : `${weaponName(id, level)} ${level}`;
+    })
+    .join(' · ');
+}
+
 /**
  * 레벨업 때 보여 줄 선택지. 아직 덜 올린 무기와 패시브 가운데에서 겹치지 않게 count개 고른다.
  * 무기 칸이 다 찼으면 새 무기는 나오지 않는다. 모두 최대 레벨이면 회복과 불씨를 준다.

@@ -31,7 +31,7 @@ interface Flash {
 }
 
 const RING_SECONDS = 0.22;
-const FLASH_SECONDS = 0.14;
+const FLASH_SECONDS = 0.2;
 
 const SHOT_KEY: Record<ShotLook, string> = {
   ember: LK.ember,
@@ -272,28 +272,26 @@ export class RunView {
     for (const flash of this.flashes) {
       flash.life -= dt;
       if (flash.life <= 0) continue;
-      const alpha = flash.life / FLASH_SECONDS;
+      // 처음 절반은 또렷하게 보이다가 빠르게 사라진다.
+      const alpha = Math.min(1, (flash.life / FLASH_SECONDS) * 2);
       const { points } = flash;
-      air.lineStyle(flash.evolved ? 3 : 2, LOOK.bolt, 0.9 * alpha);
-      air.beginPath();
-      air.moveTo(Math.round(points[0] + offsetX), Math.round(points[1] + offsetY));
-      for (let i = 2; i < points.length; i += 2) {
-        const midX = (points[i - 2] + points[i]) / 2;
-        const midY = (points[i - 1] + points[i + 1]) / 2;
-        const bend = i % 4 === 0 ? 4 : -4;
-        air.lineTo(Math.round(midX + offsetX + bend), Math.round(midY + offsetY - bend));
-        air.lineTo(Math.round(points[i] + offsetX), Math.round(points[i + 1] + offsetY));
-      }
-      air.strokePath();
-      if (flash.evolved) {
-        air.lineStyle(1, LOOK.boltEvo, alpha);
+      const trace = (): void => {
         air.beginPath();
         air.moveTo(Math.round(points[0] + offsetX), Math.round(points[1] + offsetY));
         for (let i = 2; i < points.length; i += 2) {
+          const midX = (points[i - 2] + points[i]) / 2;
+          const midY = (points[i - 1] + points[i + 1]) / 2;
+          const bend = i % 4 === 0 ? 4 : -4;
+          air.lineTo(Math.round(midX + offsetX + bend), Math.round(midY + offsetY - bend));
           air.lineTo(Math.round(points[i] + offsetX), Math.round(points[i + 1] + offsetY));
         }
         air.strokePath();
-      }
+      };
+      // 바깥은 굵고 옅게, 안쪽은 가늘고 밝게 두 번 그어 빛나는 줄처럼 보이게 한다.
+      air.lineStyle(flash.evolved ? 6 : 4, flash.evolved ? LOOK.boltEvoGlow : LOOK.boltGlow, 0.45 * alpha);
+      trace();
+      air.lineStyle(flash.evolved ? 2.5 : 1.5, LOOK.bolt, alpha);
+      trace();
       this.flashes[kept] = flash;
       kept += 1;
     }

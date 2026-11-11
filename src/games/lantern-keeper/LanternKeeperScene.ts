@@ -8,10 +8,10 @@ import { MiniGameScene, type ResultStat } from '../../scenes/MiniGameScene';
 import { registerLanternTextures } from './art';
 import { ENEMIES, LANTERN_GAME_ID, LANTERN_SCENE, RUN_SECONDS } from './data';
 import { Joystick } from './joystick';
-import { buildSummary, levelUpHeader, showChoices, TICKET_HEADER } from './levelup';
+import { levelUpHeader, showChoices, TICKET_HEADER } from './levelup';
 import { buildLobby } from './lobby';
 import { applyRun, metaStore } from './meta';
-import { embersFor, formatClock, scoreFor, xpToNext } from './rules';
+import { buildSummary, embersFor, formatClock, scoreFor, xpToNext } from './rules';
 import { createRun, Sim, type Enemy } from './sim';
 import { RunView } from './view';
 
@@ -214,6 +214,10 @@ export class LanternKeeperScene extends MiniGameScene {
           break;
         case 'bolt':
           this.view.bolt(event.points, event.evolved);
+          // 번개가 닿은 자리마다 불티가 튄다.
+          for (let i = 2; i < event.points.length; i += 2) {
+            this.view.burst(sim, event.points[i], event.points[i + 1], 2);
+          }
           break;
         case 'boss':
           showBanner(this, this.scale.height * 0.3, ENEMIES[event.kind].name, CSS.red, 1800, DEPTH.banner);
@@ -349,11 +353,7 @@ export class LanternKeeperScene extends MiniGameScene {
     const button = this.add.graphics().setDepth(DEPTH.hud);
     const drawButton = (pressed: boolean): void => {
       button.clear();
-      drawPanel(button, 8, 8, 26, 26, {
-        fill: pressed ? COLOR.navy : COLOR.slate,
-        border: COLOR.ink,
-        highlight: pressed ? COLOR.navy : COLOR.silver,
-      });
+      drawPanel(button, 8, 8, 26, 26, { fill: pressed ? COLOR.navy : COLOR.slate, shadow: COLOR.ink, radius: 8 });
     };
     drawButton(false);
     this.add.image(21, 21, 'icon-pause').setDepth(DEPTH.hud);
@@ -385,7 +385,7 @@ export class LanternKeeperScene extends MiniGameScene {
     const g = this.bars;
     g.clear();
     const bar = (y: number, ratio: number, color: number): void => {
-      drawPanel(g, BAR.x, y, BAR.width, BAR.height, { fill: COLOR.ink, border: COLOR.slate, highlight: COLOR.ink });
+      drawPanel(g, BAR.x, y, BAR.width, BAR.height, { fill: COLOR.ink, border: COLOR.slate, shadow: null, radius: 4 });
       g.fillStyle(color, 1);
       g.fillRect(BAR.x + 2, y + 2, Math.round((BAR.width - 4) * Phaser.Math.Clamp(ratio, 0, 1)), BAR.height - 4);
     };
@@ -398,7 +398,7 @@ export class LanternKeeperScene extends MiniGameScene {
       const y = HUD_HEIGHT + 20;
       const width = 120;
       const x = Math.round((GAME_WIDTH - width) / 2);
-      drawPanel(g, x, y, width, 6, { fill: COLOR.ink, border: COLOR.ink, highlight: COLOR.ink });
+      drawPanel(g, x, y, width, 6, { fill: COLOR.ink, shadow: null, radius: 3 });
       g.fillStyle(COLOR.red, 1);
       g.fillRect(x + 1, y + 1, Math.round((width - 2) * Phaser.Math.Clamp(boss.hp / boss.maxHp, 0, 1)), 4);
       this.bossText.setText(ENEMIES[boss.kind].name);
