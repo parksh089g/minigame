@@ -105,6 +105,42 @@ export const GAMES: readonly MiniGameInfo[] = [
     coinsFor: (score) => Math.floor(score / 40),
     dailyTargets: [250, 450, 750],
   },
+  {
+    id: 'merge-tiles',
+    title: '머지 타일',
+    tagline: '같은 숫자를 밀어 합치기',
+    icon: 'icon-merge',
+    sceneKey: SCENE.mergeTiles,
+    coinsFor: (score) => Math.floor(score / 15),
+    dailyTargets: [60, 100, 150],
+  },
+  {
+    id: 'tail-chase',
+    title: '꼬리 잡기',
+    tagline: '먹을수록 길어지는 꼬리',
+    icon: 'icon-tail',
+    sceneKey: SCENE.tailChase,
+    coinsFor: (score) => Math.floor(score / 15),
+    dailyTargets: [60, 100, 150],
+  },
+  {
+    id: 'logic-tiles',
+    title: '논리 타일',
+    tagline: '숫자 힌트로 함정 찾기',
+    icon: 'icon-logic',
+    sceneKey: SCENE.logicTiles,
+    coinsFor: (score) => Math.floor(score / 15),
+    dailyTargets: [60, 100, 150],
+  },
+  {
+    id: 'number-puzzle',
+    title: '숫자 퍼즐',
+    tagline: '빈칸에 맞는 숫자 채우기',
+    icon: 'icon-number',
+    sceneKey: SCENE.numberPuzzle,
+    coinsFor: (score) => Math.floor(score / 15),
+    dailyTargets: [60, 100, 150],
+  },
 ];
 
 /** 허브에 보여 주는 순서로 늘어놓는다: 대표 게임이 먼저 오고, 나머지는 적힌 순서 그대로다. */

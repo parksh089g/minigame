@@ -167,4 +167,8 @@ export const SCENE = {
   pinPull: 'PinPull',
   parkingOut: 'ParkingOut',
   screwSort: 'ScrewSort',
+  mergeTiles: 'MergeTiles',
+  tailChase: 'TailChase',
+  logicTiles: 'LogicTiles',
+  numberPuzzle: 'NumberPuzzle',
 } as const;
