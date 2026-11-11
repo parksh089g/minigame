@@ -85,7 +85,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     icon: 'icon-pin',
     sceneKey: SCENE.pinPull,
     coinsFor: (score) => Math.floor(score / 15),
-    dailyTargets: [60, 100, 150],
+    dailyTargets: [70, 130, 220],
   },
   {
     id: 'parking-out',

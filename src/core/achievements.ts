@@ -98,6 +98,8 @@ export const ACHIEVEMENTS: readonly Achievement[] = [
   { id: 'sort-420', group: 'score', title: '색의 달인', description: '물 나누기 420점 이상', goal: 420, reward: 50, measure: bestOf('color-sort') },
   { id: 'gate-200', group: 'score', title: '눈치 빠른 무리', description: '관문 달리기 200점 이상', goal: 200, reward: 20, measure: bestOf('gate-run') },
   { id: 'gate-400', group: 'score', title: '관문의 달인', description: '관문 달리기 400점 이상', goal: 400, reward: 50, measure: bestOf('gate-run') },
+  { id: 'pin-250', group: 'score', title: '보물 사냥꾼', description: '핀 뽑기 250점 이상', goal: 250, reward: 20, measure: bestOf('pin-pull') },
+  { id: 'pin-500', group: 'score', title: '핀의 달인', description: '핀 뽑기 500점 이상', goal: 500, reward: 50, measure: bestOf('pin-pull') },
   { id: 'parking-400', group: 'score', title: '주차 도우미', description: '주차장 빼기 400점 이상', goal: 400, reward: 20, measure: bestOf('parking-out') },
   { id: 'parking-800', group: 'score', title: '주차의 달인', description: '주차장 빼기 800점 이상', goal: 800, reward: 50, measure: bestOf('parking-out') },
 
