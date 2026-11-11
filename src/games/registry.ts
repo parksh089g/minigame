@@ -19,6 +19,8 @@ export interface MiniGameInfo {
   coinsFor: (score: number) => number;
   /** 오늘의 도전에 쓰는 목표 점수. 쉬운 것부터 어려운 것 순서로 세 단계. */
   dailyTargets: readonly number[];
+  /** true면 허브 목록의 맨 앞에 놓는다. 대표로 내세울 게임에 쓴다. */
+  featured?: boolean;
 }
 
 export const GAMES: readonly MiniGameInfo[] = [
@@ -58,7 +60,60 @@ export const GAMES: readonly MiniGameInfo[] = [
     coinsFor: (score) => Math.floor(score / 12),
     dailyTargets: [70, 110, 150],
   },
+  {
+    id: 'color-sort',
+    title: '색깔 물 나누기',
+    tagline: '같은 색끼리 병에 모으기',
+    icon: 'icon-flask',
+    sceneKey: SCENE.colorSort,
+    coinsFor: (score) => Math.floor(score / 20),
+    dailyTargets: [100, 170, 250],
+  },
+  {
+    id: 'gate-run',
+    title: '관문 달리기',
+    tagline: '관문 골라 무리 불리기',
+    icon: 'icon-gate',
+    sceneKey: SCENE.gateRun,
+    coinsFor: (score) => Math.floor(score / 12),
+    dailyTargets: [80, 150, 250],
+  },
+  {
+    id: 'pin-pull',
+    title: '핀 뽑기',
+    tagline: '순서대로 뽑아 보물 얻기',
+    icon: 'icon-pin',
+    sceneKey: SCENE.pinPull,
+    coinsFor: (score) => Math.floor(score / 15),
+    dailyTargets: [70, 130, 220],
+  },
+  {
+    id: 'parking-out',
+    title: '주차장 빼기',
+    tagline: '막힌 차를 차례로 빼기',
+    icon: 'icon-car',
+    sceneKey: SCENE.parkingOut,
+    coinsFor: (score) => Math.floor(score / 25),
+    dailyTargets: [150, 280, 450],
+  },
+  {
+    id: 'screw-sort',
+    title: '나사 풀기',
+    tagline: '같은 색 나사 세 개씩',
+    icon: 'icon-screw',
+    sceneKey: SCENE.screwSort,
+    coinsFor: (score) => Math.floor(score / 40),
+    dailyTargets: [250, 450, 750],
+  },
 ];
+
+/** 허브에 보여 주는 순서로 늘어놓는다: 대표 게임이 먼저 오고, 나머지는 적힌 순서 그대로다. */
+export function orderForHub<T extends { featured?: boolean }>(games: readonly T[]): T[] {
+  return [...games.filter((game) => game.featured), ...games.filter((game) => !game.featured)];
+}
+
+/** 허브의 게임 목록 */
+export const HUB_GAMES: readonly MiniGameInfo[] = orderForHub(GAMES);
 
 export function getGame(id: string): MiniGameInfo | undefined {
   return GAMES.find((game) => game.id === id);

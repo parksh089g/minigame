@@ -108,6 +108,21 @@ export const sfx = {
     tone(196, 0.07, { type: 'triangle', volume: 0.4 });
     tone(98, 0.05, { type: 'square', volume: 0.12, delay: 0.01 });
   },
+  /** 물을 부음 */
+  pour: (): void => tone(440, 0.12, { type: 'triangle', slideTo: 260, volume: 0.35 }),
+  /** 작은 것이 톡 튀어나옴 */
+  pop: (): void => tone(700, 0.05, { slideTo: 1100, volume: 0.3 }),
+  /** 무언가를 쑥 뽑음 */
+  pull: (): void => tone(880, 0.06, { type: 'triangle', slideTo: 440, volume: 0.35 }),
+  /** 빠르게 지나가거나 빠져나감 */
+  whoosh: (): void => tone(260, 0.16, { type: 'sawtooth', slideTo: 620, volume: 0.2 }),
+  /** 막혀서 쿵 부딪힘 */
+  bump: (): void => {
+    tone(110, 0.09, { volume: 0.4 });
+    tone(70, 0.07, { type: 'triangle', volume: 0.3, delay: 0.03 });
+  },
+  /** 뜨거운 것이 식음 */
+  sizzle: (): void => tone(1800, 0.18, { type: 'sawtooth', slideTo: 300, volume: 0.15 }),
   /** 카운트다운 */
   count: (): void => tone(440, 0.09, { volume: 0.3 }),
   /** 시작 */

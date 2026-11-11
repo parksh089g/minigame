@@ -35,3 +35,17 @@ export function registerTextures(scene: Phaser.Scene): void {
     scene.textures.addCanvas(key, drawRows(rows))?.setFilter(Phaser.Textures.FilterMode.NEAREST);
   }
 }
+
+/**
+ * 게임 폴더에 따로 둔 스프라이트(문자열 그림)를 텍스처로 등록한다.
+ * 그 게임의 씬 create()에서 부르면 되고, 이미 등록된 이름은 건너뛴다.
+ */
+export function registerSprites(
+  scene: Phaser.Scene,
+  sprites: Readonly<Record<string, SpriteRows>>,
+): void {
+  for (const [key, rows] of Object.entries(sprites)) {
+    if (scene.textures.exists(key)) continue;
+    scene.textures.addCanvas(key, drawRows(rows))?.setFilter(Phaser.Textures.FilterMode.NEAREST);
+  }
+}

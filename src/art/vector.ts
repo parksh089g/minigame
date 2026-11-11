@@ -487,6 +487,88 @@ const ICONS: Record<string, Art> = {
       face(c, 18, 4.200, { gap: 5, eye: 0.900, blush: false, mood: 'none' });
     },
   },
+  /** 색깔 물 나누기: 세 가지 색이 층층이 담긴 유리병 */
+  'icon-flask': {
+    width: 32,
+    height: 32,
+    draw(c) {
+      c.fillStyle = '#b5a3ab';
+      c.beginPath();
+      c.roundRect(9.500, 4, 13, 26, [0, 0, 6.500, 6.500]);
+      c.fill();
+      c.save();
+      c.beginPath();
+      c.roundRect(11.500, 4, 9, 24, [0, 0, 4.500, 4.500]);
+      c.clip();
+      c.fillStyle = '#f6ece7';
+      c.fillRect(11.500, 4, 9, 24);
+      c.fillStyle = '#9dd6ff';
+      c.fillRect(11.500, 10, 9, 6);
+      c.fillStyle = '#ffcf5c';
+      c.fillRect(11.500, 16, 9, 6);
+      c.fillStyle = '#7fd3ae';
+      c.fillRect(11.500, 22, 9, 6);
+      c.restore();
+      roundRect(c, 7.500, 2, 17, 4, 2, '#b5a3ab');
+      roundRect(c, 13, 11.500, 1.600, 12, 0.800, 'rgba(255, 255, 255, 0.7)');
+    },
+  },
+  /** 관문 달리기: 더하기가 적힌 관문 */
+  'icon-gate': {
+    width: 32,
+    height: 32,
+    draw(c) {
+      roundRect(c, 4, 12, 5, 18, 2.500, '#9684e0');
+      roundRect(c, 23, 12, 5, 18, 2.500, '#9684e0');
+      roundRect(c, 2, 5.500, 28, 15, 5, '#7dbef2');
+      roundRect(c, 2, 4, 28, 15, 5, '#9dd6ff');
+      roundRect(c, 14.400, 6.500, 3.200, 10, 1.600, WHITE);
+      roundRect(c, 11, 9.900, 10, 3.200, 1.600, WHITE);
+    },
+  },
+  /** 핀 뽑기: 고리 달린 핀과 그 아래의 보물 */
+  'icon-pin': {
+    width: 32,
+    height: 32,
+    draw(c) {
+      roundRect(c, 10, 6.200, 20, 5, 2.500, '#b5a3ab');
+      roundRect(c, 10, 6.200, 20, 3.200, 1.600, '#d5c8cd');
+      ring(c, 7.500, 8.700, 4.200, '#e97f99', 3.200);
+      oval(c, 17, 22.800, 7.600, 7.600, '#f2b93b');
+      oval(c, 17, 22, 7.300, 7, '#ffcf5c');
+      oval(c, 17, 22, 4.600, 4.400, '#ffe39a');
+      oval(c, 14.800, 20, 1.400, 1.400, '#fff6da');
+    },
+  },
+  /** 주차장 빼기: 옆에서 본 작은 차 */
+  'icon-car': {
+    width: 32,
+    height: 32,
+    draw(c) {
+      roundRect(c, 7.500, 6, 15, 11, 4.500, '#ff8f8f');
+      roundRect(c, 2.500, 14.500, 27, 11, 5, '#e06d75');
+      roundRect(c, 2.500, 13, 27, 11, 5, '#ff8f8f');
+      roundRect(c, 9.500, 8, 5, 5, 1.800, '#e3f2ff');
+      roundRect(c, 16, 8, 5, 5, 1.800, '#e3f2ff');
+      oval(c, 27.200, 17.500, 1.600, 1.600, '#ffe9a8');
+      for (const x of [9.500, 22.500]) {
+        oval(c, x, 25, 3.800, 3.800, INK);
+        oval(c, x, 25, 1.500, 1.500, '#b5a3ab');
+      }
+    },
+  },
+  /** 나사 풀기: 십자 홈이 파인 나사 머리 */
+  'icon-screw': {
+    width: 32,
+    height: 32,
+    draw(c) {
+      oval(c, 16, 17.300, 11.500, 11.500, '#9684e0');
+      oval(c, 16, 15.300, 11.500, 11.500, '#c9bcf8');
+      oval(c, 11.200, 9.800, 3, 1.700, '#e9e3ff', -0.6);
+      roundRect(c, 14.400, 8.300, 3.200, 14, 1.600, '#9684e0');
+      roundRect(c, 9, 13.700, 14, 3.200, 1.600, '#9684e0');
+    },
+  },
 };
 
 // ───────── 기억 카드의 그림 ─────────
