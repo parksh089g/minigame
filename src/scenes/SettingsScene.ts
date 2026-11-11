@@ -1,11 +1,11 @@
 import Phaser from 'phaser';
-import { APP_VERSION, CSS, FONT_SIZE, GAME_WIDTH, SCENE } from '../config';
+import { APP_VERSION, FONT_SIZE, GAME_WIDTH, SCENE, THEME_CSS } from '../config';
 import { dateStamp, downloadText, pickTextFile } from '../core/files';
 import { canVibrate, vibrate } from '../core/haptics';
 import { getOfflineStatus, onOfflineStatus, type OfflineStatus } from '../core/pwa';
 import { sfx } from '../core/sfx';
 import { store } from '../core/store';
-import { addBackdrop, addText, fadeIn, fadeToScene, PixelButton } from '../core/ui';
+import { addBackdrop, addPanel, addText, fadeIn, fadeToScene, PixelButton } from '../core/ui';
 
 const LEFT = 16;
 const RIGHT = GAME_WIDTH - 16;
@@ -45,12 +45,7 @@ export class SettingsScene extends Phaser.Scene {
       hitPadding: 6,
       onTap: () => fadeToScene(this, SCENE.hub),
     });
-    addText(this, GAME_WIDTH / 2, 9, '설정', {
-      size: FONT_SIZE.large,
-      bold: true,
-      originX: 0.5,
-      shadow: CSS.navy,
-    });
+    addText(this, GAME_WIDTH / 2, 8, '설정', { size: FONT_SIZE.large, originX: 0.5 });
 
     this.addSection(48, '소리와 진동');
     this.addToggleRow(66, '효과음', {
@@ -70,22 +65,22 @@ export class SettingsScene extends Phaser.Scene {
       });
     } else {
       addText(this, LEFT, 104, '진동');
-      addText(this, RIGHT, 104, '이 기기는 지원 안 함', { color: CSS.slate, originX: 1 });
+      addText(this, RIGHT, 104, '이 기기는 지원 안 함', { color: THEME_CSS.sub, originX: 1 });
     }
 
     this.addSection(138, '저장 데이터');
     this.addDataButtons(156);
-    this.noticeText = addText(this, LEFT, 226, '', { wrapWidth: CONTENT_WIDTH });
+    this.noticeText = addText(this, LEFT, 228, '', { wrapWidth: CONTENT_WIDTH });
     if (data.notice) this.showNotice(data.notice.text, data.notice.ok);
 
     this.addSection(262, '정보');
-    this.addInfoRows(280);
+    this.addInfoRows(286);
 
     fadeIn(this);
   }
 
   private addSection(y: number, title: string): void {
-    addText(this, LEFT, y, title, { color: CSS.sky });
+    addText(this, LEFT, y, title, { color: THEME_CSS.accent });
   }
 
   private addToggleRow(
@@ -121,7 +116,7 @@ export class SettingsScene extends Phaser.Scene {
       width: half,
       height: 28,
       label: '내보내기',
-      style: 'blue',
+      style: 'green',
       onTap: () => {
         downloadText(`pocket-arcade-save-${dateStamp()}.json`, store.exportJson());
         this.showNotice('세이브 파일을 내려받았어요.', true);
@@ -133,13 +128,13 @@ export class SettingsScene extends Phaser.Scene {
       width: half,
       height: 28,
       label: '가져오기',
-      style: 'blue',
+      style: 'green',
       onTap: () => void this.importSave(),
     });
 
     const resetButton = new PixelButton(this, {
       x: LEFT,
-      y: y + 34,
+      y: y + 36,
       width: CONTENT_WIDTH,
       height: 28,
       label: '기록 초기화',
@@ -171,14 +166,15 @@ export class SettingsScene extends Phaser.Scene {
   }
 
   private showNotice(text: string, ok: boolean): void {
-    this.noticeText.setText(text).setColor(ok ? CSS.lime : CSS.orange);
+    this.noticeText.setText(text).setColor(ok ? THEME_CSS.good : THEME_CSS.bad);
   }
 
   private addInfoRows(top: number): void {
+    addPanel(this, LEFT - 6, top - 6, CONTENT_WIDTH + 12, 3 * 16 + 10);
     const row = (index: number, label: string, value: string): Phaser.GameObjects.Text => {
       const y = top + index * 16;
-      addText(this, LEFT, y, label, { color: CSS.silver });
-      return addText(this, RIGHT, y, value, { originX: 1 });
+      addText(this, LEFT + 2, y, label, { color: THEME_CSS.sub });
+      return addText(this, RIGHT - 2, y, value, { originX: 1 });
     };
 
     const offline = row(0, '오프라인 플레이', OFFLINE_TEXT[getOfflineStatus()]);
@@ -192,6 +188,6 @@ export class SettingsScene extends Phaser.Scene {
     });
 
     row(2, '버전', APP_VERSION);
-    addText(this, LEFT, top + 56, '글꼴 갈무리11 · 팔레트 Sweetie 16', { color: CSS.slate });
+    addText(this, LEFT, top + 62, '글꼴 주아(Jua)', { size: FONT_SIZE.small, color: THEME_CSS.sub });
   }
 }

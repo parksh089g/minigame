@@ -1,11 +1,11 @@
 import Phaser from 'phaser';
-import { COLOR, CSS, FONT_SIZE, GAME_WIDTH } from '../config';
-import { addText, drawPanel } from '../core/ui';
+import { FONT_SIZE, GAME_WIDTH, THEME, THEME_CSS } from '../config';
+import { addText } from '../core/ui';
 
 /** 미니게임 화면 위쪽에 놓이는 HUD의 높이. 이 아래부터 게임 영역이다. */
 export const HUD_HEIGHT = 56;
 
-const TIME_BAR = { x: 8, y: 40, width: GAME_WIDTH - 16, height: 8 } as const;
+const TIME_BAR = { x: 10, y: 41, width: GAME_WIDTH - 20, height: 8 } as const;
 const SIDE_Y = 14;
 
 /**
@@ -21,15 +21,16 @@ export class GameHud {
     private readonly scene: Phaser.Scene,
     depth: number,
   ) {
-    this.scoreText = addText(scene, GAME_WIDTH / 2, 6, '0', {
+    this.scoreText = addText(scene, GAME_WIDTH / 2, 5, '0', {
       size: FONT_SIZE.large,
-      bold: true,
+      color: THEME_CSS.inkDeep,
       originX: 0.5,
-      shadow: CSS.navy,
+      stroke: THEME_CSS.white,
     }).setDepth(depth);
-    this.sideText = addText(scene, GAME_WIDTH - 8, SIDE_Y, '', {
-      color: CSS.yellow,
+    this.sideText = addText(scene, GAME_WIDTH - 10, SIDE_Y, '', {
+      color: THEME_CSS.accent,
       originX: 1,
+      stroke: THEME_CSS.white,
     }).setDepth(depth);
     this.timeBar = scene.add.graphics().setDepth(depth);
   }
@@ -55,16 +56,20 @@ export class GameHud {
   setTime(remaining: number, total: number): void {
     const { x, y, width, height } = TIME_BAR;
     const ratio = Phaser.Math.Clamp(remaining / total, 0, 1);
-    const color = remaining <= 5 ? COLOR.red : remaining <= 10 ? COLOR.yellow : COLOR.lime;
+    const color = remaining <= 5 ? THEME.coral : remaining <= 10 ? THEME.gold : THEME.mintDeep;
+    const radius = height / 2;
 
     this.timeBar.clear();
-    drawPanel(this.timeBar, x, y, width, height, {
-      fill: COLOR.ink,
-      border: COLOR.slate,
-      highlight: COLOR.ink,
-    });
-    this.timeBar.fillStyle(color, 1);
-    this.timeBar.fillRect(x + 2, y + 2, Math.round((width - 4) * ratio), height - 4);
+    this.timeBar.fillStyle(THEME.shadow, 1);
+    this.timeBar.fillRoundedRect(x, y + 2, width, height, radius);
+    this.timeBar.fillStyle(THEME.card, 1);
+    this.timeBar.fillRoundedRect(x, y, width, height, radius);
+    // 거의 다 닳아도 둥근 끝이 찌그러지지 않게 막대의 가장 짧은 길이를 높이만큼 둔다.
+    const filled = Math.max(height - 2, (width - 2) * ratio);
+    if (ratio > 0) {
+      this.timeBar.fillStyle(color, 1);
+      this.timeBar.fillRoundedRect(x + 1, y + 1, filled, height - 2, radius - 1);
+    }
   }
 }
 
@@ -79,11 +84,11 @@ export function showBanner(
 ): void {
   const banner = addText(scene, GAME_WIDTH / 2, Math.round(centerY), label, {
     size: FONT_SIZE.huge,
-    bold: true,
     color,
     originX: 0.5,
     originY: 0.5,
-    shadow: CSS.navy,
+    stroke: THEME_CSS.white,
+    shadow: THEME_CSS.shadow,
   }).setDepth(depth);
   scene.tweens.add({
     targets: banner,
@@ -109,7 +114,7 @@ export function floatText(
     color,
     originX: 0.5,
     originY: 1,
-    shadow: CSS.ink,
+    stroke: THEME_CSS.white,
   }).setDepth(depth);
   scene.tweens.add({
     targets: text,

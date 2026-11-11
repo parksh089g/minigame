@@ -229,7 +229,7 @@ describe('꾸미기 사기와 끼우기', () => {
     const result = buyCosmetic(save, 'backdrop-forest', NOW + 10);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.item.name).toBe('숲속');
+    expect(result.item.name).toBe('민트 숲');
     expect(result.save.coins).toBe(80);
     expect(result.save.cosmetics.owned).toEqual(['backdrop-forest']);
     expect(result.save.cosmetics.equipped.backdrop).toBe('backdrop-forest');

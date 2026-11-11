@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
-import { APP_NAME, APP_VERSION, COLOR, CSS, FONT_SIZE, GAME_WIDTH, SCENE } from '../config';
+import { mascotTexture } from '../art/cosmetics';
+import { MASCOT_SIZE } from '../art/vector';
+import { APP_NAME, APP_VERSION, FONT_SIZE, GAME_WIDTH, SCENE, THEME, THEME_CSS } from '../config';
 import { claimable, statsOf } from '../core/achievements';
 import { activeStreak, dateKeyOf, isCleared, streakBonus } from '../core/daily';
 import { vibrate } from '../core/haptics';
@@ -21,7 +23,6 @@ import {
   drawPanel,
   fadeIn,
   fadeToScene,
-  fillChamfer,
   onSwipe,
   Pager,
   PAGER_HEIGHT,
@@ -45,15 +46,20 @@ const FOOTER_HEIGHT = 26;
 let lastPage = 0;
 
 const OFFLINE_LABEL: Record<OfflineStatus, { text: string; color: number }> = {
-  ready: { text: '오프라인 준비 완료', color: COLOR.lime },
-  preparing: { text: '오프라인 준비 중', color: COLOR.yellow },
-  unsupported: { text: '온라인 전용', color: COLOR.slate },
+  ready: { text: '오프라인 준비 완료', color: THEME.mintDeep },
+  preparing: { text: '오프라인 준비 중', color: THEME.gold },
+  unsupported: { text: '온라인 전용', color: THEME.faint },
 };
+
+/** 게임 카드의 아이콘 뒤에 까는 색. 게임 순서대로 돌아가며 쓴다. */
+const ICON_TILES = [THEME.butterSoft, THEME.lilacSoft, THEME.mintSoft, THEME.skySoft, THEME.pinkSoft] as const;
+/** 카드에 놓는 게임 아이콘의 크기. 픽셀로 그린 작은 아이콘도 이 크기로 맞춘다. */
+const ICON_SIZE = 32;
 
 /** 게임을 고르는 첫 화면. */
 export class HubScene extends Phaser.Scene {
   private backdrop!: Phaser.GameObjects.TileSprite;
-  private offlineDot!: Phaser.GameObjects.Rectangle;
+  private offlineDot!: Phaser.GameObjects.Arc;
   private offlineText!: Phaser.GameObjects.Text;
   /** 화면을 그린 날짜. 켜 둔 채 자정이 지나면 오늘의 도전을 새로 그린다. */
   private shownDate = '';
@@ -89,8 +95,8 @@ export class HubScene extends Phaser.Scene {
   }
 
   override update(time: number): void {
-    // 배경 점무늬가 천천히 흐른다. 정수 픽셀 단위로만 움직여 픽셀이 흐려지지 않게 한다.
-    const step = Math.floor(time / 160);
+    // 배경 무늬가 천천히 흐른다.
+    const step = time / 160;
     this.backdrop.setTilePosition(step, step);
 
     // 카드를 누른 손가락이 떨어지는 도중에 그 카드를 지우지 않도록, 다시 그리는 일은 다음 프레임으로 미룬다.
@@ -113,7 +119,7 @@ export class HubScene extends Phaser.Scene {
       onTap: () => fadeToScene(this, SCENE.settings),
     });
 
-    // 설정 옆: 업적. 받을 보상이 있으면 노랗게 바뀌고 빨간 점이 붙는다.
+    // 설정 옆: 업적. 받을 보상이 있으면 노랗게 바뀌고 산호색 점이 붙는다.
     const waiting = claimable(store.data.achievements, statsOf(store.data)).length;
     new PixelButton(this, {
       x: 40,
@@ -127,8 +133,10 @@ export class HubScene extends Phaser.Scene {
     });
     if (waiting > 0) {
       const dot = this.add.graphics();
-      fillChamfer(dot, 75, 5, 7, 7, COLOR.ink);
-      fillChamfer(dot, 76, 6, 5, 5, COLOR.red);
+      dot.fillStyle(THEME.white, 1);
+      dot.fillCircle(78, 9, 5);
+      dot.fillStyle(THEME.coral, 1);
+      dot.fillCircle(78, 9, 3.5);
     }
 
     // 오른쪽 위: 가진 코인과, 그 코인을 쓰는 꾸미기 상점
@@ -145,12 +153,28 @@ export class HubScene extends Phaser.Scene {
     });
     new CoinCounter(this, GAME_WIDTH - 8 - shopWidth - 6, 11, store.data.coins);
 
-    addText(this, GAME_WIDTH / 2, 38, APP_NAME, {
+    // 제목 옆에는 고른 캐릭터가 서서 까딱거린다.
+    const mascotWidth = 30;
+    const title = addText(this, GAME_WIDTH / 2 + (mascotWidth + 4) / 2, 40, APP_NAME, {
       size: FONT_SIZE.large,
-      bold: true,
-      color: CSS.yellow,
-      shadow: CSS.orange,
+      color: THEME_CSS.inkDeep,
       originX: 0.5,
+    });
+    const mascot = this.add
+      .image(
+        Math.round(title.x - title.width / 2) - 4,
+        69,
+        mascotTexture(store.data.cosmetics.equipped.runner, 'idle'),
+      )
+      .setOrigin(1, 1)
+      .setDisplaySize(mascotWidth, (mascotWidth * MASCOT_SIZE.height) / MASCOT_SIZE.width);
+    this.tweens.add({
+      targets: mascot,
+      scaleY: mascot.scaleY * 0.93,
+      duration: 700,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.InOut',
     });
   }
 
@@ -166,42 +190,48 @@ export class HubScene extends Phaser.Scene {
     const streak = activeStreak(daily, challenge.dateKey);
     const x = MARGIN;
     const y = DAILY_TOP;
-    const right = x + CARD_WIDTH - 8;
+    const right = x + CARD_WIDTH - 10;
 
     const frame = this.add.graphics();
     const drawFrame = (pressed: boolean): void => {
       frame.clear();
       drawPanel(frame, x, y, CARD_WIDTH, DAILY_HEIGHT, {
-        fill: cleared ? COLOR.ink : pressed ? COLOR.blue : COLOR.navy,
-        border: pressed ? COLOR.sky : cleared ? COLOR.navy : COLOR.ink,
-        highlight: cleared ? COLOR.ink : pressed ? COLOR.blue : COLOR.blue,
+        fill: cleared ? THEME.dim : pressed ? THEME.butterSoft : THEME.butter,
+        shadow: cleared ? THEME.shadow : THEME.butterDeep,
       });
+      // 별이 놓이는 동그란 자리
+      frame.fillStyle(THEME.white, 1);
+      frame.fillCircle(x + 20, y + DAILY_HEIGHT / 2, 13);
     };
     drawFrame(false);
 
-    this.add
-      .image(x + 18, y + DAILY_HEIGHT / 2, 'icon-star')
-      .setScale(2)
-      .setAlpha(cleared ? 0.45 : 1);
-    const title = addText(this, x + 34, y + 6, '오늘의 도전', {
-      bold: true,
-      color: cleared ? CSS.silver : CSS.yellow,
+    this.add.image(x + 20, y + DAILY_HEIGHT / 2, 'icon-star').setAlpha(cleared ? 0.5 : 1);
+    const title = addText(this, x + 40, y + 5, '오늘의 도전', {
+      color: cleared ? THEME_CSS.sub : THEME_CSS.inkDeep,
     });
     if (streak > 0) {
-      addText(this, Math.round(title.x + title.width) + 6, y + 6, `연속 ${streak}일`, {
-        color: CSS.orange,
+      addText(this, Math.round(title.x + title.width) + 6, y + 7, `연속 ${streak}일`, {
+        size: FONT_SIZE.small,
+        color: THEME_CSS.accent,
       });
     }
 
     if (cleared) {
-      addText(this, right, y + 6, '달성!', { bold: true, color: CSS.lime, originX: 1 });
-      addText(this, x + 34, y + 22, '내일 새 도전이 열려요', { color: CSS.silver });
+      addText(this, right, y + 5, '달성!', { color: THEME_CSS.good, originX: 1 });
+      addText(this, x + 40, y + 22, '내일 새 도전이 열려요', {
+        size: FONT_SIZE.small,
+        color: THEME_CSS.sub,
+      });
     } else {
       // 오늘 달성하면 받을 코인. 연속 보너스까지 더해서 보여 준다.
       const reward = challenge.reward + streakBonus(streak + 1);
-      const amount = addText(this, right, y + 6, `+${reward}`, { color: CSS.yellow, originX: 1 });
-      this.add.image(Math.round(right - amount.width - 11), y + 8, 'coin').setOrigin(0, 0);
-      addText(this, x + 34, y + 22, `${game.title} ${challenge.target}점 이상`, { color: CSS.white });
+      const amount = addText(this, right, y + 5, `+${reward}`, { originX: 1 });
+      this.add
+        .image(Math.round(right - amount.width - 3), y + 13, 'coin')
+        .setOrigin(1, 0.5);
+      addText(this, x + 40, y + 22, `${game.title} ${challenge.target}점 이상`, {
+        size: FONT_SIZE.small,
+      });
     }
 
     addTapZone(this, x, y, CARD_WIDTH, DAILY_HEIGHT, drawFrame, () => {
@@ -267,38 +297,55 @@ export class HubScene extends Phaser.Scene {
       this.tweens.add({ targets: card, x, alpha: 1, duration: 130, ease: 'Quad.Out' });
     }
 
+    const tile = ICON_TILES[Math.max(0, GAMES.indexOf(game)) % ICON_TILES.length];
+    const goX = CARD_WIDTH - 22;
+    const goY = CARD_HEIGHT / 2;
     const frame = this.add.graphics();
     const drawFrame = (pressed: boolean): void => {
       frame.clear();
       drawPanel(frame, 0, 0, CARD_WIDTH, CARD_HEIGHT, {
-        fill: pressed ? COLOR.navy : COLOR.charcoal,
-        border: pressed ? COLOR.sky : COLOR.ink,
-        highlight: pressed ? COLOR.navy : COLOR.slate,
+        fill: pressed ? THEME.dim : THEME.card,
+        radius: 14,
       });
-      drawPanel(frame, 6, 8, 40, 40, { fill: COLOR.ink, border: COLOR.navy, highlight: COLOR.ink });
+      frame.fillStyle(playable ? tile : THEME.dim, 1);
+      frame.fillRoundedRect(8, 8, 40, 40, 11);
+      if (playable) {
+        // 오른쪽의 동그란 시작 버튼
+        frame.fillStyle(THEME.pinkDeep, 1);
+        frame.fillCircle(goX, goY + 2, 12);
+        frame.fillStyle(THEME.pink, 1);
+        frame.fillCircle(goX, goY, 12);
+      }
     };
     drawFrame(false);
 
-    const icon = this.add.image(26, 28, game.icon).setScale(2);
-    const title = addText(this, 54, 5, game.title, {
-      bold: true,
-      color: playable ? CSS.white : CSS.silver,
+    const icon = this.add.image(28, 28, game.icon).setDisplaySize(ICON_SIZE, ICON_SIZE);
+    const title = addText(this, 56, 6, game.title, {
+      color: playable ? THEME_CSS.inkDeep : THEME_CSS.sub,
     });
-    const tagline = addText(this, 54, 20, game.tagline, { color: CSS.silver });
+    const tagline = addText(this, 56, 23, game.tagline, {
+      size: FONT_SIZE.small,
+      color: THEME_CSS.sub,
+    });
     card.add([frame, icon, title, tagline]);
 
     if (playable) {
       const best =
         record.plays > 0
-          ? addText(this, 54, 35, `최고 기록 ${record.best}`, { color: CSS.yellow })
-          : addText(this, 54, 35, '첫 도전을 기다려요', { color: CSS.slate });
-      const arrow = this.add.image(CARD_WIDTH - 16, CARD_HEIGHT / 2, 'icon-play').setTint(COLOR.lime);
+          ? addText(this, 56, 37, `최고 기록 ${record.best}`, {
+              size: FONT_SIZE.small,
+              color: THEME_CSS.accent,
+            })
+          : addText(this, 56, 37, '첫 도전을 기다려요', {
+              size: FONT_SIZE.small,
+              color: THEME_CSS.faint,
+            });
+      const arrow = this.add.image(goX + 1, goY, 'icon-play');
       card.add([best, arrow]);
     } else {
       icon.setAlpha(0.35);
-      tagline.setColor(CSS.slate);
-      const soon = addText(this, 66, 35, '준비 중', { color: CSS.slate });
-      const lock = this.add.image(54, 38, 'icon-lock').setOrigin(0, 0).setTint(COLOR.slate);
+      const lock = this.add.image(56, 43, 'icon-lock').setOrigin(0, 0.5).setDisplaySize(10, 10).setAlpha(0.6);
+      const soon = addText(this, 69, 37, '준비 중', { size: FONT_SIZE.small, color: THEME_CSS.faint });
       card.add([soon, lock]);
     }
 
@@ -332,7 +379,8 @@ export class HubScene extends Phaser.Scene {
         : '인터넷이 없어도 언제든 플레이할 수 있어요.';
 
     const text = addText(this, MARGIN + 10, 0, message, {
-      color: CSS.silver,
+      size: FONT_SIZE.small,
+      color: THEME_CSS.sub,
       wrapWidth: CARD_WIDTH - 20,
     });
     const panelHeight = Math.ceil(text.height) + 14;
@@ -345,26 +393,26 @@ export class HubScene extends Phaser.Scene {
       return;
     }
     const panel = this.add.graphics();
-    drawPanel(panel, MARGIN, top, CARD_WIDTH, panelHeight, {
-      fill: COLOR.ink,
-      border: COLOR.navy,
-      highlight: COLOR.ink,
-    });
+    drawPanel(panel, MARGIN, top, CARD_WIDTH, panelHeight, { fill: THEME.dim, shadow: null });
     text.setY(top + 7).setDepth(1);
   }
 
   private addFooter(height: number): void {
     const y = height - 18;
-    addText(this, 8, y, `v${APP_VERSION}`, { color: CSS.slate });
-    this.offlineText = addText(this, GAME_WIDTH - 8, y, '', { originX: 1 });
-    this.offlineDot = this.add.rectangle(0, y + 6, 4, 4, COLOR.slate).setOrigin(0, 0);
+    addText(this, 10, y, `v${APP_VERSION}`, { size: FONT_SIZE.small, color: THEME_CSS.sub });
+    this.offlineText = addText(this, GAME_WIDTH - 10, y, '', {
+      size: FONT_SIZE.small,
+      color: THEME_CSS.sub,
+      originX: 1,
+    });
+    this.offlineDot = this.add.circle(0, y + 7, 2.5, THEME.faint);
     this.showOfflineStatus(getOfflineStatus());
   }
 
   private showOfflineStatus(status: OfflineStatus): void {
     const label = OFFLINE_LABEL[status];
-    this.offlineText.setText(label.text).setColor(CSS.silver);
+    this.offlineText.setText(label.text);
     this.offlineDot.setFillStyle(label.color);
-    this.offlineDot.setX(Math.round(GAME_WIDTH - 8 - this.offlineText.width - 8));
+    this.offlineDot.setX(Math.round(GAME_WIDTH - 10 - this.offlineText.width - 6));
   }
 }

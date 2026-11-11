@@ -1,108 +1,96 @@
 /**
  * 꾸미기의 실제 색과 무늬. 무엇을 얼마에 파는지는 core/shop.ts에 있고, 여기서는 id마다 생김새만 정한다.
- * 숫자는 모두 config.ts의 PALETTE 색 번호다.
+ * 그림은 art/vector.ts가 이 값을 보고 그린다. 색은 CSS 색 문자열이다.
  */
+
+/** 배경 위에 드문드문 놓는 무늬 */
+export type BackdropShape = 'dot' | 'leaf' | 'cloud' | 'star';
 
 /** 배경 무늬. 타일 하나를 그려서 화면 가득 이어 붙인다. */
 export interface BackdropLook {
-  /** 타일 한 변의 길이(px) */
+  /** 타일 한 변의 길이(논리 픽셀) */
   size: number;
-  base: number;
-  /** 타일 위에 찍는 점과 선: [x, y, 폭, 높이, 색] */
-  marks: ReadonlyArray<readonly [number, number, number, number, number]>;
+  base: string;
+  /** 타일 위에 놓는 무늬: [모양, 중심 x, 중심 y, 크기, 색]. 타일 밖으로 나가면 이음매가 보인다. */
+  marks: ReadonlyArray<readonly [BackdropShape, number, number, number, string]>;
 }
 
 /**
- * 글자가 배경 위에 바로 놓이는 화면이 있어서, 바탕은 언제나 가장 어두운 색으로 두고
- * 무늬만 드문드문 바꾼다.
+ * 글자가 배경 위에 바로 놓이는 화면이 있어서, 바탕은 언제나 아주 밝은 색으로 두고
+ * 무늬도 바탕과 비슷한 밝기로만 그린다.
  */
 export const BACKDROP_LOOKS: Record<string, BackdropLook> = {
+  // 기본 배경. 이름은 예전(밤하늘) 그대로지만 지금은 복숭아빛 크림이다.
   'backdrop-night': {
-    size: 16,
-    base: 0,
+    size: 120,
+    base: '#fff4ec',
     marks: [
-      [0, 0, 1, 1, 8],
-      [8, 8, 1, 1, 8],
+      ['dot', 26, 28, 20, '#ffe9ee'],
+      ['dot', 88, 64, 16, '#eaf7f1'],
+      ['dot', 36, 96, 12, '#fff0d2'],
+      ['dot', 98, 18, 5, '#ffe9ee'],
+      ['dot', 66, 108, 4, '#eaf7f1'],
     ],
   },
   // 바람에 날리는 잎
   'backdrop-forest': {
-    size: 32,
-    base: 0,
+    size: 120,
+    base: '#f1faf4',
     marks: [
-      [5, 4, 2, 1, 7],
-      [4, 5, 2, 1, 7],
-      [6, 4, 1, 1, 6],
-      [21, 12, 2, 1, 7],
-      [20, 13, 2, 1, 7],
-      [12, 21, 2, 1, 7],
-      [11, 22, 2, 1, 7],
-      [13, 21, 1, 1, 6],
-      [28, 27, 2, 1, 7],
-      [27, 28, 2, 1, 7],
-      [14, 7, 1, 1, 7],
-      [29, 18, 1, 1, 7],
-      [2, 16, 1, 1, 7],
-      [19, 29, 1, 1, 7],
+      ['leaf', 24, 26, 12, '#d6f0e2'],
+      ['leaf', 84, 50, 9, '#dff5ea'],
+      ['leaf', 44, 88, 11, '#d6f0e2'],
+      ['leaf', 100, 100, 7, '#dff5ea'],
+      ['dot', 68, 18, 3.5, '#d6f0e2'],
+      ['dot', 14, 66, 3, '#dff5ea'],
     ],
   },
-  // 길게 누운 구름과 불씨
+  // 길게 누운 구름
   'backdrop-sunset': {
-    size: 32,
-    base: 0,
+    size: 120,
+    base: '#fff0e6',
     marks: [
-      [2, 5, 6, 1, 1],
-      [4, 6, 3, 1, 1],
-      [18, 13, 5, 1, 1],
-      [19, 12, 2, 1, 1],
-      [7, 22, 7, 1, 1],
-      [10, 23, 3, 1, 1],
-      [24, 28, 5, 1, 1],
-      [23, 4, 1, 1, 3],
-      [4, 15, 1, 1, 2],
-      [28, 20, 1, 1, 3],
-      [14, 29, 1, 1, 2],
+      ['cloud', 34, 32, 22, '#ffe2d2'],
+      ['cloud', 88, 80, 18, '#ffe6ea'],
+      ['dot', 96, 26, 4, '#ffe6ea'],
+      ['dot', 22, 92, 5, '#ffe2d2'],
     ],
   },
   // 크고 작은 별
   'backdrop-galaxy': {
-    size: 32,
-    base: 0,
+    size: 120,
+    base: '#f4f0ff',
     marks: [
-      [0, 0, 1, 1, 8],
-      [16, 16, 1, 1, 8],
-      [8, 24, 1, 1, 8],
-      [24, 8, 1, 1, 8],
-      [13, 5, 1, 1, 8],
-      [29, 25, 1, 1, 8],
-      [20, 2, 1, 1, 1],
-      [3, 18, 1, 1, 1],
-      [26, 17, 1, 1, 1],
-      [6, 11, 1, 3, 9],
-      [5, 12, 3, 1, 9],
-      [6, 12, 1, 1, 12],
-      [22, 26, 1, 1, 4],
-      [11, 30, 1, 1, 11],
+      ['star', 26, 28, 9, '#e4dcff'],
+      ['star', 88, 58, 12, '#e9e3ff'],
+      ['star', 40, 96, 7, '#fff0c9'],
+      ['star', 102, 104, 5, '#e4dcff'],
+      ['dot', 66, 16, 2.5, '#fff0c9'],
+      ['dot', 12, 66, 2.5, '#e4dcff'],
+      ['dot', 70, 100, 2, '#e9e3ff'],
     ],
   },
 };
 
-/** 러너 스프라이트의 몸 색 세 가지(밝은 곳, 그늘, 발)를 무엇으로 바꿀지 */
+/** 달리는 친구의 생김새. 그림은 art/vector.ts의 CHARACTERS에 있다. */
+export type CharacterKind = 'sprout' | 'drop' | 'chick' | 'ghost' | 'duck' | 'dog';
+
 export interface RunnerLook {
-  light: number;
-  shade: number;
-  dark: number;
+  kind: CharacterKind;
+  /** 몸의 대표색. 장애물과 같은 산호색 계열은 쓰지 않는다. */
+  body: string;
 }
 
-/** 원본 스프라이트(sprites.ts의 runner-*)에서 몸을 그리는 데 쓴 색 */
-export const RUNNER_SOURCE: RunnerLook = { light: 5, shade: 6, dark: 7 };
+/** 점프 러너의 장애물은 모두 이 색 계열이다. */
+export const OBSTACLE_COLORS = ['#ff8f8f', '#ffa3a0', '#e06d75'] as const;
 
-/** 장애물이 모두 붉은색이라, 캐릭터에는 붉은 계열을 쓰지 않는다. */
 export const RUNNER_LOOKS: Record<string, RunnerLook> = {
-  'runner-sprout': RUNNER_SOURCE,
-  'runner-drop': { light: 11, shade: 10, dark: 9 },
-  'runner-chick': { light: 4, shade: 3, dark: 3 },
-  'runner-ghost': { light: 12, shade: 13, dark: 14 },
+  'runner-sprout': { kind: 'sprout', body: '#9be3c9' },
+  'runner-drop': { kind: 'drop', body: '#9dd6ff' },
+  'runner-duck': { kind: 'duck', body: '#fffdf6' },
+  'runner-chick': { kind: 'chick', body: '#ffe08a' },
+  'runner-dog': { kind: 'dog', body: '#f6cfa3' },
+  'runner-ghost': { kind: 'ghost', body: '#ffffff' },
 };
 
 export const RUNNER_FRAMES = ['run1', 'run2', 'jump', 'hit'] as const;
@@ -113,78 +101,92 @@ export function runnerTexture(id: string, frame: RunnerFrame): string {
   return `${id}-${frame}`;
 }
 
+/** 메뉴에 세워 두는 큰 캐릭터의 텍스처 이름. idle은 서 있는 모습, cheer는 기뻐하는 모습이다. */
+export function mascotTexture(id: string, pose: 'idle' | 'cheer'): string {
+  return `${id}-big-${pose}`;
+}
+
 export type CardMotif = 'diamond' | 'dots' | 'checks' | 'stripes';
 
 export interface CardBackLook {
-  border: number;
-  fill: number;
-  mark: number;
+  /** 카드 면의 색 */
+  face: string;
+  /** 카드 아래에 보이는 두께의 색 */
+  lip: string;
+  /** 무늬의 색 */
+  mark: string;
   motif: CardMotif;
 }
 
 export const CARD_BACK_LOOKS: Record<string, CardBackLook> = {
-  'cardback-blue': { border: 9, fill: 8, mark: 9, motif: 'diamond' },
-  'cardback-green': { border: 6, fill: 7, mark: 6, motif: 'dots' },
-  'cardback-red': { border: 2, fill: 1, mark: 2, motif: 'checks' },
-  'cardback-gold': { border: 4, fill: 3, mark: 4, motif: 'stripes' },
+  'cardback-blue': { face: '#9dd6ff', lip: '#7dbef2', mark: '#bfe4ff', motif: 'diamond' },
+  'cardback-green': { face: '#9be3c9', lip: '#7fd3ae', mark: '#bff0dd', motif: 'dots' },
+  'cardback-red': { face: '#ff9fb5', lip: '#e97f99', mark: '#ffbccb', motif: 'checks' },
+  'cardback-gold': { face: '#ffd772', lip: '#f2b93b', mark: '#ffe9a8', motif: 'stripes' },
 };
 
-/** 상점에서 보여 주는 작은 카드 뒷면의 텍스처 이름 */
-export function cardBackPreviewTexture(id: string): string {
-  return `${id}-mini`;
+/** 상점에서 보여 주는 배경 조각의 텍스처 이름 */
+export function backdropPreviewTexture(id: string): string {
+  return `${id}-preview`;
 }
 
 export interface OrbLook {
-  /** 바깥에서 안쪽 순서의 [반지름, 색] */
-  rings: ReadonlyArray<readonly [number, number]>;
+  base: string;
+  /** 아래쪽에 살짝 보이는 그늘 */
+  shade: string;
+  /** 왼쪽 위의 반짝임 */
+  light: string;
+  /** 덧붙는 장식. berry는 딸기 꼭지와 씨, sparkle은 작은 별 */
+  motif?: 'berry' | 'sparkle';
+  /** 표정. 없으면 웃는 얼굴 */
+  mood?: 'smile' | 'sleepy' | 'happy';
   /** 사라지기까지 남은 시간을 알려 주는 고리의 색 */
   ring: number;
   /** 터질 때 튀는 조각의 색 */
   sparks: readonly number[];
 }
 
+/** 보너스 구슬. 상점에서 팔지 않고 언제나 이 모습이다. */
+export const GOLD_ORB: OrbLook = {
+  base: '#ffcf5c',
+  shade: '#f2b93b',
+  light: '#fff0bd',
+  motif: 'sparkle',
+  mood: 'happy',
+  ring: 0xf2b93b,
+  sparks: [0xffcf5c, 0xffe9a8, 0xffffff],
+};
+
 /** 금색 구슬(보너스)과 헷갈리지 않도록 노란 계열은 쓰지 않는다. */
 export const ORB_LOOKS: Record<string, OrbLook> = {
   'orb-blue': {
-    rings: [
-      [14, 0],
-      [13, 9],
-      [10.5, 10],
-      [7, 11],
-      [3.5, 12],
-    ],
-    ring: 10,
-    sparks: [11, 10, 12],
+    base: '#8ccbff',
+    shade: '#6fb5ee',
+    light: '#c9e8ff',
+    ring: 0x7dbef2,
+    sparks: [0x8ccbff, 0xc9e8ff, 0xffffff],
   },
   'orb-green': {
-    rings: [
-      [14, 0],
-      [13, 7],
-      [10.5, 6],
-      [7, 5],
-      [3.5, 12],
-    ],
-    ring: 6,
-    sparks: [5, 6, 12],
+    base: '#9be3c9',
+    shade: '#74cba6',
+    light: '#c6f2e2',
+    ring: 0x7fd3ae,
+    sparks: [0x9be3c9, 0xc6f2e2, 0xffffff],
   },
   'orb-red': {
-    rings: [
-      [14, 0],
-      [13, 1],
-      [10.5, 2],
-      [4.5, 12],
-    ],
-    ring: 2,
-    sparks: [2, 1, 12],
+    base: '#ff9fb5',
+    shade: '#e97f99',
+    light: '#ffd0db',
+    motif: 'berry',
+    ring: 0xe97f99,
+    sparks: [0xff9fb5, 0xffd0db, 0xffffff],
   },
   'orb-moon': {
-    rings: [
-      [14, 0],
-      [13, 14],
-      [10.5, 13],
-      [6, 12],
-    ],
-    ring: 13,
-    sparks: [13, 14, 12],
+    base: '#d9cfff',
+    shade: '#b9a9f5',
+    light: '#f1ecff',
+    mood: 'sleepy',
+    ring: 0xb9a9f5,
+    sparks: [0xd9cfff, 0xf1ecff, 0xffffff],
   },
 };

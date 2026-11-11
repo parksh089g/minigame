@@ -88,9 +88,67 @@ export const CSS = {
   charcoal: PALETTE[15],
 } as const;
 
-/** 갈무리11은 12px의 배수에서 픽셀이 또렷하게 나온다. */
-export const FONT_FAMILY = 'Galmuri11';
-export const FONT_SIZE = { normal: 12, large: 24, huge: 36 } as const;
+/**
+ * 말랑 파스텔 테마. 화면의 바탕, 카드, 글자, 버튼은 모두 여기 색을 쓴다.
+ * 위의 PALETTE는 픽셀 스프라이트 문자열이 가리키는 색이라 그대로 둔다.
+ */
+const THEME_HEX = {
+  /** 화면 바탕 */
+  bg: '#fff4ec',
+  /** 카드와 버튼의 흰 면 */
+  card: '#ffffff',
+  /** 카드 아래에 깔리는 도톰한 그림자 */
+  shadow: '#f3dcd3',
+  /** 눌렸거나 비활성인 면 */
+  dim: '#f6ece7',
+  /** 기본 글자 */
+  ink: '#5b4455',
+  /** 색 있는 버튼 위의 글자, 캐릭터의 눈 */
+  inkDeep: '#4a3545',
+  /** 덜 중요한 글자 */
+  sub: '#7a6170',
+  /** 비활성 글자와 빈 아이콘 */
+  faint: '#b5a3ab',
+  /** 점수, 코인처럼 눈에 띄어야 하는 글자 */
+  accent: '#b3541e',
+  /** 잘됐다는 글자 */
+  good: '#2f7d5f',
+  /** 안 됐다는 글자 */
+  bad: '#c2413b',
+  pink: '#ff9fb5',
+  pinkDeep: '#e97f99',
+  pinkSoft: '#ffe3ea',
+  mint: '#9be3c9',
+  mintDeep: '#7fd3ae',
+  mintSoft: '#e2f6ee',
+  butter: '#ffe9a8',
+  butterDeep: '#f2cf73',
+  butterSoft: '#fff0c9',
+  gold: '#ffcf5c',
+  lilac: '#c9bcf8',
+  lilacDeep: '#9684e0',
+  lilacSoft: '#e9e3ff',
+  sky: '#9dd6ff',
+  skyDeep: '#7dbef2',
+  skySoft: '#e3f2ff',
+  coral: '#ff8f8f',
+  coralDeep: '#e06d75',
+  white: '#ffffff',
+} as const;
+
+export type ThemeColor = keyof typeof THEME_HEX;
+
+/** 글자용 CSS 색 문자열 */
+export const THEME_CSS: Readonly<Record<ThemeColor, string>> = THEME_HEX;
+
+/** Phaser 도형·틴트용 숫자 색 */
+export const THEME = Object.fromEntries(
+  Object.entries(THEME_HEX).map(([name, value]) => [name, Number.parseInt(value.slice(1), 16)]),
+) as Readonly<Record<ThemeColor, number>>;
+
+/** 주아(Jua)는 굵기가 하나뿐인 둥근 글꼴이다. */
+export const FONT_FAMILY = 'Jua';
+export const FONT_SIZE = { small: 10, normal: 12, large: 24, huge: 36 } as const;
 
 export const SCENE = {
   boot: 'Boot',

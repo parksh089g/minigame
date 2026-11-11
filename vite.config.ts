@@ -35,12 +35,12 @@ export default defineConfig({
       manifest: {
         name: '포켓 아케이드',
         short_name: '포켓 아케이드',
-        description: '온·오프라인에서 즐기는 픽셀 아트 미니게임 모음',
+        description: '온·오프라인에서 즐기는 말랑한 미니게임 모음',
         lang: 'ko',
         display: 'standalone',
         orientation: 'portrait',
-        background_color: '#1a1c2c',
-        theme_color: '#1a1c2c',
+        background_color: '#fff4ec',
+        theme_color: '#fff4ec',
         categories: ['games'],
         icons: [
           { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png' },
