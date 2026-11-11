@@ -28,7 +28,7 @@ import {
   PAGER_HEIGHT,
   PixelButton,
 } from '../core/ui';
-import { GAMES, getGame, todaysChallenge, type MiniGameInfo } from '../games/registry';
+import { GAMES, getGame, HUB_GAMES, todaysChallenge, type MiniGameInfo } from '../games/registry';
 
 const MARGIN = 12;
 const CARD_WIDTH = GAME_WIDTH - MARGIN * 2;
@@ -281,7 +281,7 @@ export class HubScene extends Phaser.Scene {
     this.tweens.killTweensOf(this.cardObjects);
     for (const object of this.cardObjects) object.destroy();
     this.cardObjects = [];
-    pageSlice(GAMES, this.page, this.layout.perPage).forEach((game, index) => {
+    pageSlice(HUB_GAMES, this.page, this.layout.perPage).forEach((game, index) => {
       this.addCard(game, MARGIN, CARDS_TOP + index * CARD_STEP);
     });
   }

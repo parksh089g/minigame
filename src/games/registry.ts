@@ -19,6 +19,8 @@ export interface MiniGameInfo {
   coinsFor: (score: number) => number;
   /** 오늘의 도전에 쓰는 목표 점수. 쉬운 것부터 어려운 것 순서로 세 단계. */
   dailyTargets: readonly number[];
+  /** true면 허브 목록의 맨 앞에 놓는다. 대표로 내세울 게임에 쓴다. */
+  featured?: boolean;
 }
 
 export const GAMES: readonly MiniGameInfo[] = [
@@ -104,6 +106,14 @@ export const GAMES: readonly MiniGameInfo[] = [
     dailyTargets: [60, 100, 150],
   },
 ];
+
+/** 허브에 보여 주는 순서로 늘어놓는다: 대표 게임이 먼저 오고, 나머지는 적힌 순서 그대로다. */
+export function orderForHub<T extends { featured?: boolean }>(games: readonly T[]): T[] {
+  return [...games.filter((game) => game.featured), ...games.filter((game) => !game.featured)];
+}
+
+/** 허브의 게임 목록 */
+export const HUB_GAMES: readonly MiniGameInfo[] = orderForHub(GAMES);
 
 export function getGame(id: string): MiniGameInfo | undefined {
   return GAMES.find((game) => game.id === id);
