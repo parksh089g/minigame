@@ -4,6 +4,7 @@ import { COLOR, computeGameHeight, FONT_FAMILY, FONT_SIZE, GAME_WIDTH } from './
 import { initPwa, isStandalone } from './core/pwa';
 import { initAudioUnlock } from './core/sfx';
 import { store } from './core/store';
+import { JumpRunnerScene } from './games/jump-runner/JumpRunnerScene';
 import { LightningTapScene } from './games/lightning-tap/LightningTapScene';
 import { MemoryCardsScene } from './games/memory-cards/MemoryCardsScene';
 import { BootScene } from './scenes/BootScene';
@@ -60,6 +61,7 @@ async function boot(): Promise<void> {
       SettingsScene,
       LightningTapScene,
       MemoryCardsScene,
+      JumpRunnerScene,
       PauseScene,
       ResultScene,
     ],

@@ -120,6 +120,78 @@ function drawCardFront(width: number, height: number): HTMLCanvasElement {
   return canvas;
 }
 
+/** 점프 러너의 땅속. 옆으로 흘러가는 것이 보이도록 드문드문 돌을 박는다. */
+function drawRunnerSoil(): HTMLCanvasElement {
+  const size = 32;
+  const [canvas, context] = createCanvas(size, size);
+  context.fillStyle = PALETTE[15];
+  context.fillRect(0, 0, size, size);
+  context.fillStyle = PALETTE[14];
+  for (const [x, y, width] of [
+    [3, 5, 3],
+    [19, 9, 2],
+    [10, 17, 2],
+    [26, 22, 3],
+    [5, 27, 2],
+  ]) {
+    context.fillRect(x, y, width, 1);
+  }
+  context.fillStyle = PALETTE[0];
+  for (const [x, y] of [
+    [14, 4],
+    [28, 13],
+    [2, 15],
+    [20, 28],
+  ]) {
+    context.fillRect(x, y, 2, 1);
+  }
+  return canvas;
+}
+
+/** 점프 러너의 땅 윗면. 밝은 선에 틈을 두어 달리는 속도가 느껴지게 한다. */
+function drawRunnerEdge(): HTMLCanvasElement {
+  const [canvas, context] = createCanvas(32, 4);
+  context.fillStyle = PALETTE[13];
+  context.fillRect(0, 0, 32, 2);
+  context.fillStyle = PALETTE[14];
+  context.fillRect(0, 2, 32, 2);
+  context.fillRect(12, 0, 4, 2);
+  context.fillRect(27, 0, 2, 2);
+  return canvas;
+}
+
+/** 점프 러너의 먼 언덕. 양 끝이 이어지도록 한 주기만 그린다. */
+function drawRunnerHills(): HTMLCanvasElement {
+  const width = 160;
+  const height = 40;
+  const [canvas, context] = createCanvas(width, height);
+  context.fillStyle = PALETTE[8];
+  for (let x = 0; x < width; x += 2) {
+    const angle = (x / width) * Math.PI * 2;
+    const hill = 20 + 11 * Math.sin(angle) + 6 * Math.sin(angle * 3 + 1) + 2 * Math.sin(angle * 7);
+    // 2픽셀 계단으로 맞춰 픽셀 그림답게 한다.
+    const top = height - Math.round(hill / 2) * 2;
+    context.fillRect(x, top, 2, height - top);
+  }
+  return canvas;
+}
+
+/** 점프 러너의 초승달. 둥근 달에서 옆으로 비켜난 원을 파내어 만든다. */
+function drawRunnerMoon(): HTMLCanvasElement {
+  const size = 20;
+  const [canvas, context] = createCanvas(size, size);
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const inMoon = Math.hypot(x + 0.5 - 10, y + 0.5 - 10) <= 9.5;
+      const inShadow = Math.hypot(x + 0.5 - 14, y + 0.5 - 7.5) <= 8.5;
+      if (!inMoon || inShadow) continue;
+      context.fillStyle = PALETTE[4];
+      context.fillRect(x, y, 1, 1);
+    }
+  }
+  return canvas;
+}
+
 export const ORB_SIZE = 28;
 export const CARD_WIDTH = 48;
 export const CARD_HEIGHT = 56;
@@ -154,5 +226,9 @@ export function registerTextures(scene: Phaser.Scene): void {
   add(TEXTURE.spark, drawSpark());
   add(TEXTURE.cardBack, drawCardBack(CARD_WIDTH, CARD_HEIGHT));
   add(TEXTURE.cardFront, drawCardFront(CARD_WIDTH, CARD_HEIGHT));
+  add(TEXTURE.runnerSoil, drawRunnerSoil());
+  add(TEXTURE.runnerEdge, drawRunnerEdge());
+  add(TEXTURE.runnerHills, drawRunnerHills());
+  add(TEXTURE.runnerMoon, drawRunnerMoon());
   add(TEXTURE.backdrop, drawBackdrop());
 }

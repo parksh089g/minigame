@@ -40,8 +40,8 @@ export const GAMES: readonly MiniGameInfo[] = [
     title: '점프 러너',
     tagline: '한 번 탭으로 점프!',
     icon: 'icon-runner',
-    sceneKey: null,
-    coinsFor: () => 0,
+    sceneKey: SCENE.jumpRunner,
+    coinsFor: (score) => Math.floor(score / 20),
   },
 ];
 
