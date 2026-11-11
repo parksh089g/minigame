@@ -1,276 +1,37 @@
-/** 스프라이트 문자열과 간단한 도형으로 게임에서 쓸 텍스처를 만든다. */
-import type Phaser from 'phaser';
+/** 게임에서 쓸 텍스처를 만든다. 말랑 파스텔 그림은 vector.ts에, 픽셀 스프라이트는 sprites.ts에 있다. */
+import Phaser from 'phaser';
 import { PALETTE } from '../config';
-import {
-  BACKDROP_LOOKS,
-  CARD_BACK_LOOKS,
-  ORB_LOOKS,
-  RUNNER_FRAMES,
-  RUNNER_LOOKS,
-  RUNNER_SOURCE,
-  cardBackPreviewTexture,
-  runnerTexture,
-  type BackdropLook,
-  type CardBackLook,
-} from './cosmetics';
-import { SPRITES, TEXTURE, type SpriteRows } from './sprites';
+import { SPRITES, type SpriteRows } from './sprites';
+import { registerVectorTextures } from './vector';
 
-function createCanvas(width: number, height: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
+export { CARD_HEIGHT, CARD_WIDTH, ORB_SIZE } from './vector';
+
+/** 스프라이트 문자열 한 장을 1글자 = 1픽셀로 캔버스에 옮긴다. */
+function drawRows(rows: SpriteRows): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
+  canvas.width = rows[0].length;
+  canvas.height = rows.length;
   const context = canvas.getContext('2d');
   if (!context) throw new Error('2D 캔버스를 만들 수 없습니다.');
-  return [canvas, context];
-}
-
-/** recolor를 주면 그 색 번호들을 다른 번호로 바꿔서 그린다(같은 그림의 색만 다른 판). */
-function drawRows(rows: SpriteRows, recolor: ReadonlyMap<number, number> = new Map()): HTMLCanvasElement {
-  const [canvas, context] = createCanvas(rows[0].length, rows.length);
   rows.forEach((row, y) => {
     for (let x = 0; x < row.length; x += 1) {
       const index = Number.parseInt(row[x], 16);
       if (Number.isNaN(index)) continue;
-      context.fillStyle = PALETTE[recolor.get(index) ?? index];
+      context.fillStyle = PALETTE[index];
       context.fillRect(x, y, 1, 1);
     }
   });
   return canvas;
 }
 
-/**
- * 동심원 구슬을 그린다. 픽셀 중심까지의 거리로 색을 정해 계단 현상 없이 또렷한 원이 나온다.
- * rings는 바깥에서 안쪽 순서의 [반지름, 팔레트 번호].
- */
-function drawOrb(size: number, rings: ReadonlyArray<readonly [number, number]>): HTMLCanvasElement {
-  const [canvas, context] = createCanvas(size, size);
-  const center = size / 2;
-  for (let y = 0; y < size; y += 1) {
-    for (let x = 0; x < size; x += 1) {
-      const distance = Math.hypot(x + 0.5 - center, y + 0.5 - center);
-      let color = -1;
-      for (const [radius, index] of rings) {
-        if (distance <= radius) color = index;
-      }
-      if (color < 0) continue;
-      context.fillStyle = PALETTE[color];
-      context.fillRect(x, y, 1, 1);
-    }
-  }
-  // 왼쪽 위의 반짝임
-  const glint = Math.round(size * 0.3);
-  context.fillStyle = PALETTE[12];
-  context.fillRect(glint, glint - 1, 2, 1);
-  context.fillRect(glint - 1, glint, 1, 2);
-  return canvas;
-}
-
-function drawBackdrop(look: BackdropLook): HTMLCanvasElement {
-  const [canvas, context] = createCanvas(look.size, look.size);
-  context.fillStyle = PALETTE[look.base];
-  context.fillRect(0, 0, look.size, look.size);
-  for (const [x, y, width, height, color] of look.marks) {
-    context.fillStyle = PALETTE[color];
-    context.fillRect(x, y, width, height);
-  }
-  return canvas;
-}
-
-function drawSpark(): HTMLCanvasElement {
-  const [canvas, context] = createCanvas(2, 2);
-  context.fillStyle = PALETTE[12];
-  context.fillRect(0, 0, 2, 2);
-  return canvas;
-}
-
-/** 모서리 한 픽셀을 깎은 사각형을 칠한다. */
-function fillChamfer(
-  context: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  color: string,
-): void {
-  context.fillStyle = color;
-  context.fillRect(x + 1, y, width - 2, 1);
-  context.fillRect(x, y + 1, width, height - 2);
-  context.fillRect(x + 1, y + height - 1, width - 2, 1);
-}
-
-/** 카드 뒷면: 테두리 안쪽에 무늬를 채운다. 어느 카드든 똑같이 보여야 한다. */
-function drawCardBack(width: number, height: number, look: CardBackLook): HTMLCanvasElement {
-  const [canvas, context] = createCanvas(width, height);
-  fillChamfer(context, 0, 0, width, height, PALETTE[0]);
-  fillChamfer(context, 1, 1, width - 2, height - 2, PALETTE[look.border]);
-  context.fillStyle = PALETTE[look.fill];
-  context.fillRect(3, 3, width - 6, height - 6);
-
-  context.fillStyle = PALETTE[look.mark];
-  if (look.motif === 'stripes') {
-    // 안쪽을 비스듬히 가로지르는 줄무늬
-    for (let y = 3; y < height - 3; y += 1) {
-      for (let x = 3; x < width - 3; x += 1) {
-        if ((x + y) % 6 < 2) context.fillRect(x, y, 1, 1);
-      }
-    }
-  } else if (look.motif === 'checks') {
-    // 4px 바둑판. 가장자리에 한 칸 여백을 둔다.
-    for (let y = 5; y + 4 <= height - 5; y += 4) {
-      for (let x = 5; x + 4 <= width - 5; x += 4) {
-        if (((x - 5) / 4 + (y - 5) / 4) % 2 === 0) context.fillRect(x, y, 4, 4);
-      }
-    }
-  } else {
-    // 가운데에서부터 대칭이 되도록 6px 간격으로 작은 무늬를 놓는다.
-    const step = 6;
-    for (let y = 7; y <= height - 8; y += step) {
-      for (let x = 6; x <= width - 7; x += step) {
-        if (look.motif === 'diamond') {
-          context.fillRect(x, y - 1, 1, 3);
-          context.fillRect(x - 1, y, 3, 1);
-        } else {
-          context.fillRect(x - 1, y - 1, 2, 2);
-        }
-      }
-    }
-  }
-  // 아래쪽 두께
-  context.fillStyle = PALETTE[0];
-  context.globalAlpha = 0.35;
-  context.fillRect(1, height - 3, width - 2, 2);
-  context.globalAlpha = 1;
-  return canvas;
-}
-
-/** 카드 앞면: 그림이 잘 보이도록 밝은 바탕. */
-function drawCardFront(width: number, height: number): HTMLCanvasElement {
-  const [canvas, context] = createCanvas(width, height);
-  fillChamfer(context, 0, 0, width, height, PALETTE[0]);
-  fillChamfer(context, 1, 1, width - 2, height - 2, PALETTE[12]);
-  context.fillStyle = PALETTE[13];
-  context.fillRect(2, height - 3, width - 4, 2);
-  return canvas;
-}
-
-/** 점프 러너의 땅속. 옆으로 흘러가는 것이 보이도록 드문드문 돌을 박는다. */
-function drawRunnerSoil(): HTMLCanvasElement {
-  const size = 32;
-  const [canvas, context] = createCanvas(size, size);
-  context.fillStyle = PALETTE[15];
-  context.fillRect(0, 0, size, size);
-  context.fillStyle = PALETTE[14];
-  for (const [x, y, width] of [
-    [3, 5, 3],
-    [19, 9, 2],
-    [10, 17, 2],
-    [26, 22, 3],
-    [5, 27, 2],
-  ]) {
-    context.fillRect(x, y, width, 1);
-  }
-  context.fillStyle = PALETTE[0];
-  for (const [x, y] of [
-    [14, 4],
-    [28, 13],
-    [2, 15],
-    [20, 28],
-  ]) {
-    context.fillRect(x, y, 2, 1);
-  }
-  return canvas;
-}
-
-/** 점프 러너의 땅 윗면. 밝은 선에 틈을 두어 달리는 속도가 느껴지게 한다. */
-function drawRunnerEdge(): HTMLCanvasElement {
-  const [canvas, context] = createCanvas(32, 4);
-  context.fillStyle = PALETTE[13];
-  context.fillRect(0, 0, 32, 2);
-  context.fillStyle = PALETTE[14];
-  context.fillRect(0, 2, 32, 2);
-  context.fillRect(12, 0, 4, 2);
-  context.fillRect(27, 0, 2, 2);
-  return canvas;
-}
-
-/** 점프 러너의 먼 언덕. 양 끝이 이어지도록 한 주기만 그린다. */
-function drawRunnerHills(): HTMLCanvasElement {
-  const width = 160;
-  const height = 40;
-  const [canvas, context] = createCanvas(width, height);
-  context.fillStyle = PALETTE[8];
-  for (let x = 0; x < width; x += 2) {
-    const angle = (x / width) * Math.PI * 2;
-    const hill = 20 + 11 * Math.sin(angle) + 6 * Math.sin(angle * 3 + 1) + 2 * Math.sin(angle * 7);
-    // 2픽셀 계단으로 맞춰 픽셀 그림답게 한다.
-    const top = height - Math.round(hill / 2) * 2;
-    context.fillRect(x, top, 2, height - top);
-  }
-  return canvas;
-}
-
-/** 점프 러너의 초승달. 둥근 달에서 옆으로 비켜난 원을 파내어 만든다. */
-function drawRunnerMoon(): HTMLCanvasElement {
-  const size = 20;
-  const [canvas, context] = createCanvas(size, size);
-  for (let y = 0; y < size; y += 1) {
-    for (let x = 0; x < size; x += 1) {
-      const inMoon = Math.hypot(x + 0.5 - 10, y + 0.5 - 10) <= 9.5;
-      const inShadow = Math.hypot(x + 0.5 - 14, y + 0.5 - 7.5) <= 8.5;
-      if (!inMoon || inShadow) continue;
-      context.fillStyle = PALETTE[4];
-      context.fillRect(x, y, 1, 1);
-    }
-  }
-  return canvas;
-}
-
-export const ORB_SIZE = 28;
-export const CARD_WIDTH = 48;
-export const CARD_HEIGHT = 56;
-/** 상점에서 보여 주는 작은 카드 뒷면의 크기 */
-const CARD_PREVIEW_WIDTH = 28;
-const CARD_PREVIEW_HEIGHT = 34;
-
 /** 모든 텍스처를 한 번에 등록한다. 부트 씬에서 부른다. */
 export function registerTextures(scene: Phaser.Scene): void {
-  const add = (key: string, canvas: HTMLCanvasElement): void => {
-    if (!scene.textures.exists(key)) scene.textures.addCanvas(key, canvas);
-  };
+  // 말랑 파스텔 그림을 먼저 등록한다. 같은 이름의 픽셀 스프라이트는 아래에서 건너뛴다.
+  registerVectorTextures(scene);
 
-  for (const [key, rows] of Object.entries(SPRITES)) add(key, drawRows(rows));
-
-  // 꾸미기: 어떤 것을 쓰고 있든 바로 바꿀 수 있게 모두 만들어 둔다.
-  for (const [id, look] of Object.entries(BACKDROP_LOOKS)) add(id, drawBackdrop(look));
-  for (const [id, look] of Object.entries(RUNNER_LOOKS)) {
-    const recolor = new Map([
-      [RUNNER_SOURCE.light, look.light],
-      [RUNNER_SOURCE.shade, look.shade],
-      [RUNNER_SOURCE.dark, look.dark],
-    ]);
-    for (const frame of RUNNER_FRAMES) {
-      add(runnerTexture(id, frame), drawRows(SPRITES[`runner-${frame}`], recolor));
-    }
+  // 아직 새로 그리지 않은 픽셀 스프라이트. 확대해도 번지지 않게 한다.
+  for (const [key, rows] of Object.entries(SPRITES)) {
+    if (scene.textures.exists(key)) continue;
+    scene.textures.addCanvas(key, drawRows(rows))?.setFilter(Phaser.Textures.FilterMode.NEAREST);
   }
-  for (const [id, look] of Object.entries(CARD_BACK_LOOKS)) {
-    add(id, drawCardBack(CARD_WIDTH, CARD_HEIGHT, look));
-    add(cardBackPreviewTexture(id), drawCardBack(CARD_PREVIEW_WIDTH, CARD_PREVIEW_HEIGHT, look));
-  }
-  for (const [id, look] of Object.entries(ORB_LOOKS)) add(id, drawOrb(ORB_SIZE, look.rings));
-
-  add(
-    TEXTURE.orbGold,
-    drawOrb(ORB_SIZE, [
-      [14, 0],
-      [13, 3],
-      [10.5, 4],
-      [4.5, 12],
-    ]),
-  );
-  add(TEXTURE.spark, drawSpark());
-  add(TEXTURE.cardFront, drawCardFront(CARD_WIDTH, CARD_HEIGHT));
-  add(TEXTURE.runnerSoil, drawRunnerSoil());
-  add(TEXTURE.runnerEdge, drawRunnerEdge());
-  add(TEXTURE.runnerHills, drawRunnerHills());
-  add(TEXTURE.runnerMoon, drawRunnerMoon());
 }

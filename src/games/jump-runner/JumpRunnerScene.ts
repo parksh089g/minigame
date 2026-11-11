@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { runnerTexture, type RunnerFrame } from '../../art/cosmetics';
 import { TEXTURE, type SpriteKey } from '../../art/sprites';
-import { COLOR, CSS, GAME_WIDTH, SCENE } from '../../config';
+import { GAME_WIDTH, SCENE, THEME, THEME_CSS } from '../../config';
 import { vibrate } from '../../core/haptics';
 import { sfx } from '../../core/sfx';
 import { store } from '../../core/store';
@@ -42,8 +42,6 @@ interface Star {
   sprite: Phaser.GameObjects.Image;
 }
 
-/** 스프라이트는 모두 두 배로 키워 그린다. */
-const SPRITE_SCALE = 2;
 /** 캐릭터가 서 있는 가로 위치. 화면 왼쪽에 두어 앞을 넓게 본다. */
 const RUNNER_X = 52;
 /** 땅의 높이. 화면 세로 길이에 대한 비율. */
@@ -61,9 +59,9 @@ const STRIDE_PIXELS = 14;
 const BAT_FLAP_SECONDS = 0.14;
 /** 구름: 처음 가로 위치, HUD 아래로부터의 높이, 땅에 견준 흐르는 속도 */
 const CLOUDS: ReadonlyArray<readonly [x: number, top: number, drift: number]> = [
-  [40, 34, 0.06],
-  [170, 78, 0.1],
-  [280, 132, 0.08],
+  [40, 30, 0.06],
+  [170, 74, 0.1],
+  [280, 122, 0.08],
 ];
 /** 구름이 화면을 한 바퀴 도는 거리(px). 화면보다 넓어야 밖에서 돌아 들어온다. */
 const CLOUD_LOOP = GAME_WIDTH + 120;
@@ -72,9 +70,12 @@ const OBSTACLE_ART: Readonly<Record<ObstacleKind, { frames: readonly SpriteKey[]
   spike: { frames: ['ob-spike'], lift: 0 },
   pillar: { frames: ['ob-pillar'], lift: 0 },
   thorns: { frames: ['ob-thorns'], lift: 0 },
-  // 그림이 판정 상자보다 위아래로 2px씩 크다.
-  bat: { frames: ['ob-bat1', 'ob-bat2'], lift: -2 },
+  // 그림에서 몸통 아래로 날개 끝이 3px 더 내려온다.
+  bat: { frames: ['ob-bat1', 'ob-bat2'], lift: -3 },
 };
+
+/** 풀이 땅 위로 봉긋 올라오는 높이와 풀 띠의 두께. runner-edge 그림과 맞춘다. */
+const GRASS = { rise: 4, height: 12 } as const;
 
 const DEPTH = { hills: 1, ground: 2, star: 8, obstacle: 10, runner: 12, effect: 20, hud: 30, banner: 40 } as const;
 
@@ -128,12 +129,12 @@ export class JumpRunnerScene extends MiniGameScene {
     this.playArea = new Phaser.Geom.Rectangle(0, HUD_HEIGHT, GAME_WIDTH, this.groundY - HUD_HEIGHT);
 
     addBackdrop(this);
-    this.add.image(GAME_WIDTH - 46, HUD_HEIGHT + 44, TEXTURE.runnerMoon).setScale(SPRITE_SCALE);
+    this.add.image(GAME_WIDTH - 42, HUD_HEIGHT + 40, TEXTURE.runnerMoon);
     this.clouds = CLOUDS.map(([, top]) =>
-      this.add.image(0, HUD_HEIGHT + top, 'sky-cloud').setOrigin(0, 0).setScale(SPRITE_SCALE),
+      this.add.image(0, HUD_HEIGHT + top, 'sky-cloud').setOrigin(0, 0),
     );
     this.hills = this.add
-      .tileSprite(0, this.groundY, GAME_WIDTH, 40, TEXTURE.runnerHills)
+      .tileSprite(0, this.groundY, GAME_WIDTH, 48, TEXTURE.runnerHills)
       .setOrigin(0, 1)
       .setDepth(DEPTH.hills);
     this.soil = this.add
@@ -141,7 +142,7 @@ export class JumpRunnerScene extends MiniGameScene {
       .setOrigin(0, 0)
       .setDepth(DEPTH.ground);
     this.edge = this.add
-      .tileSprite(0, this.groundY, GAME_WIDTH, 4, TEXTURE.runnerEdge)
+      .tileSprite(0, this.groundY - GRASS.rise, GAME_WIDTH, GRASS.height, TEXTURE.runnerEdge)
       .setOrigin(0, 0)
       .setDepth(DEPTH.ground);
 
@@ -149,7 +150,6 @@ export class JumpRunnerScene extends MiniGameScene {
     this.runner = this.add
       .image(RUNNER_X, this.groundY, runnerTexture(this.skin, 'run1'))
       .setOrigin(0.5, 1)
-      .setScale(SPRITE_SCALE)
       .setDepth(DEPTH.runner);
 
     this.dust = this.add
@@ -158,7 +158,7 @@ export class JumpRunnerScene extends MiniGameScene {
         angle: { min: 180, max: 360 },
         lifespan: { min: 160, max: 300 },
         alpha: { start: 0.9, end: 0 },
-        tint: [COLOR.silver, COLOR.slate],
+        tint: [THEME.white, THEME.mintSoft],
         emitting: false,
       })
       .setDepth(DEPTH.effect);
@@ -167,7 +167,7 @@ export class JumpRunnerScene extends MiniGameScene {
         speed: { min: 40, max: 110 },
         lifespan: { min: 200, max: 380 },
         alpha: { start: 1, end: 0 },
-        tint: [COLOR.yellow, COLOR.orange, COLOR.white],
+        tint: [THEME.gold, THEME.butter, THEME.white],
         emitting: false,
       })
       .setDepth(DEPTH.effect);
@@ -184,7 +184,7 @@ export class JumpRunnerScene extends MiniGameScene {
     this.showHint();
     this.spawnAhead();
     this.draw();
-    showBanner(this, this.playArea.centerY, '출발!', CSS.lime, 600, DEPTH.banner);
+    showBanner(this, this.playArea.centerY, '출발!', THEME_CSS.good, 600, DEPTH.banner);
     sfx.go();
     this.playing = true;
   }
@@ -240,7 +240,8 @@ export class JumpRunnerScene extends MiniGameScene {
 
     this.input.on(Phaser.Input.Events.POINTER_DOWN, (pointer: Phaser.Input.Pointer) => {
       // 위쪽 HUD(일시정지 버튼)를 누른 것은 점프가 아니다.
-      if (pointer.y >= HUD_HEIGHT) press();
+      // 카메라가 화면을 확대해 그리므로 화면 좌표가 아니라 게임 좌표로 본다.
+      if (pointer.worldY >= HUD_HEIGHT) press();
     });
     this.input.on(Phaser.Input.Events.POINTER_UP, release);
     this.input.on(Phaser.Input.Events.POINTER_UP_OUTSIDE, release);
@@ -267,7 +268,7 @@ export class JumpRunnerScene extends MiniGameScene {
     if (!this.playing) return;
     // 돌아오자마자 부딪히지 않도록 잠깐 숨을 고를 시간을 준다.
     this.grace = RESUME_GRACE_SECONDS;
-    showBanner(this, this.playArea.centerY, '준비!', CSS.yellow, RESUME_GRACE_SECONDS * 1000, DEPTH.banner);
+    showBanner(this, this.playArea.centerY, '준비!', THEME_CSS.accent, RESUME_GRACE_SECONDS * 1000, DEPTH.banner);
   }
 
   private showHint(): void {
@@ -275,16 +276,16 @@ export class JumpRunnerScene extends MiniGameScene {
     const centerY = Math.round((this.groundY + height) / 2);
     const lines = [
       addText(this, GAME_WIDTH / 2, centerY - 8, '화면을 누르면 점프!', {
-        color: CSS.white,
+        color: THEME_CSS.ink,
         originX: 0.5,
         originY: 0.5,
-        shadow: CSS.ink,
+        stroke: THEME_CSS.white,
       }),
       addText(this, GAME_WIDTH / 2, centerY + 8, '길게 누르면 더 높이 뛰어요', {
-        color: CSS.silver,
+        color: THEME_CSS.sub,
         originX: 0.5,
         originY: 0.5,
-        shadow: CSS.ink,
+        stroke: THEME_CSS.white,
       }),
     ];
     for (const line of lines) line.setDepth(DEPTH.hud);
@@ -351,7 +352,7 @@ export class JumpRunnerScene extends MiniGameScene {
       const reached = this.nextMilestone;
       this.nextMilestone += MILESTONE_METERS;
       sfx.count();
-      floatText(this, RUNNER_X + 44, this.groundY - 96, `${reached}m!`, CSS.cyan, this.playArea, DEPTH.effect);
+      floatText(this, RUNNER_X + 44, this.groundY - 96, `${reached}m!`, THEME_CSS.good, this.playArea, DEPTH.effect);
     }
   }
 
@@ -369,7 +370,6 @@ export class JumpRunnerScene extends MiniGameScene {
       const sprite = this.add
         .image(0, this.groundY - box.bottom - art.lift, art.frames[0])
         .setOrigin(0.5, 1)
-        .setScale(SPRITE_SCALE)
         .setDepth(DEPTH.obstacle);
       this.obstacles.push({ kind: spawn.kind, x, sprite, passed: false });
 
@@ -377,8 +377,7 @@ export class JumpRunnerScene extends MiniGameScene {
       if (spawn.star && (spawn.star.along >= 0 || !isFirst)) {
         const starX = x + spawn.star.along;
         const starSprite = this.add
-          .image(0, this.groundY - STAR_HEIGHT, 'icon-star')
-          .setScale(SPRITE_SCALE)
+          .image(0, this.groundY - STAR_HEIGHT, 'star-buddy')
           .setDepth(DEPTH.star);
         this.stars.push({ x: starX, sprite: starSprite });
       }
@@ -408,11 +407,11 @@ export class JumpRunnerScene extends MiniGameScene {
   /** 뛰거나 내려앉을 때 몸이 잠깐 늘어났다 돌아온다. */
   private stretch(scaleX: number, scaleY: number): void {
     this.tweens.killTweensOf(this.runner);
-    this.runner.setScale(SPRITE_SCALE * scaleX, SPRITE_SCALE * scaleY);
+    this.runner.setScale(scaleX, scaleY);
     this.tweens.add({
       targets: this.runner,
-      scaleX: SPRITE_SCALE,
-      scaleY: SPRITE_SCALE,
+      scaleX: 1,
+      scaleY: 1,
       duration: 130,
       ease: 'Quad.Out',
     });
@@ -424,7 +423,7 @@ export class JumpRunnerScene extends MiniGameScene {
     vibrate(10);
     const y = star.sprite.y;
     this.sparks.explode(8, RUNNER_X + 6, y);
-    floatText(this, RUNNER_X + 6, y - 8, `+${STAR_POINTS}`, CSS.yellow, this.playArea, DEPTH.effect);
+    floatText(this, RUNNER_X + 6, y - 8, `+${STAR_POINTS}`, THEME_CSS.accent, this.playArea, DEPTH.effect);
     star.sprite.destroy();
     this.hud.setSide(`별 ${this.starCount}`, true);
   }
@@ -438,7 +437,7 @@ export class JumpRunnerScene extends MiniGameScene {
     // 튕겨 올랐다가 화면 아래로 떨어진다.
     const { height } = this.scale;
     this.tweens.killTweensOf(this.runner);
-    this.runner.setTexture(runnerTexture(this.skin, 'hit')).setScale(SPRITE_SCALE);
+    this.runner.setTexture(runnerTexture(this.skin, 'hit')).setScale(1);
     this.tweens.add({
       targets: this.runner,
       y: this.runner.y - 30,
@@ -456,7 +455,7 @@ export class JumpRunnerScene extends MiniGameScene {
       },
     });
 
-    showBanner(this, this.playArea.centerY, '앗!', CSS.orange, 900, DEPTH.banner);
+    showBanner(this, this.playArea.centerY, '앗!', THEME_CSS.bad, 900, DEPTH.banner);
     this.finishMiniGame(this.currentScore(), [
       ['달린 거리', `${meters(this.distance)}m`],
       ['모은 별', `${this.starCount}개`],

@@ -1,13 +1,15 @@
-/** 픽셀 UI 부품: 글자, 패널, 버튼, 씬 전환. 모든 씬이 같이 쓴다. */
+/** 말랑한 UI 부품: 글자, 카드, 버튼, 씬 전환. 모든 씬이 같이 쓴다. */
 import Phaser from 'phaser';
-import { COLOR, CSS, FONT_FAMILY, FONT_SIZE } from '../config';
+import { FONT_FAMILY, FONT_SIZE, THEME, THEME_CSS } from '../config';
 import { vibrate } from './haptics';
+import { renderScale } from './hidpi';
 import { sfx } from './sfx';
 import { store } from './store';
 
 export interface TextOptions {
   size?: number;
   color?: string;
+  /** 주아는 굵기가 하나라서 아무 일도 하지 않는다. 예전 코드와 맞추려고 남겨 둔다. */
   bold?: boolean;
   align?: 'left' | 'center' | 'right';
   /** 0~1. 기본은 왼쪽 위(0, 0) */
@@ -16,8 +18,10 @@ export interface TextOptions {
   /** 이 폭을 넘으면 줄을 바꾼다 */
   wrapWidth?: number;
   lineSpacing?: number;
-  /** 글자 아래에 깔리는 1px 그림자 색 */
+  /** 글자 아래에 깔리는 얇은 그림자 색 */
   shadow?: string;
+  /** 글자 둘레에 두르는 테두리 색. 게임 화면 위에 뜨는 글자가 묻히지 않게 한다. */
+  stroke?: string;
 }
 
 export function addText(
@@ -31,21 +35,27 @@ export function addText(
   const text = scene.add.text(Math.round(x), Math.round(y), content, {
     fontFamily: FONT_FAMILY,
     fontSize: `${size}px`,
-    fontStyle: options.bold ? 'bold' : 'normal',
-    color: options.color ?? CSS.white,
+    color: options.color ?? THEME_CSS.ink,
     align: options.align ?? 'left',
     lineSpacing: options.lineSpacing ?? 3,
-    wordWrap: options.wrapWidth ? { width: options.wrapWidth } : undefined,
+    wordWrap: options.wrapWidth ? { width: options.wrapWidth, useAdvancedWrap: true } : undefined,
+    // 카메라가 확대하는 만큼 촘촘하게 그려야 글자가 흐려지지 않는다.
+    resolution: renderScale(),
+    // 받침 없는 글자의 윗부분과 테두리가 잘리지 않게 여유를 둔다.
+    padding: { x: 1, y: 1 },
   });
   text.setOrigin(options.originX ?? 0, options.originY ?? 0);
+  if (options.stroke) {
+    text.setStroke(options.stroke, Math.max(2, size / 5));
+  }
   if (options.shadow) {
-    const offset = Math.max(1, Math.round(size / 12));
-    text.setShadow(0, offset, options.shadow, 0, false, true);
+    const offset = Math.max(1, size / 14);
+    text.setShadow(0, offset, options.shadow, 0, Boolean(options.stroke), true);
   }
   return text;
 }
 
-/** 모서리 한 픽셀을 깎은 사각형. 겹치는 부분 없이 그려서 반투명이어도 얼룩지지 않는다. */
+/** 모서리가 살짝 둥근 사각형을 칠한다. 작은 점이나 띠에 쓴다. */
 export function fillChamfer(
   graphics: Phaser.GameObjects.Graphics,
   x: number,
@@ -56,18 +66,24 @@ export function fillChamfer(
   alpha = 1,
 ): void {
   graphics.fillStyle(color, alpha);
-  graphics.fillRect(x + 1, y, width - 2, 1);
-  graphics.fillRect(x, y + 1, width, height - 2);
-  graphics.fillRect(x + 1, y + height - 1, width - 2, 1);
+  graphics.fillRoundedRect(x, y, width, height, Math.min(3, width / 2, height / 2));
 }
 
 export interface PanelColors {
   fill?: number;
+  /** 주면 둘레에 2px 테두리를 두른다(고른 것, 받을 것이 있는 것 표시). */
   border?: number;
+  /** 예전 픽셀 패널의 윗줄 색. 지금은 쓰지 않는다. */
   highlight?: number;
+  /** 아래에 깔리는 그림자 색. null이면 그림자를 그리지 않는다. */
+  shadow?: number | null;
+  /** 모서리 반지름. 기본 12 */
+  radius?: number;
+  /** 그림자가 아래로 비어져 나오는 두께. 기본 3 */
+  depth?: number;
 }
 
-/** 테두리와 윗줄 하이라이트가 있는 패널을 graphics에 그린다. */
+/** 둥근 카드를 graphics에 그린다. 그림자는 height 아래로 depth만큼 더 내려간다. */
 export function drawPanel(
   graphics: Phaser.GameObjects.Graphics,
   x: number,
@@ -76,11 +92,22 @@ export function drawPanel(
   height: number,
   colors: PanelColors = {},
 ): void {
-  fillChamfer(graphics, x, y, width, height, colors.border ?? COLOR.ink);
-  graphics.fillStyle(colors.fill ?? COLOR.charcoal, 1);
-  graphics.fillRect(x + 1, y + 1, width - 2, height - 2);
-  graphics.fillStyle(colors.highlight ?? COLOR.slate, 1);
-  graphics.fillRect(x + 2, y + 1, width - 4, 1);
+  const radius = Math.min(colors.radius ?? 12, width / 2, height / 2);
+  const depth = colors.depth ?? 3;
+  if (colors.shadow !== null && depth > 0) {
+    graphics.fillStyle(colors.shadow ?? THEME.shadow, 1);
+    graphics.fillRoundedRect(x, y + depth, width, height, radius);
+  }
+  const fill = colors.fill ?? THEME.card;
+  if (colors.border === undefined) {
+    graphics.fillStyle(fill, 1);
+    graphics.fillRoundedRect(x, y, width, height, radius);
+    return;
+  }
+  graphics.fillStyle(colors.border, 1);
+  graphics.fillRoundedRect(x, y, width, height, radius);
+  graphics.fillStyle(fill, 1);
+  graphics.fillRoundedRect(x + 2, y + 2, width - 4, height - 4, Math.max(1, radius - 2));
 }
 
 export function addPanel(
@@ -94,6 +121,12 @@ export function addPanel(
   const graphics = scene.add.graphics();
   drawPanel(graphics, x, y, width, height, colors);
   return graphics;
+}
+
+/** 게임 위에 겹쳐 뜨는 화면(일시정지, 결과)의 뒤를 가리는 막. 뒤쪽이 눌리지 않게 입력도 받는다. */
+export function addScrim(scene: Phaser.Scene): Phaser.GameObjects.Rectangle {
+  const { width, height } = scene.scale;
+  return scene.add.rectangle(0, 0, width, height, THEME.bg, 0.82).setOrigin(0, 0).setInteractive();
 }
 
 /** 화면을 덮는 배경 무늬. 상점에서 고른 배경을 쓴다. */
@@ -182,12 +215,14 @@ export function onSwipe(
   });
 }
 
-/** 가진 코인을 보여 주는 작은 패널. 오른쪽 끝이 right에 맞춰지고, 금액에 따라 왼쪽으로 늘어난다. */
+/** 가진 코인을 보여 주는 알약 모양 칸. 오른쪽 끝이 right에 맞춰지고, 금액에 따라 왼쪽으로 늘어난다. */
 export class CoinCounter {
+  static readonly HEIGHT = 22;
+
   private readonly panel: Phaser.GameObjects.Graphics;
   private readonly icon: Phaser.GameObjects.Image;
   private readonly amount: Phaser.GameObjects.Text;
-  /** 패널의 왼쪽 끝. 옆에 다른 것을 놓을 때 쓴다. */
+  /** 칸의 왼쪽 끝. 옆에 다른 것을 놓을 때 쓴다. */
   left = 0;
 
   constructor(
@@ -197,32 +232,33 @@ export class CoinCounter {
     coins: number,
   ) {
     this.panel = scene.add.graphics();
-    this.icon = scene.add.image(0, y + 6, 'coin').setOrigin(0, 0);
-    this.amount = addText(scene, 0, y + 4, '', { color: CSS.yellow });
+    this.icon = scene.add.image(0, y + CoinCounter.HEIGHT / 2, 'coin').setOrigin(0, 0.5);
+    this.amount = addText(scene, 0, y + CoinCounter.HEIGHT / 2, '', { originY: 0.5 });
     this.set(coins);
   }
 
   set(coins: number): void {
     this.amount.setText(String(coins));
-    const width = Math.ceil(this.amount.width) + 24;
+    const width = Math.ceil(this.amount.width) + 28;
     this.left = this.right - width;
     this.panel.clear();
-    drawPanel(this.panel, this.left, this.y, width, 20, {
-      fill: COLOR.ink,
-      border: COLOR.slate,
-      highlight: COLOR.ink,
-    });
-    this.icon.setX(this.left + 6);
-    this.amount.setX(this.left + 18);
+    drawPanel(this.panel, this.left, this.y, width, CoinCounter.HEIGHT, { depth: 2 });
+    this.icon.setX(this.left + 5);
+    this.amount.setX(this.left + 19);
   }
 }
 
+/**
+ * 버튼 색. pink는 그 화면에서 가장 먼저 누를 버튼, neutral은 흰 버튼이다.
+ * green, blue, red, yellow는 예전 이름을 그대로 둔 것으로 각각 민트, 연보라, 산호, 버터색이다.
+ */
 const BUTTON_STYLES = {
-  green: { face: COLOR.green, light: COLOR.lime, dark: COLOR.teal, text: CSS.white },
-  blue: { face: COLOR.blue, light: COLOR.sky, dark: COLOR.navy, text: CSS.white },
-  red: { face: COLOR.red, light: COLOR.orange, dark: COLOR.plum, text: CSS.white },
-  yellow: { face: COLOR.yellow, light: COLOR.white, dark: COLOR.orange, text: CSS.ink },
-  neutral: { face: COLOR.slate, light: COLOR.silver, dark: COLOR.charcoal, text: CSS.white },
+  pink: { face: THEME.pink, lip: THEME.pinkDeep, text: THEME_CSS.inkDeep },
+  green: { face: THEME.mint, lip: THEME.mintDeep, text: THEME_CSS.inkDeep },
+  blue: { face: THEME.lilac, lip: THEME.lilacDeep, text: THEME_CSS.inkDeep },
+  red: { face: THEME.coral, lip: THEME.coralDeep, text: THEME_CSS.inkDeep },
+  yellow: { face: THEME.butter, lip: THEME.butterDeep, text: THEME_CSS.inkDeep },
+  neutral: { face: THEME.card, lip: THEME.shadow, text: THEME_CSS.ink },
 } as const;
 
 export type ButtonStyle = keyof typeof BUTTON_STYLES;
@@ -246,7 +282,7 @@ const BUTTON_DEPTH = 3;
 const PRESS_OFFSET = 2;
 
 /**
- * 눌리는 느낌이 나는 픽셀 버튼.
+ * 눌리는 느낌이 나는 둥근 버튼. (이름은 픽셀 UI 시절 그대로다.)
  * 손가락을 뗄 때 동작해서, 누른 채 밖으로 끌면 취소할 수 있다.
  */
 export class PixelButton {
@@ -341,21 +377,19 @@ export class PixelButton {
     const { x, y, width, height } = this.config;
     const colors = BUTTON_STYLES[this.style];
     const offset = this.pressed ? PRESS_OFFSET : 0;
-    const faceHeight = height - BUTTON_DEPTH - 2;
+    const faceHeight = height - BUTTON_DEPTH;
+    const radius = Math.min(12, faceHeight / 2, width / 2);
     const g = this.graphics;
 
     g.clear();
-    fillChamfer(g, x, y + offset, width, height - offset, COLOR.ink);
-    g.fillStyle(colors.dark, 1);
-    g.fillRect(x + 1, y + offset + 1, width - 2, height - offset - 2);
+    g.fillStyle(colors.lip, 1);
+    g.fillRoundedRect(x, y + BUTTON_DEPTH, width, faceHeight, radius);
     g.fillStyle(colors.face, 1);
-    g.fillRect(x + 1, y + offset + 1, width - 2, faceHeight);
-    g.fillStyle(colors.light, 1);
-    g.fillRect(x + 2, y + offset + 1, width - 4, 1);
+    g.fillRoundedRect(x, y + offset, width, faceHeight, radius);
 
-    const centerX = Math.round(x + width / 2);
-    const centerY = Math.round(y + offset + 1 + faceHeight / 2);
-    this.label?.setColor(colors.text).setPosition(centerX, centerY);
+    const centerX = x + width / 2;
+    const centerY = y + offset + faceHeight / 2;
+    this.label?.setColor(colors.text).setPosition(Math.round(centerX), Math.round(centerY));
     this.icon?.setPosition(centerX, centerY);
   }
 }
@@ -366,12 +400,12 @@ const PAGER_BUTTON_WIDTH = 34;
 const PAGER_BUTTON_HEIGHT = 22;
 /** 두 버튼 사이, 쪽을 나타내는 점이 놓이는 폭 */
 const PAGER_MIDDLE = 56;
-const PAGER_DOT = 4;
-const PAGER_DOT_GAP = 6;
+const PAGER_DOT = 6;
+const PAGER_DOT_GAP = 5;
 /** 쪽이 이보다 많으면 점 대신 "2/9"처럼 숫자로 보여 준다. */
 const PAGER_MAX_DOTS = 6;
 /** 쪽 넘김 줄의 색. 버튼은 PixelButton의 기본 모양을 그대로 쓴다. */
-const PAGER_LOOK = { current: COLOR.yellow, other: COLOR.slate, count: CSS.silver } as const;
+const PAGER_LOOK = { current: THEME.pink, other: THEME.shadow, count: THEME_CSS.sub } as const;
 
 /**
  * 목록을 쪽으로 나눴을 때 그 아래에 두는 줄: 이전 버튼, 쪽을 나타내는 점, 다음 버튼.
@@ -433,24 +467,30 @@ export class Pager {
     const top = this.y + (PAGER_HEIGHT - PAGER_DOT) / 2;
     for (let index = 0; index < this.pages; index += 1) {
       this.dots.fillStyle(index === this.page ? PAGER_LOOK.current : PAGER_LOOK.other, 1);
-      this.dots.fillRect(left + index * (PAGER_DOT + PAGER_DOT_GAP), top, PAGER_DOT, PAGER_DOT);
+      this.dots.fillCircle(
+        left + index * (PAGER_DOT + PAGER_DOT_GAP) + PAGER_DOT / 2,
+        top + PAGER_DOT / 2,
+        PAGER_DOT / 2,
+      );
     }
   }
 }
 
 const FADE_MS = 140;
+/** 화면 바탕색(THEME.bg). 밝은 화면이 어둡게 번쩍이지 않도록 바탕색으로 넘긴다. */
+const FADE_RGB = [255, 244, 236] as const;
 
-/** 화면을 어둡게 한 뒤 다른 씬으로 넘어간다. */
+/** 화면을 바탕색으로 덮은 뒤 다른 씬으로 넘어간다. */
 export function fadeToScene(scene: Phaser.Scene, key: string, data?: object): void {
   const camera = scene.cameras.main;
   if (camera.fadeEffect.isRunning) return;
   scene.input.enabled = false;
   camera.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => scene.scene.start(key, data));
-  camera.fadeOut(FADE_MS, 26, 28, 44);
+  camera.fadeOut(FADE_MS, FADE_RGB[0], FADE_RGB[1], FADE_RGB[2]);
 }
 
-/** 씬이 시작될 때 부르면 어두운 화면에서 밝아지며 나타난다. */
+/** 씬이 시작될 때 부르면 바탕색에서 서서히 나타난다. */
 export function fadeIn(scene: Phaser.Scene): void {
   scene.input.enabled = true;
-  scene.cameras.main.fadeIn(FADE_MS, 26, 28, 44);
+  scene.cameras.main.fadeIn(FADE_MS, FADE_RGB[0], FADE_RGB[1], FADE_RGB[2]);
 }

@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { TEXTURE } from '../../art/sprites';
-import { COLOR, CSS, GAME_WIDTH, SCENE } from '../../config';
+import { GAME_WIDTH, SCENE, THEME, THEME_CSS } from '../../config';
 import { vibrate } from '../../core/haptics';
 import { sfx } from '../../core/sfx';
 import { addBackdrop, addText } from '../../core/ui';
@@ -67,40 +67,39 @@ const CLOUDS: ReadonlyArray<readonly [x: number, altitude: number, drift: number
 const CLOUD_LOOP = 560;
 /** 구름은 탑보다 느리게 내려가서 멀리 있는 것처럼 보인다. */
 const CLOUD_PARALLAX = 0.5;
-const CLOUD_WIDTH = 48;
+const CLOUD_WIDTH = 52;
+/** 풀이 땅 위로 봉긋 올라오는 높이와 풀 띠의 두께. runner-edge 그림과 맞춘다. */
+const GRASS = { rise: 4, height: 12 } as const;
 
 /**
  * 이 게임의 색을 한곳에 모아 둔다. 겉모습을 바꿀 때는 여기와 drawBlock()만 고치면 된다.
  */
 const LOOK = {
-  /** 블록의 테두리 */
-  outline: COLOR.ink,
   /** 맨 아래 받침 */
-  base: { face: COLOR.slate, light: COLOR.silver, dark: COLOR.charcoal } as BlockColors,
-  /** 층마다 차례로 바뀌는 블록 색. 파랑에서 빨강까지 갔다가 다시 돈다. */
+  base: { face: THEME.card, light: THEME.white, dark: THEME.shadow } as BlockColors,
+  /** 층마다 차례로 바뀌는 블록 색. 하늘색에서 산호색까지 갔다가 다시 돈다. */
   floors: [
-    { face: COLOR.blue, light: COLOR.sky, dark: COLOR.navy },
-    { face: COLOR.sky, light: COLOR.cyan, dark: COLOR.blue },
-    { face: COLOR.cyan, light: COLOR.white, dark: COLOR.sky },
-    { face: COLOR.green, light: COLOR.lime, dark: COLOR.teal },
-    { face: COLOR.lime, light: COLOR.white, dark: COLOR.green },
-    { face: COLOR.yellow, light: COLOR.white, dark: COLOR.orange },
-    { face: COLOR.orange, light: COLOR.yellow, dark: COLOR.red },
-    { face: COLOR.red, light: COLOR.orange, dark: COLOR.plum },
+    { face: THEME.sky, light: THEME.skySoft, dark: THEME.skyDeep },
+    { face: THEME.mint, light: THEME.mintSoft, dark: THEME.mintDeep },
+    { face: THEME.butter, light: THEME.butterSoft, dark: THEME.butterDeep },
+    { face: THEME.pink, light: THEME.pinkSoft, dark: THEME.pinkDeep },
+    { face: THEME.lilac, light: THEME.lilacSoft, dark: THEME.lilacDeep },
+    { face: THEME.coral, light: THEME.pinkSoft, dark: THEME.coralDeep },
   ] as readonly BlockColors[],
-  /** 딱 맞혔을 때의 번쩍임과 불꽃 */
-  flash: COLOR.white,
-  sparks: [COLOR.yellow, COLOR.white, COLOR.cyan],
+  /** 딱 맞혔을 때의 번쩍임, 퍼지는 테두리, 불꽃 */
+  flash: THEME.white,
+  ring: THEME.gold,
+  sparks: [THEME.gold, THEME.pink, THEME.mintDeep],
   text: {
-    hint: CSS.white,
-    hintSub: CSS.silver,
-    shadow: CSS.ink,
-    start: CSS.lime,
-    ready: CSS.yellow,
-    over: CSS.orange,
-    perfect: CSS.yellow,
-    grow: CSS.lime,
-    milestone: CSS.cyan,
+    hint: THEME_CSS.ink,
+    hintSub: THEME_CSS.sub,
+    outline: THEME_CSS.white,
+    start: THEME_CSS.good,
+    ready: THEME_CSS.accent,
+    over: THEME_CSS.bad,
+    perfect: THEME_CSS.accent,
+    grow: THEME_CSS.good,
+    milestone: THEME_CSS.good,
   },
 } as const;
 
@@ -111,24 +110,22 @@ function colorsFor(level: number): BlockColors {
   return level <= 0 ? LOOK.base : LOOK.floors[(level - 1) % LOOK.floors.length];
 }
 
-/** 블록 하나를 (0, 0)에서부터 그린다. 윗줄은 밝게, 아랫줄은 어둡게 해서 층이 구분된다. */
+/** 블록 아래쪽에 보이는 두께(px) */
+const BLOCK_LIP = 3;
+
+/** 블록 하나를 (0, 0)에서부터 그린다. 아래쪽에 짙은 두께를 두어 층이 구분되고 말랑해 보인다. */
 function drawBlock(graphics: Phaser.GameObjects.Graphics, width: number, colors: BlockColors): void {
   graphics.clear();
-  graphics.fillStyle(LOOK.outline, 1);
-  graphics.fillRect(0, 0, width, BLOCK_HEIGHT);
-  if (width < 3) {
-    // 테두리를 그릴 자리가 없을 만큼 좁으면 색만 칠한다.
-    graphics.fillStyle(colors.face, 1);
-    graphics.fillRect(0, 0, width, BLOCK_HEIGHT - 1);
-    return;
-  }
-  const inner = width - 2;
-  graphics.fillStyle(colors.face, 1);
-  graphics.fillRect(1, 0, inner, BLOCK_HEIGHT - 1);
-  graphics.fillStyle(colors.light, 1);
-  graphics.fillRect(1, 0, inner, 1);
+  // 아주 좁은 블록도 찌그러지지 않게 모서리 반지름을 폭에 맞춘다.
+  const radius = Math.min(5, width / 2);
   graphics.fillStyle(colors.dark, 1);
-  graphics.fillRect(1, BLOCK_HEIGHT - 3, inner, 2);
+  graphics.fillRoundedRect(0, 0, width, BLOCK_HEIGHT, radius);
+  graphics.fillStyle(colors.face, 1);
+  graphics.fillRoundedRect(0, 0, width, BLOCK_HEIGHT - BLOCK_LIP, radius);
+  if (width >= 12) {
+    graphics.fillStyle(colors.light, 1);
+    graphics.fillRoundedRect(4, 2, Math.min(10, width - 8), 2, 1);
+  }
 }
 
 /**
@@ -179,9 +176,9 @@ export class StackTowerScene extends MiniGameScene {
     this.anchorY = HUD_HEIGHT + Math.round(this.playArea.height * ANCHOR_RATIO);
 
     addBackdrop(this);
-    this.add.image(GAME_WIDTH - 40, HUD_HEIGHT + 78, TEXTURE.runnerMoon).setScale(2);
+    this.add.image(GAME_WIDTH - 40, HUD_HEIGHT + 60, TEXTURE.runnerMoon);
     this.clouds = CLOUDS.map(([x, altitude, drift]) => ({
-      image: this.add.image(0, 0, 'sky-cloud').setOrigin(0, 0).setScale(2).setDepth(DEPTH.cloud),
+      image: this.add.image(0, 0, 'sky-cloud').setOrigin(0, 0).setDepth(DEPTH.cloud),
       x,
       altitude,
       drift,
@@ -190,7 +187,9 @@ export class StackTowerScene extends MiniGameScene {
     this.world = this.add.container(0, this.groundY).setDepth(DEPTH.world);
     this.world.add([
       this.add.tileSprite(0, 0, GAME_WIDTH, GROUND_HEIGHT, TEXTURE.runnerSoil).setOrigin(0, 0),
-      this.add.tileSprite(0, 0, GAME_WIDTH, 4, TEXTURE.runnerEdge).setOrigin(0, 0),
+      this.add
+        .tileSprite(0, -GRASS.rise, GAME_WIDTH, GRASS.height, TEXTURE.runnerEdge)
+        .setOrigin(0, 0),
     ]);
     this.addBlock(this.tower.top, 0);
     this.mover = this.add.graphics();
@@ -290,12 +289,12 @@ export class StackTowerScene extends MiniGameScene {
       addText(this, GAME_WIDTH / 2, top, '화면을 누르면 블록을 내려놓아요', {
         color: LOOK.text.hint,
         originX: 0.5,
-        shadow: LOOK.text.shadow,
+        stroke: LOOK.text.outline,
       }),
       addText(this, GAME_WIDTH / 2, top + 16, '딱 맞추면 줄어들지 않아요', {
         color: LOOK.text.hintSub,
         originX: 0.5,
-        shadow: LOOK.text.shadow,
+        stroke: LOOK.text.outline,
       }),
     ];
     for (const line of lines) line.setDepth(DEPTH.hud);
@@ -434,7 +433,7 @@ export class StackTowerScene extends MiniGameScene {
       .setOrigin(0, 0);
     const ring = this.add
       .rectangle(centerX, top + BLOCK_HEIGHT / 2, placed.width + 2, BLOCK_HEIGHT + 2)
-      .setStrokeStyle(1, LOOK.flash);
+      .setStrokeStyle(1.5, LOOK.ring);
     this.world.add([flash, ring]);
     this.tweens.add({
       targets: flash,

@@ -1,10 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { PALETTE } from '../config';
 import { itemsIn } from '../core/shop';
-import { BACKDROP_LOOKS, CARD_BACK_LOOKS, ORB_LOOKS, RUNNER_LOOKS } from './cosmetics';
+import {
+  BACKDROP_LOOKS,
+  CARD_BACK_LOOKS,
+  GOLD_ORB,
+  OBSTACLE_COLORS,
+  ORB_LOOKS,
+  RUNNER_LOOKS,
+} from './cosmetics';
 
-const isColor = (index: number): boolean =>
-  Number.isInteger(index) && index >= 0 && index < PALETTE.length;
+const HEX = /^#[0-9a-f]{6}$/;
+
+/** 0(검정)~1(흰색)의 상대 휘도 */
+function luminance(hex: string): number {
+  const channel = (index: number): number => {
+    const value = Number.parseInt(hex.slice(index, index + 2), 16) / 255;
+    return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
+}
 
 describe('꾸미기 생김새', () => {
   it('상점의 모든 꾸미기에 생김새가 있고, 남는 생김새는 없다', () => {
@@ -18,49 +32,45 @@ describe('꾸미기 생김새', () => {
     expect(Object.keys(ORB_LOOKS).sort()).toEqual(ids('orb'));
   });
 
-  it('배경 무늬는 타일 안에만 그리고, 바탕은 가장 어두운 색이다', () => {
+  it('배경 무늬는 타일 안에만 그리고, 바탕과 무늬 모두 글자가 읽힐 만큼 밝다', () => {
     for (const look of Object.values(BACKDROP_LOOKS)) {
-      expect(look.base).toBe(0);
-      for (const [x, y, width, height, color] of look.marks) {
-        expect(x).toBeGreaterThanOrEqual(0);
-        expect(y).toBeGreaterThanOrEqual(0);
-        expect(width).toBeGreaterThan(0);
-        expect(height).toBeGreaterThan(0);
-        expect(x + width).toBeLessThanOrEqual(look.size);
-        expect(y + height).toBeLessThanOrEqual(look.size);
-        expect(isColor(color)).toBe(true);
+      expect(look.base).toMatch(HEX);
+      expect(luminance(look.base)).toBeGreaterThan(0.85);
+      for (const [, x, y, size, color] of look.marks) {
+        expect(size).toBeGreaterThan(0);
+        expect(x - size).toBeGreaterThanOrEqual(0);
+        expect(y - size).toBeGreaterThanOrEqual(0);
+        expect(x + size).toBeLessThanOrEqual(look.size);
+        expect(y + size).toBeLessThanOrEqual(look.size);
+        expect(color).toMatch(HEX);
+        expect(luminance(color)).toBeGreaterThan(0.7);
       }
     }
   });
 
-  it('캐릭터에는 장애물과 같은 붉은색을 쓰지 않는다', () => {
+  it('캐릭터에는 장애물과 같은 산호색을 쓰지 않는다', () => {
     for (const look of Object.values(RUNNER_LOOKS)) {
-      for (const color of [look.light, look.shade, look.dark]) {
-        expect(isColor(color)).toBe(true);
-        expect([1, 2]).not.toContain(color);
-      }
+      expect(look.body).toMatch(HEX);
+      expect(OBSTACLE_COLORS).not.toContain(look.body);
     }
   });
 
-  it('구슬에는 금색 구슬과 헷갈리는 노란색과 주황색을 쓰지 않는다', () => {
+  it('구슬에는 금색 구슬과 헷갈리는 색을 쓰지 않는다', () => {
+    const gold = [GOLD_ORB.base, GOLD_ORB.shade];
     for (const look of Object.values(ORB_LOOKS)) {
-      const colors = [...look.rings.map(([, color]) => color), look.ring, ...look.sparks];
-      for (const color of colors) {
-        expect(isColor(color)).toBe(true);
-        expect([3, 4]).not.toContain(color);
-      }
-      // 반지름은 바깥에서 안쪽으로 줄어든다.
-      for (let i = 1; i < look.rings.length; i += 1) {
-        expect(look.rings[i][0]).toBeLessThan(look.rings[i - 1][0]);
-      }
+      for (const color of [look.base, look.shade, look.light]) expect(color).toMatch(HEX);
+      expect(gold).not.toContain(look.base);
+      expect(look.ring).not.toBe(GOLD_ORB.ring);
+      expect(look.motif).not.toBe('sparkle');
+      expect(look.sparks.length).toBeGreaterThan(0);
     }
   });
 
-  it('카드 뒷면은 테두리와 바탕이 다른 색이다', () => {
+  it('카드 뒷면은 면, 두께, 무늬의 색이 서로 다르다', () => {
     for (const look of Object.values(CARD_BACK_LOOKS)) {
-      expect(isColor(look.border) && isColor(look.fill) && isColor(look.mark)).toBe(true);
-      expect(look.fill).not.toBe(look.border);
-      expect(look.mark).not.toBe(look.fill);
+      for (const color of [look.face, look.lip, look.mark]) expect(color).toMatch(HEX);
+      expect(look.lip).not.toBe(look.face);
+      expect(look.mark).not.toBe(look.face);
     }
   });
 });
