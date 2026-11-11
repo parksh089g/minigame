@@ -162,4 +162,9 @@ export const SCENE = {
   memoryCards: 'MemoryCards',
   jumpRunner: 'JumpRunner',
   stackTower: 'StackTower',
+  colorSort: 'ColorSort',
+  gateRun: 'GateRun',
+  pinPull: 'PinPull',
+  parkingOut: 'ParkingOut',
+  screwSort: 'ScrewSort',
 } as const;
