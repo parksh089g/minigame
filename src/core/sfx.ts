@@ -97,6 +97,8 @@ export const sfx = {
   miss: (): void => tone(170, 0.14, { type: 'sawtooth', slideTo: 80, volume: 0.35 }),
   /** 구슬이 사라짐 */
   expire: (): void => tone(196, 0.07, { type: 'triangle', volume: 0.3 }),
+  /** 카드 뒤집기 */
+  flip: (): void => tone(540, 0.04, { type: 'triangle', volume: 0.3 }),
   /** 카운트다운 */
   count: (): void => tone(440, 0.09, { volume: 0.3 }),
   /** 시작 */

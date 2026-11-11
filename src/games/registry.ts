@@ -32,8 +32,8 @@ export const GAMES: readonly MiniGameInfo[] = [
     title: '기억 카드',
     tagline: '같은 그림 짝 맞추기',
     icon: 'icon-cards',
-    sceneKey: null,
-    coinsFor: () => 0,
+    sceneKey: SCENE.memoryCards,
+    coinsFor: (score) => Math.floor(score / 15),
   },
   {
     id: 'jump-runner',

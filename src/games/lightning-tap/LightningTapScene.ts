@@ -1,10 +1,11 @@
 import Phaser from 'phaser';
 import { TEXTURE } from '../../art/sprites';
 import { ORB_SIZE } from '../../art/textures';
-import { COLOR, CSS, FONT_SIZE, GAME_WIDTH, SCENE } from '../../config';
+import { COLOR, CSS, GAME_WIDTH, SCENE } from '../../config';
 import { vibrate } from '../../core/haptics';
 import { sfx } from '../../core/sfx';
 import { addBackdrop, addText, drawPanel } from '../../core/ui';
+import { floatText, GameHud, HUD_HEIGHT, showBanner } from '../../scenes/GameHud';
 import { MiniGameScene } from '../../scenes/MiniGameScene';
 import {
   accuracy,
@@ -27,14 +28,12 @@ interface Orb {
   lifetime: number;
 }
 
-const HUD_HEIGHT = 56;
 const FIELD_MARGIN = 6;
 const ORB_RADIUS = ORB_SIZE / 2;
 /** 구슬 가장자리 바깥으로 이만큼까지는 명중으로 쳐 준다. 손가락은 마우스보다 덜 정확하다. */
 const HIT_FORGIVENESS = 6;
 /** 구슬끼리 떨어져 있어야 하는 최소 간격 */
 const ORB_SPACING = ORB_SIZE + 8;
-const TIME_BAR = { x: 8, y: 40, width: GAME_WIDTH - 16, height: 8 } as const;
 
 const DEPTH = { ring: 5, orb: 10, effect: 20, hud: 30, banner: 40 } as const;
 
@@ -56,9 +55,7 @@ export class LightningTapScene extends MiniGameScene {
   private misses = 0;
   private lastTickSecond = 0;
 
-  private scoreText!: Phaser.GameObjects.Text;
-  private comboText!: Phaser.GameObjects.Text;
-  private timeBar!: Phaser.GameObjects.Graphics;
+  private hud!: GameHud;
   private rings!: Phaser.GameObjects.Graphics;
   private sparks!: Record<OrbKind, Phaser.GameObjects.Particles.ParticleEmitter>;
 
@@ -92,7 +89,9 @@ export class LightningTapScene extends MiniGameScene {
       gold: this.createSparks([COLOR.yellow, COLOR.orange, COLOR.white]),
     };
 
-    this.addHud();
+    this.addPauseButton();
+    this.hud = new GameHud(this, DEPTH.hud);
+    this.drawTimeBar();
     this.input.on(Phaser.Input.Events.POINTER_DOWN, this.onPointerDown, this);
     this.runCountdown();
   }
@@ -130,36 +129,8 @@ export class LightningTapScene extends MiniGameScene {
 
   // ───────── 화면 구성 ─────────
 
-  private addHud(): void {
-    this.addPauseButton();
-    this.scoreText = addText(this, GAME_WIDTH / 2, 6, '0', {
-      size: FONT_SIZE.large,
-      bold: true,
-      originX: 0.5,
-      shadow: CSS.navy,
-    }).setDepth(DEPTH.hud);
-    this.comboText = addText(this, GAME_WIDTH - 8, 14, '', {
-      color: CSS.yellow,
-      originX: 1,
-    }).setDepth(DEPTH.hud);
-    this.timeBar = this.add.graphics().setDepth(DEPTH.hud);
-    this.drawTimeBar();
-  }
-
   private drawTimeBar(): void {
-    const { x, y, width, height } = TIME_BAR;
-    const remaining = ROUND_SECONDS - this.elapsed;
-    const ratio = Phaser.Math.Clamp(remaining / ROUND_SECONDS, 0, 1);
-    const color = remaining <= 5 ? COLOR.red : remaining <= 10 ? COLOR.yellow : COLOR.lime;
-
-    this.timeBar.clear();
-    drawPanel(this.timeBar, x, y, width, height, {
-      fill: COLOR.ink,
-      border: COLOR.slate,
-      highlight: COLOR.ink,
-    });
-    this.timeBar.fillStyle(color, 1);
-    this.timeBar.fillRect(x + 2, y + 2, Math.round((width - 4) * ratio), height - 4);
+    this.hud.setTime(ROUND_SECONDS - this.elapsed, ROUND_SECONDS);
   }
 
   private createSparks(tint: number[]): Phaser.GameObjects.Particles.ParticleEmitter {
@@ -198,23 +169,8 @@ export class LightningTapScene extends MiniGameScene {
     });
   }
 
-  /** 화면 가운데에 큰 글자를 잠깐 띄운다. */
   private showBanner(label: string, color: string, durationMs: number): void {
-    const banner = addText(this, GAME_WIDTH / 2, Math.round(this.field.centerY), label, {
-      size: FONT_SIZE.huge,
-      bold: true,
-      color,
-      originX: 0.5,
-      originY: 0.5,
-      shadow: CSS.navy,
-    }).setDepth(DEPTH.banner);
-    this.tweens.add({
-      targets: banner,
-      alpha: 0,
-      delay: durationMs * 0.6,
-      duration: durationMs * 0.4,
-      onComplete: () => banner.destroy(),
-    });
+    showBanner(this, this.field.centerY, label, color, durationMs, DEPTH.banner);
   }
 
   // ───────── 구슬 ─────────
@@ -316,7 +272,7 @@ export class LightningTapScene extends MiniGameScene {
     this.combo += 1;
     this.maxCombo = Math.max(this.maxCombo, this.combo);
     this.score += points;
-    this.scoreText.setText(String(this.score));
+    this.hud.setScore(this.score);
     this.showCombo(comboBonus(this.combo) > bonusBefore);
 
     if (orb.kind === 'gold') sfx.gold();
@@ -337,39 +293,18 @@ export class LightningTapScene extends MiniGameScene {
 
   private breakCombo(): void {
     this.combo = 0;
-    this.comboText.setText('');
+    this.hud.setSide('');
   }
 
   private showCombo(bonusJustIncreased: boolean): void {
     if (this.combo < 2) return;
     const bonus = comboBonus(this.combo);
-    this.comboText.setText(bonus > 0 ? `콤보 ${this.combo} +${bonus}` : `콤보 ${this.combo}`);
-    if (bonusJustIncreased) {
-      this.tweens.add({
-        targets: this.comboText,
-        y: { from: 10, to: 14 },
-        duration: 160,
-        ease: 'Bounce.Out',
-      });
-    }
+    const label = bonus > 0 ? `콤보 ${this.combo} +${bonus}` : `콤보 ${this.combo}`;
+    this.hud.setSide(label, bonusJustIncreased);
   }
 
   private floatText(x: number, y: number, label: string, color: string): void {
-    const clampedX = Phaser.Math.Clamp(x, this.field.left + 20, this.field.right - 20);
-    const text = addText(this, clampedX, Math.max(y, this.field.top + 8), label, {
-      color,
-      originX: 0.5,
-      originY: 1,
-      shadow: CSS.ink,
-    }).setDepth(DEPTH.effect);
-    this.tweens.add({
-      targets: text,
-      y: text.y - 14,
-      alpha: 0,
-      duration: 480,
-      ease: 'Quad.Out',
-      onComplete: () => text.destroy(),
-    });
+    floatText(this, x, y, label, color, this.field, DEPTH.effect);
   }
 
   private tickLastSeconds(): void {
