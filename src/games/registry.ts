@@ -138,8 +138,8 @@ export const GAMES: readonly MiniGameInfo[] = [
     tagline: '빈칸에 맞는 숫자 채우기',
     icon: 'icon-number',
     sceneKey: SCENE.numberPuzzle,
-    coinsFor: (score) => Math.floor(score / 15),
-    dailyTargets: [60, 100, 150],
+    coinsFor: (score) => Math.floor(score / 25),
+    dailyTargets: [100, 220, 420],
   },
 ];
 

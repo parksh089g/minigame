@@ -106,6 +106,8 @@ export const ACHIEVEMENTS: readonly Achievement[] = [
   { id: 'screw-1400', group: 'score', title: '나사의 달인', description: '나사 풀기 1400점 이상', goal: 1400, reward: 50, measure: bestOf('screw-sort') },
   { id: 'merge-500', group: 'score', title: '쓱쓱 합치기', description: '머지 타일 500점 이상', goal: 500, reward: 20, measure: bestOf('merge-tiles') },
   { id: 'merge-1000', group: 'score', title: '머지의 달인', description: '머지 타일 1000점 이상', goal: 1000, reward: 50, measure: bestOf('merge-tiles') },
+  { id: 'number-350', group: 'score', title: '숫자 탐정', description: '숫자 퍼즐 350점 이상', goal: 350, reward: 20, measure: bestOf('number-puzzle') },
+  { id: 'number-700', group: 'score', title: '숫자의 달인', description: '숫자 퍼즐 700점 이상', goal: 700, reward: 50, measure: bestOf('number-puzzle') },
 
   { id: 'daily-1', group: 'daily', title: '오늘도 도전', description: '오늘의 도전 한 번 달성', goal: 1, reward: 10, measure: (stats) => stats.dailyCleared },
   { id: 'daily-streak-3', group: 'daily', title: '사흘 연속', description: '도전 3일 연속 달성', goal: 3, reward: 30, measure: (stats) => stats.bestStreak },
