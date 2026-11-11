@@ -582,6 +582,71 @@ const ICONS: Record<string, Art> = {
       roundRect(c, 9, 13.700, 14, 3.200, 1.600, '#9684e0');
     },
   },
+  /** 머지 타일: 색이 다른 타일 네 장, 큰 타일일수록 점이 많다 */
+  'icon-merge': {
+    width: 32,
+    height: 32,
+    draw(c) {
+      const tile = (x: number, y: number, lip: string, top: string): void => {
+        roundRect(c, x, y + 2, 13, 12, 3.500, lip);
+        roundRect(c, x, y, 13, 12, 3.500, top);
+      };
+      tile(2, 2, '#7dbef2', '#9dd6ff');
+      tile(17, 2, '#7fd3ae', '#9be3c9');
+      tile(2, 17, '#f2cf73', '#ffe9a8');
+      tile(17, 17, '#e97f99', '#ff9fb5');
+      oval(c, 8.500, 8, 1.700, 1.700, '#ffffff');
+      oval(c, 21, 8, 1.700, 1.700, '#ffffff');
+      oval(c, 26, 8, 1.700, 1.700, '#ffffff');
+      oval(c, 6, 23, 1.700, 1.700, '#ffffff');
+      oval(c, 11, 23, 1.700, 1.700, '#ffffff');
+      oval(c, 8.500, 20, 1.700, 1.700, '#ffffff');
+      softPath(c, 'M21 23H26M23.500 20.500V25.500', '#ffffff', 2.400);
+    },
+  },
+  /** 꼬리 잡기: 마디가 이어진 민트색 애벌레와 먹이 */
+  'icon-tail': {
+    width: 32,
+    height: 32,
+    draw(c) {
+      oval(c, 5.500, 25.500, 4, 4, '#7fd3ae');
+      oval(c, 10.500, 21.500, 4.600, 4.600, '#9be3c9');
+      oval(c, 15, 16, 5, 5, '#7fd3ae');
+      oval(c, 21, 10.500, 7.500, 7.500, '#9be3c9');
+      oval(c, 17.500, 6, 2.400, 1.400, '#d5f5e8', -0.6);
+      face(c, 21.500, 10.500, { gap: 6, eye: 1.100, blush: true });
+      oval(c, 26, 26, 3.600, 3.600, '#ff8a7a');
+      oval(c, 24.800, 24.800, 1.200, 0.800, '#ffc4bb', -0.6);
+    },
+  },
+  /** 논리 타일: 열린 타일 위에 꽂힌 깃발 */
+  'icon-logic': {
+    width: 32,
+    height: 32,
+    draw(c) {
+      roundRect(c, 3, 5, 26, 25, 6, '#9684e0');
+      roundRect(c, 3, 3, 26, 25, 6, '#c9bcf8');
+      roundRect(c, 6, 6, 20, 19, 4, '#e9e3ff');
+      roundRect(c, 13.200, 8, 2.400, 15, 1.200, '#7a6170');
+      fillPath(c, 'M15.600 8.500L23.500 12L15.600 15.500Z', '#ff8a7a');
+      roundRect(c, 10.500, 21.500, 8, 2.600, 1.300, '#7a6170');
+    },
+  },
+  /** 숫자 퍼즐: 아홉 칸 가운데 몇 칸이 채워진 판 */
+  'icon-number': {
+    width: 32,
+    height: 32,
+    draw(c) {
+      roundRect(c, 2, 4, 28, 27, 6, '#f2cf73');
+      roundRect(c, 2, 2, 28, 27, 6, '#ffe9a8');
+      const fills: Record<string, string> = { '0,0': '#9dd6ff', '1,1': '#ff9fb5', '2,0': '#9be3c9', '0,2': '#c9bcf8', '2,2': '#9dd6ff' };
+      for (let row = 0; row < 3; row += 1) {
+        for (let col = 0; col < 3; col += 1) {
+          roundRect(c, 5 + col * 7.700, 5 + row * 7.300, 6.600, 6.300, 1.800, fills[`${col},${row}`] ?? '#fffaf0');
+        }
+      }
+    },
+  },
 };
 
 // ───────── 기억 카드의 그림 ─────────

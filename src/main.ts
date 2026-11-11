@@ -11,11 +11,15 @@ import { GateRunScene } from './games/gate-run/GateRunScene';
 import { JumpRunnerScene } from './games/jump-runner/JumpRunnerScene';
 import { LanternKeeperScene } from './games/lantern-keeper/LanternKeeperScene';
 import { LightningTapScene } from './games/lightning-tap/LightningTapScene';
+import { LogicTilesScene } from './games/logic-tiles/LogicTilesScene';
 import { MemoryCardsScene } from './games/memory-cards/MemoryCardsScene';
+import { MergeTilesScene } from './games/merge-tiles/MergeTilesScene';
+import { NumberPuzzleScene } from './games/number-puzzle/NumberPuzzleScene';
 import { ParkingOutScene } from './games/parking-out/ParkingOutScene';
 import { PinPullScene } from './games/pin-pull/PinPullScene';
 import { ScrewSortScene } from './games/screw-sort/ScrewSortScene';
 import { StackTowerScene } from './games/stack-tower/StackTowerScene';
+import { TailChaseScene } from './games/tail-chase/TailChaseScene';
 import { initOnline } from './online/online';
 import { AchievementsScene } from './scenes/AchievementsScene';
 import { BootScene } from './scenes/BootScene';
@@ -89,6 +93,10 @@ async function boot(): Promise<void> {
       PinPullScene,
       ParkingOutScene,
       ScrewSortScene,
+      MergeTilesScene,
+      TailChaseScene,
+      LogicTilesScene,
+      NumberPuzzleScene,
       LanternKeeperScene,
       PauseScene,
       ResultScene,

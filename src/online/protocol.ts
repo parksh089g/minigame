@@ -15,6 +15,10 @@ export const RANKED_GAMES = [
   'pin-pull',
   'parking-out',
   'screw-sort',
+  'merge-tiles',
+  'tail-chase',
+  'logic-tiles',
+  'number-puzzle',
   'lantern-keeper',
 ] as const;
 
