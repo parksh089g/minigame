@@ -95,4 +95,5 @@ export const SCENE = {
   pause: 'Pause',
   lightningTap: 'LightningTap',
   memoryCards: 'MemoryCards',
+  jumpRunner: 'JumpRunner',
 } as const;

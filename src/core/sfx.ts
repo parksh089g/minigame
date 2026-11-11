@@ -99,6 +99,10 @@ export const sfx = {
   expire: (): void => tone(196, 0.07, { type: 'triangle', volume: 0.3 }),
   /** 카드 뒤집기 */
   flip: (): void => tone(540, 0.04, { type: 'triangle', volume: 0.3 }),
+  /** 점프 */
+  jump: (): void => tone(330, 0.1, { slideTo: 700, volume: 0.28 }),
+  /** 착지 */
+  land: (): void => tone(120, 0.05, { type: 'triangle', volume: 0.3 }),
   /** 카운트다운 */
   count: (): void => tone(440, 0.09, { volume: 0.3 }),
   /** 시작 */
