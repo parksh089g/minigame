@@ -3,13 +3,14 @@ import { COLOR, CSS, FONT_SIZE, GAME_WIDTH, SCENE } from '../config';
 import { vibrate } from '../core/haptics';
 import { sfx } from '../core/sfx';
 import { addPanel, addText, fadeToScene, PixelButton } from '../core/ui';
+import type { Achievement } from '../core/achievements';
 import type { DailyOutcome } from '../core/save';
 import type { ResultData } from './MiniGameScene';
 
 const PANEL_WIDTH = 200;
 const STAT_ROW = 16;
-/** 오늘의 도전 결과를 알리는 줄의 높이 */
-const DAILY_ROW = 22;
+/** 오늘의 도전 결과나 새로 달성한 업적을 알리는 줄의 높이 */
+const EXTRA_ROW = 22;
 
 /** 한 판이 끝난 뒤 게임 위에 겹쳐 뜨는 결과 화면. 기록은 게임 씬이 이미 저장해 두었다. */
 export class ResultScene extends Phaser.Scene {
@@ -23,7 +24,9 @@ export class ResultScene extends Phaser.Scene {
 
     const { width, height } = this.scale;
     const daily = result.daily;
-    const panelHeight = 210 + stats.length * STAT_ROW + (daily ? DAILY_ROW : 0);
+    const achieved = result.newAchievements;
+    const extraRows = (daily ? 1 : 0) + (achieved.length > 0 ? 1 : 0);
+    const panelHeight = 210 + stats.length * STAT_ROW + extraRows * EXTRA_ROW;
     const left = Math.round((GAME_WIDTH - PANEL_WIDTH) / 2);
     const top = Math.round((height - panelHeight) / 2);
     const centerX = GAME_WIDTH / 2;
@@ -88,9 +91,15 @@ export class ResultScene extends Phaser.Scene {
     const coinDelay = result.isNewBest ? 900 : 500;
     if (result.coinsEarned > 0) this.time.delayedCall(coinDelay, () => sfx.coin());
 
+    let extraDelay = coinDelay + 350;
     if (daily) {
-      y += DAILY_ROW;
-      this.addDailyRow(daily, innerLeft, innerRight, y, coinDelay + 350);
+      y += EXTRA_ROW;
+      this.addDailyRow(daily, innerLeft, innerRight, y, extraDelay);
+      if (daily.cleared) extraDelay += 450;
+    }
+    if (achieved.length > 0) {
+      y += EXTRA_ROW;
+      this.addAchievementRow(achieved, innerLeft, innerRight, y, extraDelay);
     }
 
     y += 24;
@@ -114,6 +123,35 @@ export class ResultScene extends Phaser.Scene {
         this.scene.stop(data.sceneKey);
         fadeToScene(this, SCENE.hub);
       },
+    });
+  }
+
+  /** 이번 판으로 새로 달성한 업적을 알린다. 보상은 업적 화면에서 받는다. */
+  private addAchievementRow(
+    achieved: readonly Achievement[],
+    left: number,
+    right: number,
+    y: number,
+    delay: number,
+  ): void {
+    const band = this.add.graphics();
+    band.fillStyle(COLOR.navy, 1);
+    band.fillRect(left - 6, y - 4, right - left + 12, 20);
+    const label = addText(this, left, y, '업적 달성!', { bold: true, color: CSS.lime });
+    const detail = addText(
+      this,
+      right,
+      y,
+      achieved.length === 1 ? achieved[0].title : `${achieved.length}개`,
+      { originX: 1 },
+    );
+
+    const parts = [band, label, detail];
+    parts.forEach((part) => part.setAlpha(0));
+    this.time.delayedCall(delay, () => {
+      this.tweens.add({ targets: parts, alpha: 1, duration: 160 });
+      sfx.fanfare();
+      vibrate([15, 30, 15]);
     });
   }
 

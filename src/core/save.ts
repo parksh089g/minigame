@@ -4,6 +4,16 @@
  */
 
 import {
+  claim,
+  completedIds,
+  createAchievements,
+  normalizeAchievements,
+  statsOf,
+  getAchievement,
+  type Achievement,
+  type AchievementsState,
+} from './achievements';
+import {
   clearDaily,
   createDailyState,
   isCleared,
@@ -21,7 +31,7 @@ import {
   type CosmeticsState,
 } from './shop';
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 export interface GameRecord {
   /** 최고 점수 */
@@ -47,6 +57,8 @@ export interface SaveData {
   daily: DailyState;
   /** 상점에서 산 꾸미기와 지금 쓰는 꾸미기 */
   cosmetics: CosmeticsState;
+  /** 보상을 받은 업적. 달성 여부는 위의 기록들에서 계산한다. */
+  achievements: AchievementsState;
   createdAt: number;
   updatedAt: number;
 }
@@ -73,6 +85,8 @@ export interface PlayResult {
   coinsEarned: number;
   /** 이 게임이 오늘의 도전이고 아직 달성하기 전이었을 때만 있다. */
   daily: DailyOutcome | null;
+  /** 이번 판으로 새로 달성한 업적. 보상은 업적 화면에서 받는다. */
+  newAchievements: Achievement[];
 }
 
 export function createDefaultSave(now: number = Date.now()): SaveData {
@@ -83,6 +97,7 @@ export function createDefaultSave(now: number = Date.now()): SaveData {
     games: {},
     daily: createDailyState(),
     cosmetics: createCosmetics(),
+    achievements: createAchievements(),
     createdAt: now,
     updatedAt: now,
   };
@@ -135,6 +150,7 @@ export function normalizeSave(raw: unknown, now: number = Date.now()): SaveData 
     games,
     daily: normalizeDaily(raw.daily),
     cosmetics: normalizeCosmetics(raw.cosmetics),
+    achievements: normalizeAchievements(raw.achievements),
     createdAt: toTimestamp(raw.createdAt, now),
     updatedAt: toTimestamp(raw.updatedAt, now),
   };
@@ -183,23 +199,33 @@ export function applyPlayResult(
     }
   }
 
-  return {
-    save: {
-      ...save,
-      coins: save.coins + coinsEarned + (daily?.reward ?? 0),
-      games: {
-        ...save.games,
-        [gameId]: { best, plays: previous.plays + 1, lastPlayedAt: now },
-      },
-      daily: dailyState,
-      updatedAt: now,
+  const next: SaveData = {
+    ...save,
+    coins: save.coins + coinsEarned + (daily?.reward ?? 0),
+    games: {
+      ...save.games,
+      [gameId]: { best, plays: previous.plays + 1, lastPlayedAt: now },
     },
+    daily: dailyState,
+    updatedAt: now,
+  };
+
+  // 이번 판 전에는 달성하지 못했던 업적만 "새로 달성"으로 알린다.
+  const before = new Set(completedIds(statsOf(save)));
+  const newAchievements = completedIds(statsOf(next))
+    .filter((id) => !before.has(id))
+    .map((id) => getAchievement(id))
+    .filter((achievement): achievement is Achievement => achievement !== undefined);
+
+  return {
+    save: next,
     score,
     best,
     previousBest: previous.best,
     isNewBest,
     coinsEarned,
     daily,
+    newAchievements,
   };
 }
 
@@ -225,7 +251,31 @@ export function equipCosmetic(save: SaveData, itemId: string, now: number = Date
   return cosmetics === save.cosmetics ? save : { ...save, cosmetics, updatedAt: now };
 }
 
-/** 기록, 코인, 산 꾸미기를 지우고 설정은 남긴다. */
+export type ClaimAchievementResult =
+  | { ok: true; save: SaveData; achievement: Achievement }
+  | { ok: false; reason: 'unknown' | 'incomplete' | 'claimed' };
+
+/** 달성한 업적의 보상 코인을 받은 새 세이브를 돌려준다. 받을 수 없으면 이유를 알려 준다. */
+export function claimAchievement(
+  save: SaveData,
+  achievementId: string,
+  now: number = Date.now(),
+): ClaimAchievementResult {
+  const result = claim(save.achievements, statsOf(save), achievementId);
+  if (!result.ok) return result;
+  return {
+    ok: true,
+    save: {
+      ...save,
+      coins: save.coins + result.achievement.reward,
+      achievements: result.state,
+      updatedAt: now,
+    },
+    achievement: result.achievement,
+  };
+}
+
+/** 기록, 코인, 산 꾸미기, 받은 업적 보상을 지우고 설정은 남긴다. */
 export function resetProgress(save: SaveData, now: number = Date.now()): SaveData {
   return { ...createDefaultSave(now), settings: { ...save.settings } };
 }

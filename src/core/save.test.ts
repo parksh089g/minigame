@@ -3,6 +3,7 @@ import type { DailyChallenge } from './daily';
 import {
   applyPlayResult,
   buyCosmetic,
+  claimAchievement,
   createDefaultSave,
   equipCosmetic,
   getRecord,
@@ -28,7 +29,7 @@ describe('normalizeSave', () => {
       coins: 12,
       settings: { sound: false, vibration: true },
       games: { 'lightning-tap': { best: 80, plays: 4, lastPlayedAt: NOW - 1000 } },
-      daily: { lastClearedOn: '2026-11-11', streak: 3, totalCleared: 8 },
+      daily: { lastClearedOn: '2026-11-11', streak: 3, bestStreak: 4, totalCleared: 8 },
       cosmetics: {
         owned: ['runner-drop'],
         equipped: {
@@ -38,6 +39,7 @@ describe('normalizeSave', () => {
           orb: 'orb-blue',
         },
       },
+      achievements: { claimed: ['play-first'] },
       createdAt: NOW - 5000,
       updatedAt: NOW - 1000,
     };
@@ -56,7 +58,7 @@ describe('normalizeSave', () => {
     };
     const save = normalizeSave(old, NOW);
     expect(save.coins).toBe(55);
-    expect(save.daily).toEqual(old.daily);
+    expect(save.daily).toEqual({ ...old.daily, bestStreak: 2 });
     expect(save.cosmetics).toEqual(createCosmetics());
   });
 
@@ -74,7 +76,7 @@ describe('normalizeSave', () => {
     expect(save.coins).toBe(30);
     expect(save.games).toEqual(old.games);
     expect(save.settings).toEqual(old.settings);
-    expect(save.daily).toEqual({ lastClearedOn: null, streak: 0, totalCleared: 0 });
+    expect(save.daily).toEqual({ lastClearedOn: null, streak: 0, bestStreak: 0, totalCleared: 0 });
   });
 
   it('빠지거나 잘못된 항목을 기본값으로 채운다', () => {
@@ -175,7 +177,12 @@ describe('오늘의 도전과 한 판의 결과', () => {
     expect(result.daily).toEqual({ cleared: true, reward: 25, streak: 1, shortBy: 0 });
     expect(result.coinsEarned).toBe(5);
     expect(result.save.coins).toBe(30);
-    expect(result.save.daily).toEqual({ lastClearedOn: '2026-11-11', streak: 1, totalCleared: 1 });
+    expect(result.save.daily).toEqual({
+      lastClearedOn: '2026-11-11',
+      streak: 1,
+      bestStreak: 1,
+      totalCleared: 1,
+    });
   });
 
   it('목표에 못 미치면 모자란 점수를 알려 주고 보상은 없다', () => {
@@ -205,7 +212,12 @@ describe('오늘의 도전과 한 판의 결과', () => {
     const second = applyPlayResult(first, 'g', 120, 0, NOW + 10, nextDay);
     expect(second.daily).toEqual({ cleared: true, reward: 15 + 5, streak: 2, shortBy: 0 });
     expect(second.save.coins).toBe(25 + 20);
-    expect(second.save.daily).toEqual({ lastClearedOn: '2026-11-12', streak: 2, totalCleared: 2 });
+    expect(second.save.daily).toEqual({
+      lastClearedOn: '2026-11-12',
+      streak: 2,
+      bestStreak: 2,
+      totalCleared: 2,
+    });
   });
 });
 
@@ -243,6 +255,65 @@ describe('꾸미기 사기와 끼우기', () => {
   });
 });
 
+describe('업적', () => {
+  it('한 판을 끝내면 그 판으로 새로 달성한 업적을 알려 준다', () => {
+    const first = applyPlayResult(createDefaultSave(NOW), 'lightning-tap', 85, 8, NOW);
+    expect(first.newAchievements.map((achievement) => achievement.id).sort()).toEqual([
+      'play-first',
+      'tap-80',
+    ]);
+    // 이미 달성한 업적은 다시 알리지 않는다.
+    const second = applyPlayResult(first.save, 'lightning-tap', 90, 9, NOW + 10);
+    expect(second.newAchievements).toEqual([]);
+    // 달성만으로는 코인이 늘지 않는다. 보상은 받아야 들어온다.
+    expect(second.save.coins).toBe(17);
+    expect(second.save.achievements.claimed).toEqual([]);
+  });
+
+  it('업적이 생기기 전에 쌓은 기록도 달성으로 인정하되, 새로 달성한 것으로 알리지는 않는다', () => {
+    const old = normalizeSave(
+      {
+        version: 3,
+        coins: 10,
+        games: { 'jump-runner': { best: 320, plays: 40, lastPlayedAt: NOW - 1000 } },
+      },
+      NOW,
+    );
+    const claimed = claimAchievement(old, 'runner-300', NOW + 5);
+    expect(claimed.ok && claimed.save.coins).toBe(60);
+    const result = applyPlayResult(old, 'jump-runner', 10, 0, NOW + 10);
+    expect(result.newAchievements).toEqual([]);
+  });
+
+  it('보상은 한 번만 받고, 달성하지 못한 업적은 받을 수 없다', () => {
+    const played = applyPlayResult(createDefaultSave(NOW), 'memory-cards', 20, 1, NOW).save;
+    const claimed = claimAchievement(played, 'play-first', NOW + 10);
+    expect(claimed.ok).toBe(true);
+    if (!claimed.ok) return;
+    expect(claimed.achievement.title).toBe('첫걸음');
+    expect(claimed.save.coins).toBe(1 + 5);
+    expect(claimed.save.achievements.claimed).toEqual(['play-first']);
+    expect(claimed.save.updatedAt).toBe(NOW + 10);
+    // 원본은 그대로다.
+    expect(played.coins).toBe(1);
+
+    expect(claimAchievement(claimed.save, 'play-first', NOW + 20)).toEqual({
+      ok: false,
+      reason: 'claimed',
+    });
+    expect(claimAchievement(played, 'play-30', NOW + 20)).toEqual({
+      ok: false,
+      reason: 'incomplete',
+    });
+  });
+
+  it('오늘의 도전을 달성한 판은 도전 업적도 함께 알린다', () => {
+    const challenge: DailyChallenge = { dateKey: '2026-11-11', gameId: 'g', target: 5, reward: 15 };
+    const result = applyPlayResult(createDefaultSave(NOW), 'g', 10, 0, NOW, challenge);
+    expect(result.newAchievements.map((achievement) => achievement.id)).toContain('daily-1');
+  });
+});
+
 describe('resetProgress', () => {
   it('기록과 코인은 지우고 설정은 남긴다', () => {
     let save = createDefaultSave(NOW);
@@ -260,12 +331,20 @@ describe('resetProgress', () => {
     expect(resetProgress(bought.save, NOW + 100).cosmetics).toEqual(createCosmetics());
   });
 
+  it('받은 업적 보상 기록도 지운다', () => {
+    const played = applyPlayResult(createDefaultSave(NOW), 'g', 10, 0, NOW).save;
+    const claimed = claimAchievement(played, 'play-first', NOW);
+    if (!claimed.ok) throw new Error('보상 받기 실패');
+    expect(resetProgress(claimed.save, NOW + 100).achievements).toEqual({ claimed: [] });
+  });
+
   it('오늘의 도전 기록도 지운다', () => {
     const challenge: DailyChallenge = { dateKey: '2026-11-11', gameId: 'g', target: 1, reward: 15 };
     const save = applyPlayResult(createDefaultSave(NOW), 'g', 10, 0, NOW, challenge).save;
     expect(resetProgress(save, NOW + 100).daily).toEqual({
       lastClearedOn: null,
       streak: 0,
+      bestStreak: 0,
       totalCleared: 0,
     });
   });

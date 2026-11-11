@@ -7,12 +7,14 @@ import type { DailyChallenge } from './daily';
 import {
   applyPlayResult,
   buyCosmetic,
+  claimAchievement,
   equipCosmetic,
   createDefaultSave,
   looksLikeSave,
   normalizeSave,
   resetProgress,
   type BuyResult,
+  type ClaimAchievementResult,
   type PlayResult,
   type SaveData,
 } from './save';
@@ -87,6 +89,16 @@ class SaveStore {
     this.data = next;
     this.commit();
     return true;
+  }
+
+  /** 달성한 업적의 보상을 받는다. */
+  claimAchievement(achievementId: string): ClaimAchievementResult {
+    const result = claimAchievement(this.data, achievementId);
+    if (result.ok) {
+      this.data = result.save;
+      this.commit();
+    }
+    return result;
   }
 
   exportJson(): string {
