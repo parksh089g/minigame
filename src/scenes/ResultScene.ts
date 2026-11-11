@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { mascotTexture } from '../art/cosmetics';
 import { TEXTURE } from '../art/sprites';
 import { FONT_SIZE, GAME_WIDTH, SCENE, THEME, THEME_CSS } from '../config';
+import type { BackAware } from '../core/app-events';
 import { vibrate } from '../core/haptics';
 import { sfx } from '../core/sfx';
 import { store } from '../core/store';
@@ -20,13 +21,27 @@ const BUTTON_HEIGHT = 30;
 const BUTTON_GAP = 7;
 
 /** 한 판이 끝난 뒤 게임 위에 겹쳐 뜨는 결과 화면. 기록은 게임 씬이 이미 저장해 두었다. */
-export class ResultScene extends Phaser.Scene {
+export class ResultScene extends Phaser.Scene implements BackAware {
+  /** 결과를 낸 게임 씬의 이름 */
+  private gameKey = '';
+
   constructor() {
     super(SCENE.result);
   }
 
+  /** 결과 화면에서 뒤로 가기는 "다른 게임 고르기"와 같다. */
+  onBackRequest(): void {
+    this.leave();
+  }
+
+  private leave(): void {
+    this.scene.stop(this.gameKey);
+    fadeToScene(this, SCENE.hub);
+  }
+
   create(data: ResultData): void {
     this.input.enabled = true;
+    this.gameKey = data.sceneKey;
     const { result, stats } = data;
 
     const { height } = this.scale;
@@ -161,10 +176,7 @@ export class ResultScene extends Phaser.Scene {
       width: PANEL_WIDTH,
       height: BUTTON_HEIGHT,
       label: '다른 게임 고르기',
-      onTap: () => {
-        this.scene.stop(data.sceneKey);
-        fadeToScene(this, SCENE.hub);
-      },
+      onTap: () => this.leave(),
     });
   }
 

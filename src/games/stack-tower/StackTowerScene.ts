@@ -68,6 +68,17 @@ const CLOUD_LOOP = 560;
 /** 구름은 탑보다 느리게 내려가서 멀리 있는 것처럼 보인다. */
 const CLOUD_PARALLAX = 0.5;
 const CLOUD_WIDTH = 52;
+const CLOUD_HEIGHT = 24;
+/**
+ * 시작 안내 두 줄이 놓이는 띠. top은 놀이 영역 위쪽 끝에서부터의 거리다.
+ * 글자 뒤에 해와 구름이 걸치지 않도록, 띠와 그 둘레(clearance)는 비워 둔다.
+ */
+const HINT_BAND = { top: 4, height: 34, clearance: 4 } as const;
+/**
+ * 해의 중심. 화면 오른쪽 끝과 놀이 영역 위쪽 끝에서부터의 거리다.
+ * 지름이 48이라, 윗면이 안내 띠 아래로 clearance만큼 떨어진다(4 + 34 + 4 + 24).
+ */
+const SUN = { right: 36, top: 66 } as const;
 /** 풀이 땅 위로 봉긋 올라오는 높이와 풀 띠의 두께. runner-edge 그림과 맞춘다. */
 const GRASS = { rise: 4, height: 12 } as const;
 
@@ -176,7 +187,7 @@ export class StackTowerScene extends MiniGameScene {
     this.anchorY = HUD_HEIGHT + Math.round(this.playArea.height * ANCHOR_RATIO);
 
     addBackdrop(this);
-    this.add.image(GAME_WIDTH - 40, HUD_HEIGHT + 60, TEXTURE.runnerMoon);
+    this.add.image(GAME_WIDTH - SUN.right, this.playArea.top + SUN.top, TEXTURE.runnerMoon);
     this.clouds = CLOUDS.map(([x, altitude, drift]) => ({
       image: this.add.image(0, 0, 'sky-cloud').setOrigin(0, 0).setDepth(DEPTH.cloud),
       x,
@@ -284,7 +295,17 @@ export class StackTowerScene extends MiniGameScene {
   }
 
   private showHint(): void {
-    const top = this.playArea.top + 18;
+    const top = this.playArea.top + HINT_BAND.top;
+    // 안내가 사라지기 전에는 화면이 따라 올라갈 만큼 탑이 높아지지 않아서 구름의 높이도 그대로다.
+    // 그래서 처음부터 띠에 걸친 구름만 띠 위로 올려 두면 글자 뒤로 지나가지 않는다.
+    const clearTop = top - HINT_BAND.clearance;
+    const clearBottom = top + HINT_BAND.height + HINT_BAND.clearance;
+    for (const cloud of this.clouds) {
+      const y = this.groundY - cloud.altitude;
+      if (y < clearBottom && y + CLOUD_HEIGHT > clearTop) {
+        cloud.altitude = this.groundY - clearTop + CLOUD_HEIGHT;
+      }
+    }
     const lines = [
       addText(this, GAME_WIDTH / 2, top, '화면을 누르면 블록을 내려놓아요', {
         color: LOOK.text.hint,

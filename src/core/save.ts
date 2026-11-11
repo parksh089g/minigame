@@ -33,6 +33,9 @@ import {
 
 export const SAVE_VERSION = 4;
 
+/** 점수를 냈으면 한 판에 적어도 이만큼은 코인을 준다. 처음 하는 사람이 빈손으로 끝나지 않게 한다. */
+export const MIN_COINS_PER_PLAY = 1;
+
 export interface GameRecord {
   /** 최고 점수 */
   best: number;
@@ -167,7 +170,9 @@ export function getRecord(save: SaveData, gameId: string): GameRecord {
 
 /**
  * 한 판의 결과를 반영한 새 세이브를 돌려준다. 원본은 바꾸지 않는다.
+ * 1점이라도 냈으면 코인을 적어도 MIN_COINS_PER_PLAY개 준다. 0점이면 받은 코인 수 그대로다.
  * challenge에 오늘의 도전을 넘기면, 이 판으로 달성했는지도 함께 따져 보상을 더한다.
+ * 이미 달성한 날이거나 기기 시계가 마지막 달성일보다 앞으로 돌아가 있으면 도전은 따지지 않는다.
  */
 export function applyPlayResult(
   save: SaveData,
@@ -178,7 +183,8 @@ export function applyPlayResult(
   challenge: DailyChallenge | null = null,
 ): PlayResult {
   const score = toCount(rawScore);
-  const coinsEarned = toCount(rawCoins);
+  const coinsEarned =
+    score > 0 ? Math.max(MIN_COINS_PER_PLAY, toCount(rawCoins)) : toCount(rawCoins);
   const previous = getRecord(save, gameId);
   const isNewBest = score > previous.best;
   const best = Math.max(previous.best, score);
