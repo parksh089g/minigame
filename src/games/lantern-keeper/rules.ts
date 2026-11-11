@@ -4,12 +4,16 @@
  */
 import {
   ENEMIES,
+  EVOLVE_LEVEL,
   MAX_LEVEL,
+  MAX_WEAPONS,
   META,
+  MID_BOSS_TIERS,
   PASSIVES,
   PLAYER_BASE,
   RUN_SECONDS,
   SPAWN_TABLE,
+  WEAPON_ORDER,
   WEAPONS,
   type EnemyKind,
   type MetaId,
@@ -51,9 +55,14 @@ export function maxAlive(t: number): number {
   return Math.min(280, 40 + Math.floor(t / 2.2));
 }
 
-/** 시간이 지날수록 적 체력이 늘어난다. 보스에는 쓰지 않는다. */
+/** 시간이 지날수록 적 체력이 늘어난다. 무기가 진화하는 후반에는 더 가파르게 는다. 보스에는 쓰지 않는다. */
 export function hpScale(t: number): number {
-  return 1 + (t / 150) ** 1.6;
+  return 1 + (t / 150) ** 1.6 + (t / 330) ** 3.2;
+}
+
+/** 3분이 지나면 적이 닿았을 때 주는 피해가 조금씩 늘어난다. 보스에는 쓰지 않는다. */
+export function damageScale(t: number): number {
+  return 1 + 0.6 * Math.min(1, Math.max(0, t - 180) / (RUN_SECONDS - 180));
 }
 
 /** 지금 나올 수 있는 적 가운데 하나를 가중치에 따라 고른다. */
@@ -76,6 +85,11 @@ export function speedScale(t: number): number {
 export function enemyHp(kind: EnemyKind, t: number): number {
   const info = ENEMIES[kind];
   return Math.round(info.boss ? info.hp : info.hp * hpScale(t));
+}
+
+/** index번째(0부터) 중간 보스의 세기. 표보다 뒤의 것은 마지막 줄을 쓴다. */
+export function midBossTier(index: number): (typeof MID_BOSS_TIERS)[number] {
+  return MID_BOSS_TIERS[Math.max(0, Math.min(index, MID_BOSS_TIERS.length - 1))];
 }
 
 // ---------------------------------------------------------------- 능력치
@@ -138,44 +152,122 @@ export interface StarStats {
   count: number;
   radius: number;
 }
+export interface LanceStats {
+  damage: number;
+  cooldown: number;
+  count: number;
+  /** 화살의 굵기(판정 반지름) */
+  radius: number;
+  speed: number;
+  /** 날아가는 시간(초) */
+  life: number;
+}
+export interface OilStats {
+  /** 한 번 태울 때의 피해 */
+  damage: number;
+  /** 불길을 새로 남기는 간격(초) */
+  cooldown: number;
+  radius: number;
+  /** 불길이 남아 있는 시간(초) */
+  duration: number;
+  /** 태우는 간격(초) */
+  tick: number;
+  /** 닿은 적의 이동 속도 배율 */
+  slow: number;
+}
+export interface BoltStats {
+  damage: number;
+  cooldown: number;
+  /** 한 줄기가 때리는 적의 수 */
+  jumps: number;
+  /** 한 번에 치는 줄기 수 */
+  chains: number;
+  /** 첫 번째 적까지 닿는 거리 */
+  reach: number;
+  /** 다음 적으로 튀는 거리 */
+  hop: number;
+}
 
 const atLeast = (level: number, n: number): number => (level >= n ? 1 : 0);
 
+/** 이 레벨이면 최종 진화형인지 */
+export const isEvolved = (level: number): boolean => level >= EVOLVE_LEVEL;
+
 export function emberStats(level: number, mods: Modifiers): EmberStats {
+  const evo = atLeast(level, EVOLVE_LEVEL);
   return {
-    damage: (10 + 4 * atLeast(level, 2)) * mods.damage,
-    cooldown: 0.75 * (level >= 4 ? 0.85 : 1) * mods.cooldown,
-    count: 1 + atLeast(level, 3) + atLeast(level, 5),
-    pierce: atLeast(level, 5),
-    speed: 170,
+    damage: (10 + 4 * atLeast(level, 2) + 6 * evo) * mods.damage,
+    cooldown: 0.75 * (level >= 4 ? 0.85 : 1) * (evo ? 0.85 : 1) * mods.cooldown,
+    count: 1 + atLeast(level, 3) + atLeast(level, 5) + evo,
+    pierce: atLeast(level, 5) + 2 * evo,
+    speed: evo ? 190 : 170,
   };
 }
 
 export function auraStats(level: number, mods: Modifiers): AuraStats {
+  const evo = atLeast(level, EVOLVE_LEVEL);
   return {
-    radius: (24 + 5 * atLeast(level, 2) + 5 * atLeast(level, 4)) * mods.area,
-    damage: (4 + 3 * atLeast(level, 3) + 4 * atLeast(level, 5)) * mods.damage,
-    tick: 0.45 * mods.cooldown,
-    slow: level >= 5 ? 0.6 : 1,
+    radius: (24 + 5 * atLeast(level, 2) + 5 * atLeast(level, 4) + 10 * evo) * mods.area,
+    damage: (4 + 3 * atLeast(level, 3) + 4 * atLeast(level, 5) + 6 * evo) * mods.damage,
+    tick: (evo ? 0.38 : 0.45) * mods.cooldown,
+    slow: evo ? 0.45 : level >= 5 ? 0.6 : 1,
   };
 }
 
 export function fireflyStats(level: number, mods: Modifiers): FireflyStats {
+  const evo = atLeast(level, EVOLVE_LEVEL);
   return {
-    count: 1 + atLeast(level, 2) + atLeast(level, 4) + atLeast(level, 5),
-    damage: (7 + 4 * atLeast(level, 3)) * mods.damage,
-    orbit: 30 * mods.area,
-    spin: level >= 5 ? 4.2 : 3,
-    rehit: 0.5,
+    count: 1 + atLeast(level, 2) + atLeast(level, 4) + atLeast(level, 5) + 2 * evo,
+    damage: (7 + 4 * atLeast(level, 3) + 5 * evo) * mods.damage,
+    orbit: (evo ? 38 : 30) * mods.area,
+    spin: evo ? 4.6 : level >= 5 ? 4.2 : 3,
+    rehit: evo ? 0.35 : 0.5,
   };
 }
 
 export function starStats(level: number, mods: Modifiers): StarStats {
+  const evo = atLeast(level, EVOLVE_LEVEL);
   return {
-    damage: (20 + 8 * atLeast(level, 2)) * mods.damage,
+    damage: (20 + 8 * atLeast(level, 2) + 6 * evo) * mods.damage,
+    cooldown: 2.4 * (level >= 5 ? 0.8 : 1) * (evo ? 0.7 : 1) * mods.cooldown,
+    count: 1 + atLeast(level, 3) + atLeast(level, 5) + 2 * evo,
+    radius: (16 + 5 * atLeast(level, 4) + 4 * evo) * mods.area,
+  };
+}
+
+export function lanceStats(level: number, mods: Modifiers): LanceStats {
+  const evo = atLeast(level, EVOLVE_LEVEL);
+  return {
+    damage: (14 + 6 * atLeast(level, 2) + 8 * atLeast(level, 5) + 12 * evo) * mods.damage,
+    cooldown: 1.6 * (level >= 3 ? 0.8 : 1) * mods.cooldown,
+    count: 1 + atLeast(level, 4) + evo,
+    radius: (4 + atLeast(level, 5) + 2 * evo) * mods.area,
+    speed: 210,
+    life: 0.8,
+  };
+}
+
+export function oilStats(level: number, mods: Modifiers): OilStats {
+  const evo = atLeast(level, EVOLVE_LEVEL);
+  return {
+    damage: (5 + 3 * atLeast(level, 3) + 4 * atLeast(level, 5) + 5 * evo) * mods.damage,
     cooldown: 2.4 * (level >= 5 ? 0.8 : 1) * mods.cooldown,
-    count: 1 + atLeast(level, 3) + atLeast(level, 5),
-    radius: (16 + 5 * atLeast(level, 4)) * mods.area,
+    radius: (16 + 4 * atLeast(level, 2) + 8 * evo) * mods.area,
+    duration: 3 + 1.5 * atLeast(level, 4) + 1.5 * evo,
+    tick: 0.4,
+    slow: evo ? 0.6 : 1,
+  };
+}
+
+export function boltStats(level: number, mods: Modifiers): BoltStats {
+  const evo = atLeast(level, EVOLVE_LEVEL);
+  return {
+    damage: (9 + 4 * atLeast(level, 2) + 5 * atLeast(level, 5) + 6 * evo) * mods.damage,
+    cooldown: 1.5 * (level >= 4 ? 0.8 : 1) * mods.cooldown,
+    jumps: 3 + 2 * atLeast(level, 3) + 2 * atLeast(level, 5) + 3 * evo,
+    chains: 1 + evo,
+    reach: 110,
+    hop: (46 + 10 * evo) * mods.area,
   };
 }
 
@@ -195,15 +287,28 @@ export interface Build {
   passives: Levels<PassiveId>;
 }
 
+/** 무기를 level까지 올렸을 때의 이름. 진화하면 이름이 바뀐다. */
+export function weaponName(id: WeaponId, level: number): string {
+  return isEvolved(level) ? WEAPONS[id].evolved.name : WEAPONS[id].name;
+}
+
+/** 지금 들고 있는 무기를 정해진 순서로 */
+export function ownedWeapons(weapons: Levels<WeaponId>): WeaponId[] {
+  return WEAPON_ORDER.filter((id) => (weapons[id] ?? 0) > 0);
+}
+
 /**
  * 레벨업 때 보여 줄 선택지. 아직 덜 올린 무기와 패시브 가운데에서 겹치지 않게 count개 고른다.
- * 모두 최대 레벨이면 회복과 불씨를 준다.
+ * 무기 칸이 다 찼으면 새 무기는 나오지 않는다. 모두 최대 레벨이면 회복과 불씨를 준다.
+ * 레벨업으로는 MAX_LEVEL까지만 올릴 수 있다. 그다음 단계인 진화는 무기 강화권으로만 한다.
  * upgrade.level은 고르면 올라갈 레벨(처음 얻는 것이면 1).
  */
 export function upgradeOptions(build: Build, rand: Rand, count = 3): Upgrade[] {
   const pool: Upgrade[] = [];
-  for (const id of Object.keys(WEAPONS) as WeaponId[]) {
+  const full = ownedWeapons(build.weapons).length >= MAX_WEAPONS;
+  for (const id of WEAPON_ORDER) {
     const level = build.weapons[id] ?? 0;
+    if (level === 0 && full) continue;
     if (level < MAX_LEVEL) pool.push({ type: 'weapon', id, level: level + 1 });
   }
   for (const id of Object.keys(PASSIVES) as PassiveId[]) {
@@ -235,10 +340,24 @@ export function upgradeOptions(build: Build, rand: Rand, count = 3): Upgrade[] {
   return picked;
 }
 
+/**
+ * 무기 강화권으로 고를 수 있는 것: 가진 무기 가운데 아직 더 올릴 수 있는 것 전부.
+ * MAX_LEVEL인 무기에 쓰면 최종 진화형(EVOLVE_LEVEL)이 된다. 진화는 이 길로만 할 수 있다.
+ * 올릴 무기가 없으면 회복과 불씨 가운데에서 고른다.
+ */
+export function ticketOptions(weapons: Levels<WeaponId>): Upgrade[] {
+  const options: Upgrade[] = [];
+  for (const id of ownedWeapons(weapons)) {
+    const level = weapons[id] ?? 0;
+    if (level < EVOLVE_LEVEL) options.push({ type: 'weapon', id, level: level + 1 });
+  }
+  return options.length > 0 ? options : [{ type: 'heal' }, { type: 'embers' }];
+}
+
 export function upgradeTitle(upgrade: Upgrade): string {
   switch (upgrade.type) {
     case 'weapon':
-      return WEAPONS[upgrade.id].name;
+      return weaponName(upgrade.id, upgrade.level);
     case 'passive':
       return PASSIVES[upgrade.id].name;
     case 'heal':
@@ -251,7 +370,9 @@ export function upgradeTitle(upgrade: Upgrade): string {
 export function upgradeDescription(upgrade: Upgrade): string {
   switch (upgrade.type) {
     case 'weapon':
-      return WEAPONS[upgrade.id].levels[upgrade.level - 1];
+      return isEvolved(upgrade.level)
+        ? WEAPONS[upgrade.id].evolved.description
+        : WEAPONS[upgrade.id].levels[upgrade.level - 1];
     case 'passive':
       return PASSIVES[upgrade.id].perLevel;
     case 'heal':
@@ -275,14 +396,14 @@ export interface RunSummary {
 
 /** 허브의 최고 기록에 쓰는 점수 */
 export function scoreFor(run: RunSummary): number {
-  return Math.floor(run.seconds) + run.kills + 250 * run.bossKills + (run.cleared ? 1000 : 0);
+  return Math.floor(run.seconds) + run.kills + 150 * run.bossKills + (run.cleared ? 1000 : 0);
 }
 
 /** 판이 끝나고 받는 불씨. 오래 버틸수록, 많이 쓰러뜨릴수록 많다. */
 export function embersFor(run: RunSummary): number {
   const minutes = Math.floor(Math.min(run.seconds, RUN_SECONDS) / 60);
   return (
-    minutes * 3 + Math.floor(run.kills / 40) + 15 * run.bossKills + (run.cleared ? 40 : 0) + run.bonusEmbers
+    minutes * 3 + Math.floor(run.kills / 40) + 8 * run.bossKills + (run.cleared ? 40 : 0) + run.bonusEmbers
   );
 }
 

@@ -1,38 +1,53 @@
 import { describe, expect, it } from 'vitest';
 import {
   ENEMIES,
+  EVOLVE_LEVEL,
   MAX_LEVEL,
+  MAX_WEAPONS,
   META,
   META_ORDER,
+  MID_BOSS_COUNT,
+  MID_BOSS_EVERY,
+  MID_BOSS_TIERS,
   PASSIVES,
   RUN_SECONDS,
   SPAWN_TABLE,
   SURGES,
+  WEAPON_ORDER,
   WEAPONS,
   type PassiveId,
   type WeaponId,
 } from './data';
 import {
   auraStats,
+  boltStats,
   coinsFor,
+  damageScale,
   embersFor,
   emberStats,
   enemyHp,
   fireflyStats,
   formatClock,
   hpScale,
+  isEvolved,
+  lanceStats,
   maxAlive,
   metaCost,
+  midBossTier,
   modifiers,
+  oilStats,
+  ownedWeapons,
   pickSpawnKind,
   scoreFor,
   seededRandom,
   spawnPerSecond,
   speedScale,
   starStats,
+  ticketOptions,
   upgradeDescription,
   upgradeOptions,
   upgradeTitle,
+  weaponName,
   xpToNext,
   type Build,
   type RunSummary,
@@ -51,8 +66,30 @@ const run = (over: Partial<RunSummary> = {}): RunSummary => ({
 
 describe('데이터', () => {
   it('무기와 패시브의 레벨 설명이 빠짐없이 있다', () => {
-    for (const weapon of Object.values(WEAPONS)) expect(weapon.levels).toHaveLength(MAX_LEVEL);
+    for (const weapon of Object.values(WEAPONS)) {
+      expect(weapon.levels).toHaveLength(MAX_LEVEL);
+      expect(weapon.evolved.name).not.toBe('');
+      expect(weapon.evolved.name).not.toBe(weapon.name);
+      expect(weapon.evolved.description).not.toBe('');
+    }
     for (const passive of Object.values(PASSIVES)) expect(passive.perLevel).not.toBe('');
+  });
+
+  it('무기는 일곱 가지이고, 늘어놓는 순서에 빠진 것이 없다', () => {
+    expect(WEAPON_ORDER).toHaveLength(7);
+    expect([...WEAPON_ORDER].sort()).toEqual(Object.keys(WEAPONS).sort());
+    expect(MAX_WEAPONS).toBeLessThan(WEAPON_ORDER.length);
+  });
+
+  it('중간 보스는 나올 때마다 강해지고, 표에 빠진 차례가 없다', () => {
+    expect(MID_BOSS_TIERS).toHaveLength(MID_BOSS_COUNT);
+    for (let n = 1; n < MID_BOSS_COUNT; n += 1) {
+      expect(midBossTier(n).hp).toBeGreaterThan(midBossTier(n - 1).hp);
+      expect(midBossTier(n).summon).toBeGreaterThanOrEqual(midBossTier(n - 1).summon);
+    }
+    expect(midBossTier(99)).toBe(midBossTier(MID_BOSS_COUNT - 1));
+    expect(ENEMIES.giant.hp).toBe(midBossTier(0).hp);
+    expect(ENEMIES.lord.hp).toBeGreaterThan(midBossTier(MID_BOSS_COUNT - 1).hp);
   });
 
   it('등장표와 밀물 시각이 한 판 안에 있고, 처음부터 나오는 적이 있다', () => {
@@ -76,12 +113,24 @@ describe('난이도 곡선', () => {
       expect(spawnPerSecond(t)).toBeGreaterThanOrEqual(spawnPerSecond(t - 10));
       expect(maxAlive(t)).toBeGreaterThanOrEqual(maxAlive(t - 10));
       expect(hpScale(t)).toBeGreaterThan(hpScale(t - 10));
+      expect(damageScale(t)).toBeGreaterThanOrEqual(damageScale(t - 10));
       expect(speedScale(t)).toBeGreaterThanOrEqual(speedScale(t - 10));
     }
   });
 
   it('처음에는 불씨탄 한 발에 그림자 방울이 쓰러진다', () => {
     expect(emberStats(1, base).damage).toBeGreaterThanOrEqual(enemyHp('shade', 0));
+  });
+
+  it('적의 피해는 처음 3분 동안 그대로이고 끝에서도 두 배를 넘지 않는다', () => {
+    expect(damageScale(0)).toBe(1);
+    expect(damageScale(180)).toBe(1);
+    expect(damageScale(RUN_SECONDS)).toBeGreaterThan(1.3);
+    expect(damageScale(RUN_SECONDS * 2)).toBeLessThan(2);
+  });
+
+  it('밀물은 중간 보스가 나오는 시각과 겹치지 않는다', () => {
+    for (const at of SURGES) expect(at % MID_BOSS_EVERY).not.toBe(0);
   });
 
   it('적은 끝까지 플레이어보다 느리다', () => {
@@ -114,7 +163,7 @@ describe('성장', () => {
   });
 
   it('무기는 레벨이 오를수록 약해지지 않는다', () => {
-    for (let level = 2; level <= MAX_LEVEL; level += 1) {
+    for (let level = 2; level <= EVOLVE_LEVEL; level += 1) {
       const [e0, e1] = [emberStats(level - 1, base), emberStats(level, base)];
       expect((e1.damage * e1.count) / e1.cooldown).toBeGreaterThanOrEqual((e0.damage * e0.count) / e0.cooldown);
       const [a0, a1] = [auraStats(level - 1, base), auraStats(level, base)];
@@ -123,7 +172,43 @@ describe('성장', () => {
       expect(f1.damage * f1.count).toBeGreaterThanOrEqual(f0.damage * f0.count);
       const [s0, s1] = [starStats(level - 1, base), starStats(level, base)];
       expect((s1.damage * s1.count) / s1.cooldown).toBeGreaterThanOrEqual((s0.damage * s0.count) / s0.cooldown);
+      const [l0, l1] = [lanceStats(level - 1, base), lanceStats(level, base)];
+      expect((l1.damage * l1.count) / l1.cooldown).toBeGreaterThanOrEqual((l0.damage * l0.count) / l0.cooldown);
+      const [o0, o1] = [oilStats(level - 1, base), oilStats(level, base)];
+      expect((o1.damage * o1.radius * o1.duration) / o1.cooldown).toBeGreaterThanOrEqual(
+        (o0.damage * o0.radius * o0.duration) / o0.cooldown,
+      );
+      const [b0, b1] = [boltStats(level - 1, base), boltStats(level, base)];
+      expect((b1.damage * b1.jumps * b1.chains) / b1.cooldown).toBeGreaterThanOrEqual(
+        (b0.damage * b0.jumps * b0.chains) / b0.cooldown,
+      );
     }
+  });
+
+  it('진화하면 한 단계 오른 것보다 눈에 띄게 강해진다', () => {
+    const power = (level: number): number[] => {
+      const e = emberStats(level, base);
+      const a = auraStats(level, base);
+      const f = fireflyStats(level, base);
+      const s = starStats(level, base);
+      const l = lanceStats(level, base);
+      const o = oilStats(level, base);
+      const b = boltStats(level, base);
+      return [
+        (e.damage * e.count * (1 + e.pierce)) / e.cooldown,
+        (a.damage * a.radius ** 2) / a.tick,
+        (f.damage * f.count) / f.rehit,
+        (s.damage * s.count * s.radius ** 2) / s.cooldown,
+        (l.damage * l.count * l.radius) / l.cooldown,
+        (o.damage * o.radius ** 2 * o.duration) / o.cooldown,
+        (b.damage * b.jumps * b.chains) / b.cooldown,
+      ];
+    };
+    const before = power(MAX_LEVEL);
+    const after = power(EVOLVE_LEVEL);
+    expect(isEvolved(MAX_LEVEL)).toBe(false);
+    expect(isEvolved(EVOLVE_LEVEL)).toBe(true);
+    after.forEach((value, i) => expect(value / before[i]).toBeGreaterThan(1.5));
   });
 
   it('패시브와 영구 강화가 능력치에 곱해진다', () => {
@@ -153,9 +238,9 @@ describe('레벨업 선택지', () => {
     }
   });
 
-  it('최대 레벨인 것은 나오지 않고, 모두 채우면 회복과 불씨를 준다', () => {
+  it('다 올린 것은 나오지 않고, 모두 채우면 회복과 불씨를 준다', () => {
     const full: Build = { weapons: {}, passives: {} };
-    for (const id of Object.keys(WEAPONS) as WeaponId[]) full.weapons[id] = MAX_LEVEL;
+    for (const id of WEAPON_ORDER.slice(0, MAX_WEAPONS)) full.weapons[id] = MAX_LEVEL;
     for (const id of Object.keys(PASSIVES) as PassiveId[]) full.passives[id] = MAX_LEVEL;
     expect(upgradeOptions(full, seededRandom(1)).map((u) => u.type)).toEqual(['heal', 'embers']);
 
@@ -163,6 +248,48 @@ describe('레벨업 선택지', () => {
     const options = upgradeOptions(full, seededRandom(1));
     expect(options[0]).toEqual({ type: 'weapon', id: 'star', level: MAX_LEVEL });
     expect(options.map((u) => u.type)).toEqual(['weapon', 'heal', 'embers']);
+  });
+
+  it('무기 칸이 다 차면 새 무기는 나오지 않는다', () => {
+    const rand = seededRandom(9);
+    const packed: Build = { weapons: { ember: 1, aura: 1, lance: 1, bolt: 1 }, passives: {} };
+    expect(ownedWeapons(packed.weapons)).toHaveLength(MAX_WEAPONS);
+    for (let i = 0; i < 200; i += 1) {
+      for (const option of upgradeOptions(packed, rand)) {
+        if (option.type === 'weapon') expect(packed.weapons[option.id]).toBe(1);
+      }
+    }
+    // 칸이 남아 있으면 아직 없는 무기도 나온다.
+    const roomy: Build = { weapons: { ember: 1 }, passives: {} };
+    const seen = new Set<WeaponId>();
+    for (let i = 0; i < 300; i += 1) {
+      for (const option of upgradeOptions(roomy, rand)) if (option.type === 'weapon') seen.add(option.id);
+    }
+    expect(seen.size).toBe(WEAPON_ORDER.length);
+  });
+
+  it('레벨업으로는 진화하지 못하고, 5레벨 무기에 강화권을 써야 진화한다', () => {
+    const build: Build = { weapons: { star: MAX_LEVEL }, passives: {} };
+    const rand = seededRandom(4);
+    for (let i = 0; i < 200; i += 1) {
+      for (const option of upgradeOptions(build, rand)) {
+        if (option.type === 'weapon') expect(option.id).not.toBe('star');
+      }
+    }
+    const [evolve] = ticketOptions(build.weapons);
+    expect(evolve).toEqual({ type: 'weapon', id: 'star', level: EVOLVE_LEVEL });
+    expect(upgradeTitle(evolve)).toBe(WEAPONS.star.evolved.name);
+    expect(upgradeDescription(evolve)).toBe(WEAPONS.star.evolved.description);
+    expect(weaponName('star', MAX_LEVEL)).toBe(WEAPONS.star.name);
+    expect(weaponName('star', EVOLVE_LEVEL)).toBe(WEAPONS.star.evolved.name);
+  });
+
+  it('무기 강화권은 가진 무기 가운데 덜 올린 것을 모두 보여 준다', () => {
+    expect(ticketOptions({ ember: 3, bolt: MAX_LEVEL, aura: EVOLVE_LEVEL })).toEqual([
+      { type: 'weapon', id: 'ember', level: 4 },
+      { type: 'weapon', id: 'bolt', level: EVOLVE_LEVEL },
+    ]);
+    expect(ticketOptions({ ember: EVOLVE_LEVEL })).toEqual([{ type: 'heal' }, { type: 'embers' }]);
   });
 });
 

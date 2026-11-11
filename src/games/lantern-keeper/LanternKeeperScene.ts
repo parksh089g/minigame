@@ -8,10 +8,10 @@ import { MiniGameScene, type ResultStat } from '../../scenes/MiniGameScene';
 import { registerLanternTextures } from './art';
 import { ENEMIES, LANTERN_GAME_ID, LANTERN_SCENE, RUN_SECONDS } from './data';
 import { Joystick } from './joystick';
-import { showLevelUp } from './levelup';
+import { buildSummary, levelUpHeader, showChoices, TICKET_HEADER } from './levelup';
 import { buildLobby } from './lobby';
 import { applyRun, metaStore } from './meta';
-import { embersFor, formatClock, scoreFor, xpToNext, type Upgrade } from './rules';
+import { embersFor, formatClock, scoreFor, xpToNext } from './rules';
 import { createRun, Sim, type Enemy } from './sim';
 import { RunView } from './view';
 
@@ -29,6 +29,8 @@ const HUD_HEIGHT = 50;
 const BAR = { x: 42, width: GAME_WIDTH - 50, height: 8 } as const;
 /** 진행 중인 판을 저장하는 간격(초) */
 const SAVE_EVERY = 20;
+/** 중간 보스가 쓰러지는 모습을 보여 준 뒤에 강화권 화면을 연다(ms). */
+const TICKET_DELAY_MS = 550;
 const DEPTH = { hud: 20, banner: 30, stick: 25, panel: 40 } as const;
 
 /**
@@ -136,7 +138,14 @@ export class LanternKeeperScene extends MiniGameScene {
     }
 
     this.playing = true;
-    if (state.pendingLevelUps > 0) this.openLevelUp();
+    this.openNext();
+  }
+
+  /** 기다리는 선택이 있으면 그 화면을 열고, 없으면 판을 이어 간다. 강화권이 레벨업보다 먼저다. */
+  private openNext(delayTicket = false): void {
+    const s = this.sim.state;
+    if (s.pendingTickets > 0) this.openTicket(delayTicket);
+    else if (s.pendingLevelUps > 0) this.openLevelUp();
     else this.resumeRun();
   }
 
@@ -160,7 +169,7 @@ export class LanternKeeperScene extends MiniGameScene {
       sim.step(STEP, this.stick.x, this.stick.y);
       this.handleEvents();
       if (sim.state.over) this.endRun();
-      else if (sim.state.pendingLevelUps > 0) this.openLevelUp();
+      else if (sim.state.pendingTickets > 0 || sim.state.pendingLevelUps > 0) this.openNext(true);
     }
 
     this.view.sync(sim, this.seconds, frame);
@@ -203,6 +212,9 @@ export class LanternKeeperScene extends MiniGameScene {
         case 'strike':
           this.view.ring(event.x, event.y, event.radius);
           break;
+        case 'bolt':
+          this.view.bolt(event.points, event.evolved);
+          break;
         case 'boss':
           showBanner(this, this.scale.height * 0.3, ENEMIES[event.kind].name, CSS.red, 1800, DEPTH.banner);
           sfx.deny();
@@ -213,6 +225,7 @@ export class LanternKeeperScene extends MiniGameScene {
           sfx.count();
           break;
         case 'levelup':
+        case 'ticket':
         case 'shoot':
           break;
       }
@@ -234,20 +247,52 @@ export class LanternKeeperScene extends MiniGameScene {
     this.stick.reset();
     sfx.gold();
     vibrate(15);
-    showLevelUp(this, this.sim.state.player.level, this.sim.options(), DEPTH.panel, (upgrade) =>
-      this.pick(upgrade),
+    const s = this.sim.state;
+    showChoices(
+      this,
+      levelUpHeader(s.player.level),
+      this.sim.options(),
+      DEPTH.panel,
+      (upgrade) => {
+        this.sim.applyUpgrade(upgrade);
+        this.afterPick();
+      },
+      buildSummary(s.weapons),
     );
   }
 
-  private pick(upgrade: Upgrade): void {
-    this.sim.applyUpgrade(upgrade);
+  /** 무기 강화권: 가진 무기 가운데 하나를 골라 한 레벨 올린다. */
+  private openTicket(delayed: boolean): void {
+    this.phase = 'choosing';
+    this.stick.enabled = false;
+    this.stick.reset();
+    const show = (): void => {
+      // 기다리는 사이에 씬을 떠났으면 열지 않는다.
+      if (!this.sys.isActive() || this.phase !== 'choosing') return;
+      sfx.gold();
+      vibrate(15);
+      showChoices(
+        this,
+        TICKET_HEADER,
+        this.sim.ticketChoices(),
+        DEPTH.panel,
+        (upgrade) => {
+          this.sim.useTicket(upgrade);
+          this.afterPick();
+        },
+        buildSummary(this.sim.state.weapons),
+      );
+    };
+    if (delayed) this.time.delayedCall(TICKET_DELAY_MS, show);
+    else show();
+  }
+
+  private afterPick(): void {
     this.drawHud();
-    if (this.sim.state.pendingLevelUps > 0) {
-      this.openLevelUp();
-      return;
-    }
-    this.saveRun();
-    this.resumeRun();
+    const s = this.sim.state;
+    // 고를 것이 남아 있지 않을 때만 저장한다. 다음 화면은 곧바로 연다.
+    if (s.pendingTickets === 0 && s.pendingLevelUps === 0) this.saveRun();
+    this.openNext();
   }
 
   // ------------------------------------------------------------ 저장과 끝
@@ -318,7 +363,11 @@ export class LanternKeeperScene extends MiniGameScene {
     });
     this.bars = this.add.graphics().setDepth(DEPTH.hud);
     this.levelText = addText(this, BAR.x, 33, '', { color: CSS.cyan }).setDepth(DEPTH.hud);
-    this.clockText = addText(this, BAR.x + BAR.width / 2, 33, '', { bold: true, originX: 0.5 }).setDepth(DEPTH.hud);
+    this.clockText = addText(this, BAR.x + BAR.width / 2, 33, '', {
+      bold: true,
+      color: CSS.white,
+      originX: 0.5,
+    }).setDepth(DEPTH.hud);
     this.killText = addText(this, BAR.x + BAR.width, 33, '', { color: CSS.silver, originX: 1 }).setDepth(DEPTH.hud);
     this.bossText = addText(this, GAME_WIDTH / 2, HUD_HEIGHT + 4, '', {
       color: CSS.red,

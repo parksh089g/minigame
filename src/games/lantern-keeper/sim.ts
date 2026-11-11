@@ -4,7 +4,8 @@
  */
 import {
   ENEMIES,
-  MID_BOSS_AT,
+  MID_BOSS_COUNT,
+  MID_BOSS_EVERY,
   PLAYER_BASE,
   RUN_SECONDS,
   SURGES,
@@ -15,17 +16,24 @@ import {
 } from './data';
 import {
   auraStats,
+  boltStats,
+  damageScale,
   EMBER_BONUS,
   emberStats,
   enemyHp,
   fireflyStats,
   HEAL_AMOUNT,
+  isEvolved,
+  lanceStats,
   maxAlive,
+  midBossTier,
   modifiers,
+  oilStats,
   pickSpawnKind,
   spawnPerSecond,
   speedScale,
   starStats,
+  ticketOptions,
   upgradeOptions,
   xpToNext,
   type Levels,
@@ -35,7 +43,7 @@ import {
   type Upgrade,
 } from './rules';
 
-export const RUN_STATE_VERSION = 1;
+export const RUN_STATE_VERSION = 2;
 
 export interface Enemy {
   uid: number;
@@ -48,15 +56,22 @@ export interface Enemy {
   flash: number;
   /** 느려진 남은 시간(초) */
   slow: number;
+  /** 느려져 있는 동안의 이동 속도 배율 */
+  slowTo: number;
   /** 반딧불에 다시 맞을 수 있을 때까지(초) */
   fireflyCd: number;
   /** 보스의 다음 행동까지(초) */
   timer: number;
   /** 보스의 상태. 0 쫓기, 1 힘 모으기, 2 돌진 */
   mode: number;
+  /** 몇 번째 중간 보스인지(0부터). 다른 적은 0 */
+  tier: number;
   vx: number;
   vy: number;
 }
+
+/** 날아가는 것의 생김새. 화면에서 그림을 고를 때 쓴다. */
+export type ShotLook = 'ember' | 'emberEvo' | 'lance' | 'lanceEvo';
 
 export interface Shot {
   x: number;
@@ -66,6 +81,9 @@ export interface Shot {
   damage: number;
   pierce: number;
   life: number;
+  /** 판정 반지름(px) */
+  radius: number;
+  look: ShotLook;
   /** 이미 맞힌 적. 관통할 때 같은 적을 두 번 때리지 않는다. */
   hit: number[];
 }
@@ -86,6 +104,24 @@ export interface Strike {
   delay: number;
   radius: number;
   damage: number;
+  evolved: boolean;
+}
+
+/** 등잔 기름이 남긴 불길 */
+export interface Fire {
+  x: number;
+  y: number;
+  radius: number;
+  /** 남은 시간(초) */
+  life: number;
+  /** 다음에 태울 때까지(초) */
+  tick: number;
+  /** 태우는 간격(초) */
+  every: number;
+  damage: number;
+  /** 닿은 적의 이동 속도 배율 */
+  slow: number;
+  evolved: boolean;
 }
 
 export interface RunState {
@@ -113,17 +149,21 @@ export interface RunState {
   shots: Shot[];
   gems: Gem[];
   strikes: Strike[];
-  cd: { ember: number; aura: number; star: number };
+  fires: Fire[];
+  cd: { ember: number; aura: number; star: number; lance: number; oil: number; bolt: number };
   fireflyAngle: number;
   spawnDebt: number;
   surgeIndex: number;
-  midBoss: boolean;
+  /** 지금까지 나온 중간 보스의 수 */
+  midBosses: number;
   finalBoss: boolean;
   kills: number;
   bossKills: number;
   bonusEmbers: number;
   /** 아직 고르지 않은 레벨업 횟수. 0보다 크면 시뮬레이션이 멈춘다. */
   pendingLevelUps: number;
+  /** 아직 쓰지 않은 무기 강화권. 0보다 크면 시뮬레이션이 멈춘다. */
+  pendingTickets: number;
   nextUid: number;
   over: null | 'dead' | 'cleared';
 }
@@ -136,7 +176,10 @@ export type SimEvent =
   | { type: 'levelup' }
   | { type: 'shoot' }
   | { type: 'strike'; x: number; y: number; radius: number }
+  /** 번갯불이 지나간 길. points는 x, y가 번갈아 들어 있다. */
+  | { type: 'bolt'; points: number[]; evolved: boolean }
   | { type: 'boss'; kind: EnemyKind }
+  | { type: 'ticket' }
   | { type: 'surge' };
 
 export interface RunConfig {
@@ -147,9 +190,12 @@ export interface RunConfig {
 
 const CELL = 20;
 const BUCKETS = 4096;
-const SHOT_RADIUS = 3;
+const EMBER_RADIUS = 3;
 const FIREFLY_RADIUS = 4;
 const EMBER_RANGE = 130;
+const LANCE_RANGE = 170;
+/** 꿰뚫는 화살은 사라질 때까지 몇이든 꿰뚫는다. */
+const PIERCE_ALL = 9999;
 const GEM_LIMIT = 220;
 const GEM_PICKUP = 7;
 const GEM_SPEED = 170;
@@ -173,16 +219,18 @@ export function createRun(config: RunConfig): RunState {
     shots: [],
     gems: [],
     strikes: [],
-    cd: { ember: 0.6, aura: 0, star: 1 },
+    fires: [],
+    cd: { ember: 0.6, aura: 0, star: 1, lance: 0.8, oil: 0.5, bolt: 0.7 },
     fireflyAngle: 0,
     spawnDebt: 0,
     surgeIndex: 0,
-    midBoss: false,
+    midBosses: 0,
     finalBoss: false,
     kills: 0,
     bossKills: 0,
     bonusEmbers: 0,
     pendingLevelUps: 0,
+    pendingTickets: 0,
     nextUid: 1,
     over: null,
   };
@@ -201,7 +249,8 @@ export function looksLikeRun(raw: unknown): raw is RunState {
     Array.isArray(run.enemies) &&
     Array.isArray(run.gems) &&
     Array.isArray(run.shots) &&
-    Array.isArray(run.strikes)
+    Array.isArray(run.strikes) &&
+    Array.isArray(run.fires)
   );
 }
 
@@ -238,9 +287,27 @@ export class Sim {
     return upgradeOptions({ weapons: this.state.weapons, passives: this.state.passives }, this.rand);
   }
 
+  /** 레벨업에서 고른 강화를 반영한다. */
   applyUpgrade(upgrade: Upgrade): void {
     const s = this.state;
     if (s.pendingLevelUps > 0) s.pendingLevelUps -= 1;
+    this.grant(upgrade);
+  }
+
+  /** 무기 강화권으로 고를 수 있는 것 */
+  ticketChoices(): Upgrade[] {
+    return ticketOptions(this.state.weapons);
+  }
+
+  /** 무기 강화권을 한 장 써서 고른 것을 반영한다. */
+  useTicket(upgrade: Upgrade): void {
+    const s = this.state;
+    if (s.pendingTickets > 0) s.pendingTickets -= 1;
+    this.grant(upgrade);
+  }
+
+  private grant(upgrade: Upgrade): void {
+    const s = this.state;
     switch (upgrade.type) {
       case 'weapon':
         s.weapons[upgrade.id] = upgrade.level;
@@ -275,12 +342,12 @@ export class Sim {
 
   /**
    * dt초만큼 진행한다. moveX, moveY는 길이가 1 이하인 이동 방향.
-   * 레벨업 선택을 기다리는 중이거나 판이 끝났으면 아무 일도 하지 않는다.
+   * 레벨업이나 강화권 선택을 기다리는 중이거나 판이 끝났으면 아무 일도 하지 않는다.
    */
   step(dt: number, moveX: number, moveY: number): void {
     this.events.length = 0;
     const s = this.state;
-    if (s.over || s.pendingLevelUps > 0) return;
+    if (s.over || s.pendingLevelUps > 0 || s.pendingTickets > 0) return;
 
     s.t += dt;
     this.movePlayer(dt, moveX, moveY);
@@ -291,6 +358,7 @@ export class Sim {
     this.fireWeapons(dt);
     this.moveShots(dt);
     this.landStrikes(dt);
+    this.burnFires(dt);
     this.reap();
     this.moveGems(dt);
   }
@@ -324,9 +392,11 @@ export class Sim {
       maxHp: hp,
       flash: 0,
       slow: 0,
+      slowTo: 1,
       fireflyCd: 0,
       timer: kind === 'giant' ? 5 : kind === 'lord' ? 3 : 0,
       mode: 0,
+      tier: 0,
       vx: 0,
       vy: 0,
     };
@@ -379,9 +449,13 @@ export class Sim {
       this.events.push({ type: 'surge' });
     }
 
-    if (!s.midBoss && s.t >= MID_BOSS_AT) {
-      s.midBoss = true;
-      this.spawnBoss('giant');
+    // 중간 보스: 정해진 간격마다 하나씩, 나올 때마다 더 강하게
+    if (s.midBosses < MID_BOSS_COUNT && s.t >= (s.midBosses + 1) * MID_BOSS_EVERY) {
+      const boss = this.spawnBoss('giant');
+      boss.tier = s.midBosses;
+      boss.hp = midBossTier(boss.tier).hp;
+      boss.maxHp = boss.hp;
+      s.midBosses += 1;
     }
     if (!s.finalBoss && s.t >= RUN_SECONDS) {
       s.finalBoss = true;
@@ -389,11 +463,12 @@ export class Sim {
     }
   }
 
-  private spawnBoss(kind: EnemyKind): void {
+  private spawnBoss(kind: EnemyKind): Enemy {
     const s = this.state;
     // 보스는 위쪽에서 내려온다.
-    this.makeEnemy(kind, s.player.x, s.player.y - s.viewH / 2 - 24);
+    const boss = this.makeEnemy(kind, s.player.x, s.player.y - s.viewH / 2 - 24);
     this.events.push({ type: 'boss', kind });
+    return boss;
   }
 
   // ------------------------------------------------------------ 격자
@@ -425,6 +500,7 @@ export class Sim {
     const gridCount = enemies.length;
     const recycle = Math.max(s.viewW, s.viewH) * 0.5 + 90;
     const fast = speedScale(this.clock);
+    const hard = damageScale(this.clock);
 
     for (let i = 0; i < gridCount; i += 1) {
       const e = enemies[i];
@@ -446,7 +522,7 @@ export class Sim {
         distance = Math.hypot(dx, dy) || 0.001;
       }
 
-      let speed = info.speed * (info.boss ? 1 : fast) * (e.slow > 0 ? 0.6 : 1);
+      let speed = info.speed * (info.boss ? 1 : fast) * (e.slow > 0 ? e.slowTo : 1);
       let dirX = dx / distance;
       let dirY = dy / distance;
 
@@ -455,8 +531,9 @@ export class Sim {
         if (distance > recycle) speed *= 4;
         e.timer -= dt;
         if (e.kind === 'giant' && e.timer <= 0) {
+          const tier = midBossTier(e.tier);
           e.timer = 7;
-          this.summon(e, 'bat', 8, 26);
+          this.summon(e, tier.minion, tier.summon, 26);
         } else if (e.kind === 'lord') {
           if (e.mode === 0 && e.timer <= 0) {
             e.mode = 1;
@@ -518,7 +595,7 @@ export class Sim {
       const px = p.x - e.x;
       const py = p.y - e.y;
       if (p.inv <= 0 && px * px + py * py < reach * reach) {
-        p.hp -= info.damage;
+        p.hp -= info.boss ? info.damage : Math.round(info.damage * hard);
         p.inv = PLAYER_BASE.invulnerable;
         this.events.push({ type: 'hurt' });
         if (p.hp <= 0) {
@@ -545,6 +622,13 @@ export class Sim {
     enemy.flash = flash;
   }
 
+  /** 잠깐 느리게 한다. 이미 더 느려져 있으면 그 배율을 지킨다. */
+  private chill(enemy: Enemy, factor: number): void {
+    if (factor >= 1) return;
+    enemy.slowTo = enemy.slow > 0 ? Math.min(enemy.slowTo, factor) : factor;
+    enemy.slow = 0.7;
+  }
+
   private fireWeapons(dt: number): void {
     const s = this.state;
     const p = s.player;
@@ -567,6 +651,7 @@ export class Sim {
         if (target) {
           const stats = emberStats(w.ember, this.mods);
           const base = Math.atan2(target.y - p.y, target.x - p.x);
+          const look: ShotLook = isEvolved(w.ember) ? 'emberEvo' : 'ember';
           for (let i = 0; i < stats.count; i += 1) {
             const angle = base + (i - (stats.count - 1) / 2) * 0.22;
             s.shots.push({
@@ -577,6 +662,8 @@ export class Sim {
               damage: stats.damage,
               pierce: stats.pierce,
               life: 1,
+              radius: EMBER_RADIUS,
+              look,
               hit: [],
             });
           }
@@ -599,7 +686,7 @@ export class Sim {
           if ((e.x - p.x) ** 2 + (e.y - p.y) ** 2 < reach * reach) {
             // 고리 안의 적이 한꺼번에 번쩍여 화면을 가리지 않게 짧게만 깜빡인다.
             this.damage(e, stats.damage, 0.04);
-            if (stats.slow < 1) e.slow = 0.7;
+            this.chill(e, stats.slow);
           }
         }
       }
@@ -643,10 +730,112 @@ export class Sim {
               delay: 0.35 + i * 0.12,
               radius: stats.radius,
               damage: stats.damage,
+              evolved: isEvolved(w.star),
             });
           }
           s.cd.star = stats.cooldown;
         }
+      }
+    }
+
+    if (w.lance) {
+      s.cd.lance -= dt;
+      if (s.cd.lance <= 0) {
+        // 닿는 거리 안에서 체력이 가장 많은 적을 겨눈다. 그 사이에 있는 적은 모두 꿰뚫는다.
+        let target: Enemy | null = null;
+        for (const e of enemies) {
+          if (e.hp <= 0 || (e.x - p.x) ** 2 + (e.y - p.y) ** 2 > LANCE_RANGE * LANCE_RANGE) continue;
+          if (!target || e.hp > target.hp) target = e;
+        }
+        if (target) {
+          const stats = lanceStats(w.lance, this.mods);
+          const base = Math.atan2(target.y - p.y, target.x - p.x);
+          const look: ShotLook = isEvolved(w.lance) ? 'lanceEvo' : 'lance';
+          for (let i = 0; i < stats.count; i += 1) {
+            const angle = base + (i - (stats.count - 1) / 2) * 0.2;
+            s.shots.push({
+              x: p.x,
+              y: p.y,
+              vx: Math.cos(angle) * stats.speed,
+              vy: Math.sin(angle) * stats.speed,
+              damage: stats.damage,
+              pierce: PIERCE_ALL,
+              life: stats.life,
+              radius: stats.radius,
+              look,
+              hit: [],
+            });
+          }
+          s.cd.lance = stats.cooldown;
+          this.events.push({ type: 'shoot' });
+        } else {
+          s.cd.lance = 0.15;
+        }
+      }
+    }
+
+    if (w.oil) {
+      s.cd.oil -= dt;
+      if (s.cd.oil <= 0) {
+        const stats = oilStats(w.oil, this.mods);
+        s.cd.oil = stats.cooldown;
+        // 서 있던 자리에 이미 불길이 있으면 겹쳐 쌓지 않고 그 불길을 다시 살린다.
+        const here = s.fires.find((fire) => (fire.x - p.x) ** 2 + (fire.y - p.y) ** 2 < (fire.radius * 0.5) ** 2);
+        if (here) {
+          here.life = stats.duration;
+          here.radius = stats.radius;
+          here.damage = stats.damage;
+          here.slow = stats.slow;
+          here.evolved = isEvolved(w.oil);
+        } else {
+          s.fires.push({
+            x: p.x,
+            y: p.y,
+            radius: stats.radius,
+            life: stats.duration,
+            tick: 0,
+            every: stats.tick,
+            damage: stats.damage,
+            slow: stats.slow,
+            evolved: isEvolved(w.oil),
+          });
+        }
+      }
+    }
+
+    if (w.bolt) {
+      s.cd.bolt -= dt;
+      if (s.cd.bolt <= 0) {
+        const stats = boltStats(w.bolt, this.mods);
+        const struck: Enemy[] = [];
+        for (let chain = 0; chain < stats.chains; chain += 1) {
+          // 플레이어에게서 가장 가까운 적을 치고, 거기서 가까운 다음 적으로 튄다.
+          const points = [p.x, p.y];
+          let fromX = p.x;
+          let fromY = p.y;
+          let range = stats.reach;
+          for (let jump = 0; jump < stats.jumps; jump += 1) {
+            let target: Enemy | null = null;
+            let best = range * range;
+            for (const e of enemies) {
+              if (e.hp <= 0 || struck.includes(e)) continue;
+              const d2 = (e.x - fromX) ** 2 + (e.y - fromY) ** 2;
+              if (d2 < best) {
+                best = d2;
+                target = e;
+              }
+            }
+            if (!target) break;
+            struck.push(target);
+            this.damage(target, stats.damage);
+            points.push(target.x, target.y);
+            fromX = target.x;
+            fromY = target.y;
+            range = stats.hop;
+          }
+          if (points.length > 2) this.events.push({ type: 'bolt', points, evolved: isEvolved(w.bolt) });
+        }
+        s.cd.bolt = struck.length > 0 ? stats.cooldown : 0.15;
       }
     }
   }
@@ -670,7 +859,7 @@ export class Sim {
             const e = enemies[j];
             j = this.next[j];
             if (e.hp <= 0 || shot.hit.includes(e.uid)) continue;
-            const reach = SHOT_RADIUS + ENEMIES[e.kind].radius;
+            const reach = shot.radius + ENEMIES[e.kind].radius;
             const dx = e.x - shot.x;
             const dy = e.y - shot.y;
             if (dx * dx + dy * dy >= reach * reach) continue;
@@ -720,6 +909,31 @@ export class Sim {
     s.strikes.length = kept;
   }
 
+  private burnFires(dt: number): void {
+    const s = this.state;
+    let kept = 0;
+    for (const fire of s.fires) {
+      fire.life -= dt;
+      fire.tick -= dt;
+      if (fire.tick <= 0) {
+        fire.tick += fire.every;
+        for (const e of s.enemies) {
+          if (e.hp <= 0) continue;
+          const reach = fire.radius + ENEMIES[e.kind].radius;
+          if ((e.x - fire.x) ** 2 + (e.y - fire.y) ** 2 < reach * reach) {
+            this.damage(e, fire.damage, 0.04);
+            this.chill(e, fire.slow);
+          }
+        }
+      }
+      if (fire.life > 0) {
+        s.fires[kept] = fire;
+        kept += 1;
+      }
+    }
+    s.fires.length = kept;
+  }
+
   // ------------------------------------------------------------ 정리와 보상
 
   /** 쓰러진 적을 치우고 빛 조각을 떨어뜨린다. 순서를 지켜 줄여서 그리는 순서가 흔들리지 않게 한다. */
@@ -739,7 +953,13 @@ export class Sim {
       if (info.boss) {
         s.bossKills += 1;
         this.dropGem(e.x + 8, e.y, HEAL_DROP_VALUE * 2, 'heal');
-        if (e.kind === 'lord') s.over = 'cleared';
+        if (e.kind === 'lord') {
+          s.over = 'cleared';
+        } else {
+          // 중간 보스를 잡으면 무기 강화권을 한 장 받는다.
+          s.pendingTickets += 1;
+          this.events.push({ type: 'ticket' });
+        }
       } else if (this.rand() < HEAL_DROP_CHANCE) {
         this.dropGem(e.x, e.y, HEAL_DROP_VALUE, 'heal');
       }

@@ -11,6 +11,8 @@ export type BotStyle = 'still' | 'kite';
 export interface BotResult extends RunSummary {
   over: 'dead' | 'cleared' | null;
   peakEnemies: number;
+  /** 끝났을 때 들고 있던 무기와 그 레벨 */
+  weapons: Sim['state']['weapons'];
 }
 
 const DANGER_RANGE = 34;
@@ -18,7 +20,7 @@ const LOOK_AHEAD = 12;
 const DIRECTIONS = 16;
 
 /** 열여섯 방향 가운데, 조금 나아갔을 때 적과 덜 가깝고 빛 조각에 가까워지는 쪽을 고른다. */
-function steer(sim: Sim): [number, number] {
+export function steer(sim: Sim): [number, number] {
   const { player, enemies, gems } = sim.state;
   const near = enemies.filter(
     (e) => Math.abs(e.x - player.x) < 70 && Math.abs(e.y - player.y) < 70,
@@ -58,10 +60,19 @@ function steer(sim: Sim): [number, number] {
   return [bestX, bestY];
 }
 
-/** 선택지 가운데 무기를 먼저, 그다음 패시브를 고른다. */
-function choose(options: Upgrade[]): Upgrade {
-  return options.find((u) => u.type === 'weapon') ?? options[0];
+export type Chooser = (options: Upgrade[]) => Upgrade;
+
+/** 무기 강화권은 가장 많이 올린 무기에 쓴다. 진화할 수 있으면 진화가 된다. */
+function spendTicket(options: Upgrade[]): Upgrade {
+  let best = options[0];
+  for (const option of options) {
+    if (option.type === 'weapon' && (best.type !== 'weapon' || option.level > best.level)) best = option;
+  }
+  return best;
 }
+
+/** 선택지 가운데 무기를 먼저, 그다음 패시브를 고른다. */
+export const weaponFirst: Chooser = (options) => options.find((u) => u.type === 'weapon') ?? options[0];
 
 export function playRun(
   seed: number,
@@ -69,14 +80,16 @@ export function playRun(
   config: RunConfig,
   maxSeconds = 900,
   dt = 1 / 30,
+  choose: Chooser = weaponFirst,
 ): BotResult {
   const sim = new Sim(createRun(config), seededRandom(seed));
   let peakEnemies = 0;
   while (!sim.state.over && sim.state.t < maxSeconds) {
+    while (sim.state.pendingTickets > 0) sim.useTicket(spendTicket(sim.ticketChoices()));
     while (sim.state.pendingLevelUps > 0) sim.applyUpgrade(choose(sim.options()));
     const [x, y] = style === 'kite' ? steer(sim) : [0, 0];
     sim.step(dt, x, y);
     peakEnemies = Math.max(peakEnemies, sim.state.enemies.length);
   }
-  return { ...sim.summary(), over: sim.state.over, peakEnemies };
+  return { ...sim.summary(), over: sim.state.over, peakEnemies, weapons: { ...sim.state.weapons } };
 }

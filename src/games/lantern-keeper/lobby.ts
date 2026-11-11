@@ -79,7 +79,7 @@ export function buildLobby(scene: Phaser.Scene, handlers: LobbyHandlers): void {
     const y = ROWS_TOP + index * (ROW_HEIGHT + ROW_GAP);
     const panel = scene.add.graphics();
     drawPanel(panel, MARGIN, y, ROW_WIDTH, ROW_HEIGHT);
-    const name = addText(scene, MARGIN + 8, y + 4, item.name, { bold: true });
+    const name = addText(scene, MARGIN + 8, y + 4, item.name, { bold: true, color: CSS.white });
     addText(scene, MARGIN + 8, y + 19, item.perLevel, { color: CSS.silver });
     const pips = scene.add.graphics();
     const pipsLeft = Math.round(name.x + name.width) + 6;

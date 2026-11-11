@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { playRun } from './bot';
-import { ENEMIES, MID_BOSS_AT, RUN_SECONDS, SURGES } from './data';
+import { ENEMIES, EVOLVE_LEVEL, MAX_LEVEL, MID_BOSS_COUNT, MID_BOSS_EVERY, MID_BOSS_TIERS, RUN_SECONDS, SURGES } from './data';
 import { maxAlive, seededRandom, xpToNext, type Upgrade } from './rules';
 import { createRun, looksLikeRun, Sim, type Enemy, type RunState, type SimEvent } from './sim';
 
@@ -12,13 +12,30 @@ function newSim(seed = 1, state: RunState = createRun(config)): Sim {
 }
 
 function enemy(kind: Enemy['kind'], x: number, y: number, hp = ENEMIES[kind].hp): Enemy {
-  return { uid: 9000 + x, kind, x, y, hp, maxHp: hp, flash: 0, slow: 0, fireflyCd: 0, timer: 99, mode: 0, vx: 0, vy: 0 };
+  return {
+    uid: 9000 + x * 7 + y,
+    kind,
+    x,
+    y,
+    hp,
+    maxHp: hp,
+    flash: 0,
+    slow: 0,
+    slowTo: 1,
+    fireflyCd: 0,
+    timer: 99,
+    mode: 0,
+    tier: 0,
+    vx: 0,
+    vy: 0,
+  };
 }
 
-/** seconds초 동안 돌리면서 일어난 일을 모은다. 레벨업은 첫 선택지로 넘긴다. */
+/** seconds초 동안 돌리면서 일어난 일을 모은다. 레벨업과 강화권은 첫 선택지로 넘긴다. */
 function advance(sim: Sim, seconds: number, moveX = 0, moveY = 0): SimEvent[] {
   const events: SimEvent[] = [];
   for (let i = 0; i < Math.round(seconds / STEP); i += 1) {
+    while (sim.state.pendingTickets > 0) sim.useTicket(sim.ticketChoices()[0]);
     while (sim.state.pendingLevelUps > 0) sim.applyUpgrade(sim.options()[0]);
     sim.step(STEP, moveX, moveY);
     events.push(...sim.events);
@@ -56,6 +73,22 @@ describe('적', () => {
     expect(Math.max(Math.abs(first.x) - 120, Math.abs(first.y) - 260)).toBeGreaterThan(-30);
     advance(sim, 1);
     expect(Math.hypot(first.x, first.y)).toBeLessThan(before);
+  });
+
+  it('후반에는 같은 적이 더 아프게 때린다', () => {
+    const hit = (t: number): number => {
+      const sim = newSim();
+      sim.state.t = t;
+      sim.state.weapons = {};
+      sim.state.surgeIndex = SURGES.length;
+      sim.state.midBosses = MID_BOSS_COUNT;
+      sim.state.finalBoss = true;
+      sim.state.enemies.push(enemy('brute', 2, 0, 9999));
+      sim.step(STEP, 0, 0);
+      return 100 - sim.state.player.hp;
+    };
+    expect(hit(0)).toBe(ENEMIES.brute.damage);
+    expect(hit(RUN_SECONDS)).toBeGreaterThan(ENEMIES.brute.damage);
   });
 
   it('닿으면 피해를 주고, 잠깐 동안은 다시 피해를 주지 않는다', () => {
@@ -156,6 +189,91 @@ describe('무기', () => {
     expect(events.some((e) => e.type === 'strike')).toBe(true);
     expect(sim.state.enemies.every((e) => e.hp < 500)).toBe(true);
   });
+
+  it('빛화살은 가장 튼튼한 적을 겨누고 그 사이의 적을 모두 꿰뚫는다', () => {
+    const sim = newSim();
+    sim.state.weapons = { lance: 1 };
+    sim.state.cd.lance = 0;
+    sim.state.spawnDebt = -100;
+    sim.state.enemies.push(
+      enemy('brute', 40, 0, 300),
+      enemy('brute', 70, 0, 300),
+      enemy('brute', 100, 0, 900),
+      enemy('brute', 0, 60, 300),
+    );
+    advance(sim, 0.7);
+    const [first, second, toughest, aside] = sim.state.enemies;
+    expect(first.hp).toBeLessThan(300);
+    expect(second.hp).toBeLessThan(300);
+    expect(toughest.hp).toBeLessThan(900);
+    expect(aside.hp).toBe(300);
+  });
+
+  it('등잔 기름은 서 있던 자리에 불길을 남기고, 그 위의 적만 태운다', () => {
+    const sim = newSim();
+    sim.state.weapons = { oil: 1 };
+    sim.state.cd.oil = 0;
+    sim.state.spawnDebt = -100;
+    sim.state.enemies.push(enemy('brute', 10, 0, 500), enemy('brute', 90, 0, 500));
+    sim.state.player.hp = 1e9;
+    sim.step(STEP, 0, 0);
+    expect(sim.state.fires).toHaveLength(1);
+    const [near, far] = sim.state.enemies;
+    expect(near.hp).toBeLessThan(500);
+    expect(far.hp).toBe(500);
+
+    // 걸어서 떠나도 불길은 제자리에 남는다.
+    const fire = sim.state.fires[0];
+    advance(sim, 1, 1, 0);
+    expect(sim.state.fires[0]).toBe(fire);
+    expect(fire.x).toBe(0);
+    expect(sim.state.player.x).toBeGreaterThan(50);
+  });
+
+  it('제자리에 서 있어도 불길이 겹쳐 쌓이지 않고, 시간이 지나면 꺼진다', () => {
+    const sim = newSim();
+    sim.state.weapons = { oil: 1 };
+    sim.state.cd.oil = 0;
+    sim.state.spawnDebt = -1000;
+    advance(sim, 8);
+    expect(sim.state.fires).toHaveLength(1);
+    sim.state.weapons = {};
+    advance(sim, 4);
+    expect(sim.state.fires).toHaveLength(0);
+  });
+
+  it('번갯불은 가까이 모인 적들을 차례로 치고, 멀리 떨어진 적에게는 튀지 않는다', () => {
+    const sim = newSim();
+    sim.state.weapons = { bolt: 1 };
+    sim.state.cd.bolt = 0;
+    sim.state.spawnDebt = -100;
+    sim.state.enemies.push(
+      enemy('brute', 50, 0, 500),
+      enemy('brute', 80, 0, 500),
+      enemy('brute', 110, 0, 500),
+      enemy('brute', 140, 0, 500),
+      enemy('brute', 0, -200, 500),
+    );
+    sim.step(STEP, 0, 0);
+    const bolt = sim.events.find((e) => e.type === 'bolt');
+    // 플레이어에서 시작해 세 마리를 친다: 점 네 개
+    expect(bolt).toMatchObject({ type: 'bolt', evolved: false });
+    expect(bolt?.type === 'bolt' && bolt.points.length).toBe(8);
+    expect(sim.state.enemies.map((e) => e.hp < 500)).toEqual([true, true, true, false, false]);
+  });
+
+  it('진화한 무기는 다른 모습으로 나간다', () => {
+    const sim = newSim();
+    sim.state.weapons = { ember: EVOLVE_LEVEL, lance: EVOLVE_LEVEL };
+    sim.state.cd.ember = 0;
+    sim.state.cd.lance = 0;
+    sim.state.spawnDebt = -100;
+    sim.state.enemies.push(enemy('brute', 60, 0, 5000));
+    sim.step(STEP, 0, 0);
+    const looks = sim.state.shots.map((shot) => shot.look);
+    expect(looks.filter((look) => look === 'emberEvo')).toHaveLength(4);
+    expect(looks.filter((look) => look === 'lanceEvo')).toHaveLength(3);
+  });
 });
 
 describe('빛 조각과 레벨업', () => {
@@ -217,26 +335,80 @@ describe('빛 조각과 레벨업', () => {
 });
 
 describe('보스와 끝', () => {
-  it('5분에 중간 보스가, 10분에 마지막 보스가 한 번씩 나온다', () => {
+  it('2분마다 중간 보스가 점점 강해져서 나오고, 10분에는 마지막 보스가 나온다', () => {
     const state = createRun(config);
-    state.t = MID_BOSS_AT - 0.01;
     state.surgeIndex = SURGES.length;
     const sim = newSim(1, state);
+    sim.state.weapons = {};
     sim.state.player.hp = 1e9;
-    sim.step(STEP, 0, 0);
-    expect(sim.events).toContainEqual({ type: 'boss', kind: 'giant' });
-    sim.step(STEP, 0, 0);
-    expect(sim.state.enemies.filter((e) => e.kind === 'giant')).toHaveLength(1);
+    expect(MID_BOSS_COUNT).toBe(4);
+
+    for (let n = 0; n < MID_BOSS_COUNT; n += 1) {
+      sim.state.t = (n + 1) * MID_BOSS_EVERY - 0.01;
+      sim.step(STEP, 0, 0);
+      expect(sim.events).toContainEqual({ type: 'boss', kind: 'giant' });
+      sim.step(STEP, 0, 0);
+      const giants = sim.state.enemies.filter((e) => e.kind === 'giant');
+      expect(giants).toHaveLength(n + 1);
+      expect(giants[n]).toMatchObject({ tier: n, hp: MID_BOSS_TIERS[n].hp, maxHp: MID_BOSS_TIERS[n].hp });
+    }
 
     sim.state.t = RUN_SECONDS - 0.01;
     sim.step(STEP, 0, 0);
     expect(sim.events).toContainEqual({ type: 'boss', kind: 'lord' });
+    // 마지막 보스와 함께 중간 보스가 또 나오지는 않는다.
+    sim.step(STEP, 0, 0);
+    expect(sim.state.enemies.filter((e) => e.kind === 'giant')).toHaveLength(MID_BOSS_COUNT);
+    expect(sim.state.enemies.filter((e) => e.kind === 'lord')).toHaveLength(1);
+  });
+
+  it('중간 보스를 잡으면 무기 강화권을 받고, 고를 때까지 멈춘다', () => {
+    const sim = newSim();
+    sim.state.weapons = { ember: 2, aura: 1 };
+    sim.state.spawnDebt = -100;
+    sim.state.enemies.push(enemy('giant', 30, 0, 1));
+    const events: SimEvent[] = [];
+    for (let i = 0; i < 120 && sim.state.pendingTickets === 0; i += 1) {
+      sim.step(STEP, 0, 0);
+      events.push(...sim.events);
+    }
+    expect(events).toContainEqual({ type: 'ticket' });
+    expect(sim.state.pendingTickets).toBe(1);
+    expect(sim.state.bossKills).toBe(1);
+
+    const t = sim.state.t;
+    sim.step(STEP, 1, 0);
+    expect(sim.state.t).toBe(t);
+
+    // 가진 무기만, 한 레벨씩 올릴 수 있다.
+    const choices = sim.ticketChoices();
+    expect(choices).toEqual([
+      { type: 'weapon', id: 'ember', level: 3 },
+      { type: 'weapon', id: 'aura', level: 2 },
+    ]);
+    sim.useTicket(choices[1]);
+    expect(sim.state.weapons).toEqual({ ember: 2, aura: 2 });
+    expect(sim.state.pendingTickets).toBe(0);
+    sim.step(STEP, 1, 0);
+    expect(sim.state.t).toBeGreaterThan(t);
+  });
+
+  it('5레벨 무기에 강화권을 쓰면 진화하고, 다 진화했으면 회복이나 불씨를 받는다', () => {
+    const sim = newSim();
+    sim.state.weapons = { ember: MAX_LEVEL };
+    sim.state.pendingTickets = 2;
+    sim.useTicket(sim.ticketChoices()[0]);
+    expect(sim.state.weapons.ember).toBe(EVOLVE_LEVEL);
+    expect(sim.ticketChoices().map((u) => u.type)).toEqual(['heal', 'embers']);
+    sim.useTicket(sim.ticketChoices()[1]);
+    expect(sim.state.pendingTickets).toBe(0);
+    expect(sim.summary().bonusEmbers).toBeGreaterThan(0);
   });
 
   it('마지막 보스를 쓰러뜨리면 완주다', () => {
     const sim = newSim();
     sim.state.t = RUN_SECONDS + 5;
-    sim.state.midBoss = true;
+    sim.state.midBosses = MID_BOSS_COUNT;
     sim.state.finalBoss = true;
     sim.state.surgeIndex = SURGES.length;
     sim.state.enemies.push(enemy('lord', 40, 0, 1));
@@ -272,7 +444,7 @@ describe('저장과 이어하기', () => {
 
   it('끝난 판이나 엉뚱한 값은 이어하지 않는다', () => {
     expect(looksLikeRun(null)).toBe(false);
-    expect(looksLikeRun({ version: 1 })).toBe(false);
+    expect(looksLikeRun({ version: 2 })).toBe(false);
     expect(looksLikeRun({ ...createRun(config), version: 0 })).toBe(false);
     expect(looksLikeRun({ ...createRun(config), over: 'dead' })).toBe(false);
   });

@@ -20,8 +20,13 @@ export const LK = {
   gemBig: 'lk-gem-b',
   heal: 'lk-heal',
   ember: 'lk-ember',
+  emberEvo: 'lk-ember-evo',
   firefly: 'lk-firefly',
+  fireflyEvo: 'lk-firefly-evo',
   star: 'lk-star',
+  starEvo: 'lk-star-evo',
+  lance: 'lk-lance',
+  lanceEvo: 'lk-lance-evo',
   floor: 'lk-floor',
   spark: 'lk-spark',
 } as const;
@@ -32,7 +37,14 @@ export const LK = {
 export const LOOK = {
   aura: COLOR.yellow,
   auraEdge: COLOR.orange,
+  auraEvo: COLOR.white,
+  auraEvoEdge: COLOR.yellow,
   strike: COLOR.yellow,
+  fire: COLOR.orange,
+  fireCore: COLOR.yellow,
+  fireEvo: COLOR.red,
+  bolt: COLOR.cyan,
+  boltEvo: COLOR.white,
 } as const;
 
 /** 맞았을 때 잠깐 하얗게 보이는 텍스처의 이름 */
@@ -95,6 +107,24 @@ const WISP_1: Rows = [
 ];
 /** 불꽃 끝이 옆으로 흔들린다. */
 const WISP_2: Rows = [...WISP_1.slice(0, 3).map((row) => `.${row.slice(0, -1)}`), ...WISP_1.slice(3)];
+
+/** 빛화살. 오른쪽을 보게 그리고, 날아가는 쪽으로 돌려서 쓴다. */
+const LANCE: Rows = [
+  '.........c..',
+  '.4444444ccc.',
+  'cccccccccccc',
+  '.4444444ccc.',
+  '.........c..',
+];
+const LANCE_EVO: Rows = [
+  '...........cc...',
+  '..33333333cccc..',
+  '.3444444444cccc.',
+  '44cccccccccccccc',
+  '.3444444444cccc.',
+  '..33333333cccc..',
+  '...........cc...',
+];
 
 /** 회복 떡 */
 const HEAL: Rows = [
@@ -373,6 +403,33 @@ export function registerLanternTextures(scene: Phaser.Scene): void {
       [1.6, 12],
     ]),
   );
+  add(
+    LK.emberEvo,
+    drawDot(8, [
+      [4, 2],
+      [3.2, 3],
+      [2.3, 4],
+      [1.2, 12],
+    ]),
+  );
+  add(
+    LK.fireflyEvo,
+    drawDot(9, [
+      [4.5, 10],
+      [3.5, 11],
+      [2, 12],
+    ]),
+  );
+  add(
+    LK.starEvo,
+    drawDot(10, [
+      [5, 3],
+      [4, 4],
+      [2.4, 12],
+    ]),
+  );
+  add(LK.lance, drawRows(LANCE));
+  add(LK.lanceEvo, drawRows(LANCE_EVO));
   add(
     LK.spark,
     drawDot(2, [[1.5, 12]]),
