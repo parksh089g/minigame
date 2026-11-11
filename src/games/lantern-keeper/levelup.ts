@@ -4,11 +4,25 @@ import { vibrate } from '../../core/haptics';
 import { sfx } from '../../core/sfx';
 import { addTapZone, addText, drawPanel } from '../../core/ui';
 import { MAX_LEVEL } from './data';
+import { ICON_SIZE, iconKey, upgradeIcon } from './icons';
 import { isEvolved, upgradeDescription, upgradeTitle, type Upgrade } from './rules';
 
-const CARD_WIDTH = 208;
-const CARD_HEIGHT = 56;
+const CARD_WIDTH = 212;
+const CARD_HEIGHT = 60;
 const CARD_GAP = 8;
+/** 아이콘은 픽셀이 뭉개지지 않게 정수 배로만 키운다. */
+const ICON_SCALE = 2;
+/** 카드 왼쪽에 놓는 아이콘 칸의 한 변. 테두리까지 그린 아이콘보다 사방으로 2px 넓다. */
+const TILE = (ICON_SIZE + 2) * ICON_SCALE + 4;
+const TILE_INSET = 9;
+/** 글이 시작하는 자리 */
+const TEXT_LEFT = TILE_INSET + TILE + 8;
+/** 이름과 설명 사이 */
+const TEXT_GAP = 2;
+/** 첫 카드가 이보다 아래에 있으면 머리글이 HUD의 레벨, 처치 글자와 겹치지 않는다. */
+const HEADER_CLEAR = 102;
+/** 카드 아래에 두 줄짜리 설명이 들어갈 높이 */
+const FOOTER_ROOM = 40;
 /** 움직이던 손가락으로 엉뚱한 것을 고르지 않도록 잠깐 뒤부터 누를 수 있다. */
 const ARM_DELAY_MS = 380;
 
@@ -75,7 +89,10 @@ export function showChoices(
   };
 
   const total = options.length * CARD_HEIGHT + (options.length - 1) * CARD_GAP;
-  const top = Math.round((height - total) / 2) + 14;
+  // 가운데에 두되, 카드가 넷이라 길어져도 머리글이 위쪽 HUD 글자를 덮지 않게 내린다.
+  // 화면이 아주 짧을 때는 아래 한 줄이 잘리지 않는 데까지만 내린다.
+  const centered = Math.round((height - total) / 2) + 14;
+  const top = Math.max(centered, Math.min(HEADER_CLEAR, height - total - FOOTER_ROOM));
   const left = Math.round((GAME_WIDTH - CARD_WIDTH) / 2);
 
   keep(scene.add.rectangle(0, 0, width, height, COLOR.ink, 0.66).setOrigin(0, 0));
@@ -112,6 +129,8 @@ export function showChoices(
     const frame = keep(scene.add.graphics());
     // 진화하는 선택지는 테두리를 밝게 해서 눈에 띄게 한다.
     const special = evolves(upgrade);
+    const tileX = left + TILE_INSET;
+    const tileY = y + (CARD_HEIGHT - TILE) / 2;
     const draw = (pressed: boolean): void => {
       frame.clear();
       drawPanel(frame, left, y, CARD_WIDTH, CARD_HEIGHT, {
@@ -119,27 +138,44 @@ export function showChoices(
         border: pressed ? COLOR.sky : special ? COLOR.yellow : COLOR.slate,
         shadow: COLOR.ink,
       });
+      drawPanel(frame, tileX, tileY, TILE, TILE, {
+        fill: pressed ? COLOR.charcoal : COLOR.navy,
+        border: special ? COLOR.yellow : undefined,
+        shadow: null,
+        radius: 8,
+      });
     };
     draw(false);
     keep(
-      addText(scene, left + 10, y + 8, upgradeTitle(upgrade), {
+      scene.add
+        .image(tileX + TILE / 2, tileY + TILE / 2, iconKey(upgradeIcon(upgrade)))
+        .setScale(ICON_SCALE),
+    );
+    const title = keep(
+      addText(scene, left + TEXT_LEFT, y, upgradeTitle(upgrade), {
         bold: true,
         color: special ? CSS.white : TITLE_COLOR[upgrade.type],
       }),
     );
-    keep(
-      addText(scene, left + CARD_WIDTH - 10, y + 8, badge(upgrade), {
+    const mark = keep(
+      addText(scene, left + CARD_WIDTH - 10, y, badge(upgrade), {
         color: special ? CSS.yellow : CSS.white,
         bold: special,
         originX: 1,
       }),
     );
-    keep(
-      addText(scene, left + 10, y + 26, upgradeDescription(upgrade), {
+    const description = keep(
+      addText(scene, left + TEXT_LEFT, y, upgradeDescription(upgrade), {
         color: CSS.silver,
-        wrapWidth: CARD_WIDTH - 20,
+        wrapWidth: CARD_WIDTH - TEXT_LEFT - 8,
+        lineSpacing: 1,
       }),
     );
+    // 설명이 한 줄이든 두 줄이든 글 덩어리가 카드 가운데에 오게 한다.
+    const textTop = Math.round(y + (CARD_HEIGHT - title.height - TEXT_GAP - description.height) / 2);
+    title.setY(textTop);
+    mark.setY(textTop);
+    description.setY(textTop + title.height + TEXT_GAP);
     keep(
       addTapZone(scene, left, y, CARD_WIDTH, CARD_HEIGHT, (pressed) => draw(pressed && armed), () => {
         if (!armed || picked) return;

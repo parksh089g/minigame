@@ -4,6 +4,7 @@
  */
 import Phaser from 'phaser';
 import { COLOR, PALETTE } from '../../config';
+import { ICON_IDS, ICONS, iconKey, withOutline } from './icons';
 
 type Rows = readonly string[];
 
@@ -443,4 +444,5 @@ export function registerLanternTextures(scene: Phaser.Scene): void {
   );
   add(LK.heal, drawRows(HEAL));
   add(LK.floor, drawFloor());
+  for (const id of ICON_IDS) add(iconKey(id), drawRows(withOutline(ICONS[id])));
 }
