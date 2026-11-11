@@ -116,8 +116,7 @@ export class ShopScene extends Phaser.Scene {
       CELL_HEIGHT.min,
       CELL_HEIGHT.max,
     );
-    const noticeTop = GRID_TOP + rowCount * (this.cellHeight + CELL_GAP) + 2;
-    this.notice = addText(this, GAME_WIDTH / 2, noticeTop, '', {
+    this.notice = addText(this, GAME_WIDTH / 2, this.noticeTop(this.slot), '', {
       originX: 0.5,
       align: 'center',
       wrapWidth: CONTENT_WIDTH,
@@ -141,7 +140,14 @@ export class ShopScene extends Phaser.Scene {
     for (const key of SLOTS) this.tabs[key].setStyle(key === slot ? 'pink' : 'neutral');
     this.hint.setText(SLOT_INFO[slot].hint);
     if (announce) this.setNotice('');
+    this.notice.setY(this.noticeTop(slot));
     this.rowsDirty = true;
+  }
+
+  /** 안내 문구의 자리. 그 탭의 마지막 줄 바로 아래라서, 줄이 적은 탭에서도 물건 곁에 뜬다. */
+  private noticeTop(slot: CosmeticSlot): number {
+    const rows = Math.ceil(itemsIn(slot).length / COLUMNS);
+    return GRID_TOP + rows * (this.cellHeight + CELL_GAP) + 2;
   }
 
   private setNotice(text: string, color: string = THEME_CSS.sub): void {
