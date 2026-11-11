@@ -104,9 +104,12 @@ export function addBackdrop(scene: Phaser.Scene): Phaser.GameObjects.TileSprite 
     .setOrigin(0, 0);
 }
 
+/** 누른 자리에서 이보다 멀리 움직였다가 떼면 누른 것이 아니라 민 것으로 본다(px). */
+const TAP_SLOP = 12;
+
 /**
  * 누르는 동안 모양이 바뀌고, 그 위에서 손을 떼면 onTap이 불리는 영역을 만든다.
- * draw는 눌린 상태가 바뀔 때마다 불린다. 누른 채 밖으로 끌면 취소된다.
+ * draw는 눌린 상태가 바뀔 때마다 불린다. 누른 채 밖으로 끌거나 옆으로 밀면 취소된다.
  */
 export function addTapZone(
   scene: Phaser.Scene,
@@ -122,21 +125,61 @@ export function addTapZone(
     .setOrigin(0, 0)
     .setInteractive({ useHandCursor: true });
   let pressed = false;
+  // 누른 자리. 카메라가 확대되어 있어도 맞도록 화면 좌표가 아니라 씬 좌표로 잰다.
+  let downX = 0;
+  let downY = 0;
   const release = (): void => {
     pressed = false;
     draw(false);
   };
-  zone.on(Phaser.Input.Events.GAMEOBJECT_POINTER_DOWN, () => {
+  zone.on(Phaser.Input.Events.GAMEOBJECT_POINTER_DOWN, (pointer: Phaser.Input.Pointer) => {
     pressed = true;
+    downX = pointer.worldX;
+    downY = pointer.worldY;
     draw(true);
   });
   zone.on(Phaser.Input.Events.GAMEOBJECT_POINTER_OUT, release);
-  zone.on(Phaser.Input.Events.GAMEOBJECT_POINTER_UP, () => {
+  zone.on(Phaser.Input.Events.GAMEOBJECT_POINTER_UP, (pointer: Phaser.Input.Pointer) => {
     if (!pressed) return;
     release();
+    if (Math.hypot(pointer.worldX - downX, pointer.worldY - downY) > TAP_SLOP) return;
     onTap();
   });
   return zone;
+}
+
+/** 가로로 민 것으로 보는 가장 짧은 거리(px) */
+const SWIPE_MIN = 28;
+
+/**
+ * area 안에서 시작한 가로 밀기를 알려 준다.
+ * 왼쪽으로 밀면 1(다음 쪽), 오른쪽으로 밀면 -1(이전 쪽)을 넘긴다. 위아래로 민 것은 세지 않는다.
+ */
+export function onSwipe(
+  scene: Phaser.Scene,
+  area: Phaser.Geom.Rectangle,
+  handler: (direction: 1 | -1) => void,
+): void {
+  // 손가락마다 누른 자리를 기억한다. 카메라가 확대되어 있어도 맞도록 씬 좌표로 잰다.
+  const starts = new Map<number, { x: number; y: number }>();
+  const onDown = (pointer: Phaser.Input.Pointer): void => {
+    starts.set(pointer.id, { x: pointer.worldX, y: pointer.worldY });
+  };
+  const onUp = (pointer: Phaser.Input.Pointer): void => {
+    const from = starts.get(pointer.id);
+    starts.delete(pointer.id);
+    if (!from || !area.contains(from.x, from.y)) return;
+    const dx = pointer.worldX - from.x;
+    const dy = pointer.worldY - from.y;
+    if (Math.abs(dx) < SWIPE_MIN || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+    handler(dx < 0 ? 1 : -1);
+  };
+  scene.input.on(Phaser.Input.Events.POINTER_DOWN, onDown);
+  scene.input.on(Phaser.Input.Events.POINTER_UP, onUp);
+  scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+    scene.input.off(Phaser.Input.Events.POINTER_DOWN, onDown);
+    scene.input.off(Phaser.Input.Events.POINTER_UP, onUp);
+  });
 }
 
 /** 가진 코인을 보여 주는 작은 패널. 오른쪽 끝이 right에 맞춰지고, 금액에 따라 왼쪽으로 늘어난다. */
@@ -314,6 +357,84 @@ export class PixelButton {
     const centerY = Math.round(y + offset + 1 + faceHeight / 2);
     this.label?.setColor(colors.text).setPosition(centerX, centerY);
     this.icon?.setPosition(centerX, centerY);
+  }
+}
+
+/** 쪽 넘김 줄이 차지하는 높이. 목록 아래에 이만큼 자리를 비워 둔다. */
+export const PAGER_HEIGHT = 30;
+const PAGER_BUTTON_WIDTH = 34;
+const PAGER_BUTTON_HEIGHT = 22;
+/** 두 버튼 사이, 쪽을 나타내는 점이 놓이는 폭 */
+const PAGER_MIDDLE = 56;
+const PAGER_DOT = 4;
+const PAGER_DOT_GAP = 6;
+/** 쪽이 이보다 많으면 점 대신 "2/9"처럼 숫자로 보여 준다. */
+const PAGER_MAX_DOTS = 6;
+/** 쪽 넘김 줄의 색. 버튼은 PixelButton의 기본 모양을 그대로 쓴다. */
+const PAGER_LOOK = { current: COLOR.yellow, other: COLOR.slate, count: CSS.silver } as const;
+
+/**
+ * 목록을 쪽으로 나눴을 때 그 아래에 두는 줄: 이전 버튼, 쪽을 나타내는 점, 다음 버튼.
+ * 쪽이 하나뿐이면 보이지 않는다. 어느 쪽을 보여 줄지는 부르는 쪽이 정하고 set()으로 알려 준다.
+ */
+export class Pager {
+  private readonly prev: PixelButton;
+  private readonly next: PixelButton;
+  private readonly dots: Phaser.GameObjects.Graphics;
+  private readonly count: Phaser.GameObjects.Text;
+  private pages = 1;
+  private page = 0;
+
+  /** y는 비워 둔 자리(PAGER_HEIGHT)의 위쪽 끝. onChange에는 옮겨 갈 쪽 번호(0부터)가 넘어온다. */
+  constructor(
+    scene: Phaser.Scene,
+    private readonly centerX: number,
+    private readonly y: number,
+    onChange: (page: number) => void,
+  ) {
+    const top = y + Math.floor((PAGER_HEIGHT - PAGER_BUTTON_HEIGHT) / 2);
+    const button = { y: top, width: PAGER_BUTTON_WIDTH, height: PAGER_BUTTON_HEIGHT, hitPadding: 4 };
+    this.prev = new PixelButton(scene, {
+      ...button,
+      x: centerX - PAGER_MIDDLE / 2 - PAGER_BUTTON_WIDTH,
+      icon: 'icon-prev',
+      onTap: () => onChange(this.page - 1),
+    });
+    this.next = new PixelButton(scene, {
+      ...button,
+      x: centerX + PAGER_MIDDLE / 2,
+      icon: 'icon-play',
+      onTap: () => onChange(this.page + 1),
+    });
+    this.dots = scene.add.graphics();
+    this.count = addText(scene, centerX, y + PAGER_HEIGHT / 2, '', {
+      color: PAGER_LOOK.count,
+      originX: 0.5,
+      originY: 0.5,
+    });
+    this.set(1, 0);
+  }
+
+  /** 쪽 수와 지금 쪽(0부터)을 알려 주면 거기에 맞춰 다시 그린다. */
+  set(pages: number, page: number): void {
+    this.pages = Math.max(1, Math.floor(pages));
+    this.page = Math.min(this.pages - 1, Math.max(0, Math.floor(page)));
+    const visible = this.pages > 1;
+    const asDots = this.pages <= PAGER_MAX_DOTS;
+
+    this.prev.setVisible(visible).setEnabled(this.page > 0);
+    this.next.setVisible(visible).setEnabled(this.page < this.pages - 1);
+    this.count.setVisible(visible && !asDots).setText(`${this.page + 1}/${this.pages}`);
+
+    this.dots.clear();
+    if (!visible || !asDots) return;
+    const width = this.pages * PAGER_DOT + (this.pages - 1) * PAGER_DOT_GAP;
+    const left = Math.round(this.centerX - width / 2);
+    const top = this.y + (PAGER_HEIGHT - PAGER_DOT) / 2;
+    for (let index = 0; index < this.pages; index += 1) {
+      this.dots.fillStyle(index === this.page ? PAGER_LOOK.current : PAGER_LOOK.other, 1);
+      this.dots.fillRect(left + index * (PAGER_DOT + PAGER_DOT_GAP), top, PAGER_DOT, PAGER_DOT);
+    }
   }
 }
 

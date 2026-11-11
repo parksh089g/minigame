@@ -103,4 +103,5 @@ export const SCENE = {
   lightningTap: 'LightningTap',
   memoryCards: 'MemoryCards',
   jumpRunner: 'JumpRunner',
+  stackTower: 'StackTower',
 } as const;

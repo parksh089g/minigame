@@ -7,6 +7,7 @@ import { store } from './core/store';
 import { JumpRunnerScene } from './games/jump-runner/JumpRunnerScene';
 import { LightningTapScene } from './games/lightning-tap/LightningTapScene';
 import { MemoryCardsScene } from './games/memory-cards/MemoryCardsScene';
+import { StackTowerScene } from './games/stack-tower/StackTowerScene';
 import { AchievementsScene } from './scenes/AchievementsScene';
 import { BootScene } from './scenes/BootScene';
 import { HubScene } from './scenes/HubScene';
@@ -66,6 +67,7 @@ async function boot(): Promise<void> {
       LightningTapScene,
       MemoryCardsScene,
       JumpRunnerScene,
+      StackTowerScene,
       PauseScene,
       ResultScene,
     ],

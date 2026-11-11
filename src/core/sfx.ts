@@ -103,6 +103,11 @@ export const sfx = {
   jump: (): void => tone(330, 0.1, { slideTo: 700, volume: 0.28 }),
   /** 착지 */
   land: (): void => tone(120, 0.05, { type: 'triangle', volume: 0.3 }),
+  /** 블록을 내려놓음 */
+  stack: (): void => {
+    tone(196, 0.07, { type: 'triangle', volume: 0.4 });
+    tone(98, 0.05, { type: 'square', volume: 0.12, delay: 0.01 });
+  },
   /** 카운트다운 */
   count: (): void => tone(440, 0.09, { volume: 0.3 }),
   /** 시작 */

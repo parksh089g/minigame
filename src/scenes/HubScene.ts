@@ -3,6 +3,7 @@ import { APP_NAME, APP_VERSION, COLOR, CSS, FONT_SIZE, GAME_WIDTH, SCENE } from 
 import { claimable, statsOf } from '../core/achievements';
 import { activeStreak, dateKeyOf, isCleared, streakBonus } from '../core/daily';
 import { vibrate } from '../core/haptics';
+import { clampPage, layoutPages, pageSlice, type PageLayout } from '../core/paging';
 import {
   getOfflineStatus,
   isStandalone,
@@ -21,6 +22,9 @@ import {
   fadeIn,
   fadeToScene,
   fillChamfer,
+  onSwipe,
+  Pager,
+  PAGER_HEIGHT,
   PixelButton,
 } from '../core/ui';
 import { GAMES, getGame, todaysChallenge, type MiniGameInfo } from '../games/registry';
@@ -29,9 +33,16 @@ const MARGIN = 12;
 const CARD_WIDTH = GAME_WIDTH - MARGIN * 2;
 const CARD_HEIGHT = 56;
 const CARD_GAP = 8;
+/** 카드 하나가 간격까지 쳐서 차지하는 높이 */
+const CARD_STEP = CARD_HEIGHT + CARD_GAP;
 const DAILY_TOP = 78;
 const DAILY_HEIGHT = 40;
 const CARDS_TOP = DAILY_TOP + DAILY_HEIGHT + 8;
+/** 맨 아래 버전과 오프라인 표시가 차지하는 높이 */
+const FOOTER_HEIGHT = 26;
+
+/** 마지막으로 보던 쪽. 게임을 하고 돌아와도 같은 쪽이 보인다. */
+let lastPage = 0;
 
 const OFFLINE_LABEL: Record<OfflineStatus, { text: string; color: number }> = {
   ready: { text: '오프라인 준비 완료', color: COLOR.lime },
@@ -46,6 +57,15 @@ export class HubScene extends Phaser.Scene {
   private offlineText!: Phaser.GameObjects.Text;
   /** 화면을 그린 날짜. 켜 둔 채 자정이 지나면 오늘의 도전을 새로 그린다. */
   private shownDate = '';
+  /** 게임 카드를 한 쪽에 몇 개씩, 몇 쪽으로 나눠 놓는지. 화면이 짧으면 여러 쪽이 된다. */
+  private layout: PageLayout = { perPage: 1, pages: 1 };
+  private page = 0;
+  private pager: Pager | null = null;
+  /** 지금 쪽의 카드를 이루는 것들. 쪽을 넘기면 지우고 다시 만든다. */
+  private cardObjects: Phaser.GameObjects.GameObject[] = [];
+  private cardsDirty = false;
+  /** 새 카드가 밀려 들어오는 방향(1이면 오른쪽에서). 0이면 그냥 나타난다. */
+  private slideFrom = 0;
 
   constructor() {
     super(SCENE.hub);
@@ -58,9 +78,7 @@ export class HubScene extends Phaser.Scene {
     this.addHeader();
     this.shownDate = dateKeyOf(new Date());
     this.addDaily();
-    GAMES.forEach((game, index) => {
-      this.addCard(game, MARGIN, CARDS_TOP + index * (CARD_HEIGHT + CARD_GAP));
-    });
+    this.addGames(height);
     this.addTip(height);
     this.addFooter(height);
 
@@ -74,6 +92,12 @@ export class HubScene extends Phaser.Scene {
     // 배경 점무늬가 천천히 흐른다. 정수 픽셀 단위로만 움직여 픽셀이 흐려지지 않게 한다.
     const step = Math.floor(time / 160);
     this.backdrop.setTilePosition(step, step);
+
+    // 카드를 누른 손가락이 떨어지는 도중에 그 카드를 지우지 않도록, 다시 그리는 일은 다음 프레임으로 미룬다.
+    if (this.cardsDirty) {
+      this.cardsDirty = false;
+      this.buildCards();
+    }
 
     if (dateKeyOf(new Date()) !== this.shownDate) this.scene.restart();
   }
@@ -187,10 +211,61 @@ export class HubScene extends Phaser.Scene {
     });
   }
 
+  /**
+   * 게임 카드 목록. 화면에 다 들어가면 그대로 늘어놓고,
+   * 넘치면 쪽으로 나눠서 아래의 버튼이나 옆으로 밀기로 넘겨 본다.
+   */
+  private addGames(height: number): void {
+    this.cardObjects = [];
+    this.cardsDirty = false;
+    this.slideFrom = 0;
+    this.pager = null;
+
+    const available = height - FOOTER_HEIGHT - CARDS_TOP;
+    this.layout = layoutPages(GAMES.length, available, CARD_STEP, PAGER_HEIGHT);
+    this.page = clampPage(lastPage, this.layout.pages);
+    this.buildCards();
+    if (this.layout.pages <= 1) return;
+
+    const listHeight = this.layout.perPage * CARD_STEP;
+    this.pager = new Pager(this, GAME_WIDTH / 2, CARDS_TOP + listHeight, (page) => this.showPage(page));
+    this.pager.set(this.layout.pages, this.page);
+    onSwipe(this, new Phaser.Geom.Rectangle(0, CARDS_TOP, GAME_WIDTH, listHeight), (direction) => {
+      if (this.showPage(this.page + direction)) sfx.click();
+    });
+  }
+
+  /** 다른 쪽으로 넘긴다. 실제로 넘어갔으면 true. */
+  private showPage(page: number): boolean {
+    const next = clampPage(page, this.layout.pages);
+    if (next === this.page) return false;
+    this.slideFrom = next > this.page ? 1 : -1;
+    this.page = next;
+    lastPage = next;
+    this.pager?.set(this.layout.pages, next);
+    this.cardsDirty = true;
+    return true;
+  }
+
+  private buildCards(): void {
+    this.tweens.killTweensOf(this.cardObjects);
+    for (const object of this.cardObjects) object.destroy();
+    this.cardObjects = [];
+    pageSlice(GAMES, this.page, this.layout.perPage).forEach((game, index) => {
+      this.addCard(game, MARGIN, CARDS_TOP + index * CARD_STEP);
+    });
+  }
+
   private addCard(game: MiniGameInfo, x: number, y: number): void {
     const playable = game.sceneKey !== null;
     const record = getRecord(store.data, game.id);
     const card = this.add.container(x, y);
+    this.cardObjects.push(card);
+    if (this.slideFrom !== 0) {
+      // 넘긴 방향에서 살짝 밀려 들어온다.
+      card.setX(x + this.slideFrom * 16).setAlpha(0);
+      this.tweens.add({ targets: card, x, alpha: 1, duration: 130, ease: 'Quad.Out' });
+    }
 
     const frame = this.add.graphics();
     const drawFrame = (pressed: boolean): void => {
@@ -227,7 +302,7 @@ export class HubScene extends Phaser.Scene {
       card.add([soon, lock]);
     }
 
-    addTapZone(this, x, y, CARD_WIDTH, CARD_HEIGHT, (pressed) => drawFrame(pressed && playable), () => {
+    const zone = addTapZone(this, x, y, CARD_WIDTH, CARD_HEIGHT, (pressed) => drawFrame(pressed && playable), () => {
       if (game.sceneKey) {
         sfx.click();
         vibrate(8);
@@ -244,6 +319,7 @@ export class HubScene extends Phaser.Scene {
         });
       }
     });
+    this.cardObjects.push(zone);
   }
 
   /** 카드 아래 빈자리에 짧은 도움말을 둔다. 화면이 짧아 카드와 겹치면 생략한다. */
@@ -261,7 +337,9 @@ export class HubScene extends Phaser.Scene {
     });
     const panelHeight = Math.ceil(text.height) + 14;
     const top = height - 26 - panelHeight;
-    const cardsBottom = CARDS_TOP + GAMES.length * (CARD_HEIGHT + CARD_GAP);
+    const paged = this.layout.pages > 1;
+    const shown = paged ? this.layout.perPage : GAMES.length;
+    const cardsBottom = CARDS_TOP + shown * CARD_STEP + (paged ? PAGER_HEIGHT : 0);
     if (top < cardsBottom) {
       text.destroy();
       return;

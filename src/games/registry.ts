@@ -49,6 +49,15 @@ export const GAMES: readonly MiniGameInfo[] = [
     coinsFor: (score) => Math.floor(score / 20),
     dailyTargets: [80, 140, 200],
   },
+  {
+    id: 'stack-tower',
+    title: '탑 쌓기',
+    tagline: '타이밍 맞춰 차곡차곡',
+    icon: 'icon-tower',
+    sceneKey: SCENE.stackTower,
+    coinsFor: (score) => Math.floor(score / 12),
+    dailyTargets: [70, 110, 150],
+  },
 ];
 
 export function getGame(id: string): MiniGameInfo | undefined {
