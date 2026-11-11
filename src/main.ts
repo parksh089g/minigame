@@ -8,6 +8,7 @@ import { JumpRunnerScene } from './games/jump-runner/JumpRunnerScene';
 import { LanternKeeperScene } from './games/lantern-keeper/LanternKeeperScene';
 import { LightningTapScene } from './games/lightning-tap/LightningTapScene';
 import { MemoryCardsScene } from './games/memory-cards/MemoryCardsScene';
+import { StackTowerScene } from './games/stack-tower/StackTowerScene';
 import { AchievementsScene } from './scenes/AchievementsScene';
 import { BootScene } from './scenes/BootScene';
 import { HubScene } from './scenes/HubScene';
@@ -67,6 +68,7 @@ async function boot(): Promise<void> {
       LightningTapScene,
       MemoryCardsScene,
       JumpRunnerScene,
+      StackTowerScene,
       LanternKeeperScene,
       PauseScene,
       ResultScene,
