@@ -102,6 +102,8 @@ export const ACHIEVEMENTS: readonly Achievement[] = [
   { id: 'pin-500', group: 'score', title: '핀의 달인', description: '핀 뽑기 500점 이상', goal: 500, reward: 50, measure: bestOf('pin-pull') },
   { id: 'parking-400', group: 'score', title: '주차 도우미', description: '주차장 빼기 400점 이상', goal: 400, reward: 20, measure: bestOf('parking-out') },
   { id: 'parking-800', group: 'score', title: '주차의 달인', description: '주차장 빼기 800점 이상', goal: 800, reward: 50, measure: bestOf('parking-out') },
+  { id: 'screw-700', group: 'score', title: '꼼꼼한 손', description: '나사 풀기 700점 이상', goal: 700, reward: 20, measure: bestOf('screw-sort') },
+  { id: 'screw-1400', group: 'score', title: '나사의 달인', description: '나사 풀기 1400점 이상', goal: 1400, reward: 50, measure: bestOf('screw-sort') },
 
   { id: 'daily-1', group: 'daily', title: '오늘도 도전', description: '오늘의 도전 한 번 달성', goal: 1, reward: 10, measure: (stats) => stats.dailyCleared },
   { id: 'daily-streak-3', group: 'daily', title: '사흘 연속', description: '도전 3일 연속 달성', goal: 3, reward: 30, measure: (stats) => stats.bestStreak },

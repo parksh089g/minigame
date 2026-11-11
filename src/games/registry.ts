@@ -102,8 +102,8 @@ export const GAMES: readonly MiniGameInfo[] = [
     tagline: '같은 색 나사 세 개씩',
     icon: 'icon-screw',
     sceneKey: SCENE.screwSort,
-    coinsFor: (score) => Math.floor(score / 15),
-    dailyTargets: [60, 100, 150],
+    coinsFor: (score) => Math.floor(score / 40),
+    dailyTargets: [250, 450, 750],
   },
 ];
 
