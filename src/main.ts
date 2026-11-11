@@ -9,6 +9,7 @@ import { store } from './core/store';
 import { ColorSortScene } from './games/color-sort/ColorSortScene';
 import { GateRunScene } from './games/gate-run/GateRunScene';
 import { JumpRunnerScene } from './games/jump-runner/JumpRunnerScene';
+import { LanternKeeperScene } from './games/lantern-keeper/LanternKeeperScene';
 import { LightningTapScene } from './games/lightning-tap/LightningTapScene';
 import { LogicTilesScene } from './games/logic-tiles/LogicTilesScene';
 import { MemoryCardsScene } from './games/memory-cards/MemoryCardsScene';
@@ -19,10 +20,12 @@ import { PinPullScene } from './games/pin-pull/PinPullScene';
 import { ScrewSortScene } from './games/screw-sort/ScrewSortScene';
 import { StackTowerScene } from './games/stack-tower/StackTowerScene';
 import { TailChaseScene } from './games/tail-chase/TailChaseScene';
+import { initOnline } from './online/online';
 import { AchievementsScene } from './scenes/AchievementsScene';
 import { BootScene } from './scenes/BootScene';
 import { HubScene } from './scenes/HubScene';
 import { PauseScene } from './scenes/PauseScene';
+import { RankingScene } from './scenes/RankingScene';
 import { ResultScene } from './scenes/ResultScene';
 import { SettingsScene } from './scenes/SettingsScene';
 import { ShopScene } from './scenes/ShopScene';
@@ -80,6 +83,7 @@ async function boot(): Promise<void> {
       SettingsScene,
       ShopScene,
       AchievementsScene,
+      RankingScene,
       LightningTapScene,
       MemoryCardsScene,
       JumpRunnerScene,
@@ -93,6 +97,7 @@ async function boot(): Promise<void> {
       TailChaseScene,
       LogicTilesScene,
       NumberPuzzleScene,
+      LanternKeeperScene,
       PauseScene,
       ResultScene,
     ],
@@ -103,6 +108,8 @@ async function boot(): Promise<void> {
   initAudioUnlock();
   initPwa();
   initAppShell(game, parent);
+  // 닉네임을 정해 랭킹에 참여한 경우에만, 올리지 못한 기록을 올린다.
+  initOnline();
 
   // 홈 화면에 설치해 쓰는 경우에는 브라우저가 세이브를 지우지 않도록 요청한다.
   if (isStandalone()) void store.requestPersistence();

@@ -156,6 +156,7 @@ export const SCENE = {
   settings: 'Settings',
   shop: 'Shop',
   achievements: 'Achievements',
+  ranking: 'Ranking',
   result: 'Result',
   pause: 'Pause',
   lightningTap: 'LightningTap',

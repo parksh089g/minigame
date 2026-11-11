@@ -40,7 +40,7 @@ export function initAudioUnlock(): void {
   window.addEventListener('keydown', unlock, { capture: true, passive: true });
 }
 
-interface ToneOptions {
+export interface ToneOptions {
   type?: OscillatorType;
   /** 0~1 */
   volume?: number;
@@ -50,7 +50,8 @@ interface ToneOptions {
   delay?: number;
 }
 
-function tone(frequency: number, duration: number, options: ToneOptions = {}): void {
+/** 음 하나를 낸다. 게임마다 따로 쓰는 효과음을 만들 때도 이것을 쓴다. */
+export function tone(frequency: number, duration: number, options: ToneOptions = {}): void {
   if (!store.data.settings.sound) return;
   const ctx = getContext();
   if (!ctx || !master || ctx.state !== 'running') return;

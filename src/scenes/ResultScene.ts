@@ -6,10 +6,15 @@ import type { BackAware } from '../core/app-events';
 import { vibrate } from '../core/haptics';
 import { sfx } from '../core/sfx';
 import { store } from '../core/store';
-import { addPanel, addScrim, addText, fadeToScene, PixelButton } from '../core/ui';
+import { addPanel, addScrim, addTapZone, addText, fadeToScene, PixelButton } from '../core/ui';
 import type { Achievement } from '../core/achievements';
 import type { DailyOutcome } from '../core/save';
+import { loadBoard, scoreSync, syncScores } from '../online/online';
+import { isJoined } from '../online/profile';
+import { isRankedGame, rankLabel } from '../online/protocol';
 import type { ResultData } from './MiniGameScene';
+import { askNickname } from './nickname';
+import type { RankingData } from './RankingScene';
 
 const PANEL_WIDTH = 204;
 const STAT_ROW = 16;
@@ -47,12 +52,17 @@ export class ResultScene extends Phaser.Scene implements BackAware {
     const { height } = this.scale;
     const daily = result.daily;
     const achieved = result.newAchievements;
-    const extraRows = (daily ? 1 : 0) + (achieved.length > 0 ? 1 : 0);
+    // 점수를 낸 적이 있으면 온라인 랭킹 줄을 둔다. 닉네임을 정하기 전에는 참여를 권하는 줄이 된다.
+    const ranked = result.best > 0 && isRankedGame(data.gameId);
+    const extraRows = (daily ? 1 : 0) + (achieved.length > 0 ? 1 : 0) + (ranked ? 1 : 0);
     const statsHeight = stats.length > 0 ? stats.length * STAT_ROW + 12 : 0;
     const cardHeight = 106 + statsHeight + 28 + extraRows * EXTRA_ROW + 6;
     const buttonsHeight = 12 + BUTTON_HEIGHT * 2 + BUTTON_GAP + 3;
-    const total = MASCOT.above + cardHeight + buttonsHeight;
-    const top = Math.max(2, Math.round((height - total) / 2)) + MASCOT.above;
+    // 알릴 것이 많은 판에 화면까지 짧으면 다 들어가지 않는다. 그때는 카드 위의 캐릭터를 뺀다.
+    const showMascot = MASCOT.above + cardHeight + buttonsHeight + 4 <= height;
+    const above = showMascot ? MASCOT.above : 0;
+    const total = above + cardHeight + buttonsHeight;
+    const top = Math.max(2, Math.round((height - total) / 2)) + above;
     const left = Math.round((GAME_WIDTH - PANEL_WIDTH) / 2);
     const centerX = GAME_WIDTH / 2;
     const innerLeft = left + 16;
@@ -68,7 +78,8 @@ export class ResultScene extends Phaser.Scene implements BackAware {
         top + MASCOT.overlap,
         mascotTexture(store.data.cosmetics.equipped.runner, result.isNewBest ? 'cheer' : 'idle'),
       )
-      .setOrigin(0.5, 1);
+      .setOrigin(0.5, 1)
+      .setVisible(showMascot);
 
     addText(this, centerX, top + 23, data.title, { color: THEME_CSS.sub, originX: 0.5 });
 
@@ -158,7 +169,9 @@ export class ResultScene extends Phaser.Scene implements BackAware {
     }
     if (achieved.length > 0) {
       this.addAchievementRow(achieved, innerLeft, innerRight, y, extraDelay);
+      y += EXTRA_ROW;
     }
+    if (ranked) this.addOnlineRow(data.gameId, innerLeft, innerRight, y);
 
     const buttonY = top + cardHeight + 12;
     new PixelButton(this, {
@@ -193,6 +206,65 @@ export class ResultScene extends Phaser.Scene implements BackAware {
       emitting: false,
     });
     confetti.explode(26, x, y);
+  }
+
+  /**
+   * 온라인 랭킹 줄. 랭킹에 참여하고 있으면 이 게임에서의 내 순위를 보여 주고, 누르면 랭킹 화면으로 간다.
+   * 참여하지 않았으면 누를 때 닉네임을 묻는다. 인터넷이 없어도 결과 화면은 그대로 쓸 수 있다.
+   */
+  private addOnlineRow(gameId: string, left: number, right: number, y: number): void {
+    const band = this.addBand(left, right, y, THEME.skySoft);
+    this.add.image(left + 8, y + 10, 'icon-trophy').setDisplaySize(14, 14);
+    const label = addText(this, left + 20, y + 3, '');
+    const value = addText(this, right - 2, y + 3, '', { originX: 1 });
+
+    const refresh = async (): Promise<void> => {
+      if (!isJoined(store.data.online)) {
+        label.setText('랭킹에 내 기록 올리기');
+        value.setText('참여').setColor(THEME_CSS.accent);
+        return;
+      }
+      label.setText('온라인 랭킹');
+      const known = scoreSync.rankOf(gameId);
+      value.setText(known === null ? '확인 중…' : rankLabel(known)).setColor(THEME_CSS.sub);
+
+      // 게임이 끝날 때 이미 올리기 시작했다. 여기서는 그 결과를 같이 기다린다.
+      const outcome = await syncScores();
+      if (outcome.status === 'failed') {
+        // 올리지 못한 기록은 세이브에 남아 있다가 다음에 인터넷이 될 때 올라간다.
+        if (value.active) value.setText('다음에 올릴게요');
+        return;
+      }
+      let rank = scoreSync.rankOf(gameId);
+      if (rank === null) {
+        const board = await loadBoard(gameId);
+        if (board.ok) rank = board.data.me?.rank ?? null;
+      }
+      if (!value.active) return;
+      if (rank !== null) value.setText(rankLabel(rank)).setColor(THEME_CSS.inkDeep);
+      else value.setText('-');
+    };
+    void refresh();
+
+    addTapZone(
+      this,
+      left - 6,
+      y,
+      right - left + 12,
+      EXTRA_ROW - 4,
+      (pressed) => band.setAlpha(pressed ? 0.55 : 1),
+      () => {
+        sfx.click();
+        if (isJoined(store.data.online)) {
+          this.scene.stop(this.gameKey);
+          fadeToScene(this, SCENE.ranking, { gameId } satisfies RankingData);
+          return;
+        }
+        void askNickname(this).then((changed) => {
+          if (changed) void refresh();
+        });
+      },
+    );
   }
 
   /** 알림 줄의 바탕이 되는 둥근 띠 */

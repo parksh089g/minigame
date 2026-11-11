@@ -494,3 +494,18 @@ export function fadeIn(scene: Phaser.Scene): void {
   scene.input.enabled = true;
   scene.cameras.main.fadeIn(FADE_MS, FADE_RGB[0], FADE_RGB[1], FADE_RGB[2]);
 }
+
+/**
+ * 캔버스 밖의 창(core/dialog.ts)이 떠 있거나 서버의 답을 기다리는 동안 씬의 입력을 꺼 둔다.
+ * 입력이 꺼져 있으면 뒤로 가기와 화면 크기 맞춤도 이 씬을 건드리지 않아서, 일이 끝났을 때 씬이 그대로 있다.
+ * 이미 다른 일로 입력이 꺼져 있으면 task를 하지 않고 undefined를 돌려준다.
+ */
+export async function whileBlocked<T>(scene: Phaser.Scene, task: () => Promise<T>): Promise<T | undefined> {
+  if (!scene.input.enabled) return undefined;
+  scene.input.enabled = false;
+  try {
+    return await task();
+  } finally {
+    scene.input.enabled = true;
+  }
+}

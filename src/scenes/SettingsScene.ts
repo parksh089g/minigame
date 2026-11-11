@@ -1,16 +1,27 @@
 import Phaser from 'phaser';
 import { APP_VERSION, FONT_SIZE, GAME_WIDTH, SCENE, THEME_CSS } from '../config';
+import { exportBundleText, importBundleText } from '../core/bundle';
+import { promptText, showCode } from '../core/dialog';
 import { dateStamp, downloadText, pickTextFile } from '../core/files';
 import { canVibrate, vibrate } from '../core/haptics';
 import { getOfflineStatus, onOfflineStatus, type OfflineStatus } from '../core/pwa';
 import { sfx } from '../core/sfx';
 import { store } from '../core/store';
-import { addBackdrop, addPanel, addText, fadeIn, fadeToScene, PixelButton } from '../core/ui';
+import { addBackdrop, addPanel, addText, fadeIn, fadeToScene, PixelButton, whileBlocked } from '../core/ui';
+import { failureText } from '../online/api';
+import { afterImport, createTransferCode, useTransferCode } from '../online/online';
+import { cleanCode, CODE_LENGTH, formatCode, TRANSFER_TTL_MS } from '../online/protocol';
 
 const LEFT = 16;
 const RIGHT = GAME_WIDTH - 16;
 const CONTENT_WIDTH = RIGHT - LEFT;
 const RESET_CONFIRM_MS = 3000;
+/**
+ * 구역마다의 세로 자리. 화면이 가장 짧을 때(400)에도 맨 아래 줄까지 들어가게 맞춘 값이다.
+ * notice는 방금 한 일의 결과를 알리는 두 줄짜리 자리다.
+ */
+const TOP = { sound: 44, data: 124, transfer: 214, notice: 266, info: 298 } as const;
+const TRANSFER_MINUTES = Math.round(TRANSFER_TTL_MS / 60000);
 
 /** 저장 공간 보호가 꺼져 있을 때 저장 데이터 버튼 아래에 보여 주는 안내 */
 const BACKUP_HINT = '브라우저가 기록을 지울 수 있어요.\n내보내기로 백업해 두세요.';
@@ -26,7 +37,7 @@ interface SettingsData {
   notice?: { text: string; ok: boolean };
 }
 
-/** 소리·진동 설정, 세이브 내보내기·가져오기·초기화, 앱 정보. */
+/** 소리·진동 설정, 세이브 내보내기·가져오기·초기화, 다른 기기로 옮기기, 앱 정보. */
 export class SettingsScene extends Phaser.Scene {
   private noticeText!: Phaser.GameObjects.Text;
   private resetArmedUntil = 0;
@@ -50,8 +61,8 @@ export class SettingsScene extends Phaser.Scene {
     });
     addText(this, GAME_WIDTH / 2, 8, '설정', { size: FONT_SIZE.large, originX: 0.5 });
 
-    this.addSection(48, '소리와 진동');
-    this.addToggleRow(66, '효과음', {
+    this.addSection(TOP.sound, '소리와 진동');
+    this.addToggleRow(TOP.sound + 16, '효과음', {
       isOn: () => store.data.settings.sound,
       toggle: () => {
         store.update((save) => void (save.settings.sound = !save.settings.sound));
@@ -59,7 +70,7 @@ export class SettingsScene extends Phaser.Scene {
       },
     });
     if (canVibrate()) {
-      this.addToggleRow(98, '진동', {
+      this.addToggleRow(TOP.sound + 46, '진동', {
         isOn: () => store.data.settings.vibration,
         toggle: () => {
           store.update((save) => void (save.settings.vibration = !save.settings.vibration));
@@ -67,17 +78,20 @@ export class SettingsScene extends Phaser.Scene {
         },
       });
     } else {
-      addText(this, LEFT, 104, '진동');
-      addText(this, RIGHT, 104, '이 기기는 지원 안 함', { color: THEME_CSS.sub, originX: 1 });
+      addText(this, LEFT, TOP.sound + 52, '진동');
+      addText(this, RIGHT, TOP.sound + 52, '이 기기는 지원 안 함', { color: THEME_CSS.sub, originX: 1 });
     }
 
-    this.addSection(138, '저장 데이터');
-    this.addDataButtons(156);
-    this.noticeText = addText(this, LEFT, 228, '', { wrapWidth: CONTENT_WIDTH });
+    this.addSection(TOP.data, '저장 데이터');
+    this.addDataButtons(TOP.data + 16);
+
+    this.addSection(TOP.transfer, '다른 기기로 옮기기');
+    this.addTransferButtons(TOP.transfer + 16);
+    this.noticeText = addText(this, LEFT, TOP.notice, '', { wrapWidth: CONTENT_WIDTH });
     if (data.notice) this.showNotice(data.notice.text, data.notice.ok);
 
-    this.addSection(262, '정보');
-    this.addInfoRows(286);
+    this.addSection(TOP.info, '정보');
+    this.addInfoRows(TOP.info + 20);
 
     fadeIn(this);
   }
@@ -120,10 +134,7 @@ export class SettingsScene extends Phaser.Scene {
       height: 28,
       label: '내보내기',
       style: 'green',
-      onTap: () => {
-        downloadText(`pocket-arcade-save-${dateStamp()}.json`, store.exportJson());
-        this.showNotice('세이브 파일을 내려받았어요.', true);
-      },
+      onTap: () => void this.exportSave(),
     });
     new PixelButton(this, {
       x: LEFT + half + 8,
@@ -158,14 +169,96 @@ export class SettingsScene extends Phaser.Scene {
     });
   }
 
+  private async exportSave(): Promise<void> {
+    const text = await exportBundleText(Infinity, true);
+    if (text === null || !this.scene.isActive()) return;
+    downloadText(`pocket-arcade-save-${dateStamp()}.json`, text);
+    this.showNotice('세이브 파일을 내려받았어요.', true);
+  }
+
   private async importSave(): Promise<void> {
     const text = await pickTextFile('application/json,.json');
     if (text === null || !this.scene.isActive()) return;
-    if (store.importJson(text)) {
-      this.scene.restart({ notice: { text: '세이브를 불러왔어요.', ok: true } });
-    } else {
+    if (await importBundleText(text)) {
+      afterImport();
+      if (this.scene.isActive()) this.scene.restart({ notice: { text: '세이브를 불러왔어요.', ok: true } });
+    } else if (this.scene.isActive()) {
       this.showNotice('이 앱의 세이브 파일이 아니에요.', false);
     }
+  }
+
+  /** 코드로 다른 기기에 기록을 옮기는 두 버튼: 이 기기에서 코드를 만들고, 받을 기기에서 그 코드를 넣는다. */
+  private addTransferButtons(y: number): void {
+    const half = (CONTENT_WIDTH - 8) / 2;
+    new PixelButton(this, {
+      x: LEFT,
+      y,
+      width: half,
+      height: 28,
+      label: '코드 만들기',
+      style: 'blue',
+      onTap: () => void this.makeCode(),
+    });
+    new PixelButton(this, {
+      x: LEFT + half + 8,
+      y,
+      width: half,
+      height: 28,
+      label: '코드 입력',
+      style: 'blue',
+      onTap: () => void this.enterCode(),
+    });
+  }
+
+  private async makeCode(): Promise<void> {
+    this.showNotice('코드를 만드는 중…', true);
+    await whileBlocked(this, async () => {
+      const result = await createTransferCode();
+      if (!result.ok) {
+        this.showNotice(
+          result.reason === 'invalid' ? '기록이 너무 커서 옮길 수 없어요.' : failureText(result.reason),
+          false,
+        );
+        return;
+      }
+      this.showNotice(`코드를 만들었어요. ${TRANSFER_MINUTES}분 동안 쓸 수 있어요.`, true);
+      await showCode({
+        title: '옮기기 코드',
+        code: formatCode(result.data.code),
+        hint: `${TRANSFER_MINUTES}분 안에 받을 기기의 설정에서 '코드 입력'을 눌러 이 코드를 넣어 주세요. 이 기기의 기록은 그대로 남아요.`,
+      });
+    });
+  }
+
+  private async enterCode(): Promise<void> {
+    const notice = await whileBlocked(this, async () => {
+      const answer = await promptText({
+        title: '코드 입력',
+        hint: '다른 기기에서 만든 코드를 넣어 주세요. 이 기기의 기록은 불러온 기록으로 바뀌어요.',
+        placeholder: 'ABCD-EFGH',
+        maxLength: CODE_LENGTH + 3,
+        confirmLabel: '불러오기',
+        code: true,
+        check: (value) => {
+          const code = cleanCode(value);
+          return code === null ? { error: `코드는 ${CODE_LENGTH}글자예요. 다시 확인해 주세요.` } : { value: code };
+        },
+      });
+      if (answer.action !== 'confirm') return null;
+      this.showNotice('기록을 불러오는 중…', true);
+      const result = await useTransferCode(answer.value);
+      if (result.ok) return { text: '기록을 불러왔어요.', ok: true };
+      const text =
+        result.reason === 'notfound'
+          ? '코드가 맞지 않거나 시간이 지났어요.'
+          : result.reason === 'unreadable' || result.reason === 'invalid'
+            ? '불러올 수 없는 기록이에요.'
+            : failureText(result.reason);
+      return { text, ok: false };
+    });
+    if (!notice || !this.scene.isActive()) return;
+    if (notice.ok) this.scene.restart({ notice });
+    else this.showNotice(notice.text, false);
   }
 
   private showNotice(text: string, ok: boolean): void {
@@ -173,6 +266,8 @@ export class SettingsScene extends Phaser.Scene {
       .setFontSize(FONT_SIZE.normal)
       .setText(text)
       .setColor(ok ? THEME_CSS.good : THEME_CSS.bad);
+    // 두 줄로 넘어가는 긴 문구는 아래의 "정보" 제목에 붙지 않도록 작은 글자로 쓴다.
+    if (this.noticeText.height > FONT_SIZE.normal * 2) this.noticeText.setFontSize(FONT_SIZE.small);
   }
 
   /**
@@ -205,6 +300,6 @@ export class SettingsScene extends Phaser.Scene {
     });
 
     row(2, '버전', APP_VERSION);
-    addText(this, LEFT, top + 62, '글꼴 주아(Jua)', { size: FONT_SIZE.small, color: THEME_CSS.sub });
+    addText(this, LEFT, top + 58, '글꼴 주아(Jua)', { size: FONT_SIZE.small, color: THEME_CSS.sub });
   }
 }

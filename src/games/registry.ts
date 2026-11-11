@@ -5,6 +5,8 @@
 import { SCENE } from '../config';
 import { challengeFor, dateKeyOf, type DailyChallenge } from '../core/daily';
 import type { SpriteKey } from '../art/sprites';
+import { LANTERN_GAME_ID, LANTERN_SCENE } from './lantern-keeper/data';
+import { coinsFor as lanternCoins } from './lantern-keeper/rules';
 
 export interface MiniGameInfo {
   /** 세이브에 쓰이는 고유 id. 한 번 정하면 바꾸지 않는다. */
@@ -17,7 +19,7 @@ export interface MiniGameInfo {
   sceneKey: string | null;
   /** 점수에 따라 주는 코인 수 */
   coinsFor: (score: number) => number;
-  /** 오늘의 도전에 쓰는 목표 점수. 쉬운 것부터 어려운 것 순서로 세 단계. */
+  /** 오늘의 도전에 쓰는 목표 점수. 쉬운 것부터 어려운 것 순서로 세 단계. 비워 두면 오늘의 도전에 나오지 않는다. */
   dailyTargets: readonly number[];
   /** true면 허브 목록의 맨 앞에 놓는다. 대표로 내세울 게임에 쓴다. */
   featured?: boolean;
@@ -140,6 +142,18 @@ export const GAMES: readonly MiniGameInfo[] = [
     sceneKey: SCENE.numberPuzzle,
     coinsFor: (score) => Math.floor(score / 25),
     dailyTargets: [100, 220, 420],
+  },
+  {
+    id: LANTERN_GAME_ID,
+    title: '등불지기',
+    tagline: '그림자 무리에서 생존',
+    icon: 'icon-lantern',
+    sceneKey: LANTERN_SCENE,
+    coinsFor: lanternCoins,
+    // 한 판이 10분까지 가므로 오늘의 도전에는 넣지 않는다.
+    dailyTargets: [],
+    // 이 앱의 대표 게임이라 허브 목록의 맨 앞에 놓는다.
+    featured: true,
   },
 ];
 

@@ -4,7 +4,7 @@
  * 접는 휴대폰을 펴면 그 뒤로는 위아래가 비거나 화면이 작아진다.
  *
  * 씬은 만들어질 때 화면 길이에 맞춰 자리를 잡으므로, 길이를 바꾸려면 씬을 다시 만들어야 한다.
- * 그래서 플레이 중에는 건드리지 않고, 허브·설정·상점·업적 화면이 시작되는 순간에만 바꾼다.
+ * 그래서 플레이 중에는 건드리지 않고, 허브·설정·상점·업적·랭킹 화면이 시작되는 순간에만 바꾼다.
  * 그 화면들에 머물러 있을 때 크기가 바뀌었으면 같은 화면을 한 번 다시 연다.
  */
 import Phaser from 'phaser';
@@ -13,7 +13,13 @@ import { isSideways } from './orientation';
 import { renderScale } from './render-scale';
 
 /** 언제 다시 만들어도 잃을 것이 없는 화면 */
-const MENU_SCENES: readonly string[] = [SCENE.hub, SCENE.settings, SCENE.shop, SCENE.achievements];
+const MENU_SCENES: readonly string[] = [
+  SCENE.hub,
+  SCENE.settings,
+  SCENE.shop,
+  SCENE.achievements,
+  SCENE.ranking,
+];
 
 let parent: HTMLElement | null = null;
 /** 화면 크기가 바뀌어서 다음 기회에 세로 길이를 다시 맞춰야 하는지 */

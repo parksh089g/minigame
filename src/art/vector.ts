@@ -413,6 +413,19 @@ const ICONS: Record<string, Art> = {
     view: [24, 24],
     draw: (c) => softPath(c, starPath(12, 12.800, 9.200), '#ffcf5c', 3.200),
   },
+  /** 랭킹: 손잡이 달린 우승컵 */
+  'icon-trophy': {
+    width: 16,
+    height: 16,
+    view: [24, 24],
+    draw(c) {
+      strokePath(c, 'M7 6.500H4.200c0 3.600 1.300 5.500 4 6M17 6.500h2.800c0 3.600-1.300 5.500-4 6', '#f2b93b', 2.200);
+      softPath(c, 'M7.500 4.500h9v5.500a4.500 4.500 0 0 1-9 0z', '#ffcf5c', 1.600);
+      roundRect(c, 10.700, 14, 2.600, 4.500, 1, '#f2b93b');
+      roundRect(c, 7.300, 18, 9.400, 3.200, 1.600, '#f2b93b');
+      oval(c, 10, 7.200, 1.100, 1.900, '#fff6da', 0.2);
+    },
+  },
   /** 아직 이루지 못한 것을 나타내는 빈 별 */
   'icon-star-empty': {
     width: 16,
