@@ -37,8 +37,17 @@ export function isStandalone(): boolean {
   );
 }
 
+/** 오프라인 기능이 준비되지 않아도 게임은 그대로 할 수 있어야 하므로, 실패는 상태로만 남긴다. */
 export function initPwa(): void {
   if (!supported()) return;
+  try {
+    register();
+  } catch {
+    setStatus('unsupported');
+  }
+}
+
+function register(): void {
   setStatus('preparing');
 
   const updateServiceWorker = registerSW({
