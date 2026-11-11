@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { SPRITES } from '../art/sprites';
 import { dateKeyOf } from '../core/daily';
-import { GAMES, getGame, todaysChallenge } from './registry';
+import { GAMES, getGame, HUB_GAMES, orderForHub, todaysChallenge } from './registry';
 
 describe('게임 목록', () => {
   it('id가 겹치지 않는다', () => {
@@ -55,6 +55,24 @@ describe('게임 목록', () => {
     expect(seen.size).toBe(
       GAMES.filter((item) => item.sceneKey !== null && item.dailyTargets.length > 0).length,
     );
+  });
+
+  it('허브에는 대표 게임이 먼저 오고 나머지는 적힌 순서대로 온다', () => {
+    type Entry = { id: string; featured?: boolean };
+    const games: Entry[] = [
+      { id: 'a' },
+      { id: 'b', featured: true },
+      { id: 'c' },
+      { id: 'd', featured: true },
+    ];
+    const plain: Entry[] = [{ id: 'a' }, { id: 'b' }];
+    expect(orderForHub(games).map((game) => game.id)).toEqual(['b', 'd', 'a', 'c']);
+    expect(orderForHub(plain).map((game) => game.id)).toEqual(['a', 'b']);
+  });
+
+  it('허브 목록은 게임 목록과 같은 게임들이다', () => {
+    expect(HUB_GAMES).toHaveLength(GAMES.length);
+    expect(new Set(HUB_GAMES)).toEqual(new Set(GAMES));
   });
 
   it('id로 게임을 찾는다', () => {

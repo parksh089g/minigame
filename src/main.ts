@@ -6,10 +6,15 @@ import { HiDpiPlugin, pickRenderScale, renderScale, setRenderScale } from './cor
 import { initPwa, isStandalone } from './core/pwa';
 import { initAudioUnlock } from './core/sfx';
 import { store } from './core/store';
+import { ColorSortScene } from './games/color-sort/ColorSortScene';
+import { GateRunScene } from './games/gate-run/GateRunScene';
 import { JumpRunnerScene } from './games/jump-runner/JumpRunnerScene';
 import { LanternKeeperScene } from './games/lantern-keeper/LanternKeeperScene';
 import { LightningTapScene } from './games/lightning-tap/LightningTapScene';
 import { MemoryCardsScene } from './games/memory-cards/MemoryCardsScene';
+import { ParkingOutScene } from './games/parking-out/ParkingOutScene';
+import { PinPullScene } from './games/pin-pull/PinPullScene';
+import { ScrewSortScene } from './games/screw-sort/ScrewSortScene';
 import { StackTowerScene } from './games/stack-tower/StackTowerScene';
 import { AchievementsScene } from './scenes/AchievementsScene';
 import { BootScene } from './scenes/BootScene';
@@ -76,6 +81,11 @@ async function boot(): Promise<void> {
       MemoryCardsScene,
       JumpRunnerScene,
       StackTowerScene,
+      ColorSortScene,
+      GateRunScene,
+      PinPullScene,
+      ParkingOutScene,
+      ScrewSortScene,
       LanternKeeperScene,
       PauseScene,
       ResultScene,
