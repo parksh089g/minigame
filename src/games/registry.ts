@@ -129,8 +129,8 @@ export const GAMES: readonly MiniGameInfo[] = [
     tagline: '숫자 힌트로 함정 찾기',
     icon: 'icon-logic',
     sceneKey: SCENE.logicTiles,
-    coinsFor: (score) => Math.floor(score / 15),
-    dailyTargets: [60, 100, 150],
+    coinsFor: (score) => Math.floor(score / 25),
+    dailyTargets: [120, 260, 420],
   },
   {
     id: 'number-puzzle',
