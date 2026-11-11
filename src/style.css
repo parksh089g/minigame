@@ -134,3 +134,151 @@ body {
   cursor: pointer;
   z-index: 10;
 }
+
+/*
+ * 글자를 입력받는 작은 창(src/core/dialog.ts). 닉네임과 옮기기 코드에 쓴다.
+ * 자판이 올라와도 가려지지 않게 화면 위쪽에 놓는다.
+ */
+.dialog {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 12vh 16px 0;
+  border: 0;
+  box-sizing: border-box;
+  background: rgba(91, 68, 85, 0.35);
+  color: var(--ink);
+  font-family: inherit;
+  z-index: 30;
+}
+
+.dialog::backdrop {
+  background: transparent;
+}
+
+.dialog-card {
+  width: min(320px, 100%);
+  margin: 0 auto;
+  padding: 20px 18px 16px;
+  border-radius: 22px;
+  box-sizing: border-box;
+  background: var(--card);
+  box-shadow: 0 5px 0 var(--shadow);
+  text-align: center;
+}
+
+.dialog-title {
+  margin: 0 0 6px;
+  font-size: 20px;
+  font-weight: 400;
+}
+
+.dialog-hint {
+  margin: 0 0 12px;
+  color: var(--sub);
+  font-size: 14px;
+  line-height: 1.45;
+  word-break: keep-all;
+}
+
+.dialog-input {
+  display: block;
+  width: 100%;
+  padding: 11px 12px;
+  border: 2px solid var(--shadow);
+  border-radius: 14px;
+  box-sizing: border-box;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: inherit;
+  /* 16px보다 작으면 아이폰이 입력할 때 화면을 확대한다. */
+  font-size: 18px;
+  text-align: center;
+  outline: none;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.dialog-input:focus {
+  border-color: #ff9fb5;
+}
+
+.dialog-input-code {
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.dialog-error {
+  min-height: 20px;
+  margin: 6px 0 4px;
+  color: #c2413b;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.dialog-code {
+  display: block;
+  margin: 8px 0 12px;
+  padding: 12px 8px;
+  border-radius: 14px;
+  background: var(--bg);
+  color: #4a3545;
+  font-size: 30px;
+  letter-spacing: 0.1em;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.dialog-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.dialog-button {
+  flex: 1;
+  padding: 11px 8px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--bg);
+  box-shadow: 0 3px 0 var(--shadow);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.dialog-button:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 var(--shadow);
+}
+
+.dialog-primary {
+  background: #ff9fb5;
+  box-shadow: 0 3px 0 #e97f99;
+  color: #4a3545;
+}
+
+.dialog-primary:active {
+  box-shadow: 0 1px 0 #e97f99;
+}
+
+.dialog-link {
+  display: block;
+  margin: 14px auto 0;
+  padding: 6px 10px;
+  border: 0;
+  background: none;
+  color: var(--sub);
+  font-family: inherit;
+  font-size: 14px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.dialog-link-armed {
+  color: #c2413b;
+}

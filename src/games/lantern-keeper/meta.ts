@@ -3,9 +3,11 @@
  * 허브 세이브(core/save.ts)와 따로 기기 안에 저장해서 공용 세이브 구조를 건드리지 않는다.
  */
 import { createStore, get, set, type UseStore } from 'idb-keyval';
+import { registerSavePart } from '../../core/bundle';
 import {
   HERO_ORDER,
   HEROES,
+  LANTERN_GAME_ID,
   META,
   META_ORDER,
   STAGE_ORDER,
@@ -192,3 +194,17 @@ class MetaStore {
 }
 
 export const metaStore = new MetaStore();
+
+// 백업 파일과 기기 옮기기에 등불지기의 진행(불씨, 영구 강화, 하던 판)도 같이 실려 가게 한다.
+registerSavePart(LANTERN_GAME_ID, {
+  async read(lean) {
+    await metaStore.load();
+    return { meta: metaStore.data, run: lean ? null : metaStore.run };
+  },
+  async write(raw) {
+    await metaStore.load();
+    const data = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {};
+    metaStore.set(normalizeMeta(data.meta));
+    metaStore.setRun(restoreRun(data.run));
+  },
+});

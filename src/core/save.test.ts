@@ -41,10 +41,28 @@ describe('normalizeSave', () => {
         },
       },
       achievements: { claimed: ['play-first'] },
+      online: {
+        id: '01112131-4151-6171-8191-a1b1c1d1e1f1',
+        name: '등불지기',
+        sentName: '등불지기',
+        sent: { 'lightning-tap': 80 },
+      },
       createdAt: NOW - 5000,
       updatedAt: NOW - 1000,
     };
     expect(normalizeSave(save, NOW)).toEqual(save);
+  });
+
+  it('온라인 기능이 생기기 전의 세이브는 랭킹에 참여하지 않은 상태로 읽는다', () => {
+    const old = {
+      version: 4,
+      coins: 3,
+      settings: { sound: true, vibration: true },
+      games: { 'lightning-tap': { best: 80, plays: 4, lastPlayedAt: NOW - 1000 } },
+      createdAt: NOW - 5000,
+      updatedAt: NOW - 1000,
+    };
+    expect(normalizeSave(old, NOW).online).toEqual({ id: null, name: null, sentName: null, sent: {} });
   });
 
   it('꾸미기가 생기기 전의 세이브는 기본 꾸미기로 읽는다', () => {
@@ -354,6 +372,19 @@ describe('resetProgress', () => {
     expect(reset.coins).toBe(0);
     expect(reset.games).toEqual({});
     expect(reset.settings).toEqual({ sound: false, vibration: true });
+  });
+
+  it('닉네임은 남긴다(온라인 랭킹의 기록은 랭킹 화면에서 따로 뺀다)', () => {
+    const save = createDefaultSave(NOW);
+    save.online = {
+      id: '01112131-4151-6171-8191-a1b1c1d1e1f1',
+      name: '등불지기',
+      sentName: '등불지기',
+      sent: { 'lightning-tap': 80 },
+    };
+    const reset = resetProgress(save, NOW + 100);
+    expect(reset.online).toEqual(save.online);
+    expect(reset.online).not.toBe(save.online);
   });
 
   it('산 꾸미기도 지우고 기본으로 되돌린다', () => {

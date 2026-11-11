@@ -22,6 +22,7 @@ import {
   type DailyChallenge,
   type DailyState,
 } from './daily';
+import { createOnline, normalizeOnline, type OnlineState } from '../online/profile';
 import {
   createCosmetics,
   equip,
@@ -31,7 +32,7 @@ import {
   type CosmeticsState,
 } from './shop';
 
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 
 /** 점수를 냈으면 한 판에 적어도 이만큼은 코인을 준다. 처음 하는 사람이 빈손으로 끝나지 않게 한다. */
 export const MIN_COINS_PER_PLAY = 1;
@@ -62,6 +63,8 @@ export interface SaveData {
   cosmetics: CosmeticsState;
   /** 보상을 받은 업적. 달성 여부는 위의 기록들에서 계산한다. */
   achievements: AchievementsState;
+  /** 온라인 랭킹에서 쓰는 닉네임과, 서버에 어디까지 올렸는지. 닉네임을 정하기 전에는 비어 있다. */
+  online: OnlineState;
   createdAt: number;
   updatedAt: number;
 }
@@ -101,6 +104,7 @@ export function createDefaultSave(now: number = Date.now()): SaveData {
     daily: createDailyState(),
     cosmetics: createCosmetics(),
     achievements: createAchievements(),
+    online: createOnline(),
     createdAt: now,
     updatedAt: now,
   };
@@ -154,6 +158,7 @@ export function normalizeSave(raw: unknown, now: number = Date.now()): SaveData 
     daily: normalizeDaily(raw.daily),
     cosmetics: normalizeCosmetics(raw.cosmetics),
     achievements: normalizeAchievements(raw.achievements),
+    online: normalizeOnline(raw.online),
     createdAt: toTimestamp(raw.createdAt, now),
     updatedAt: toTimestamp(raw.updatedAt, now),
   };
@@ -281,7 +286,14 @@ export function claimAchievement(
   };
 }
 
-/** 기록, 코인, 산 꾸미기, 받은 업적 보상을 지우고 설정은 남긴다. */
+/**
+ * 기록, 코인, 산 꾸미기, 받은 업적 보상을 지우고 설정과 닉네임은 남긴다.
+ * 이 기기 안의 기록만 지운다. 온라인 랭킹에 올라간 기록은 랭킹 화면에서 따로 뺀다.
+ */
 export function resetProgress(save: SaveData, now: number = Date.now()): SaveData {
-  return { ...createDefaultSave(now), settings: { ...save.settings } };
+  return {
+    ...createDefaultSave(now),
+    settings: { ...save.settings },
+    online: { ...save.online, sent: { ...save.online.sent } },
+  };
 }

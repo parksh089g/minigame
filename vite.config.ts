@@ -14,6 +14,10 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
+  server: {
+    // 개발 서버에서 랭킹과 기기 옮기기까지 보려면 다른 터미널에서 `npm run server`를 켜 둔다.
+    proxy: { '/api': 'http://127.0.0.1:8787' },
+  },
   build: {
     target: 'es2022',
     // Phaser 한 덩어리가 1MB를 넘는다. 설치할 때 한 번만 받으므로 경고 기준을 올린다.
@@ -59,6 +63,8 @@ export default defineConfig({
         // 기본 한도(2MB) 때문에 엔진 파일이 빠지면 오프라인에서 실행되지 않는다.
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         cleanupOutdatedCaches: true,
+        // /api/ 는 서버(worker/)가 답한다. 오프라인용으로 받아 둔 첫 화면을 대신 돌려주면 안 된다.
+        navigateFallbackDenylist: [/^\/api\//],
       },
     }),
   ],

@@ -7,6 +7,7 @@ import { store } from '../core/store';
 import { holdToasts } from '../core/toast';
 import { fadeIn, PixelButton } from '../core/ui';
 import { getGame, todaysChallenge } from '../games/registry';
+import { syncScores } from '../online/online';
 
 /** 결과 화면에 덧붙여 보여 줄 한 줄. 예: ['최대 콤보', '12'] */
 export type ResultStat = readonly [label: string, value: string];
@@ -16,6 +17,8 @@ export interface ResultData {
   title: string;
   /** 이 게임을 실행한 씬 이름. "다시 하기"에 쓴다. */
   sceneKey: string;
+  /** registry.ts에 등록한 게임 id. 온라인 랭킹을 보여 줄 때 쓴다. */
+  gameId: string;
   /** 이미 세이브에 반영된 이번 판의 결과 */
   result: PlayResult;
   stats: readonly ResultStat[];
@@ -103,9 +106,12 @@ export abstract class MiniGameScene extends Phaser.Scene implements BackAware {
       game?.coinsFor(score) ?? 0,
       todaysChallenge(),
     );
+    // 랭킹에 참여하고 있으면 결과 화면이 뜨기 전에 기록을 올려 둔다. 인터넷이 없으면 다음에 올라간다.
+    void syncScores();
     const data: ResultData = {
       title: game?.title ?? '결과',
       sceneKey: this.scene.key,
+      gameId: this.gameId,
       result,
       stats,
     };

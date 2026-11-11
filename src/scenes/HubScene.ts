@@ -139,6 +139,17 @@ export class HubScene extends Phaser.Scene {
       dot.fillCircle(78, 9, 3.5);
     }
 
+    // 업적 옆: 온라인 랭킹
+    new PixelButton(this, {
+      x: 86,
+      y: 8,
+      width: 26,
+      height: 26,
+      icon: 'icon-trophy',
+      hitPadding: 3,
+      onTap: () => fadeToScene(this, SCENE.ranking),
+    });
+
     // 오른쪽 위: 가진 코인과, 그 코인을 쓰는 꾸미기 상점
     const shopWidth = 50;
     new PixelButton(this, {

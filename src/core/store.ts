@@ -114,21 +114,14 @@ class SaveStore {
     return result;
   }
 
-  exportJson(): string {
-    return JSON.stringify(this.data, null, 2);
-  }
-
-  /** 내보낸 파일의 내용을 불러온다. 형식이 맞지 않으면 false. */
-  importJson(text: string): boolean {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      return false;
-    }
-    if (!looksLikeSave(parsed)) return false;
-    this.data = normalizeSave(parsed);
-    // 예전에 내보낸 파일이라도 지금 불러왔으니, 다른 탭이 가진 것보다 새것으로 친다.
+  /**
+   * 다른 곳에서 온 세이브(가져온 파일, 다른 기기에서 옮겨 온 것)로 바꾼다. 형식이 맞지 않으면 false.
+   * 등불지기처럼 따로 저장되는 것까지 함께 옮기려면 core/bundle.ts를 쓴다.
+   */
+  importData(raw: unknown): boolean {
+    if (!looksLikeSave(raw)) return false;
+    this.data = normalizeSave(raw);
+    // 예전에 내보낸 것이라도 지금 불러왔으니, 다른 탭이 가진 것보다 새것으로 친다.
     this.data.updatedAt = Date.now();
     this.commit();
     return true;
