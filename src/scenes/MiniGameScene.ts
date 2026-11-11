@@ -80,15 +80,21 @@ export abstract class MiniGameScene extends Phaser.Scene implements BackAware {
     this.scene.launch(SCENE.pause, { sceneKey: this.scene.key } satisfies PauseData);
   }
 
+  /** 판이 끝날 때 나는 소리. 끝맺음 소리가 따로 있는 게임은 이것을 바꿔 쓴다. */
+  protected playFinishSound(): void {
+    sfx.finish();
+  }
+
   /**
    * 게임이 끝났을 때 부른다. 기록은 바로 저장하고, 잠깐 뒤에 결과 화면을 띄운다.
    * 저장을 먼저 해 두면 결과 화면이 뜨기 전에 앱을 닫아도 기록이 남는다.
+   * 끝나는 장면을 더 길게 보여 줄 게임은 resultDelayMs를 늘린다.
    */
-  protected finishMiniGame(score: number, stats: readonly ResultStat[] = []): void {
+  protected finishMiniGame(score: number, stats: readonly ResultStat[] = [], resultDelayMs = 900): void {
     if (this.finished) return;
     this.finished = true;
     this.playing = false;
-    sfx.finish();
+    this.playFinishSound();
 
     const game = getGame(this.gameId);
     const result = store.recordPlay(
@@ -103,7 +109,7 @@ export abstract class MiniGameScene extends Phaser.Scene implements BackAware {
       result,
       stats,
     };
-    this.time.delayedCall(900, () => {
+    this.time.delayedCall(resultDelayMs, () => {
       this.scene.pause();
       this.scene.launch(SCENE.result, data);
     });

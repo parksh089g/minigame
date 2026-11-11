@@ -18,7 +18,11 @@ import {
 } from './data';
 import { maxAlive, midBossKind, seededRandom, speedScale, xpToNext, type Upgrade } from './rules';
 import {
+  AIM_LOCK_SECONDS,
+  CHARGE_SECONDS,
+  CHARGING,
   createRun,
+  dashOf,
   HOP_REST,
   HOP_SECONDS,
   looksLikeRun,
@@ -428,10 +432,11 @@ describe('보스와 끝', () => {
     sim.state.enemies.push(ram);
     sim.step(STEP, 0, 0);
     expect(ram.mode).toBe(1);
+    expect(sim.events).toContainEqual({ type: 'windup' });
     const still = ram.y;
     advance(sim, 0.3);
     expect(ram.y).toBe(still);
-    advance(sim, 0.35);
+    expect(advance(sim, 0.35)).toContainEqual({ type: 'dash' });
     expect(ram.mode).toBe(2);
     // 내달리는 동안에는 플레이어보다 빠르다.
     const before = ram.y;
@@ -441,13 +446,57 @@ describe('보스와 끝', () => {
     expect(ram.mode).toBe(0);
   });
 
-  it('안개 올빼미는 플레이어 쪽으로 빛덩이를 부채꼴로 쏘고, 맞으면 다친다', () => {
+  it('돌진하는 보스가 겨눈 쪽은 끝자락에 굳어서, 그 뒤에 옆으로 비키면 맞지 않는다', () => {
+    for (const kind of ['ram', 'lord'] as const) {
+      const sim = quietSim();
+      const p = sim.state.player;
+      const boss = enemy(kind, 0, -90, 99999);
+      boss.timer = 0.01;
+      sim.state.enemies.push(boss);
+      sim.step(STEP, 0, 0);
+      const dash = dashOf(kind, boss.tier);
+      // 겨누는 동안에는 플레이어를 따라온다.
+      p.x = 40;
+      advance(sim, dash.windup - AIM_LOCK_SECONDS - 0.1);
+      expect(boss.mode).toBe(1);
+      expect(boss.vx).toBeGreaterThan(0.3);
+      // 굳기 직전에 선 자리가 겨눈 자리가 된다.
+      p.x = 0;
+      advance(sim, 0.08);
+      expect(boss.vx).toBeCloseTo(0, 5);
+      expect(boss.vy).toBeCloseTo(1, 5);
+      // 굳은 뒤에 옆으로 비킨다. 보스는 겨눈 쪽으로만 달려서 닿지 않는다.
+      advance(sim, 0.06);
+      expect(boss.timer).toBeLessThan(AIM_LOCK_SECONDS);
+      p.x = 40;
+      const events = advance(sim, AIM_LOCK_SECONDS + dash.seconds - 0.1);
+      expect(events).toContainEqual({ type: 'dash' });
+      expect(boss.vx).toBeCloseTo(0, 5);
+      expect(Math.abs(boss.x)).toBeLessThan(1);
+      expect(boss.y).toBeGreaterThan(-20);
+      expect(events).not.toContainEqual({ type: 'hurt' });
+      expect(p.hp).toBe(BASE_HP);
+      // 내달리는 길이는 화면에 그리는 예고선의 길이와 같다.
+      expect(dash.speed * dash.seconds).toBeGreaterThan(70);
+    }
+  });
+
+  it('안개 올빼미는 빛을 모았다가 플레이어 쪽으로 빛덩이를 부채꼴로 쏘고, 맞으면 다친다', () => {
     const sim = quietSim();
     const owl = enemy('owl', 0, -80, 9999);
     owl.timer = 0.01;
     sim.state.enemies.push(owl);
     sim.step(STEP, 0, 0);
-    expect(sim.events).toContainEqual({ type: 'volley' });
+    // 바로 쏘지 않고 먼저 멈춰서 빛을 모은다.
+    expect(sim.events).toContainEqual({ type: 'charge' });
+    expect(owl.mode).toBe(CHARGING);
+    expect(sim.state.hazards).toHaveLength(0);
+    const still = owl.y;
+    const quiet = advance(sim, CHARGE_SECONDS - 0.05);
+    expect(quiet).not.toContainEqual({ type: 'volley' });
+    expect(owl.y).toBe(still);
+    expect(advance(sim, 0.1)).toContainEqual({ type: 'volley' });
+    expect(owl.mode).toBe(0);
     expect(sim.state.hazards).toHaveLength(3);
     // 가운데 것은 플레이어를 똑바로 향한다.
     const middle = sim.state.hazards[1];
@@ -466,7 +515,7 @@ describe('보스와 끝', () => {
     // 뒤에 나오는 올빼미는 갈래가 더 많다.
     owl.tier = 3;
     owl.timer = 0.01;
-    sim.step(STEP, 0, 0);
+    advance(sim, CHARGE_SECONDS + 0.05);
     expect(sim.state.hazards).toHaveLength(5);
   });
 
@@ -495,13 +544,23 @@ describe('보스와 끝', () => {
     matron.timer = 0.01;
     matron.tier = MID_BOSS_COUNT - 1;
     sim.state.enemies.push(matron);
+    // 쏘기 전에는 빛을 모은다.
     sim.step(STEP, 0, 0);
+    expect(sim.events).toContainEqual({ type: 'charge' });
+    expect(sim.state.hazards).toHaveLength(0);
+    expect(advance(sim, CHARGE_SECONDS + 0.05)).toContainEqual({ type: 'volley' });
     expect(sim.state.hazards).toHaveLength(12);
+    // 부하는 모으는 틈 없이 바로 부른다.
     matron.timer = 0.01;
     sim.step(STEP, 0, 0);
+    expect(sim.events).not.toContainEqual({ type: 'charge' });
     const minions = sim.state.enemies.filter((e) => e !== matron);
     expect(minions).toHaveLength(5);
     for (const minion of minions) expect(STAGES.marsh.minions).toContain(minion.kind);
+    // 그다음은 다시 쏘기
+    matron.timer = 0.01;
+    sim.step(STEP, 0, 0);
+    expect(sim.events).toContainEqual({ type: 'charge' });
   });
 
   it('중간 보스를 잡으면 무기 강화권을 받고, 고를 때까지 멈춘다', () => {

@@ -35,7 +35,8 @@ const PIPS_WIDTH = MAX_LEVEL * PIP.step - 1;
 
 /** 체력이 이 비율 아래면 막대 색이 바뀐다. */
 const HP_WARN = 0.5;
-const HP_DANGER = 0.3;
+/** 체력이 이 비율 아래로 내려가면 위험하다고 알린다. */
+export const HP_DANGER = 0.3;
 /** 맞은 직후 체력 막대 테두리가 밝아지는 시간(초) */
 const HURT_FLASH = 0.25;
 

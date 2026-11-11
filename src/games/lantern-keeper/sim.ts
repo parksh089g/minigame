@@ -69,7 +69,11 @@ export interface Enemy {
   fireflyCd: number;
   /** 보스의 다음 행동까지, 뛰는 적의 다음 뜀이나 착지까지(초) */
   timer: number;
-  /** 보스의 상태: 0 쫓기, 1 힘 모으기, 2 돌진. 뛰는 적: 0 웅크림, 1 뛰는 중 */
+  /**
+   * 돌진하는 보스: 0 쫓기, 1 힘 모으기, 2 돌진.
+   * 빛덩이를 쏘는 보스: 0 다음은 쏘기, 1 다음은 부하 부르기(늪의 어미만), 2 쏘려고 빛을 모으는 중.
+   * 뛰는 적: 0 웅크림, 1 뛰는 중
+   */
   mode: number;
   /** 몇 번째 중간 보스인지(0부터). 다른 적은 0 */
   tier: number;
@@ -196,6 +200,20 @@ export interface RunState {
   over: null | 'dead' | 'cleared';
 }
 
+/** 돌진하는 보스가 겨눈 쪽이 굳는 때: 내달리기 이만큼(초) 전 */
+export const AIM_LOCK_SECONDS = 0.25;
+/** 빛덩이를 쏘는 보스가 쏘기 전에 빛을 모으는 시간(초) */
+export const CHARGE_SECONDS = 0.45;
+/** 빛덩이를 쏘는 보스가 빛을 모으는 중일 때의 mode */
+export const CHARGING = 2;
+
+/** 돌진하는 보스가 힘을 모으는 시간(초), 내달리는 빠르기(px/초)와 시간(초) */
+export function dashOf(kind: EnemyKind, tier: number): { windup: number; speed: number; seconds: number } {
+  return ENEMIES[kind].brain === 'lord'
+    ? { windup: 0.7, speed: 125, seconds: 0.75 }
+    : { windup: 0.6, speed: 108 + 8 * tier, seconds: 0.7 };
+}
+
 export type SimEvent =
   | { type: 'kill'; x: number; y: number; boss: boolean }
   | { type: 'hurt' }
@@ -208,8 +226,14 @@ export type SimEvent =
   | { type: 'bolt'; points: number[]; evolved: boolean }
   | { type: 'boss'; kind: EnemyKind }
   | { type: 'ticket' }
+  /** 보스가 빛덩이를 쏘려고 빛을 모으기 시작했다 */
+  | { type: 'charge' }
   /** 보스가 빛덩이를 쏘았다 */
   | { type: 'volley' }
+  /** 보스가 돌진하려고 멈춰서 힘을 모으기 시작했다 */
+  | { type: 'windup' }
+  /** 보스가 내달리기 시작했다 */
+  | { type: 'dash' }
   /** 쓰러졌다가 되살림 등불로 다시 일어났다 */
   | { type: 'revive' }
   | { type: 'surge' };
@@ -663,36 +687,64 @@ export class Sim {
             this.summon(e, minionKind(s.stage, e.tier), midBossTier(e.tier).summon, 26);
           }
         } else if (brain === 'volley') {
-          if (e.timer <= 0) {
-            e.timer = 2.9 - 0.2 * e.tier;
-            // 플레이어 쪽으로 부채꼴로 쏜다. 뒤에 나오는 것일수록 갈래가 많다.
-            this.volley(e, Math.atan2(dy, dx), e.tier >= 2 ? 5 : 3, HAZARD.spread, 9 + 2 * e.tier);
+          // 쏘기 전에 멈춰서 빛을 모은다(2). 그 틈에 비켜설 채비를 할 수 있다.
+          if (e.mode === CHARGING) {
+            speed = 0;
+            if (e.timer <= 0) {
+              e.mode = 0;
+              e.timer = 2.9 - 0.2 * e.tier - CHARGE_SECONDS;
+              // 플레이어 쪽으로 부채꼴로 쏜다. 뒤에 나오는 것일수록 갈래가 많다.
+              this.volley(e, Math.atan2(dy, dx), e.tier >= 2 ? 5 : 3, HAZARD.spread, 9 + 2 * e.tier);
+            }
+          } else if (e.timer <= 0) {
+            e.mode = CHARGING;
+            e.timer = CHARGE_SECONDS;
+            this.events.push({ type: 'charge' });
           }
         } else if (brain === 'matron') {
-          if (e.timer <= 0) {
-            // 사방으로 쏘기와 부하 부르기를 번갈아 한다.
-            e.timer = 3.4;
-            e.mode = e.mode === 0 ? 1 : 0;
-            if (e.mode === 1) this.volley(e, this.rand() * Math.PI * 2, 12, (Math.PI * 2) / 12, 14);
-            else this.summon(e, minionKind(s.stage, e.tier), 5, 30);
+          // 사방으로 쏘기와 부하 부르기를 번갈아 한다. 쏘기 전에는 빛을 모은다(2).
+          if (e.mode === CHARGING) {
+            speed = 0;
+            if (e.timer <= 0) {
+              e.mode = 1;
+              e.timer = 3.4;
+              this.volley(e, this.rand() * Math.PI * 2, 12, (Math.PI * 2) / 12, 14);
+            }
+          } else if (e.timer <= 0) {
+            if (e.mode === 0) {
+              e.mode = CHARGING;
+              e.timer = CHARGE_SECONDS;
+              this.events.push({ type: 'charge' });
+            } else {
+              e.mode = 0;
+              e.timer = 3.4 - CHARGE_SECONDS;
+              this.summon(e, minionKind(s.stage, e.tier), 5, 30);
+            }
           }
         } else if (e.mode === 0) {
-          // 돌진하는 보스: 쫓다가(0) 멈춰서 힘을 모으고(1) 그때 본 쪽으로 내달린다(2).
+          // 돌진하는 보스: 쫓다가(0) 멈춰서 힘을 모으고(1) 겨눈 쪽으로 내달린다(2).
           if (e.timer <= 0) {
             e.mode = 1;
-            e.timer = brain === 'lord' ? 0.7 : 0.6;
+            e.timer = dashOf(e.kind, e.tier).windup;
+            e.vx = dirX;
+            e.vy = dirY;
+            this.events.push({ type: 'windup' });
           }
         } else if (e.mode === 1) {
           speed = 0;
           e.flash = 0.05;
-          if (e.timer <= 0) {
-            e.mode = 2;
-            e.timer = brain === 'lord' ? 0.75 : 0.7;
+          // 겨누는 쪽은 플레이어를 따라오다가 끝자락에 굳는다. 그 뒤에 옆으로 비키면 피할 수 있다.
+          if (e.timer > AIM_LOCK_SECONDS) {
             e.vx = dirX;
             e.vy = dirY;
           }
+          if (e.timer <= 0) {
+            e.mode = 2;
+            e.timer = dashOf(e.kind, e.tier).seconds;
+            this.events.push({ type: 'dash' });
+          }
         } else {
-          speed = brain === 'lord' ? 125 : 108 + 8 * e.tier;
+          speed = dashOf(e.kind, e.tier).speed;
           dirX = e.vx;
           dirY = e.vy;
           if (e.timer <= 0) {

@@ -1,18 +1,20 @@
 import { CSS, GAME_WIDTH, SCENE } from '../../config';
 import { vibrate } from '../../core/haptics';
-import { sfx } from '../../core/sfx';
+import { sfx, tone } from '../../core/sfx';
 import { addText, fadeToScene } from '../../core/ui';
 import { showBanner } from '../../scenes/GameHud';
 import { MiniGameScene, type ResultStat } from '../../scenes/MiniGameScene';
 import { registerLanternTextures } from './art';
-import { ENEMIES, LANTERN_GAME_ID, LANTERN_SCENE } from './data';
-import { HUD_HEIGHT, RunHud } from './hud';
+import { ENEMIES, LANTERN_GAME_ID, LANTERN_SCENE, WEAPONS } from './data';
+import { RunEffects } from './effects';
+import { HP_DANGER, HUD_HEIGHT, RunHud } from './hud';
 import { Joystick } from './joystick';
 import { levelUpHeader, showChoices, TICKET_HEADER } from './levelup';
 import { buildLobby, type LobbyPage } from './lobby';
 import { applyRun, metaStore, newUnlocks } from './meta';
-import { embersFor, formatClock, scoreFor } from './rules';
+import { embersFor, formatClock, isEvolved, scoreFor, type Upgrade } from './rules';
 import { createRun, Sim } from './sim';
+import { SoundBoard, type Note } from './sound';
 import { RunView } from './view';
 
 /** 씬을 시작할 때 넘기는 값. 없으면 준비 화면부터 연다. */
@@ -33,8 +35,20 @@ const PLAYER_DROP = 18;
 const SAVE_EVERY = 20;
 /** 중간 보스가 쓰러지는 모습을 보여 준 뒤에 강화권 화면을 연다(ms). */
 const TICKET_DELAY_MS = 550;
-/** HUD는 선택 화면(panel)보다 위에 있어서, 고르는 동안에도 체력과 든 무기가 보인다. */
-const DEPTH = { field: 20, stick: 25, banner: 30, panel: 40, hud: 50 } as const;
+/** 체력이 위험할 때 심장 소리가 뛰는 간격(초). 거의 다 닳으면 더 빨라진다. */
+const HEARTBEAT = { slow: 1.05, fast: 0.72, fastBelow: 0.15 } as const;
+/** 판이 끝난 뒤 결과 화면이 뜨기까지 끝나는 장면을 보여 주는 시간(ms) */
+const ENDING_MS = { cleared: 2100, dead: 1800 } as const;
+/**
+ * 화면 전체 연출(fx)은 싸움 화면보다 위, 조작 표시보다 아래.
+ * HUD는 선택 화면(panel)보다 위에 있어서, 고르는 동안에도 체력과 든 무기가 보인다.
+ */
+const DEPTH = { fx: 12, field: 20, stick: 25, banner: 30, panel: 40, hud: 50 } as const;
+
+/** 효과음의 음 하나를 실제 소리로 낸다. */
+function playNote(note: Note): void {
+  tone(note.f, note.d, { type: note.type, volume: note.v ?? 0.3, slideTo: note.to, delay: note.at });
+}
 
 /**
  * 등불지기: 몰려오는 그림자 무리 사이를 움직이며 버티는 서바이벌.
@@ -53,9 +67,10 @@ export class LanternKeeperScene extends MiniGameScene {
   private pending = 0;
   private sinceSave = 0;
   private seconds = 0;
-  private lastKillSound = 0;
-  private lastGemSound = 0;
-  private lastVolleySound = 0;
+  private effects!: RunEffects;
+  private readonly board = new SoundBoard(playNote);
+  /** 다음 심장 소리까지 남은 시간(초) */
+  private beatIn = 0;
   private hud!: RunHud;
   private hint?: Phaser.GameObjects.Text;
 
@@ -74,6 +89,7 @@ export class LanternKeeperScene extends MiniGameScene {
     this.pending = 0;
     this.sinceSave = 0;
     this.seconds = 0;
+    this.beatIn = 0;
     this.hint = undefined;
 
     void metaStore.load().then(() => {
@@ -132,6 +148,7 @@ export class LanternKeeperScene extends MiniGameScene {
     this.sim = new Sim(state, Math.random);
 
     this.view = new RunView(this, centerY, this.sim);
+    this.effects = new RunEffects(this, DEPTH.fx, HUD_HEIGHT);
     this.hud = new RunHud(this, { top: DEPTH.hud, field: DEPTH.field }, GAME_WIDTH / 2, this.view.centerY, () => {
       sfx.click();
       this.pauseGame();
@@ -181,12 +198,18 @@ export class LanternKeeperScene extends MiniGameScene {
       this.pending -= STEP;
       sim.step(STEP, this.stick.x, this.stick.y);
       this.handleEvents();
-      if (sim.state.over) this.endRun();
-      else if (sim.state.pendingTickets > 0 || sim.state.pendingLevelUps > 0) this.openNext(true);
+      if (sim.state.over) break;
+      if (sim.state.pendingTickets > 0 || sim.state.pendingLevelUps > 0) this.openNext(true);
     }
 
     this.view.sync(sim, this.seconds, frame);
     this.drawHud();
+    // 끝나는 장면은 마지막 모습을 그린 뒤에 시작한다.
+    if (sim.state.over) {
+      this.endRun();
+      return;
+    }
+    this.heartbeat(frame);
 
     this.sinceSave += frame;
     if (this.sinceSave >= SAVE_EVERY && this.phase === 'run') this.saveRun();
@@ -194,37 +217,38 @@ export class LanternKeeperScene extends MiniGameScene {
 
   private handleEvents(): void {
     const sim = this.sim;
+    const board = this.board;
     const now = this.time.now;
     for (const event of sim.events) {
       switch (event.type) {
         case 'kill':
           this.view.burst(sim, event.x, event.y, event.boss ? 40 : 4);
           if (event.boss) {
-            sfx.fanfare();
+            // 마지막 보스를 쓰러뜨렸으면 밝은 소리는 뒤따르는 새벽 소리가 맡는다.
+            board.play(sim.state.over === 'cleared' ? 'bossFall' : 'bossKill', now);
+            this.effects.flash(0.45, 320);
             vibrate([30, 40, 30]);
-            this.cameras.main.shake(260, 0.012);
-          } else if (now - this.lastKillSound > 90) {
-            this.lastKillSound = now;
-            sfx.expire();
+            this.effects.shake(260, 0.018);
+          } else {
+            board.play('kill', now);
           }
           break;
         case 'hurt':
           this.hud.hurt(this.seconds);
-          sfx.miss();
+          this.effects.hurt();
+          board.play('hurt', now);
           vibrate(35);
-          this.cameras.main.shake(110, 0.01);
+          this.effects.shake(110, 0.014);
           break;
         case 'gem':
-          if (now - this.lastGemSound > 70) {
-            this.lastGemSound = now;
-            sfx.tick();
-          }
+          board.gem(now);
           break;
         case 'heal':
-          sfx.coin();
+          board.play('heal', now);
           break;
         case 'strike':
           this.view.ring(event.x, event.y, event.radius);
+          board.play('strike', now);
           break;
         case 'bolt':
           this.view.bolt(event.points, event.evolved);
@@ -232,27 +256,41 @@ export class LanternKeeperScene extends MiniGameScene {
           for (let i = 2; i < event.points.length; i += 2) {
             this.view.burst(sim, event.points[i], event.points[i + 1], 2);
           }
+          board.play('bolt', now);
           break;
         case 'boss':
           showBanner(this, this.scale.height * 0.3, ENEMIES[event.kind].name, CSS.red, 1800, DEPTH.banner);
-          sfx.deny();
+          board.play('boss', now);
+          // 가장자리가 두 번 붉게 뛴다.
+          this.effects.beat();
+          this.time.delayedCall(420, () => this.effects.beat());
           vibrate([40, 60, 40]);
+          this.effects.shake(180, 0.008);
           break;
         case 'surge':
           showBanner(this, this.scale.height * 0.3, '그림자 밀물!', CSS.orange, 1400, DEPTH.banner);
-          sfx.count();
+          board.play('surge', now);
+          this.effects.beat();
           break;
         case 'revive':
           showBanner(this, this.scale.height * 0.3, '등불이 다시 켜졌다!', CSS.yellow, 1600, DEPTH.banner);
           this.view.burst(sim, sim.state.player.x, sim.state.player.y, 30);
-          sfx.fanfare();
+          this.effects.flash(0.5, 420);
+          board.play('revive', now, 0.15);
           vibrate([20, 30, 60]);
           break;
+        case 'windup':
+          board.play('windup', now);
+          break;
+        case 'dash':
+          board.play('dash', now);
+          this.effects.shake(90, 0.006);
+          break;
+        case 'charge':
+          board.play('charge', now);
+          break;
         case 'volley':
-          if (now - this.lastVolleySound > 200) {
-            this.lastVolleySound = now;
-            sfx.count();
-          }
+          board.play('volley', now);
           break;
         case 'levelup':
         case 'ticket':
@@ -260,6 +298,22 @@ export class LanternKeeperScene extends MiniGameScene {
           break;
       }
     }
+  }
+
+  /** 체력이 위험하면 심장 소리가 뛰고, 그때마다 화면 가장자리가 붉게 뛴다. */
+  private heartbeat(frame: number): void {
+    const ratio = this.sim.state.player.hp / this.sim.maxHp;
+    const low = ratio <= HP_DANGER;
+    this.effects.setLow(low);
+    if (!low) {
+      this.beatIn = 0;
+      return;
+    }
+    this.beatIn -= frame;
+    if (this.beatIn > 0) return;
+    this.beatIn = ratio <= HEARTBEAT.fastBelow ? HEARTBEAT.fast : HEARTBEAT.slow;
+    this.board.play('heartbeat', this.time.now);
+    this.effects.beat();
   }
 
   private fadeHint(): void {
@@ -275,7 +329,7 @@ export class LanternKeeperScene extends MiniGameScene {
     this.phase = 'choosing';
     this.stick.enabled = false;
     this.stick.reset();
-    sfx.gold();
+    this.board.play('levelUp', this.time.now);
     vibrate(15);
     this.drawHud();
     showChoices(
@@ -285,7 +339,7 @@ export class LanternKeeperScene extends MiniGameScene {
       DEPTH.panel,
       (upgrade) => {
         this.sim.applyUpgrade(upgrade);
-        this.afterPick();
+        this.afterPick(upgrade);
       },
       HUD_HEIGHT,
     );
@@ -300,7 +354,7 @@ export class LanternKeeperScene extends MiniGameScene {
     const show = (): void => {
       // 기다리는 사이에 씬을 떠났으면 열지 않는다.
       if (!this.sys.isActive() || this.phase !== 'choosing') return;
-      sfx.gold();
+      this.board.play('ticket', this.time.now);
       vibrate(15);
       showChoices(
         this,
@@ -309,7 +363,7 @@ export class LanternKeeperScene extends MiniGameScene {
         DEPTH.panel,
         (upgrade) => {
           this.sim.useTicket(upgrade);
-          this.afterPick();
+          this.afterPick(upgrade);
         },
         HUD_HEIGHT,
       );
@@ -318,7 +372,33 @@ export class LanternKeeperScene extends MiniGameScene {
     else show();
   }
 
-  private afterPick(): void {
+  /** 고른 강화가 몸에 붙는 순간. 무기가 최종 진화하면 크게 알린다. */
+  private celebrate(upgrade: Upgrade): void {
+    const sim = this.sim;
+    const p = sim.state.player;
+    if (upgrade.type !== 'weapon' || !isEvolved(upgrade.level)) {
+      this.view.burst(sim, p.x, p.y, 8);
+      return;
+    }
+    const y = Math.round(this.scale.height * 0.3);
+    const lead = addText(this, GAME_WIDTH / 2, y - 29, '최종 진화', {
+      color: CSS.white,
+      originX: 0.5,
+      originY: 0.5,
+      shadow: CSS.ink,
+    }).setDepth(DEPTH.banner);
+    this.tweens.add({ targets: lead, alpha: 0, delay: 1200, duration: 800, onComplete: () => lead.destroy() });
+    showBanner(this, y, `${WEAPONS[upgrade.id].evolved.name}!`, CSS.yellow, 2000, DEPTH.banner);
+    this.view.burst(sim, p.x, p.y, 60);
+    this.view.ring(p.x, p.y, 72);
+    this.effects.flash(0.5, 420);
+    this.board.play('evolve', this.time.now);
+    vibrate([20, 30, 20, 30, 80]);
+    this.effects.shake(220, 0.012);
+  }
+
+  private afterPick(upgrade: Upgrade): void {
+    this.celebrate(upgrade);
     this.drawHud();
     const s = this.sim.state;
     // 고를 것이 남아 있지 않을 때만 저장한다. 다음 화면은 곧바로 연다.
@@ -363,16 +443,29 @@ export class LanternKeeperScene extends MiniGameScene {
     metaStore.set(applyRun(metaStore.data, embers, summary.seconds, summary.cleared));
     const opened = newUnlocks(bestBefore, metaStore.data.bestSeconds);
 
+    // 끝나는 장면: 새벽이 오면 어둠이 걷히며 남은 그림자가 흩어지고, 쓰러지면 등불이 꺼지듯 어두워진다.
+    const ending = summary.cleared ? ENDING_MS.cleared : ENDING_MS.dead;
+    const now = this.time.now;
+    if (summary.cleared) {
+      this.view.dawn(this.sim, ending * 0.6);
+      this.effects.dawn(ending * 0.6);
+      this.board.play('clear', now, 0.3);
+      vibrate([20, 40, 20, 40, 60]);
+    } else {
+      this.view.dusk(ending * 0.6);
+      this.effects.dusk(ending * 0.7);
+      this.board.play('death', now, 0.2);
+      vibrate(120);
+    }
     showBanner(
       this,
       this.scale.height * 0.32,
       summary.cleared ? '새벽이 왔다!' : '등불이 꺼졌다',
       summary.cleared ? CSS.yellow : CSS.silver,
-      1500,
+      // 결과 화면이 뜰 때까지 남아 있게 한다.
+      ending * 1.6,
       DEPTH.banner,
     );
-    if (summary.cleared) vibrate([20, 40, 20, 40, 60]);
-    else vibrate(120);
 
     const stats: ResultStat[] = [
       ['버틴 시간', formatClock(summary.seconds)],
@@ -384,8 +477,11 @@ export class LanternKeeperScene extends MiniGameScene {
     if (opened.length > 0) {
       stats.push(['새로 열림', opened.length <= 2 ? opened.join(' · ') : `${opened[0]} 외 ${opened.length - 1}`]);
     }
-    this.finishMiniGame(scoreFor(summary), stats);
+    this.finishMiniGame(scoreFor(summary), stats, ending);
   }
+
+  /** 끝맺음 소리는 endRun에서 새벽 소리나 꺼지는 소리로 따로 낸다. */
+  protected override playFinishSound(): void {}
 
   // ------------------------------------------------------------ HUD
 

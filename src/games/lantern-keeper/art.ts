@@ -75,6 +75,9 @@ export const LOOK = {
   puddle: COLOR.navy,
   puddleRim: COLOR.teal,
   puddleShine: COLOR.sky,
+  /** 보스의 공격 예고: 돌진할 길, 쏘려고 모으는 빛 */
+  threat: COLOR.red,
+  threatCore: COLOR.white,
 } as const;
 
 /**
@@ -505,6 +508,71 @@ export function darknessTexture(scene: Phaser.Scene, width: number, height: numb
   if (!scene.textures.exists(key)) {
     addPixelTexture(scene, key, drawDarkness(width, height, 64, 150));
   }
+  return key;
+}
+
+/** 화면 가장자리만 붉게 물들이는 덮개. 가운데는 비어 있어 싸움을 가리지 않는다. */
+function drawDanger(width: number, height: number): HTMLCanvasElement {
+  const [canvas, context] = canvasOf(width, height);
+  const image = context.createImageData(width, height);
+  const steps = 4;
+  // 화면이 세로로 길어서 위아래를 조금 더 깊게 물들인다.
+  const reachX = 24;
+  const reachY = 36;
+  const red = (COLOR.red >> 16) & 0xff;
+  const green = (COLOR.red >> 8) & 0xff;
+  const blue = COLOR.red & 0xff;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const nearX = 1 - Math.min(x, width - 1 - x) / reachX;
+      const nearY = 1 - Math.min(y, height - 1 - y) / reachY;
+      const v = Math.min(1, Math.max(0, nearX, nearY)) * steps;
+      const band = Math.min(steps, Math.floor(v + (BAYER[y & 3][x & 3] + 0.5) / 16));
+      const offset = (y * width + x) * 4;
+      image.data[offset] = red;
+      image.data[offset + 1] = green;
+      image.data[offset + 2] = blue;
+      image.data[offset + 3] = Math.round(band * 0.14 * 255);
+    }
+  }
+  context.putImageData(image, 0, 0);
+  return canvas;
+}
+
+/** 새벽빛: 화면 위쪽에서 따뜻한 빛이 번져 내려온다. 위는 노랗고 아래로 갈수록 붉어지며 옅어진다. */
+function drawDawn(width: number, height: number): HTMLCanvasElement {
+  const [canvas, context] = canvasOf(width, height);
+  const image = context.createImageData(width, height);
+  const steps = 5;
+  const reach = height * 0.8;
+  const channels = (color: number): [number, number, number] => [(color >> 16) & 0xff, (color >> 8) & 0xff, color & 0xff];
+  const top = channels(COLOR.yellow);
+  const low = channels(COLOR.orange);
+  for (let y = 0; y < height; y += 1) {
+    const depth = Math.min(1, y / reach);
+    const mix = Math.min(1, depth * 1.6);
+    for (let x = 0; x < width; x += 1) {
+      const band = Math.min(steps, Math.floor((1 - depth) * steps + (BAYER[y & 3][x & 3] + 0.5) / 16));
+      const offset = (y * width + x) * 4;
+      for (let c = 0; c < 3; c += 1) image.data[offset + c] = Math.round(top[c] + (low[c] - top[c]) * mix);
+      image.data[offset + 3] = Math.round(band * 0.11 * 255);
+    }
+  }
+  context.putImageData(image, 0, 0);
+  return canvas;
+}
+
+/** 새벽빛 텍스처를 만들고(이미 있으면 그대로) 이름을 돌려준다. */
+export function dawnTexture(scene: Phaser.Scene, width: number, height: number): string {
+  const key = `lk-dawn-${width}x${height}`;
+  if (!scene.textures.exists(key)) addPixelTexture(scene, key, drawDawn(width, height));
+  return key;
+}
+
+/** 화면 가장자리의 붉은 덮개 텍스처를 만들고(이미 있으면 그대로) 이름을 돌려준다. */
+export function dangerTexture(scene: Phaser.Scene, width: number, height: number): string {
+  const key = `lk-danger-${width}x${height}`;
+  if (!scene.textures.exists(key)) addPixelTexture(scene, key, drawDanger(width, height));
   return key;
 }
 

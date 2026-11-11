@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { darknessTexture, flashOf, FLOOR_OF, HERO_FRAMES, LK, LOOK } from './art';
 import { ENEMIES, STAGES } from './data';
 import { auraStats, fireflyStats, isEvolved } from './rules';
-import type { ShotLook, Sim } from './sim';
+import { AIM_LOCK_SECONDS, CHARGE_SECONDS, CHARGING, dashOf, type ShotLook, type Sim } from './sim';
 import { puddlesAround } from './terrain';
 
 const DEPTH = {
@@ -93,6 +93,8 @@ export class RunView {
   private readonly gems: Pool;
   private readonly shots: Pool;
   private readonly sparks: Phaser.GameObjects.Particles.ParticleEmitter;
+  private readonly dark: Phaser.GameObjects.Image;
+  private readonly darkPulse: Phaser.Tweens.Tween;
   private readonly rings: Ring[] = [];
   private readonly flashes: Flash[] = [];
   private readonly width: number;
@@ -103,7 +105,11 @@ export class RunView {
   private readonly puddles: boolean;
   private stride = 0;
 
-  constructor(scene: Phaser.Scene, centerY: number, sim: Sim) {
+  constructor(
+    private readonly scene: Phaser.Scene,
+    centerY: number,
+    sim: Sim,
+  ) {
     const { width, height } = scene.scale;
     const { hero, stage } = sim.state;
     this.frames = HERO_FRAMES[hero];
@@ -124,11 +130,18 @@ export class RunView {
 
     // 어둠 덮개는 플레이어를 중심으로 화면 전체를 덮을 만큼 크게 만든다.
     const reach = Math.max(this.centerY, height - this.centerY);
-    const dark = scene.add
+    this.dark = scene.add
       .image(this.centerX, this.centerY, darknessTexture(scene, width, reach * 2))
       .setDepth(DEPTH.dark);
     // 등불이 일렁이는 것처럼 아주 조금씩 밝아졌다 어두워진다.
-    scene.tweens.add({ targets: dark, alpha: 0.86, duration: 900, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
+    this.darkPulse = scene.tweens.add({
+      targets: this.dark,
+      alpha: 0.86,
+      duration: 900,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.InOut',
+    });
 
     this.sparks = scene.add
       .particles(0, 0, LK.spark, {
@@ -154,6 +167,72 @@ export class RunView {
   /** 번갯불이 지나간 길을 잠깐 그린다. points는 세상 좌표의 x, y가 번갈아 들어 있다. */
   bolt(points: number[], evolved: boolean): void {
     this.flashes.push({ points, evolved, life: FLASH_SECONDS });
+  }
+
+  /**
+   * 새벽이 왔다: 화면에 남은 그림자가 불티로 흩어지고, 어둠이 ms 동안 걷힌다.
+   * 판이 끝난 뒤에 한 번만 부른다. 이 뒤로는 sync를 부르지 않는다.
+   */
+  dawn(sim: Sim, ms: number): void {
+    const p = sim.state.player;
+    let left = 150;
+    for (const e of sim.state.enemies) {
+      if (left <= 0) break;
+      const x = e.x - p.x + this.centerX;
+      const y = e.y - p.y + this.centerY;
+      if (x < 0 || x > this.width || y < 0 || y > this.height) continue;
+      const count = ENEMIES[e.kind].boss ? 12 : 3;
+      this.sparks.emitParticleAt(x, y, count);
+      left -= count;
+    }
+    for (const pool of [this.enemies, this.shots]) {
+      pool.begin();
+      pool.end();
+    }
+    this.ground.clear();
+    this.air.clear();
+    this.darkPulse.stop();
+    this.scene.tweens.add({ targets: this.dark, alpha: 0, duration: ms, ease: 'Sine.Out' });
+  }
+
+  /** 등불이 꺼졌다: 캐릭터가 ms 동안 흐려진다. */
+  dusk(ms: number): void {
+    this.scene.tweens.add({ targets: this.player, alpha: 0.25, duration: ms, ease: 'Sine.In' });
+  }
+
+  /** 보스의 공격 예고: 돌진할 길은 바닥에, 쏘려고 모으는 빛은 보스 위에 그린다. */
+  private drawThreats(sim: Sim, seconds: number, offsetX: number, offsetY: number): void {
+    const g = this.ground;
+    const air = this.air;
+    for (const e of sim.state.enemies) {
+      const info = ENEMIES[e.kind];
+      if (!info.boss || e.hp <= 0) continue;
+      const x = Math.round(e.x + offsetX);
+      const y = Math.round(e.y + offsetY);
+      const brain = info.brain;
+      if ((brain === 'charge' || brain === 'lord') && e.mode === 1) {
+        // 내달릴 길. 겨누는 동안에는 옅게 따라오다가, 방향이 굳으면 짙어지고 깜빡인다.
+        const dash = dashOf(e.kind, e.tier);
+        const length = dash.speed * dash.seconds + info.radius;
+        const locked = e.timer <= AIM_LOCK_SECONDS;
+        const blink = locked && Math.floor(seconds * 20) % 2 === 0;
+        const endX = Math.round(x + e.vx * length);
+        const endY = Math.round(y + e.vy * length);
+        g.lineStyle(info.radius * 2, LOOK.threat, locked ? (blink ? 0.42 : 0.3) : 0.14);
+        g.lineBetween(x, y, endX, endY);
+        g.lineStyle(1, locked ? LOOK.threatCore : LOOK.threat, locked ? 0.85 : 0.5);
+        g.lineBetween(x, y, endX, endY);
+      } else if ((brain === 'volley' || brain === 'matron') && e.mode === CHARGING) {
+        // 모으는 빛: 고리가 보스 쪽으로 조여들고 가운데가 밝아진다.
+        const progress = 1 - Math.max(0, e.timer) / CHARGE_SECONDS;
+        air.lineStyle(2, LOOK.threat, 0.35 + 0.55 * progress);
+        air.strokeCircle(x, y, info.radius + 4 + 16 * (1 - progress));
+        air.fillStyle(LOOK.threat, 0.5 + 0.3 * progress);
+        air.fillCircle(x, y, 2 + 4 * progress);
+        air.fillStyle(LOOK.threatCore, 0.9);
+        air.fillCircle(x, y, 1 + 2 * progress);
+      }
+    }
   }
 
   /** 맞았을 때 잠깐 하얗게 */
@@ -345,5 +424,7 @@ export class RunView {
       kept += 1;
     }
     this.flashes.length = kept;
+
+    this.drawThreats(sim, seconds, offsetX, offsetY);
   }
 }
