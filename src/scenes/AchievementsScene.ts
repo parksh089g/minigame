@@ -13,6 +13,7 @@ import {
   type AchievementGroup,
 } from '../core/achievements';
 import { vibrate } from '../core/haptics';
+import { clampPage, layoutPages, pagedCapacity, pageOfIndex, pageSlice } from '../core/paging';
 import { sfx } from '../core/sfx';
 import { store } from '../core/store';
 import {
@@ -23,6 +24,9 @@ import {
   drawPanel,
   fadeIn,
   fadeToScene,
+  onSwipe,
+  Pager,
+  PAGER_HEIGHT,
   PixelButton,
 } from '../core/ui';
 
@@ -35,6 +39,9 @@ const SUMMARY_TOP = 76;
 const ROWS_TOP = 94;
 const ROW_HEIGHT = 44;
 const ROW_GAP = 4;
+/** 줄 하나가 간격까지 쳐서 차지하는 높이 */
+const ROW_STEP = ROW_HEIGHT + ROW_GAP;
+const BOTTOM_MARGIN = 4;
 
 interface AchievementsData {
   /** 처음에 열어 둘 탭. 없으면 받을 보상이 있는 탭을 연다. */
@@ -48,6 +55,13 @@ export class AchievementsScene extends Phaser.Scene {
   private summary!: Phaser.GameObjects.Text;
   private waiting!: Phaser.GameObjects.Text;
   private group: AchievementGroup = GROUPS[0];
+  /** 지금 탭에서 보고 있는 쪽. 줄이 화면에 다 들어가지 않는 탭만 여러 쪽이 된다. */
+  private page = 0;
+  /** 탭을 열 때 받을 보상이 있는 쪽을 찾아서 보여 줄지 */
+  private seekReward = true;
+  private pager!: Pager;
+  /** 줄을 놓을 수 있는 높이 */
+  private available = 0;
   /** 지금 탭의 줄들을 이루는 것들. 탭을 바꾸거나 보상을 받으면 지우고 다시 만든다. */
   private rowObjects: Phaser.GameObjects.GameObject[] = [];
   private rowsDirty = false;
@@ -59,6 +73,8 @@ export class AchievementsScene extends Phaser.Scene {
   create(data: AchievementsData = {}): void {
     this.rowObjects = [];
     this.rowsDirty = false;
+    this.page = 0;
+    this.available = this.scale.height - ROWS_TOP - BOTTOM_MARGIN;
 
     addBackdrop(this);
     new PixelButton(this, {
@@ -98,6 +114,13 @@ export class AchievementsScene extends Phaser.Scene {
       originX: 1,
     });
 
+    // 줄이 넘치는 탭에서만 보이는 쪽 넘김 줄. 자리는 쪽을 나눴을 때 들어가는 줄 수 바로 아래다.
+    const listHeight = pagedCapacity(this.available, ROW_STEP, PAGER_HEIGHT) * ROW_STEP;
+    this.pager = new Pager(this, GAME_WIDTH / 2, ROWS_TOP + listHeight, (page) => this.showPage(page));
+    onSwipe(this, new Phaser.Geom.Rectangle(0, ROWS_TOP, GAME_WIDTH, listHeight), (direction) => {
+      if (this.showPage(this.page + direction)) sfx.click();
+    });
+
     // 받을 보상이 있으면 그 탭부터 보여 준다.
     const ready = claimable(store.data.achievements, statsOf(store.data));
     this.showGroup(data.group ?? ready[0]?.group ?? GROUPS[0]);
@@ -114,8 +137,21 @@ export class AchievementsScene extends Phaser.Scene {
 
   private showGroup(group: AchievementGroup): void {
     this.group = group;
+    this.page = 0;
+    this.seekReward = true;
     this.refreshHeader();
     this.rowsDirty = true;
+  }
+
+  /** 같은 탭의 다른 쪽으로 넘긴다. 실제로 넘어갔으면 true. */
+  private showPage(page: number): boolean {
+    const count = achievementsIn(this.group).length;
+    const { pages } = layoutPages(count, this.available, ROW_STEP, PAGER_HEIGHT);
+    const next = clampPage(page, pages);
+    if (next === this.page) return false;
+    this.page = next;
+    this.rowsDirty = true;
+    return true;
   }
 
   /** 탭 색과 요약 줄을 지금 상태에 맞춘다. 받을 보상이 있는 탭은 노랗게 보인다. */
@@ -135,8 +171,20 @@ export class AchievementsScene extends Phaser.Scene {
     this.tweens.killTweensOf(this.rowObjects);
     for (const object of this.rowObjects) object.destroy();
     this.rowObjects = [];
-    achievementsIn(this.group).forEach((achievement, index) => {
-      this.addRow(achievement, MARGIN, ROWS_TOP + index * (ROW_HEIGHT + ROW_GAP));
+
+    const items = achievementsIn(this.group);
+    const { perPage, pages } = layoutPages(items.length, this.available, ROW_STEP, PAGER_HEIGHT);
+    if (this.seekReward) {
+      // 탭을 처음 열 때는 받을 보상이 있는 쪽을 보여 준다.
+      this.seekReward = false;
+      const ready = claimable(store.data.achievements, statsOf(store.data));
+      const index = items.findIndex((item) => ready.includes(item));
+      this.page = index < 0 ? 0 : pageOfIndex(index, perPage);
+    }
+    this.page = clampPage(this.page, pages);
+    this.pager.set(pages, this.page);
+    pageSlice(items, this.page, perPage).forEach((achievement, index) => {
+      this.addRow(achievement, MARGIN, ROWS_TOP + index * ROW_STEP);
     });
   }
 

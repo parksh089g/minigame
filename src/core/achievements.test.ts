@@ -42,11 +42,18 @@ describe('업적 목록', () => {
     }
   });
 
-  it('탭마다 업적이 있고, 한 화면에 들어가도록 여섯 개를 넘지 않는다', () => {
-    for (const group of GROUPS) {
-      const count = achievementsIn(group).length;
-      expect(count).toBeGreaterThan(0);
-      expect(count).toBeLessThanOrEqual(6);
+  it('탭마다 업적이 있다', () => {
+    // 한 화면에 다 들어가지 않는 탭은 업적 화면이 쪽으로 나눠 보여 준다.
+    for (const group of GROUPS) expect(achievementsIn(group).length).toBeGreaterThan(0);
+  });
+
+  it('점수 업적은 목록에 있는 게임의 점수를 본다', () => {
+    const ids = REGISTERED_GAMES.filter((game) => game.sceneKey !== null).map((game) => game.id);
+    for (const id of ids) {
+      // 그 게임에서만 높은 점수를 냈을 때 달성되는 점수 업적이 하나 이상 있어야 한다.
+      const done = completedIds(stats({ best: { [id]: 100000 } }));
+      const scored = done.filter((achievementId) => must(achievementId).group === 'score');
+      expect(scored.length, id).toBeGreaterThan(0);
     }
   });
 
