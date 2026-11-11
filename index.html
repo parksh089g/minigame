@@ -19,6 +19,11 @@
   <body>
     <div id="app"></div>
     <div id="boot">불러오는 중…</div>
+    <!-- 휴대폰을 가로로 눕혔을 때만 보인다(style.css, src/core/orientation.ts). -->
+    <div id="rotate" role="status">
+      <div class="rotate-phone" aria-hidden="true"></div>
+      <p>화면을 세로로 돌려 주세요</p>
+    </div>
     <noscript>자바스크립트를 켜야 플레이할 수 있어요.</noscript>
     <script type="module" src="/src/main.ts"></script>
   </body>

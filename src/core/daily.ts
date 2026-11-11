@@ -123,24 +123,35 @@ export function normalizeDaily(raw: unknown): DailyState {
   };
 }
 
-/** 그 날짜의 도전을 이미 달성했는지 */
+/**
+ * 그 날짜의 도전을 이미 달성했는지.
+ * 마지막으로 달성한 날보다 이른 날짜도 달성한 것으로 친다.
+ * 기기 시계를 되돌려 같은 보상을 다시 받지 못하게 하려는 것이다.
+ */
 export function isCleared(state: DailyState, dateKey: string): boolean {
-  return state.lastClearedOn === dateKey;
+  if (state.lastClearedOn === null) return false;
+  if (state.lastClearedOn === dateKey) return true;
+  const today = dayNumber(dateKey);
+  const last = dayNumber(state.lastClearedOn);
+  return today !== null && last !== null && today < last;
 }
 
 /**
  * 그 날짜 기준으로 아직 이어지고 있는 연속 일수.
  * 어제나 오늘 달성했으면 이어지는 중이고, 하루라도 건너뛰었으면 0이다.
+ * 시계가 마지막 달성일보다 앞으로 돌아가 있을 때는 그날을 이미 달성한 것으로 치므로 연속도 그대로다.
  */
 export function activeStreak(state: DailyState, dateKey: string): number {
   const today = dayNumber(dateKey);
   const last = state.lastClearedOn === null ? null : dayNumber(state.lastClearedOn);
   if (today === null || last === null) return 0;
-  const gap = today - last;
-  return gap === 0 || gap === 1 ? state.streak : 0;
+  return today - last <= 1 ? state.streak : 0;
 }
 
-/** 그 날짜의 도전을 달성한 것으로 기록한 새 상태를 돌려준다. 이미 달성했으면 그대로다. */
+/**
+ * 그 날짜의 도전을 달성한 것으로 기록한 새 상태를 돌려준다.
+ * 이미 달성했거나 마지막 달성일보다 이른 날짜면 그대로다.
+ */
 export function clearDaily(state: DailyState, dateKey: string): DailyState {
   if (isCleared(state, dateKey) || dayNumber(dateKey) === null) return state;
   const streak = activeStreak(state, dateKey) + 1;

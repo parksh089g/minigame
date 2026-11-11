@@ -1,8 +1,10 @@
 import Phaser from 'phaser';
 import { SCENE } from '../config';
+import { APP_EVENT, type BackAware } from '../core/app-events';
 import type { PlayResult } from '../core/save';
 import { sfx } from '../core/sfx';
 import { store } from '../core/store';
+import { holdToasts } from '../core/toast';
 import { fadeIn, PixelButton } from '../core/ui';
 import { getGame, todaysChallenge } from '../games/registry';
 
@@ -27,7 +29,7 @@ export interface PauseData {
  * 모든 미니게임 씬의 공통 바탕.
  * 일시정지(버튼, 앱이 가려졌을 때)와 결과 화면 연결을 맡아서, 각 게임은 규칙에만 집중하면 된다.
  */
-export abstract class MiniGameScene extends Phaser.Scene {
+export abstract class MiniGameScene extends Phaser.Scene implements BackAware {
   /** registry.ts에 등록한 게임 id */
   protected abstract readonly gameId: string;
 
@@ -40,11 +42,16 @@ export abstract class MiniGameScene extends Phaser.Scene {
     this.playing = false;
     this.finished = false;
 
-    // 전화가 오거나 다른 앱으로 넘어가면 자동으로 일시정지한다.
+    // 전화가 오거나 다른 앱으로 넘어가면, 또는 화면을 가로로 눕히면 자동으로 일시정지한다.
     const onHidden = (): void => this.pauseGame();
     this.game.events.on(Phaser.Core.Events.HIDDEN, onHidden);
+    this.game.events.on(APP_EVENT.pauseRequest, onHidden);
+    // 안내 문구는 화면 아래쪽을 덮고 터치를 가져가므로, 플레이하는 동안에는 띄우지 않는다.
+    holdToasts(true);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.game.events.off(Phaser.Core.Events.HIDDEN, onHidden);
+      this.game.events.off(APP_EVENT.pauseRequest, onHidden);
+      holdToasts(false);
     });
 
     fadeIn(this);
@@ -60,6 +67,11 @@ export abstract class MiniGameScene extends Phaser.Scene {
       hitPadding: 6,
       onTap: () => this.pauseGame(),
     });
+  }
+
+  /** 뒤로 가기를 누르면 게임을 그만두는 대신 일시정지한다. */
+  onBackRequest(): void {
+    this.pauseGame();
   }
 
   protected pauseGame(): void {

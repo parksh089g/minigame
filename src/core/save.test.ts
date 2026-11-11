@@ -8,6 +8,7 @@ import {
   equipCosmetic,
   getRecord,
   looksLikeSave,
+  MIN_COINS_PER_PLAY,
   normalizeSave,
   resetProgress,
   SAVE_VERSION,
@@ -145,6 +146,24 @@ describe('applyPlayResult', () => {
     expect(applyPlayResult(createDefaultSave(NOW), 'g', 0, 0, NOW).isNewBest).toBe(false);
   });
 
+  it('점수를 냈으면 받을 코인이 없어도 한 판에 적어도 1코인을 준다', () => {
+    const result = applyPlayResult(createDefaultSave(NOW), 'g', 7, 0, NOW);
+    expect(MIN_COINS_PER_PLAY).toBe(1);
+    expect(result.coinsEarned).toBe(1);
+    expect(result.save.coins).toBe(1);
+  });
+
+  it('0점이면 코인을 주지 않는다', () => {
+    const result = applyPlayResult(createDefaultSave(NOW), 'g', 0, 0, NOW);
+    expect(result.coinsEarned).toBe(0);
+    expect(result.save.coins).toBe(0);
+  });
+
+  it('점수로 얻은 코인이 더 많으면 그대로 준다', () => {
+    expect(applyPlayResult(createDefaultSave(NOW), 'g', 90, 9, NOW).coinsEarned).toBe(9);
+    expect(applyPlayResult(createDefaultSave(NOW), 'g', 12, 1, NOW).coinsEarned).toBe(1);
+  });
+
   it('원본 세이브를 바꾸지 않는다', () => {
     const original = createDefaultSave(NOW);
     const snapshot = structuredClone(original);
@@ -200,24 +219,36 @@ describe('오늘의 도전과 한 판의 결과', () => {
   });
 
   it('같은 날 다시 넘겨도 보상은 한 번만 받는다', () => {
-    const first = applyPlayResult(createDefaultSave(NOW), 'g', 150, 0, NOW, challenge).save;
-    const again = applyPlayResult(first, 'g', 300, 0, NOW + 10, challenge);
+    const first = applyPlayResult(createDefaultSave(NOW), 'g', 150, 6, NOW, challenge).save;
+    expect(first.coins).toBe(6 + 25);
+    const again = applyPlayResult(first, 'g', 300, 6, NOW + 10, challenge);
     expect(again.daily).toBeNull();
-    expect(again.save.coins).toBe(25);
+    expect(again.save.coins).toBe(6 + 25 + 6);
     expect(again.save.daily).toEqual(first.daily);
   });
 
   it('다음 날에도 달성하면 연속 보너스가 붙는다', () => {
-    const first = applyPlayResult(createDefaultSave(NOW), 'g', 150, 0, NOW, challenge).save;
-    const second = applyPlayResult(first, 'g', 120, 0, NOW + 10, nextDay);
+    const first = applyPlayResult(createDefaultSave(NOW), 'g', 150, 6, NOW, challenge).save;
+    const second = applyPlayResult(first, 'g', 120, 6, NOW + 10, nextDay);
     expect(second.daily).toEqual({ cleared: true, reward: 15 + 5, streak: 2, shortBy: 0 });
-    expect(second.save.coins).toBe(25 + 20);
+    expect(second.save.coins).toBe(6 + 25 + 6 + 20);
     expect(second.save.daily).toEqual({
       lastClearedOn: '2026-11-12',
       streak: 2,
       bestStreak: 2,
       totalCleared: 2,
     });
+  });
+
+  it('기기 시계를 달성한 날보다 앞으로 되돌려도 보상을 다시 받지 못한다', () => {
+    const cleared = applyPlayResult(createDefaultSave(NOW), 'g', 150, 6, NOW, nextDay).save;
+    // 하루 전 날짜의 도전을 다시 넘긴다.
+    const rolledBack = applyPlayResult(cleared, 'g', 300, 6, NOW + 10, challenge);
+    expect(rolledBack.daily).toBeNull();
+    expect(rolledBack.save.coins).toBe(cleared.coins + 6);
+    expect(rolledBack.save.daily).toEqual(cleared.daily);
+    // 목표에 못 미친 판도 "모자란 점수" 안내 없이 지나간다.
+    expect(applyPlayResult(cleared, 'g', 1, 0, NOW + 10, challenge).daily).toBeNull();
   });
 });
 
