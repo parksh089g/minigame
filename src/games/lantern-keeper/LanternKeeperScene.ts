@@ -1,18 +1,18 @@
-import Phaser from 'phaser';
-import { COLOR, CSS, GAME_WIDTH, SCENE } from '../../config';
+import { CSS, GAME_WIDTH, SCENE } from '../../config';
 import { vibrate } from '../../core/haptics';
 import { sfx } from '../../core/sfx';
-import { addTapZone, addText, drawPanel, fadeToScene } from '../../core/ui';
+import { addText, fadeToScene } from '../../core/ui';
 import { showBanner } from '../../scenes/GameHud';
 import { MiniGameScene, type ResultStat } from '../../scenes/MiniGameScene';
 import { registerLanternTextures } from './art';
-import { ENEMIES, LANTERN_GAME_ID, LANTERN_SCENE, RUN_SECONDS } from './data';
+import { ENEMIES, LANTERN_GAME_ID, LANTERN_SCENE } from './data';
+import { HUD_HEIGHT, RunHud } from './hud';
 import { Joystick } from './joystick';
 import { levelUpHeader, showChoices, TICKET_HEADER } from './levelup';
 import { buildLobby } from './lobby';
 import { applyRun, metaStore } from './meta';
-import { buildSummary, embersFor, formatClock, scoreFor, xpToNext } from './rules';
-import { createRun, Sim, type Enemy } from './sim';
+import { embersFor, formatClock, scoreFor } from './rules';
+import { createRun, Sim } from './sim';
 import { RunView } from './view';
 
 /** 씬을 시작할 때 넘기는 값. 없으면 준비 화면부터 연다. */
@@ -25,13 +25,14 @@ type Phase = 'loading' | 'lobby' | 'run' | 'choosing' | 'over';
 const STEP = 1 / 60;
 /** 한 프레임에 따라잡는 가장 긴 시간(초). 탭이 멈췄다 돌아와도 한꺼번에 몰아서 돌리지 않는다. */
 const MAX_FRAME = 0.1;
-const HUD_HEIGHT = 50;
-const BAR = { x: 42, width: GAME_WIDTH - 50, height: 8 } as const;
+/** HUD에 가려지는 만큼 캐릭터를 화면 가운데보다 이만큼 아래에 둔다. */
+const PLAYER_DROP = 18;
 /** 진행 중인 판을 저장하는 간격(초) */
 const SAVE_EVERY = 20;
 /** 중간 보스가 쓰러지는 모습을 보여 준 뒤에 강화권 화면을 연다(ms). */
 const TICKET_DELAY_MS = 550;
-const DEPTH = { hud: 20, banner: 30, stick: 25, panel: 40 } as const;
+/** HUD는 선택 화면(panel)보다 위에 있어서, 고르는 동안에도 체력과 든 무기가 보인다. */
+const DEPTH = { field: 20, stick: 25, banner: 30, panel: 40, hud: 50 } as const;
 
 /**
  * 등불지기: 몰려오는 그림자 무리 사이를 움직이며 버티는 서바이벌.
@@ -50,15 +51,7 @@ export class LanternKeeperScene extends MiniGameScene {
   private seconds = 0;
   private lastKillSound = 0;
   private lastGemSound = 0;
-  private shownClock = '';
-  private shownKills = -1;
-  private shownLevel = -1;
-
-  private bars!: Phaser.GameObjects.Graphics;
-  private clockText!: Phaser.GameObjects.Text;
-  private levelText!: Phaser.GameObjects.Text;
-  private killText!: Phaser.GameObjects.Text;
-  private bossText!: Phaser.GameObjects.Text;
+  private hud!: RunHud;
   private hint?: Phaser.GameObjects.Text;
 
   constructor() {
@@ -75,9 +68,6 @@ export class LanternKeeperScene extends MiniGameScene {
     this.pending = 0;
     this.sinceSave = 0;
     this.seconds = 0;
-    this.shownClock = '';
-    this.shownKills = -1;
-    this.shownLevel = -1;
     this.hint = undefined;
 
     void metaStore.load().then(() => {
@@ -111,9 +101,9 @@ export class LanternKeeperScene extends MiniGameScene {
 
   private startRun(resume: boolean): void {
     const { height } = this.scale;
-    // HUD에 가려지는 만큼 플레이어를 가운데보다 조금 아래에 둔다.
-    const centerY = Math.round(height / 2) + 12;
-    const view = { viewW: GAME_WIDTH, viewH: height + 24 };
+    const centerY = Math.round(height / 2) + PLAYER_DROP;
+    // 캐릭터가 아래로 내려간 만큼 위쪽이 더 넓게 보이므로, 그 넓은 쪽에 맞춰 적이 화면 밖에서 나오게 한다.
+    const view = { viewW: GAME_WIDTH, viewH: height + PLAYER_DROP * 2 };
 
     const saved = resume ? metaStore.run : null;
     const state = saved
@@ -123,7 +113,10 @@ export class LanternKeeperScene extends MiniGameScene {
     this.sim = new Sim(state, Math.random);
 
     this.view = new RunView(this, centerY);
-    this.addHud();
+    this.hud = new RunHud(this, { top: DEPTH.hud, field: DEPTH.field }, GAME_WIDTH / 2, this.view.centerY, () => {
+      sfx.click();
+      this.pauseGame();
+    });
     this.stick = new Joystick(this, HUD_HEIGHT, DEPTH.stick);
     this.view.sync(this.sim, 0, 0);
     this.drawHud();
@@ -153,6 +146,7 @@ export class LanternKeeperScene extends MiniGameScene {
     this.phase = 'run';
     this.stick.enabled = true;
     this.stick.reset();
+    this.drawHud();
   }
 
   override update(_time: number, delta: number): void {
@@ -196,6 +190,7 @@ export class LanternKeeperScene extends MiniGameScene {
           }
           break;
         case 'hurt':
+          this.hud.hurt(this.seconds);
           sfx.miss();
           vibrate(35);
           this.cameras.main.shake(110, 0.01);
@@ -251,17 +246,17 @@ export class LanternKeeperScene extends MiniGameScene {
     this.stick.reset();
     sfx.gold();
     vibrate(15);
-    const s = this.sim.state;
+    this.drawHud();
     showChoices(
       this,
-      levelUpHeader(s.player.level),
+      levelUpHeader(this.sim.state.player.level),
       this.sim.options(),
       DEPTH.panel,
       (upgrade) => {
         this.sim.applyUpgrade(upgrade);
         this.afterPick();
       },
-      buildSummary(s.weapons),
+      HUD_HEIGHT,
     );
   }
 
@@ -270,6 +265,7 @@ export class LanternKeeperScene extends MiniGameScene {
     this.phase = 'choosing';
     this.stick.enabled = false;
     this.stick.reset();
+    this.drawHud();
     const show = (): void => {
       // 기다리는 사이에 씬을 떠났으면 열지 않는다.
       if (!this.sys.isActive() || this.phase !== 'choosing') return;
@@ -284,7 +280,7 @@ export class LanternKeeperScene extends MiniGameScene {
           this.sim.useTicket(upgrade);
           this.afterPick();
         },
-        buildSummary(this.sim.state.weapons),
+        HUD_HEIGHT,
       );
     };
     if (delayed) this.time.delayedCall(TICKET_DELAY_MS, show);
@@ -346,86 +342,7 @@ export class LanternKeeperScene extends MiniGameScene {
 
   // ------------------------------------------------------------ HUD
 
-  private addHud(): void {
-    this.add.rectangle(0, 0, GAME_WIDTH, HUD_HEIGHT, COLOR.ink, 0.6).setOrigin(0, 0).setDepth(DEPTH.hud);
-
-    // 일시정지 버튼. 공용 버튼은 깊이를 정할 수 없어 어둠 덮개에 가려지므로 HUD 위에 따로 그린다.
-    const button = this.add.graphics().setDepth(DEPTH.hud);
-    const drawButton = (pressed: boolean): void => {
-      button.clear();
-      drawPanel(button, 8, 8, 26, 26, { fill: pressed ? COLOR.navy : COLOR.slate, shadow: COLOR.ink, radius: 8 });
-    };
-    drawButton(false);
-    this.add.image(21, 21, 'icon-pause').setDepth(DEPTH.hud);
-    addTapZone(this, 0, 0, 40, 40, drawButton, () => {
-      sfx.click();
-      this.pauseGame();
-    });
-    this.bars = this.add.graphics().setDepth(DEPTH.hud);
-    this.levelText = addText(this, BAR.x, 33, '', { color: CSS.cyan }).setDepth(DEPTH.hud);
-    this.clockText = addText(this, BAR.x + BAR.width / 2, 33, '', {
-      bold: true,
-      color: CSS.white,
-      originX: 0.5,
-    }).setDepth(DEPTH.hud);
-    this.killText = addText(this, BAR.x + BAR.width, 33, '', { color: CSS.silver, originX: 1 }).setDepth(DEPTH.hud);
-    this.bossText = addText(this, GAME_WIDTH / 2, HUD_HEIGHT + 4, '', {
-      color: CSS.red,
-      bold: true,
-      originX: 0.5,
-      shadow: CSS.ink,
-    }).setDepth(DEPTH.hud);
-  }
-
   private drawHud(): void {
-    const sim = this.sim;
-    const s = sim.state;
-    const p = s.player;
-
-    const g = this.bars;
-    g.clear();
-    const bar = (y: number, ratio: number, color: number): void => {
-      drawPanel(g, BAR.x, y, BAR.width, BAR.height, { fill: COLOR.ink, border: COLOR.slate, shadow: null, radius: 4 });
-      g.fillStyle(color, 1);
-      g.fillRect(BAR.x + 2, y + 2, Math.round((BAR.width - 4) * Phaser.Math.Clamp(ratio, 0, 1)), BAR.height - 4);
-    };
-    const hpRatio = p.hp / sim.maxHp;
-    bar(9, hpRatio, hpRatio <= 0.3 ? COLOR.red : COLOR.green);
-    bar(20, p.xp / xpToNext(p.level), COLOR.sky);
-
-    const boss = this.findBoss();
-    if (boss) {
-      const y = HUD_HEIGHT + 20;
-      const width = 120;
-      const x = Math.round((GAME_WIDTH - width) / 2);
-      drawPanel(g, x, y, width, 6, { fill: COLOR.ink, shadow: null, radius: 3 });
-      g.fillStyle(COLOR.red, 1);
-      g.fillRect(x + 1, y + 1, Math.round((width - 2) * Phaser.Math.Clamp(boss.hp / boss.maxHp, 0, 1)), 4);
-      this.bossText.setText(ENEMIES[boss.kind].name);
-    } else if (this.bossText.text !== '') {
-      this.bossText.setText('');
-    }
-
-    const clock = formatClock(Math.min(s.t, RUN_SECONDS));
-    if (clock !== this.shownClock) {
-      this.shownClock = clock;
-      this.clockText.setText(clock).setColor(s.t >= RUN_SECONDS ? CSS.red : CSS.white);
-    }
-    if (s.kills !== this.shownKills) {
-      this.shownKills = s.kills;
-      this.killText.setText(`처치 ${s.kills}`);
-    }
-    if (p.level !== this.shownLevel) {
-      this.shownLevel = p.level;
-      this.levelText.setText(`Lv ${p.level}`);
-    }
-  }
-
-  private findBoss(): Enemy | null {
-    let found: Enemy | null = null;
-    for (const enemy of this.sim.state.enemies) {
-      if (ENEMIES[enemy.kind].boss && enemy.hp > 0) found = enemy;
-    }
-    return found;
+    this.hud.draw(this.sim, this.seconds, this.phase === 'choosing');
   }
 }

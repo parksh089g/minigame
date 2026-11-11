@@ -19,10 +19,10 @@ const TILE_INSET = 9;
 const TEXT_LEFT = TILE_INSET + TILE + 8;
 /** 이름과 설명 사이 */
 const TEXT_GAP = 2;
-/** 첫 카드가 이보다 아래에 있으면 머리글이 HUD의 레벨, 처치 글자와 겹치지 않는다. */
-const HEADER_CLEAR = 102;
-/** 카드 아래에 두 줄짜리 설명이 들어갈 높이 */
-const FOOTER_ROOM = 40;
+/** 머리글(제목과 한 줄 설명)이 첫 카드 위로 차지하는 높이 */
+const HEADER_HEIGHT = 54;
+/** 마지막 카드 아래에 남기는 여백 */
+const BOTTOM_ROOM = 10;
 /** 움직이던 손가락으로 엉뚱한 것을 고르지 않도록 잠깐 뒤부터 누를 수 있다. */
 const ARM_DELAY_MS = 380;
 
@@ -69,7 +69,7 @@ export const TICKET_HEADER: ChoiceHeader = {
 
 /**
  * 강화 선택 화면을 게임 위에 띄운다. 하나를 고르면 스스로 사라지고 onPick이 불린다.
- * 레벨업과 무기 강화권이 함께 쓴다.
+ * 레벨업과 무기 강화권이 함께 쓴다. 지금 든 무기는 위쪽 HUD에 그대로 보인다.
  */
 export function showChoices(
   scene: Phaser.Scene,
@@ -77,8 +77,8 @@ export function showChoices(
   options: readonly Upgrade[],
   depth: number,
   onPick: (upgrade: Upgrade) => void,
-  /** 카드 아래에 적는 한 줄. 지금 든 무기를 보여 주는 데 쓴다. */
-  footer = '',
+  /** 화면 위쪽에서 이 높이까지는 HUD가 쓰므로 머리글을 그 아래에 둔다. */
+  clearTop = 0,
 ): void {
   const { width, height } = scene.scale;
   const parts: Phaser.GameObjects.GameObject[] = [];
@@ -89,10 +89,10 @@ export function showChoices(
   };
 
   const total = options.length * CARD_HEIGHT + (options.length - 1) * CARD_GAP;
-  // 가운데에 두되, 카드가 넷이라 길어져도 머리글이 위쪽 HUD 글자를 덮지 않게 내린다.
-  // 화면이 아주 짧을 때는 아래 한 줄이 잘리지 않는 데까지만 내린다.
+  // 가운데에 두되, 카드가 넷이라 길어져도 머리글이 위쪽 HUD를 덮지 않게 내린다.
+  // 화면이 아주 짧을 때는 마지막 카드가 잘리지 않는 데까지만 내린다.
   const centered = Math.round((height - total) / 2) + 14;
-  const top = Math.max(centered, Math.min(HEADER_CLEAR, height - total - FOOTER_ROOM));
+  const top = Math.max(centered, Math.min(clearTop + HEADER_HEIGHT, height - total - BOTTOM_ROOM));
   const left = Math.round((GAME_WIDTH - CARD_WIDTH) / 2);
 
   keep(scene.add.rectangle(0, 0, width, height, COLOR.ink, 0.66).setOrigin(0, 0));
@@ -106,17 +106,6 @@ export function showChoices(
     }),
   );
   keep(addText(scene, GAME_WIDTH / 2, top - 22, header.subtitle, { color: CSS.silver, originX: 0.5 }));
-
-  if (footer !== '') {
-    keep(
-      addText(scene, GAME_WIDTH / 2, top + total + 8, footer, {
-        color: CSS.silver,
-        originX: 0.5,
-        align: 'center',
-        wrapWidth: CARD_WIDTH + 12,
-      }),
-    );
-  }
 
   let armed = false;
   let picked = false;

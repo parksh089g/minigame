@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { EVOLVE_LEVEL, MAX_LEVEL, PASSIVES, WEAPON_ORDER, type PassiveId } from './data';
-import { ICON_IDS, ICON_SIZE, ICONS, iconKey, upgradeIcon, withOutline } from './icons';
+import { ICON_IDS, ICON_SIZE, ICONS, iconKey, passiveSlots, upgradeIcon, weaponSlots, withOutline } from './icons';
 
 describe('강화 아이콘', () => {
   it('모든 아이콘은 같은 크기이고 팔레트 글자만 쓴다', () => {
@@ -36,6 +36,36 @@ describe('강화 아이콘', () => {
   it('서로 같은 그림이 없고 텍스처 이름도 겹치지 않는다', () => {
     expect(new Set(ICON_IDS.map((id) => ICONS[id].join(''))).size).toBe(ICON_IDS.length);
     expect(new Set(ICON_IDS.map(iconKey)).size).toBe(ICON_IDS.length);
+  });
+});
+
+describe('HUD에 늘어놓는 칸', () => {
+  it('무기는 얻은 순서대로, 진화한 것은 진화한 모습으로 보인다', () => {
+    expect(weaponSlots({ bolt: 2, ember: EVOLVE_LEVEL, aura: MAX_LEVEL })).toEqual([
+      { icon: 'bolt', level: 2, evolved: false },
+      { icon: 'emberEvo', level: EVOLVE_LEVEL, evolved: true },
+      { icon: 'aura', level: MAX_LEVEL, evolved: false },
+    ]);
+  });
+
+  it('패시브도 얻은 순서대로 보이고 진화는 없다', () => {
+    expect(passiveSlots({ lens: 1, wick: MAX_LEVEL })).toEqual([
+      { icon: 'lens', level: 1, evolved: false },
+      { icon: 'wick', level: MAX_LEVEL, evolved: false },
+    ]);
+  });
+
+  it('아직 없는 것은 칸을 차지하지 않는다', () => {
+    expect(weaponSlots({})).toEqual([]);
+    expect(weaponSlots({ ember: 0, star: 1 })).toEqual([{ icon: 'star', level: 1, evolved: false }]);
+    expect(passiveSlots({ coat: 0 })).toEqual([]);
+  });
+
+  it('저장했다 불러와도 순서가 그대로다', () => {
+    const weapons = { oil: 3, ember: 1, lance: 2 };
+    const loaded = JSON.parse(JSON.stringify(weapons)) as typeof weapons;
+    expect(weaponSlots(loaded)).toEqual(weaponSlots(weapons));
+    expect(weaponSlots(structuredClone(weapons)).map((slot) => slot.icon)).toEqual(['oil', 'ember', 'lance']);
   });
 });
 

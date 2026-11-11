@@ -5,7 +5,7 @@
  * 화면이나 Phaser에 의존하지 않는다.
  */
 import type { PassiveId, WeaponId } from './data';
-import { isEvolved, type Upgrade } from './rules';
+import { isEvolved, type Levels, type Upgrade } from './rules';
 
 type Rows = readonly string[];
 
@@ -452,6 +452,35 @@ export function upgradeIcon(upgrade: Upgrade): IconId {
     case 'embers':
       return 'embers';
   }
+}
+
+/** HUD의 칸 하나: 무엇을 얼마나 올렸는지 */
+export interface Slot {
+  icon: IconId;
+  level: number;
+  /** 최종 진화형이 된 무기 */
+  evolved: boolean;
+}
+
+/** levels에 처음 들어온 순서, 곧 얻은 순서대로 늘어놓는다. */
+function owned<K extends string>(levels: Levels<K>): Array<[K, number]> {
+  return (Object.keys(levels) as K[])
+    .map((id): [K, number] => [id, levels[id] ?? 0])
+    .filter(([, level]) => level > 0);
+}
+
+/** 지금 든 무기를 얻은 순서대로. 진화한 무기는 진화한 모습의 아이콘으로 보인다. */
+export function weaponSlots(weapons: Levels<WeaponId>): Slot[] {
+  return owned(weapons).map(([id, level]) => ({
+    icon: upgradeIcon({ type: 'weapon', id, level }),
+    level,
+    evolved: isEvolved(level),
+  }));
+}
+
+/** 지금 가진 패시브를 얻은 순서대로 */
+export function passiveSlots(passives: Levels<PassiveId>): Slot[] {
+  return owned(passives).map(([id, level]) => ({ icon: id, level, evolved: false }));
 }
 
 const OUTLINE = '0';

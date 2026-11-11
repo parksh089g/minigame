@@ -20,6 +20,7 @@ export const LK = {
   gemMid: 'lk-gem-m',
   gemBig: 'lk-gem-b',
   heal: 'lk-heal',
+  heart: 'lk-heart',
   ember: 'lk-ember',
   emberEvo: 'lk-ember-evo',
   firefly: 'lk-firefly',
@@ -144,6 +145,18 @@ const HEAL: Rows = [
   '0dccccd0',
   '.0dddd0.',
   '..0000..',
+];
+
+/** HUD의 체력 표시 옆에 놓는 하트. 테두리는 withOutline이 두른다. */
+const HEART: Rows = [
+  '.22...22.',
+  '2c22.2222',
+  '2c2222222',
+  '222222222',
+  '.2222222.',
+  '..22222..',
+  '...222...',
+  '....2....',
 ];
 
 function canvasOf(width: number, height: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
@@ -443,6 +456,7 @@ export function registerLanternTextures(scene: Phaser.Scene): void {
     drawDot(2, [[1.5, 12]]),
   );
   add(LK.heal, drawRows(HEAL));
+  add(LK.heart, drawRows(withOutline(HEART)));
   add(LK.floor, drawFloor());
   for (const id of ICON_IDS) add(iconKey(id), drawRows(withOutline(ICONS[id])));
 }
