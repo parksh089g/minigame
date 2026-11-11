@@ -3,6 +3,7 @@
  * 새 게임을 추가할 때는 여기에 한 줄을 넣고, 씬을 main.ts의 씬 목록에 등록하면 된다.
  */
 import { SCENE } from '../config';
+import { challengeFor, dateKeyOf, type DailyChallenge } from '../core/daily';
 import type { SpriteKey } from '../art/sprites';
 
 export interface MiniGameInfo {
@@ -16,6 +17,8 @@ export interface MiniGameInfo {
   sceneKey: string | null;
   /** 점수에 따라 주는 코인 수 */
   coinsFor: (score: number) => number;
+  /** 오늘의 도전에 쓰는 목표 점수. 쉬운 것부터 어려운 것 순서로 세 단계. */
+  dailyTargets: readonly number[];
 }
 
 export const GAMES: readonly MiniGameInfo[] = [
@@ -26,6 +29,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     icon: 'icon-bolt',
     sceneKey: SCENE.lightningTap,
     coinsFor: (score) => Math.floor(score / 10),
+    dailyTargets: [50, 80, 110],
   },
   {
     id: 'memory-cards',
@@ -34,6 +38,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     icon: 'icon-cards',
     sceneKey: SCENE.memoryCards,
     coinsFor: (score) => Math.floor(score / 15),
+    dailyTargets: [100, 160, 220],
   },
   {
     id: 'jump-runner',
@@ -42,9 +47,19 @@ export const GAMES: readonly MiniGameInfo[] = [
     icon: 'icon-runner',
     sceneKey: SCENE.jumpRunner,
     coinsFor: (score) => Math.floor(score / 20),
+    dailyTargets: [80, 140, 200],
   },
 ];
 
 export function getGame(id: string): MiniGameInfo | undefined {
   return GAMES.find((game) => game.id === id);
+}
+
+/** 오늘(기기의 현지 날짜)의 도전. 플레이할 수 있는 게임 가운데에서 날짜로 정해진다. */
+export function todaysChallenge(now: Date = new Date()): DailyChallenge | null {
+  const games = GAMES.filter((game) => game.sceneKey !== null).map((game) => ({
+    id: game.id,
+    targets: game.dailyTargets,
+  }));
+  return challengeFor(dateKeyOf(now), games);
 }

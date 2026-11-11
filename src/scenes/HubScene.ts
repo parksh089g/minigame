@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { APP_NAME, APP_VERSION, COLOR, CSS, FONT_SIZE, GAME_WIDTH, SCENE } from '../config';
+import { activeStreak, dateKeyOf, isCleared, streakBonus } from '../core/daily';
 import { vibrate } from '../core/haptics';
 import {
   getOfflineStatus,
@@ -11,13 +12,15 @@ import { getRecord } from '../core/save';
 import { sfx } from '../core/sfx';
 import { store } from '../core/store';
 import { addBackdrop, addText, drawPanel, fadeIn, fadeToScene, PixelButton } from '../core/ui';
-import { GAMES, type MiniGameInfo } from '../games/registry';
+import { GAMES, getGame, todaysChallenge, type MiniGameInfo } from '../games/registry';
 
 const MARGIN = 12;
 const CARD_WIDTH = GAME_WIDTH - MARGIN * 2;
 const CARD_HEIGHT = 56;
 const CARD_GAP = 8;
-const CARDS_TOP = 100;
+const DAILY_TOP = 78;
+const DAILY_HEIGHT = 40;
+const CARDS_TOP = DAILY_TOP + DAILY_HEIGHT + 8;
 
 const OFFLINE_LABEL: Record<OfflineStatus, { text: string; color: number }> = {
   ready: { text: '오프라인 준비 완료', color: COLOR.lime },
@@ -30,6 +33,8 @@ export class HubScene extends Phaser.Scene {
   private backdrop!: Phaser.GameObjects.TileSprite;
   private offlineDot!: Phaser.GameObjects.Rectangle;
   private offlineText!: Phaser.GameObjects.Text;
+  /** 화면을 그린 날짜. 켜 둔 채 자정이 지나면 오늘의 도전을 새로 그린다. */
+  private shownDate = '';
 
   constructor() {
     super(SCENE.hub);
@@ -40,6 +45,8 @@ export class HubScene extends Phaser.Scene {
     this.backdrop = addBackdrop(this);
 
     this.addHeader();
+    this.shownDate = dateKeyOf(new Date());
+    this.addDaily();
     GAMES.forEach((game, index) => {
       this.addCard(game, MARGIN, CARDS_TOP + index * (CARD_HEIGHT + CARD_GAP));
     });
@@ -56,6 +63,8 @@ export class HubScene extends Phaser.Scene {
     // 배경 점무늬가 천천히 흐른다. 정수 픽셀 단위로만 움직여 픽셀이 흐려지지 않게 한다.
     const step = Math.floor(time / 160);
     this.backdrop.setTilePosition(step, step);
+
+    if (dateKeyOf(new Date()) !== this.shownDate) this.scene.restart();
   }
 
   private addHeader(): void {
@@ -71,16 +80,96 @@ export class HubScene extends Phaser.Scene {
 
     this.addCoinCounter();
 
-    addText(this, GAME_WIDTH / 2, 44, APP_NAME, {
+    addText(this, GAME_WIDTH / 2, 38, APP_NAME, {
       size: FONT_SIZE.large,
       bold: true,
       color: CSS.yellow,
       shadow: CSS.orange,
       originX: 0.5,
     });
-    addText(this, GAME_WIDTH / 2, 76, '오늘은 어떤 게임을 해 볼까요?', {
-      color: CSS.silver,
-      originX: 0.5,
+  }
+
+  /** 오늘의 도전: 날마다 바뀌는 목표. 누르면 그 게임으로 바로 간다. */
+  private addDaily(): void {
+    const challenge = todaysChallenge();
+    const game = challenge ? getGame(challenge.gameId) : undefined;
+    if (!challenge || !game?.sceneKey) return;
+    const sceneKey = game.sceneKey;
+
+    const daily = store.data.daily;
+    const cleared = isCleared(daily, challenge.dateKey);
+    const streak = activeStreak(daily, challenge.dateKey);
+    const x = MARGIN;
+    const y = DAILY_TOP;
+    const right = x + CARD_WIDTH - 8;
+
+    const frame = this.add.graphics();
+    const drawFrame = (pressed: boolean): void => {
+      frame.clear();
+      drawPanel(frame, x, y, CARD_WIDTH, DAILY_HEIGHT, {
+        fill: cleared ? COLOR.ink : pressed ? COLOR.blue : COLOR.navy,
+        border: pressed ? COLOR.sky : cleared ? COLOR.navy : COLOR.ink,
+        highlight: cleared ? COLOR.ink : pressed ? COLOR.blue : COLOR.blue,
+      });
+    };
+    drawFrame(false);
+
+    this.add
+      .image(x + 18, y + DAILY_HEIGHT / 2, 'icon-star')
+      .setScale(2)
+      .setAlpha(cleared ? 0.45 : 1);
+    const title = addText(this, x + 34, y + 6, '오늘의 도전', {
+      bold: true,
+      color: cleared ? CSS.silver : CSS.yellow,
+    });
+    if (streak > 0) {
+      addText(this, Math.round(title.x + title.width) + 6, y + 6, `연속 ${streak}일`, {
+        color: CSS.orange,
+      });
+    }
+
+    if (cleared) {
+      addText(this, right, y + 6, '달성!', { bold: true, color: CSS.lime, originX: 1 });
+      addText(this, x + 34, y + 22, '내일 새 도전이 열려요', { color: CSS.silver });
+    } else {
+      // 오늘 달성하면 받을 코인. 연속 보너스까지 더해서 보여 준다.
+      const reward = challenge.reward + streakBonus(streak + 1);
+      const amount = addText(this, right, y + 6, `+${reward}`, { color: CSS.yellow, originX: 1 });
+      this.add.image(Math.round(right - amount.width - 11), y + 8, 'coin').setOrigin(0, 0);
+      addText(this, x + 34, y + 22, `${game.title} ${challenge.target}점 이상`, { color: CSS.white });
+    }
+
+    this.addTapZone(x, y, CARD_WIDTH, DAILY_HEIGHT, drawFrame, () => {
+      sfx.click();
+      vibrate(8);
+      fadeToScene(this, sceneKey);
+    });
+  }
+
+  /** 누르는 동안 모양이 바뀌고, 그 위에서 손을 떼면 onTap이 불리는 영역을 만든다. */
+  private addTapZone(
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    draw: (pressed: boolean) => void,
+    onTap: () => void,
+  ): void {
+    const zone = this.add.zone(x, y, width, height).setOrigin(0, 0).setInteractive({ useHandCursor: true });
+    let pressed = false;
+    const release = (): void => {
+      pressed = false;
+      draw(false);
+    };
+    zone.on(Phaser.Input.Events.GAMEOBJECT_POINTER_DOWN, () => {
+      pressed = true;
+      draw(true);
+    });
+    zone.on(Phaser.Input.Events.GAMEOBJECT_POINTER_OUT, release);
+    zone.on(Phaser.Input.Events.GAMEOBJECT_POINTER_UP, () => {
+      if (!pressed) return;
+      release();
+      onTap();
     });
   }
 
@@ -135,23 +224,7 @@ export class HubScene extends Phaser.Scene {
       card.add([soon, lock]);
     }
 
-    const zone = this.add
-      .zone(x, y, CARD_WIDTH, CARD_HEIGHT)
-      .setOrigin(0, 0)
-      .setInteractive({ useHandCursor: playable });
-    let pressed = false;
-    const release = (): void => {
-      pressed = false;
-      drawFrame(false);
-    };
-    zone.on(Phaser.Input.Events.GAMEOBJECT_POINTER_DOWN, () => {
-      pressed = true;
-      if (playable) drawFrame(true);
-    });
-    zone.on(Phaser.Input.Events.GAMEOBJECT_POINTER_OUT, release);
-    zone.on(Phaser.Input.Events.GAMEOBJECT_POINTER_UP, () => {
-      if (!pressed) return;
-      release();
+    this.addTapZone(x, y, CARD_WIDTH, CARD_HEIGHT, (pressed) => drawFrame(pressed && playable), () => {
       if (game.sceneKey) {
         sfx.click();
         vibrate(8);

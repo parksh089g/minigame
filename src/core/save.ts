@@ -3,7 +3,17 @@
  * 저장소(IndexedDB)와 화면 어느 쪽에도 의존하지 않아서 단위 테스트가 쉽다.
  */
 
-export const SAVE_VERSION = 1;
+import {
+  clearDaily,
+  createDailyState,
+  isCleared,
+  normalizeDaily,
+  streakBonus,
+  type DailyChallenge,
+  type DailyState,
+} from './daily';
+
+export const SAVE_VERSION = 2;
 
 export interface GameRecord {
   /** 최고 점수 */
@@ -25,8 +35,22 @@ export interface SaveData {
   settings: Settings;
   /** 게임 id → 기록 */
   games: Record<string, GameRecord>;
+  /** 오늘의 도전 달성 기록 */
+  daily: DailyState;
   createdAt: number;
   updatedAt: number;
+}
+
+/** 이번 판이 오늘의 도전에 어떻게 닿았는지 */
+export interface DailyOutcome {
+  /** 이번 판으로 달성했는지 */
+  cleared: boolean;
+  /** 달성해서 받은 코인(기본 보상 + 연속 보너스). 달성하지 못했으면 0 */
+  reward: number;
+  /** 달성한 뒤의 연속 일수. 달성하지 못했으면 0 */
+  streak: number;
+  /** 목표까지 모자란 점수. 달성했으면 0 */
+  shortBy: number;
 }
 
 export interface PlayResult {
@@ -35,7 +59,10 @@ export interface PlayResult {
   best: number;
   previousBest: number;
   isNewBest: boolean;
+  /** 점수로 얻은 코인. 오늘의 도전 보상은 daily.reward에 따로 있다. */
   coinsEarned: number;
+  /** 이 게임이 오늘의 도전이고 아직 달성하기 전이었을 때만 있다. */
+  daily: DailyOutcome | null;
 }
 
 export function createDefaultSave(now: number = Date.now()): SaveData {
@@ -44,6 +71,7 @@ export function createDefaultSave(now: number = Date.now()): SaveData {
     coins: 0,
     settings: { sound: true, vibration: true },
     games: {},
+    daily: createDailyState(),
     createdAt: now,
     updatedAt: now,
   };
@@ -94,6 +122,7 @@ export function normalizeSave(raw: unknown, now: number = Date.now()): SaveData 
       vibration: toBool(settings.vibration, base.settings.vibration),
     },
     games,
+    daily: normalizeDaily(raw.daily),
     createdAt: toTimestamp(raw.createdAt, now),
     updatedAt: toTimestamp(raw.updatedAt, now),
   };
@@ -108,13 +137,17 @@ export function getRecord(save: SaveData, gameId: string): GameRecord {
   return save.games[gameId] ?? { best: 0, plays: 0, lastPlayedAt: null };
 }
 
-/** 한 판의 결과를 반영한 새 세이브를 돌려준다. 원본은 바꾸지 않는다. */
+/**
+ * 한 판의 결과를 반영한 새 세이브를 돌려준다. 원본은 바꾸지 않는다.
+ * challenge에 오늘의 도전을 넘기면, 이 판으로 달성했는지도 함께 따져 보상을 더한다.
+ */
 export function applyPlayResult(
   save: SaveData,
   gameId: string,
   rawScore: number,
   rawCoins: number,
   now: number = Date.now(),
+  challenge: DailyChallenge | null = null,
 ): PlayResult {
   const score = toCount(rawScore);
   const coinsEarned = toCount(rawCoins);
@@ -122,14 +155,31 @@ export function applyPlayResult(
   const isNewBest = score > previous.best;
   const best = Math.max(previous.best, score);
 
+  let daily: DailyOutcome | null = null;
+  let dailyState = save.daily;
+  if (challenge && challenge.gameId === gameId && !isCleared(save.daily, challenge.dateKey)) {
+    if (score >= challenge.target) {
+      dailyState = clearDaily(save.daily, challenge.dateKey);
+      daily = {
+        cleared: true,
+        reward: challenge.reward + streakBonus(dailyState.streak),
+        streak: dailyState.streak,
+        shortBy: 0,
+      };
+    } else {
+      daily = { cleared: false, reward: 0, streak: 0, shortBy: challenge.target - score };
+    }
+  }
+
   return {
     save: {
       ...save,
-      coins: save.coins + coinsEarned,
+      coins: save.coins + coinsEarned + (daily?.reward ?? 0),
       games: {
         ...save.games,
         [gameId]: { best, plays: previous.plays + 1, lastPlayedAt: now },
       },
+      daily: dailyState,
       updatedAt: now,
     },
     score,
@@ -137,6 +187,7 @@ export function applyPlayResult(
     previousBest: previous.best,
     isNewBest,
     coinsEarned,
+    daily,
   };
 }
 

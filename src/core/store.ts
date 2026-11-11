@@ -3,6 +3,7 @@
  * IndexedDB를 쓸 수 없는 환경에서는 localStorage로 물러난다.
  */
 import { createStore, get, set, type UseStore } from 'idb-keyval';
+import type { DailyChallenge } from './daily';
 import {
   applyPlayResult,
   createDefaultSave,
@@ -53,9 +54,14 @@ class SaveStore {
     this.commit();
   }
 
-  /** 한 판의 결과(점수, 얻은 코인)를 기록한다. */
-  recordPlay(gameId: string, score: number, coins: number): PlayResult {
-    const result = applyPlayResult(this.data, gameId, score, coins);
+  /** 한 판의 결과(점수, 얻은 코인)를 기록한다. challenge를 주면 오늘의 도전 달성도 함께 따진다. */
+  recordPlay(
+    gameId: string,
+    score: number,
+    coins: number,
+    challenge: DailyChallenge | null = null,
+  ): PlayResult {
+    const result = applyPlayResult(this.data, gameId, score, coins, Date.now(), challenge);
     this.data = result.save;
     this.commit();
     return result;
