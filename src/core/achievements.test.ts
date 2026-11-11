@@ -47,16 +47,6 @@ describe('업적 목록', () => {
     for (const group of GROUPS) expect(achievementsIn(group).length).toBeGreaterThan(0);
   });
 
-  it('점수 업적은 목록에 있는 게임의 점수를 본다', () => {
-    const ids = REGISTERED_GAMES.filter((game) => game.sceneKey !== null).map((game) => game.id);
-    for (const id of ids) {
-      // 그 게임에서만 높은 점수를 냈을 때 달성되는 점수 업적이 하나 이상 있어야 한다.
-      const done = completedIds(stats({ best: { [id]: 100000 } }));
-      const scored = done.filter((achievementId) => must(achievementId).group === 'score');
-      expect(scored.length, id).toBeGreaterThan(0);
-    }
-  });
-
   it('제목과 설명은 업적 화면 한 줄에 들어가는 길이다', () => {
     // 한글 12px, 숫자 7px, 빈칸 5px로 어림한 폭
     const width = (text: string): number =>

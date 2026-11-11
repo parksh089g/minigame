@@ -99,7 +99,7 @@ scripts/gen-icons.mjs  앱 아이콘을 코드로 생성
 2. 점수와 남은 시간은 `src/scenes/GameHud.ts`의 `GameHud`로 그리면 다른 게임과 같은 모양이 됩니다.
 3. `src/config.ts`의 `SCENE`에 씬 이름을 넣고 `src/main.ts`의 씬 목록에 등록합니다.
 4. `src/games/registry.ts`에 게임 정보를 추가하면 허브에 카드가 생깁니다. 같이 적는 `dailyTargets`(쉬움, 보통, 어려움 순서의 목표 점수 세 개)는 오늘의 도전에 쓰입니다. 게임이 늘어 허브 한 화면에 다 들어가지 않으면 목록이 저절로 쪽으로 나뉩니다.
-5. 그 게임의 점수 업적을 두려면 `src/core/achievements.ts`에 한두 줄을 넣습니다. 게임마다 점수 업적이 하나는 있어야 테스트가 통과합니다.
+5. 그 게임의 점수 업적을 두려면 `src/core/achievements.ts`에 한두 줄을 넣습니다.
 
 규칙과 난이도는 `rules.ts`처럼 화면과 분리된 순수 함수로 두면 숫자만 바꿔 밸런스를 잡을 수 있고 테스트하기도 쉽습니다.
 
