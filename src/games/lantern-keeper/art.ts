@@ -4,18 +4,30 @@
  */
 import Phaser from 'phaser';
 import { COLOR, PALETTE } from '../../config';
+import type { HeroId, StageId } from './data';
 import { ICON_IDS, ICONS, iconKey, withOutline } from './icons';
 
 type Rows = readonly string[];
 
 export const LK = {
   keeper: ['lk-keeper-1', 'lk-keeper-2'],
+  stargazer: ['lk-stargazer-1', 'lk-stargazer-2'],
+  stormer: ['lk-stormer-1', 'lk-stormer-2'],
   shade: ['lk-shade-1', 'lk-shade-2'],
   bat: ['lk-bat-1', 'lk-bat-2'],
   wisp: ['lk-wisp-1', 'lk-wisp-2'],
   brute: ['lk-brute-1', 'lk-brute-2'],
+  drip: ['lk-drip-1', 'lk-drip-2'],
+  moth: ['lk-moth-1', 'lk-moth-2'],
+  toad: ['lk-toad-1', 'lk-toad-2'],
+  stump: ['lk-stump-1', 'lk-stump-2'],
   giant: ['lk-giant-1', 'lk-giant-2'],
+  ram: ['lk-ram-1', 'lk-ram-2'],
+  owl: ['lk-owl-1', 'lk-owl-2'],
   lord: ['lk-lord-1', 'lk-lord-2'],
+  matron: ['lk-matron-1', 'lk-matron-2'],
+  /** 보스가 쏘는 빛덩이 */
+  orb: 'lk-orb',
   gemSmall: 'lk-gem-s',
   gemMid: 'lk-gem-m',
   gemBig: 'lk-gem-b',
@@ -30,8 +42,19 @@ export const LK = {
   lance: 'lk-lance',
   lanceEvo: 'lk-lance-evo',
   floor: 'lk-floor',
+  floorMarsh: 'lk-floor-marsh',
   spark: 'lk-spark',
 } as const;
+
+/** 스테이지마다 깔리는 바닥 */
+export const FLOOR_OF: Readonly<Record<StageId, string>> = { meadow: LK.floor, marsh: LK.floorMarsh };
+
+/** 캐릭터의 걷는 그림 두 장 */
+export const HERO_FRAMES: Readonly<Record<HeroId, readonly [string, string]>> = {
+  keeper: LK.keeper,
+  stargazer: LK.stargazer,
+  stormer: LK.stormer,
+};
 
 /**
  * 도형으로 그리는 효과의 색. 그림체를 바꿀 때는 이 파일(스프라이트 문자열, 색 번호, 이 표)만 고치면 된다.
@@ -48,6 +71,10 @@ export const LOOK = {
   bolt: COLOR.white,
   boltGlow: COLOR.cyan,
   boltEvoGlow: COLOR.yellow,
+  /** 안개 늪의 웅덩이 */
+  puddle: COLOR.navy,
+  puddleRim: COLOR.teal,
+  puddleShine: COLOR.sky,
 } as const;
 
 /**
@@ -76,8 +103,39 @@ const KEEPER_TOP: Rows = [
   '..02222220......',
   '..00222200......',
 ];
-const KEEPER_1: Rows = [...KEEPER_TOP, '...0e0.0e0......', '...00...00......'];
-const KEEPER_2: Rows = [...KEEPER_TOP, '....0e00e0......', '....00.00.......'];
+const LEGS_1: Rows = ['...0e0.0e0......', '...00...00......'];
+const LEGS_2: Rows = ['....0e00e0......', '....00.00.......'];
+const KEEPER_1: Rows = [...KEEPER_TOP, ...LEGS_1];
+const KEEPER_2: Rows = [...KEEPER_TOP, ...LEGS_2];
+
+/** 글자 하나를 다른 색 번호로 바꿔 같은 모양을 다른 색으로 칠한다. */
+const recolor = (rows: Rows, map: Readonly<Record<string, string>>): Rows =>
+  rows.map((row) => [...row].map((cell) => map[cell] ?? cell).join(''));
+
+/** 별지기: 뾰족한 모자에 푸른 옷, 손에는 별 지팡이 */
+const STARGAZER_TOP: Rows = [
+  '......00........',
+  '.....0990.......',
+  '....099990......',
+  '...09949990.....',
+  '..0999999990....',
+  '.0aaaaaaaaaa0...',
+  '..0c0cc0c0...0..',
+  '..0cccccc0..040.',
+  '..09999990.04c40',
+  '.0999999990.040.',
+  '.0999aa9990..0..',
+  '.0999999990..0..',
+  '..09999990...0..',
+  '..00999900......',
+];
+
+/** 번개잡이: 초록 두건에 하늘색 목도리, 손에는 번개를 담은 등 */
+const STORMER_TOP: Rows = [
+  ...recolor(KEEPER_TOP.slice(0, 6), { '4': '6' }),
+  '...0bbbbbb0.000.',
+  ...recolor(KEEPER_TOP.slice(7), { '2': '7', '3': '6', '4': 'b' }),
+];
 
 const BAT_1: Rows = [
   '0............0',
@@ -191,6 +249,8 @@ interface BlobLook {
   crown?: boolean;
   /** 아래쪽 물결 */
   frill?: boolean;
+  /** 머리 양쪽에 솟은 것. horn은 바깥으로 휜 흰 뿔, tuft는 몸과 같은 색의 뾰족한 깃 */
+  ears?: 'horn' | 'tuft';
 }
 
 /**
@@ -199,7 +259,7 @@ interface BlobLook {
  */
 function blobRows(look: BlobLook, frame: 1 | 2): Rows {
   const { size } = look;
-  const crownRows = look.crown ? Math.round(size / 4) : 0;
+  const crownRows = look.crown ? Math.round(size / 4) : look.ears ? Math.round(size / 5) : 0;
   const height = size + crownRows;
   const grid: string[][] = Array.from({ length: height }, () => Array<string>(size).fill('.'));
   const cx = size / 2;
@@ -240,6 +300,33 @@ function blobRows(look: BlobLook, frame: 1 | 2): Rows {
       }
     }
   }
+  // 뿔이나 깃: 머리 양쪽에서 위로 솟는 세모. 뿔은 끝이 바깥으로 휜다.
+  if (look.ears) {
+    const tall = crownRows + Math.round(size / 6);
+    const wide = Math.max(3, Math.round(size / 6));
+    const lean = look.ears === 'horn' ? Math.round(size / 9) : 0;
+    const fill = (look.ears === 'horn' ? 12 : look.body).toString(16);
+    for (const side of [-1, 1]) {
+      const base = Math.round(cx + side * size * 0.27);
+      for (let k = 0; k < tall; k += 1) {
+        const t = k / (tall - 1);
+        const span = Math.max(1, Math.round(1 + (wide - 1) * t));
+        const middle = base + side * Math.round(lean * (1 - t) * (1 - t));
+        const from = middle - Math.floor(span / 2);
+        for (let i = -1; i <= span; i += 1) {
+          const gx = from + i;
+          if (grid[k]?.[gx] === undefined) continue;
+          const edge = i === -1 || i === span;
+          // 몸 안쪽에는 테두리를 긋지 않아 머리와 자연스럽게 이어진다.
+          if (edge && grid[k][gx] !== '.') continue;
+          grid[k][gx] = edge ? '0' : fill;
+        }
+      }
+      // 뾰족한 끝 위에 테두리 한 점
+      const tip = base + side * lean;
+      if (grid[0]?.[tip] !== undefined) grid[0][tip] = '0';
+    }
+  }
   // 왕관: 뾰족한 세 봉우리
   if (look.crown) {
     const left = Math.round(size * 0.25);
@@ -259,8 +346,14 @@ function blobRows(look: BlobLook, frame: 1 | 2): Rows {
 const BLOBS = {
   shade: { size: 12, body: 1, shade: 2, eye: 12, frill: true },
   brute: { size: 16, body: 14, shade: 13, eye: 3 },
+  drip: { size: 12, body: 7, shade: 6, eye: 12, frill: true },
+  toad: { size: 13, body: 6, shade: 5, eye: 4 },
+  stump: { size: 18, body: 14, shade: 6, eye: 5 },
   giant: { size: 30, body: 7, shade: 6, eye: 4, frill: true },
+  ram: { size: 28, body: 3, shade: 4, eye: 0, ears: 'horn' },
+  owl: { size: 28, body: 9, shade: 10, eye: 4, ears: 'tuft', frill: true },
   lord: { size: 34, body: 2, shade: 3, eye: 12, crown: true, frill: true },
+  matron: { size: 34, body: 6, shade: 5, eye: 4, crown: true, frill: true },
 } as const satisfies Record<string, BlobLook>;
 
 function drawGem(size: number, rim: number, body: number): HTMLCanvasElement {
@@ -291,6 +384,44 @@ function drawDot(size: number, rings: ReadonlyArray<readonly [number, number]>):
       context.fillStyle = PALETTE[color];
       context.fillRect(x, y, 1, 1);
     }
+  }
+  return canvas;
+}
+
+/** 안개 늪. 풀밭보다 푸르고 축축한 바탕에 갈대와 물기 어린 점을 박는다. */
+function drawMarshFloor(): HTMLCanvasElement {
+  const size = 48;
+  const [canvas, context] = canvasOf(size, size);
+  context.fillStyle = '#243a4a';
+  context.fillRect(0, 0, size, size);
+  // 갈대: 길고 가는 줄기 두 가닥씩. 적과 빛 조각이 묻히지 않게 바탕보다 조금만 밝다.
+  context.fillStyle = '#2f6b5c';
+  for (const [x, y] of [
+    [8, 10],
+    [34, 6],
+    [20, 30],
+    [42, 36],
+  ]) {
+    context.fillRect(x, y, 1, 4);
+    context.fillRect(x + 2, y + 1, 1, 3);
+  }
+  context.fillStyle = '#2c5563';
+  for (const [x, y, w] of [
+    [2, 24, 4],
+    [28, 18, 3],
+    [14, 44, 4],
+    [38, 46, 3],
+    [12, 3, 3],
+  ]) {
+    context.fillRect(x, y, w, 1);
+  }
+  context.fillStyle = PALETTE[8];
+  for (const [x, y] of [
+    [30, 40],
+    [18, 16],
+    [44, 22],
+  ]) {
+    context.fillRect(x, y, 2, 1);
   }
   return canvas;
 }
@@ -389,11 +520,18 @@ export function registerLanternTextures(scene: Phaser.Scene): void {
 
   addWithFlash(LK.keeper[0], KEEPER_1);
   addWithFlash(LK.keeper[1], KEEPER_2);
+  addWithFlash(LK.stargazer[0], [...STARGAZER_TOP, ...LEGS_1]);
+  addWithFlash(LK.stargazer[1], [...STARGAZER_TOP, ...LEGS_2]);
+  addWithFlash(LK.stormer[0], [...STORMER_TOP, ...LEGS_1]);
+  addWithFlash(LK.stormer[1], [...STORMER_TOP, ...LEGS_2]);
   addWithFlash(LK.bat[0], BAT_1);
   addWithFlash(LK.bat[1], BAT_2);
+  // 안개나방은 박쥐와 같은 모양에 날개만 잿빛이다.
+  addWithFlash(LK.moth[0], recolor(BAT_1, { '2': 'd' }));
+  addWithFlash(LK.moth[1], recolor(BAT_2, { '2': 'd' }));
   addWithFlash(LK.wisp[0], WISP_1);
   addWithFlash(LK.wisp[1], WISP_2);
-  for (const kind of ['shade', 'brute', 'giant', 'lord'] as const) {
+  for (const kind of Object.keys(BLOBS) as Array<keyof typeof BLOBS>) {
     addWithFlash(LK[kind][0], blobRows(BLOBS[kind], 1));
     addWithFlash(LK[kind][1], blobRows(BLOBS[kind], 2));
   }
@@ -449,6 +587,15 @@ export function registerLanternTextures(scene: Phaser.Scene): void {
       [2.4, 12],
     ]),
   );
+  add(
+    LK.orb,
+    drawDot(9, [
+      [4.5, 0],
+      [3.6, 2],
+      // 가운데는 네모나게 밝힌다. 십자 모양이면 회복 떡처럼 읽힌다.
+      [1.5, 12],
+    ]),
+  );
   add(LK.lance, drawRows(LANCE));
   add(LK.lanceEvo, drawRows(LANCE_EVO));
   add(
@@ -458,5 +605,6 @@ export function registerLanternTextures(scene: Phaser.Scene): void {
   add(LK.heal, drawRows(HEAL));
   add(LK.heart, drawRows(withOutline(HEART)));
   add(LK.floor, drawFloor());
+  add(LK.floorMarsh, drawMarshFloor());
   for (const id of ICON_IDS) add(iconKey(id), drawRows(withOutline(ICONS[id])));
 }

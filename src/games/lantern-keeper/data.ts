@@ -26,7 +26,27 @@ export const PLAYER_BASE = {
   radius: 5,
 } as const;
 
-export type EnemyKind = 'shade' | 'bat' | 'brute' | 'wisp' | 'giant' | 'lord';
+export type EnemyKind =
+  | 'shade'
+  | 'bat'
+  | 'brute'
+  | 'wisp'
+  | 'drip'
+  | 'moth'
+  | 'toad'
+  | 'stump'
+  | 'giant'
+  | 'ram'
+  | 'owl'
+  | 'lord'
+  | 'matron';
+
+/**
+ * 보스가 싸우는 방식.
+ * summon 부하를 불러낸다 · charge 힘을 모았다 돌진한다 · volley 빛을 흩뿌려 쏜다
+ * lord 돌진한 뒤 부하를 부른다 · matron 사방으로 쏘기와 부하 부르기를 번갈아 한다
+ */
+export type BossBrain = 'summon' | 'charge' | 'volley' | 'lord' | 'matron';
 
 export interface EnemyInfo {
   name: string;
@@ -39,37 +59,108 @@ export interface EnemyInfo {
   xp: number;
   /** 판정 반지름(px) */
   radius: number;
+  /** 폴짝폴짝 뛰어서, 멈췄다가 한 번에 다가온다 */
+  hops?: boolean;
   boss?: boolean;
+  brain?: BossBrain;
 }
 
 export const ENEMIES: Readonly<Record<EnemyKind, EnemyInfo>> = {
+  // 밤의 풀밭
   shade: { name: '그림자 방울', hp: 6, speed: 22, damage: 5, xp: 1, radius: 6 },
   bat: { name: '밤박쥐', hp: 5, speed: 40, damage: 4, xp: 1, radius: 5 },
   wisp: { name: '도깨비불', hp: 14, speed: 30, damage: 8, xp: 2, radius: 5 },
   brute: { name: '돌그림자', hp: 45, speed: 15, damage: 12, xp: 4, radius: 8 },
+  // 안개 늪
+  drip: { name: '늪방울', hp: 7, speed: 21, damage: 5, xp: 1, radius: 6 },
+  moth: { name: '안개나방', hp: 4, speed: 44, damage: 4, xp: 1, radius: 5 },
+  toad: { name: '늪두꺼비', hp: 18, speed: 58, damage: 9, xp: 2, radius: 6, hops: true },
+  stump: { name: '이끼 등걸', hp: 60, speed: 13, damage: 14, xp: 5, radius: 9 },
   // 중간 보스의 체력은 MID_BOSS_TIERS가 정한다. 여기 적힌 값은 첫 번째 것과 같다.
-  giant: { name: '어스름 거인', hp: 320, speed: 30, damage: 18, xp: 30, radius: 15, boss: true },
-  lord: { name: '밤의 왕관', hp: 4000, speed: 27, damage: 24, xp: 0, radius: 17, boss: true },
+  giant: { name: '어스름 거인', hp: 320, speed: 30, damage: 18, xp: 30, radius: 15, boss: true, brain: 'summon' },
+  ram: { name: '뿔그림자', hp: 320, speed: 26, damage: 20, xp: 30, radius: 14, boss: true, brain: 'charge' },
+  owl: { name: '안개 올빼미', hp: 320, speed: 22, damage: 16, xp: 30, radius: 14, boss: true, brain: 'volley' },
+  // 마지막 보스
+  lord: { name: '밤의 왕관', hp: 4000, speed: 27, damage: 24, xp: 0, radius: 17, boss: true, brain: 'lord' },
+  matron: { name: '늪의 어미', hp: 4000, speed: 23, damage: 22, xp: 0, radius: 17, boss: true, brain: 'matron' },
 };
 
-/** 몇 초부터 어떤 적이 얼마나 섞여 나오는지. 뒤쪽 줄일수록 나중에 열린다. */
-export const SPAWN_TABLE: ReadonlyArray<{ kind: EnemyKind; from: number; weight: number }> = [
-  { kind: 'shade', from: 0, weight: 10 },
-  { kind: 'bat', from: 75, weight: 6 },
-  { kind: 'wisp', from: 200, weight: 5 },
-  { kind: 'brute', from: 160, weight: 2 },
-];
+export interface SpawnRow {
+  kind: EnemyKind;
+  /** 이 시각(초)부터 나온다 */
+  from: number;
+  /** 섞이는 비율 */
+  weight: number;
+}
 
 /**
  * 중간 보스는 나올 때마다 강해진다. 0번이 2분에 나오는 첫 번째.
- * hp는 체력, summon은 한 번에 불러내는 부하의 수, minion은 그 부하의 종류.
+ * hp는 체력, summon은 부하를 부르는 보스가 한 번에 불러내는 수.
  */
-export const MID_BOSS_TIERS: ReadonlyArray<{ hp: number; summon: number; minion: EnemyKind }> = [
-  { hp: 320, summon: 4, minion: 'bat' },
-  { hp: 700, summon: 5, minion: 'bat' },
-  { hp: 1500, summon: 6, minion: 'wisp' },
-  { hp: 2400, summon: 8, minion: 'wisp' },
+export const MID_BOSS_TIERS: ReadonlyArray<{ hp: number; summon: number }> = [
+  { hp: 320, summon: 4 },
+  { hp: 700, summon: 5 },
+  { hp: 1500, summon: 6 },
+  { hp: 2400, summon: 8 },
 ];
+
+export type StageId = 'meadow' | 'marsh';
+
+export interface StageInfo {
+  name: string;
+  /** 준비 화면에 보이는 한 줄 */
+  blurb: string;
+  /** 몇 초부터 어떤 적이 얼마나 섞여 나오는지 */
+  spawns: readonly SpawnRow[];
+  /** 밀물 때 에워싸는 적. 앞의 두 번과 뒤의 두 번 */
+  surge: readonly [EnemyKind, EnemyKind];
+  /** 보스가 불러내는 부하. 앞의 두 번과 뒤의 두 번 */
+  minions: readonly [EnemyKind, EnemyKind];
+  /** 2분, 4분, 6분, 8분에 차례로 나오는 중간 보스 */
+  midBosses: readonly EnemyKind[];
+  finalBoss: EnemyKind;
+  /** 발이 빠져 느려지는 웅덩이가 있는 곳 */
+  puddles: boolean;
+  /** 최고 기록이 이만큼(초) 되면 열린다. 0이면 처음부터 열려 있다. */
+  unlockSeconds: number;
+}
+
+export const STAGES: Readonly<Record<StageId, StageInfo>> = {
+  meadow: {
+    name: '밤의 풀밭',
+    blurb: '탁 트인 들판. 사방에서 그림자가 몰려온다',
+    spawns: [
+      { kind: 'shade', from: 0, weight: 10 },
+      { kind: 'bat', from: 75, weight: 6 },
+      { kind: 'wisp', from: 200, weight: 5 },
+      { kind: 'brute', from: 160, weight: 2 },
+    ],
+    surge: ['shade', 'wisp'],
+    minions: ['bat', 'wisp'],
+    midBosses: ['giant', 'ram', 'owl', 'giant'],
+    finalBoss: 'lord',
+    puddles: false,
+    unlockSeconds: 0,
+  },
+  marsh: {
+    name: '안개 늪',
+    blurb: '웅덩이에 빠지면 느려진다. 뛰어드는 두꺼비 조심',
+    spawns: [
+      { kind: 'drip', from: 0, weight: 10 },
+      { kind: 'moth', from: 60, weight: 6 },
+      { kind: 'toad', from: 120, weight: 5 },
+      { kind: 'stump', from: 170, weight: 2 },
+    ],
+    surge: ['moth', 'toad'],
+    minions: ['moth', 'toad'],
+    midBosses: ['owl', 'giant', 'ram', 'owl'],
+    finalBoss: 'matron',
+    puddles: true,
+    unlockSeconds: 240,
+  },
+};
+
+export const STAGE_ORDER: readonly StageId[] = ['meadow', 'marsh'];
 
 /** 이 시각들에 적이 둥글게 에워싸는 "밀물"이 한 번씩 온다(초). 중간 보스와 겹치지 않게 그 사이에 둔다. */
 export const SURGES: readonly number[] = [180, 300, 420, 540];
@@ -151,8 +242,66 @@ export const PASSIVES: Readonly<Record<PassiveId, PassiveInfo>> = {
   lens: { name: '유리 렌즈', perLevel: '공격 범위 +10%' },
 };
 
+export type HeroId = 'keeper' | 'stargazer' | 'stormer';
+
+/** 캐릭터마다 다른 능력. 더하는 값(maxHp)과 곱하는 값(나머지)이 있다. */
+export interface HeroTrait {
+  /** 최대 체력에 더한다 */
+  maxHp?: number;
+  speed?: number;
+  cooldown?: number;
+  area?: number;
+  xp?: number;
+}
+
+export interface HeroInfo {
+  name: string;
+  /** 어떤 캐릭터인지 한 줄 */
+  blurb: string;
+  /** 고유 특성에서 좋은 점을 숫자로 */
+  perk: string;
+  /** 그 대신 치르는 값. 없으면 비운다. */
+  flaw?: string;
+  /** 처음 들고 나오는 무기 */
+  weapon: WeaponId;
+  trait: HeroTrait;
+  /** 최고 기록이 이만큼(초) 되면 열린다. 0이면 처음부터 열려 있다. */
+  unlockSeconds: number;
+}
+
+export const HEROES: Readonly<Record<HeroId, HeroInfo>> = {
+  keeper: {
+    name: '등불지기',
+    blurb: '튼튼해서 처음 하기 좋다',
+    perk: '최대 체력 +20',
+    weapon: 'ember',
+    trait: { maxHp: 20 },
+    unlockSeconds: 0,
+  },
+  stargazer: {
+    name: '별지기',
+    blurb: '넓게 때리고 빨리 자란다',
+    perk: '범위 +20% · 경험치 +10%',
+    flaw: '최대 체력 -15',
+    weapon: 'star',
+    trait: { area: 1.2, xp: 1.1, maxHp: -15 },
+    unlockSeconds: 120,
+  },
+  stormer: {
+    name: '번개잡이',
+    blurb: '발이 빠르고 손이 잦다',
+    perk: '이동 +12% · 재사용 -10%',
+    flaw: '최대 체력 -25',
+    weapon: 'bolt',
+    trait: { speed: 1.12, cooldown: 0.9, maxHp: -25 },
+    unlockSeconds: 360,
+  },
+};
+
+export const HERO_ORDER: readonly HeroId[] = ['keeper', 'stargazer', 'stormer'];
+
 /** 판 밖에서 불씨로 올리는 영구 강화 */
-export type MetaId = 'vigor' | 'swift' | 'might' | 'greed' | 'reach';
+export type MetaId = 'vigor' | 'swift' | 'might' | 'greed' | 'reach' | 'mend' | 'lucky' | 'second';
 
 export interface MetaInfo {
   name: string;
@@ -168,6 +317,18 @@ export const META: Readonly<Record<MetaId, MetaInfo>> = {
   might: { name: '뜨거운 불꽃', perLevel: '모든 피해 +5%', maxLevel: 5, baseCost: 16 },
   greed: { name: '빛 모으기', perLevel: '얻는 경험치 +8%', maxLevel: 5, baseCost: 14 },
   reach: { name: '긴 손', perLevel: '줍는 거리 +15%', maxLevel: 3, baseCost: 10 },
+  mend: { name: '따뜻한 품', perLevel: '10초마다 체력 +1', maxLevel: 3, baseCost: 14 },
+  lucky: { name: '불씨 복', perLevel: '얻는 불씨 +10%', maxLevel: 3, baseCost: 18 },
+  second: { name: '되살림 등불', perLevel: '쓰러져도 한 번 일어난다', maxLevel: 1, baseCost: 60 },
 };
 
-export const META_ORDER: readonly MetaId[] = ['vigor', 'swift', 'might', 'greed', 'reach'];
+export const META_ORDER: readonly MetaId[] = [
+  'vigor',
+  'swift',
+  'might',
+  'greed',
+  'reach',
+  'mend',
+  'lucky',
+  'second',
+];

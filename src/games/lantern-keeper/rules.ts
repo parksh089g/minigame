@@ -12,12 +12,14 @@ import {
   PASSIVES,
   PLAYER_BASE,
   RUN_SECONDS,
-  SPAWN_TABLE,
+  STAGES,
   WEAPON_ORDER,
   WEAPONS,
   type EnemyKind,
+  type HeroTrait,
   type MetaId,
   type PassiveId,
+  type StageId,
   type WeaponId,
 } from './data';
 
@@ -65,9 +67,9 @@ export function damageScale(t: number): number {
   return 1 + 0.6 * Math.min(1, Math.max(0, t - 180) / (RUN_SECONDS - 180));
 }
 
-/** 지금 나올 수 있는 적 가운데 하나를 가중치에 따라 고른다. */
-export function pickSpawnKind(t: number, rand: Rand): EnemyKind {
-  const open = SPAWN_TABLE.filter((row) => t >= row.from);
+/** 그 스테이지에서 지금 나올 수 있는 적 가운데 하나를 가중치에 따라 고른다. */
+export function pickSpawnKind(t: number, rand: Rand, stage: StageId = 'meadow'): EnemyKind {
+  const open = STAGES[stage].spawns.filter((row) => t >= row.from);
   const total = open.reduce((sum, row) => sum + row.weight, 0);
   let roll = rand() * total;
   for (const row of open) {
@@ -92,6 +94,22 @@ export function midBossTier(index: number): (typeof MID_BOSS_TIERS)[number] {
   return MID_BOSS_TIERS[Math.max(0, Math.min(index, MID_BOSS_TIERS.length - 1))];
 }
 
+/** 그 스테이지에서 index번째(0부터)로 나오는 중간 보스 */
+export function midBossKind(stage: StageId, index: number): EnemyKind {
+  const list = STAGES[stage].midBosses;
+  return list[Math.max(0, Math.min(index, list.length - 1))];
+}
+
+/** 보스가 불러내는 부하. 앞의 두 번과 뒤의 두 번이 다르다. */
+export function minionKind(stage: StageId, tier: number): EnemyKind {
+  return STAGES[stage].minions[tier >= 2 ? 1 : 0];
+}
+
+/** 최고 기록(초)으로 열리는 캐릭터나 스테이지가 열렸는지 */
+export function isUnlocked(item: { unlockSeconds: number }, bestSeconds: number): boolean {
+  return bestSeconds >= item.unlockSeconds;
+}
+
 // ---------------------------------------------------------------- 능력치
 
 export type Levels<K extends string> = Partial<Record<K, number>>;
@@ -104,20 +122,26 @@ export interface Modifiers {
   area: number;
   xp: number;
   maxHp: number;
+  /** 1초에 저절로 차는 체력 */
+  regen: number;
 }
 
-/** 판 안의 패시브와 판 밖의 영구 강화를 합친 배율 */
-export function modifiers(passives: Levels<PassiveId>, meta: Levels<MetaId>): Modifiers {
+/** 캐릭터의 최대 체력이 아무리 깎여도 이보다 낮아지지는 않는다. */
+const MIN_MAX_HP = 40;
+
+/** 판 안의 패시브, 판 밖의 영구 강화, 캐릭터의 고유 특성을 합친 배율 */
+export function modifiers(passives: Levels<PassiveId>, meta: Levels<MetaId>, trait: HeroTrait = {}): Modifiers {
   const p = (id: PassiveId): number => passives[id] ?? 0;
   const m = (id: MetaId): number => meta[id] ?? 0;
   return {
     damage: (1 + 0.1 * p('wick')) * (1 + 0.05 * m('might')),
-    cooldown: 0.93 ** p('hourglass'),
-    speed: (1 + 0.08 * p('boots')) * (1 + 0.04 * m('swift')),
+    cooldown: 0.93 ** p('hourglass') * (trait.cooldown ?? 1),
+    speed: (1 + 0.08 * p('boots')) * (1 + 0.04 * m('swift')) * (trait.speed ?? 1),
     magnet: (1 + 0.3 * p('magnet')) * (1 + 0.15 * m('reach')),
-    area: 1 + 0.1 * p('lens'),
-    xp: 1 + 0.08 * m('greed'),
-    maxHp: PLAYER_BASE.maxHp + 20 * p('coat') + 10 * m('vigor'),
+    area: (1 + 0.1 * p('lens')) * (trait.area ?? 1),
+    xp: (1 + 0.08 * m('greed')) * (trait.xp ?? 1),
+    maxHp: Math.max(MIN_MAX_HP, PLAYER_BASE.maxHp + 20 * p('coat') + 10 * m('vigor') + (trait.maxHp ?? 0)),
+    regen: 0.1 * m('mend'),
   };
 }
 
@@ -399,12 +423,15 @@ export function scoreFor(run: RunSummary): number {
   return Math.floor(run.seconds) + run.kills + 150 * run.bossKills + (run.cleared ? 1000 : 0);
 }
 
-/** 판이 끝나고 받는 불씨. 오래 버틸수록, 많이 쓰러뜨릴수록 많다. */
-export function embersFor(run: RunSummary): number {
+/**
+ * 판이 끝나고 받는 불씨. 오래 버틸수록, 많이 쓰러뜨릴수록 많다.
+ * lucky는 영구 강화 "불씨 복"의 단계로, 한 단계에 10%씩 더 준다.
+ */
+export function embersFor(run: RunSummary, lucky = 0): number {
   const minutes = Math.floor(Math.min(run.seconds, RUN_SECONDS) / 60);
-  return (
-    minutes * 3 + Math.floor(run.kills / 40) + 8 * run.bossKills + (run.cleared ? 40 : 0) + run.bonusEmbers
-  );
+  const earned =
+    minutes * 3 + Math.floor(run.kills / 40) + 8 * run.bossKills + (run.cleared ? 40 : 0) + run.bonusEmbers;
+  return Math.floor(earned * (1 + 0.1 * Math.max(0, lucky)));
 }
 
 /** 허브 코인. 다른 미니게임과 비슷한 정도가 되게 점수에서 조금만 준다. */

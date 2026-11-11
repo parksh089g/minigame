@@ -1,6 +1,7 @@
 /**
  * 자동 플레이. 밸런스를 숫자로 확인하는 테스트에서 쓴다.
- * 사람처럼 잘하지는 못하지만, 가까운 적에게서 멀어지고 안전하면 빛 조각을 주우러 간다.
+ * 사람처럼 잘하지는 못하지만, 가까운 적과 날아오는 빛덩이에게서 멀어지고 안전하면 빛 조각을 주우러 간다.
+ * 캐릭터와 스테이지는 RunConfig로 정한다.
  */
 import { ENEMIES } from './data';
 import { seededRandom, type RunSummary, type Upgrade } from './rules';
@@ -18,12 +19,20 @@ export interface BotResult extends RunSummary {
 const DANGER_RANGE = 34;
 const LOOK_AHEAD = 12;
 const DIRECTIONS = 16;
+/** 빛덩이를 피할 때 두는 거리와, 얼마 뒤의 자리를 내다볼지(초) */
+const HAZARD_RANGE = 16;
+const HAZARD_AHEAD = 0.25;
+/** 웅덩이에 발을 들이는 것을 꺼리는 정도. 적을 피하는 것보다는 훨씬 가볍다. */
+const MIRE_COST = 0.8;
 
 /** 열여섯 방향 가운데, 조금 나아갔을 때 적과 덜 가깝고 빛 조각에 가까워지는 쪽을 고른다. */
 function steer(sim: Sim): [number, number] {
-  const { player, enemies, gems } = sim.state;
+  const { player, enemies, gems, hazards } = sim.state;
   const near = enemies.filter(
     (e) => Math.abs(e.x - player.x) < 70 && Math.abs(e.y - player.y) < 70,
+  );
+  const incoming = hazards.filter(
+    (h) => Math.abs(h.x - player.x) < 60 && Math.abs(h.y - player.y) < 60,
   );
   let gem: { x: number; y: number } | null = null;
   let gemDistance = 140;
@@ -50,6 +59,11 @@ function steer(sim: Sim): [number, number] {
       const d = Math.hypot(e.x - x, e.y - y) - ENEMIES[e.kind].radius;
       if (d < DANGER_RANGE) cost += ((DANGER_RANGE - d) / DANGER_RANGE) ** 2 * 10;
     }
+    for (const h of incoming) {
+      const d = Math.hypot(h.x + h.vx * HAZARD_AHEAD - x, h.y + h.vy * HAZARD_AHEAD - y);
+      if (d < HAZARD_RANGE) cost += ((HAZARD_RANGE - d) / HAZARD_RANGE) ** 2 * 8;
+    }
+    if (sim.isMire(x, y)) cost += MIRE_COST;
     if (gem) cost += Math.hypot(gem.x - x, gem.y - y) * 0.02;
     if (cost < bestCost) {
       bestCost = cost;

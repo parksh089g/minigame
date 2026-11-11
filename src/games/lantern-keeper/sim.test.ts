@@ -3,19 +3,38 @@ import { playRun } from './bot';
 import {
   ENEMIES,
   EVOLVE_LEVEL,
+  HERO_ORDER,
+  HEROES,
   MAX_LEVEL,
   MAX_WEAPONS,
   MID_BOSS_COUNT,
   MID_BOSS_EVERY,
   MID_BOSS_TIERS,
   RUN_SECONDS,
+  STAGE_ORDER,
+  STAGES,
   SURGES,
+  type EnemyKind,
 } from './data';
-import { maxAlive, seededRandom, xpToNext, type Upgrade } from './rules';
-import { createRun, looksLikeRun, Sim, type Enemy, type RunState, type SimEvent } from './sim';
+import { maxAlive, midBossKind, seededRandom, speedScale, xpToNext, type Upgrade } from './rules';
+import {
+  createRun,
+  HOP_REST,
+  HOP_SECONDS,
+  looksLikeRun,
+  restoreRun,
+  RUN_STATE_VERSION,
+  Sim,
+  type Enemy,
+  type RunState,
+  type SimEvent,
+} from './sim';
+import { inPuddle, PUDDLE_SLOW, puddleInCell } from './terrain';
 
 const config = { viewW: 240, viewH: 520, meta: {} };
 const STEP = 1 / 60;
+/** 기본 캐릭터(등불지기)의 최대 체력 */
+const BASE_HP = 100 + (HEROES.keeper.trait.maxHp ?? 0);
 
 function newSim(seed = 1, state: RunState = createRun(config)): Sim {
   return new Sim(state, seededRandom(seed));
@@ -53,11 +72,22 @@ function advance(sim: Sim, seconds: number, moveX = 0, moveY = 0): SimEvent[] {
   return events;
 }
 
+/** 적이 저절로 나오지 않고 무기도 없는 판. 한 가지 동작만 떼어 볼 때 쓴다. */
+function quietSim(seed = 1, extra: Partial<Parameters<typeof createRun>[0]> = {}): Sim {
+  const sim = newSim(seed, createRun({ ...config, ...extra }));
+  sim.state.weapons = {};
+  sim.state.spawnDebt = -1e6;
+  sim.state.surgeIndex = SURGES.length;
+  sim.state.midBosses = MID_BOSS_COUNT;
+  sim.state.finalBoss = true;
+  return sim;
+}
+
 describe('한 판의 시작', () => {
   it('불씨탄 하나만 들고 가득 찬 체력으로 시작한다', () => {
     const state = createRun({ ...config, meta: { vigor: 2 } });
     expect(state.weapons).toEqual({ ember: 1 });
-    expect(state.player.hp).toBe(120);
+    expect(state.player.hp).toBe(BASE_HP + 20);
     expect(state.player.level).toBe(1);
     expect(looksLikeRun(state)).toBe(true);
   });
@@ -95,7 +125,7 @@ describe('적', () => {
       sim.state.finalBoss = true;
       sim.state.enemies.push(enemy('brute', 2, 0, 9999));
       sim.step(STEP, 0, 0);
-      return 100 - sim.state.player.hp;
+      return BASE_HP - sim.state.player.hp;
     };
     expect(hit(0)).toBe(ENEMIES.brute.damage);
     expect(hit(RUN_SECONDS)).toBeGreaterThan(ENEMIES.brute.damage);
@@ -107,11 +137,11 @@ describe('적', () => {
     sim.state.enemies.push(enemy('brute', 2, 0, 9999), enemy('brute', -2, 0, 9999));
     sim.step(STEP, 0, 0);
     expect(sim.events).toContainEqual({ type: 'hurt' });
-    expect(sim.state.player.hp).toBe(100 - ENEMIES.brute.damage);
+    expect(sim.state.player.hp).toBe(BASE_HP - ENEMIES.brute.damage);
     advance(sim, 0.3);
-    expect(sim.state.player.hp).toBe(100 - ENEMIES.brute.damage);
+    expect(sim.state.player.hp).toBe(BASE_HP - ENEMIES.brute.damage);
     advance(sim, 0.4);
-    expect(sim.state.player.hp).toBe(100 - ENEMIES.brute.damage * 2);
+    expect(sim.state.player.hp).toBe(BASE_HP - ENEMIES.brute.damage * 2);
   });
 
   it('체력이 다하면 판이 끝나고 더 진행되지 않는다', () => {
@@ -326,7 +356,7 @@ describe('빛 조각과 레벨업', () => {
     sim.state.player.hp = 50;
     for (const pick of picks) sim.applyUpgrade(pick);
     expect(sim.state.weapons.aura).toBe(1);
-    expect(sim.maxHp).toBe(120);
+    expect(sim.maxHp).toBe(BASE_HP + 20);
     expect(sim.state.player.hp).toBe(70);
     expect(sim.summary().bonusEmbers).toBeGreaterThan(0);
     sim.applyUpgrade({ type: 'heal' });
@@ -336,11 +366,11 @@ describe('빛 조각과 레벨업', () => {
   it('회복 떡을 주우면 체력이 최대를 넘지 않게 찬다', () => {
     const sim = newSim();
     sim.state.spawnDebt = -100;
-    sim.state.player.hp = 95;
+    sim.state.player.hp = BASE_HP - 5;
     sim.state.gems.push({ x: 3, y: 0, value: 15, kind: 'heal', pulled: false });
     sim.step(STEP, 0, 0);
     expect(sim.events).toContainEqual({ type: 'heal' });
-    expect(sim.state.player.hp).toBe(100);
+    expect(sim.state.player.hp).toBe(BASE_HP);
   });
 });
 
@@ -353,14 +383,17 @@ describe('보스와 끝', () => {
     sim.state.player.hp = 1e9;
     expect(MID_BOSS_COUNT).toBe(4);
 
+    const bosses = (): Enemy[] => sim.state.enemies.filter((e) => ENEMIES[e.kind].boss);
     for (let n = 0; n < MID_BOSS_COUNT; n += 1) {
       sim.state.t = (n + 1) * MID_BOSS_EVERY - 0.01;
       sim.step(STEP, 0, 0);
-      expect(sim.events).toContainEqual({ type: 'boss', kind: 'giant' });
-      sim.step(STEP, 0, 0);
-      const giants = sim.state.enemies.filter((e) => e.kind === 'giant');
-      expect(giants).toHaveLength(n + 1);
-      expect(giants[n]).toMatchObject({ tier: n, hp: MID_BOSS_TIERS[n].hp, maxHp: MID_BOSS_TIERS[n].hp });
+      // 어떤 보스가 나올지는 스테이지가 정한다.
+      const kind = midBossKind('meadow', n);
+      expect(sim.events).toContainEqual({ type: 'boss', kind });
+      expect(bosses()).toHaveLength(n + 1);
+      expect(bosses()[n]).toMatchObject({ kind, tier: n, hp: MID_BOSS_TIERS[n].hp, maxHp: MID_BOSS_TIERS[n].hp });
+      // 다음 보스를 기다리는 동안 앞의 보스가 부하를 부르거나 움직이지 않게 재워 둔다.
+      for (const boss of bosses()) boss.timer = 1e9;
     }
 
     sim.state.t = RUN_SECONDS - 0.01;
@@ -368,8 +401,107 @@ describe('보스와 끝', () => {
     expect(sim.events).toContainEqual({ type: 'boss', kind: 'lord' });
     // 마지막 보스와 함께 중간 보스가 또 나오지는 않는다.
     sim.step(STEP, 0, 0);
-    expect(sim.state.enemies.filter((e) => e.kind === 'giant')).toHaveLength(MID_BOSS_COUNT);
+    expect(bosses()).toHaveLength(MID_BOSS_COUNT + 1);
     expect(sim.state.enemies.filter((e) => e.kind === 'lord')).toHaveLength(1);
+  });
+
+  it('중간 보스는 한 가지가 아니고, 스테이지마다 차례가 다르다', () => {
+    for (const id of STAGE_ORDER) {
+      const kinds = Array.from({ length: MID_BOSS_COUNT }, (_, n) => midBossKind(id, n));
+      expect(STAGES[id].midBosses).toHaveLength(MID_BOSS_COUNT);
+      expect(new Set(kinds).size).toBeGreaterThanOrEqual(3);
+      for (const kind of kinds) {
+        expect(ENEMIES[kind].boss).toBe(true);
+        expect(ENEMIES[kind].brain).toBeDefined();
+      }
+      expect(ENEMIES[STAGES[id].finalBoss].hp).toBeGreaterThan(MID_BOSS_TIERS[MID_BOSS_COUNT - 1].hp);
+    }
+    expect(STAGES.meadow.midBosses).not.toEqual(STAGES.marsh.midBosses);
+    expect(STAGES.meadow.finalBoss).not.toBe(STAGES.marsh.finalBoss);
+  });
+
+  it('뿔그림자는 멈춰서 힘을 모았다가 그때 본 쪽으로 내달린다', () => {
+    const sim = quietSim();
+    sim.state.player.hp = 1e9;
+    const ram = enemy('ram', 0, -90, 9999);
+    ram.timer = 0.01;
+    sim.state.enemies.push(ram);
+    sim.step(STEP, 0, 0);
+    expect(ram.mode).toBe(1);
+    const still = ram.y;
+    advance(sim, 0.3);
+    expect(ram.y).toBe(still);
+    advance(sim, 0.35);
+    expect(ram.mode).toBe(2);
+    // 내달리는 동안에는 플레이어보다 빠르다.
+    const before = ram.y;
+    advance(sim, 0.5);
+    expect((ram.y - before) / 0.5).toBeGreaterThan(62);
+    advance(sim, 0.4);
+    expect(ram.mode).toBe(0);
+  });
+
+  it('안개 올빼미는 플레이어 쪽으로 빛덩이를 부채꼴로 쏘고, 맞으면 다친다', () => {
+    const sim = quietSim();
+    const owl = enemy('owl', 0, -80, 9999);
+    owl.timer = 0.01;
+    sim.state.enemies.push(owl);
+    sim.step(STEP, 0, 0);
+    expect(sim.events).toContainEqual({ type: 'volley' });
+    expect(sim.state.hazards).toHaveLength(3);
+    // 가운데 것은 플레이어를 똑바로 향한다.
+    const middle = sim.state.hazards[1];
+    expect(middle.vx).toBeCloseTo(0, 5);
+    expect(middle.vy).toBeGreaterThan(0);
+
+    owl.timer = 1e9;
+    owl.y = -400;
+    const events = advance(sim, 1.6);
+    expect(events).toContainEqual({ type: 'hurt' });
+    expect(sim.state.player.hp).toBe(BASE_HP - middle.damage);
+    // 빗나간 것은 얼마 뒤 사라진다.
+    advance(sim, 3);
+    expect(sim.state.hazards).toHaveLength(0);
+
+    // 뒤에 나오는 올빼미는 갈래가 더 많다.
+    owl.tier = 3;
+    owl.timer = 0.01;
+    sim.step(STEP, 0, 0);
+    expect(sim.state.hazards).toHaveLength(5);
+  });
+
+  it('스테이지마다 제 마지막 보스를 쓰러뜨려야 새벽이 온다', () => {
+    for (const id of STAGE_ORDER) {
+      const sim = quietSim(1, { stage: id });
+      sim.state.weapons = { ember: 1 };
+      sim.state.enemies.push(enemy(STAGES[id].finalBoss, 30, 0, 1));
+      const events = advance(sim, 2);
+      expect(sim.state.over).toBe('cleared');
+      expect(events).not.toContainEqual({ type: 'ticket' });
+    }
+    // 다른 스테이지의 마지막 보스를 잡는 것으로는 끝나지 않는다.
+    const sim = quietSim(1, { stage: 'marsh' });
+    sim.state.weapons = { ember: 1 };
+    sim.state.enemies.push(enemy(STAGES.meadow.finalBoss, 30, 0, 1));
+    advance(sim, 2);
+    expect(sim.state.over).toBeNull();
+  });
+
+  it('늪의 어미는 사방으로 쏘기와 부하 부르기를 번갈아 한다', () => {
+    const sim = quietSim();
+    sim.state.stage = 'marsh';
+    sim.state.player.hp = 1e9;
+    const matron = enemy('matron', 0, -200, 99999);
+    matron.timer = 0.01;
+    matron.tier = MID_BOSS_COUNT - 1;
+    sim.state.enemies.push(matron);
+    sim.step(STEP, 0, 0);
+    expect(sim.state.hazards).toHaveLength(12);
+    matron.timer = 0.01;
+    sim.step(STEP, 0, 0);
+    const minions = sim.state.enemies.filter((e) => e !== matron);
+    expect(minions).toHaveLength(5);
+    for (const minion of minions) expect(STAGES.marsh.minions).toContain(minion.kind);
   });
 
   it('중간 보스를 잡으면 무기 강화권을 받고, 고를 때까지 멈춘다', () => {
@@ -438,6 +570,154 @@ describe('보스와 끝', () => {
   });
 });
 
+describe('캐릭터', () => {
+  it('저마다 시작 무기와 타고난 특성이 다르다', () => {
+    const starts = HERO_ORDER.map((id) => Object.keys(createRun({ ...config, hero: id }).weapons)[0]);
+    expect(new Set(starts).size).toBe(HERO_ORDER.length);
+    for (const id of HERO_ORDER) {
+      const state = createRun({ ...config, hero: id });
+      expect(state.hero).toBe(id);
+      expect(state.weapons).toEqual({ [HEROES[id].weapon]: 1 });
+      expect(state.player.hp).toBe(100 + (HEROES[id].trait.maxHp ?? 0));
+    }
+    // 처음부터 쓸 수 있는 캐릭터와 스테이지가 하나씩은 있다.
+    expect(HEROES[HERO_ORDER[0]].unlockSeconds).toBe(0);
+    expect(STAGES[STAGE_ORDER[0]].unlockSeconds).toBe(0);
+  });
+
+  it('번개잡이는 등불지기보다 빨리 걷는다', () => {
+    const walk = (hero: 'keeper' | 'stormer'): number => {
+      const sim = quietSim(1, { hero });
+      advance(sim, 1, 1, 0);
+      return sim.state.player.x;
+    };
+    expect(walk('stormer')).toBeCloseTo(walk('keeper') * (HEROES.stormer.trait.speed ?? 1), 1);
+  });
+
+  it('별지기는 같은 빛 조각으로 경험치를 더 얻는다', () => {
+    const gain = (hero: 'keeper' | 'stargazer'): number => {
+      const sim = quietSim(1, { hero });
+      sim.state.gems.push({ x: 2, y: 0, value: 10, kind: 'xp', pulled: false });
+      sim.step(STEP, 0, 0);
+      return sim.state.player.xp + (sim.state.player.level - 1) * 1000;
+    };
+    expect(gain('stargazer')).toBeGreaterThan(gain('keeper'));
+  });
+});
+
+describe('안개 늪', () => {
+  it('늪에서는 늪의 적만 나온다', () => {
+    const sim = newSim(4, createRun({ ...config, stage: 'marsh' }));
+    sim.state.weapons = {};
+    sim.state.player.hp = 1e9;
+    sim.state.midBosses = MID_BOSS_COUNT;
+    sim.state.finalBoss = true;
+    sim.state.t = 200;
+    advance(sim, 6);
+    const allowed = new Set<EnemyKind>(STAGES.marsh.spawns.map((row) => row.kind));
+    expect(sim.state.enemies.length).toBeGreaterThan(10);
+    for (const e of sim.state.enemies) expect(allowed.has(e.kind)).toBe(true);
+  });
+
+  it('웅덩이는 씨앗이 같으면 늘 같은 자리에 있고, 출발 지점에는 없다', () => {
+    expect(puddleInCell(0, 0, 7)).toBeNull();
+    let found = 0;
+    for (let cx = -6; cx <= 6; cx += 1) {
+      for (let cy = -6; cy <= 6; cy += 1) {
+        const puddle = puddleInCell(cx, cy, 7);
+        expect(puddleInCell(cx, cy, 7)).toEqual(puddle);
+        if (!puddle) continue;
+        found += 1;
+        expect(inPuddle(puddle.x, puddle.y, 7)).toBe(true);
+        expect(inPuddle(puddle.x + puddle.rx + 1, puddle.y, 7)).toBe(false);
+      }
+    }
+    // 절반쯤의 칸에 웅덩이가 있다.
+    expect(found).toBeGreaterThan(169 * 0.4);
+    expect(found).toBeLessThan(169 * 0.8);
+    expect(inPuddle(0, 0, 7)).toBe(false);
+  });
+
+  it('웅덩이에 빠지면 느려지고, 풀밭에는 웅덩이가 없다', () => {
+    const seed = 7;
+    let spot: { x: number; y: number } | null = null;
+    for (let cx = 1; cx < 9 && !spot; cx += 1) spot = puddleInCell(cx, 0, seed);
+    expect(spot).not.toBeNull();
+    const walk = (stage: 'meadow' | 'marsh'): number => {
+      const sim = quietSim(1, { stage, seed });
+      sim.state.player.x = spot!.x;
+      sim.state.player.y = spot!.y;
+      sim.step(STEP, 1, 0);
+      expect(sim.state.player.wading).toBe(stage === 'marsh');
+      return sim.state.player.x - spot!.x;
+    };
+    expect(walk('marsh')).toBeCloseTo(walk('meadow') * PUDDLE_SLOW, 5);
+  });
+
+  it('늪두꺼비는 웅크렸다가 한 번에 뛰고, 길게 보면 플레이어보다 느리다', () => {
+    const sim = quietSim();
+    sim.state.stage = 'marsh';
+    sim.state.player.hp = 1e9;
+    const toad = enemy('toad', 0, -120, 9999);
+    toad.timer = 0.2;
+    sim.state.enemies.push(toad);
+    advance(sim, 0.15);
+    expect(toad.y).toBe(-120);
+    advance(sim, 0.1);
+    expect(toad.mode).toBe(1);
+    advance(sim, HOP_SECONDS);
+    expect(toad.y).toBeGreaterThan(-120 + ENEMIES.toad.speed * HOP_SECONDS * 0.8);
+    expect(toad.mode).toBe(0);
+
+    const pace = (ENEMIES.toad.speed * speedScale(RUN_SECONDS) * HOP_SECONDS) / (HOP_SECONDS + HOP_REST);
+    expect(pace).toBeLessThan(62);
+  });
+});
+
+describe('영구 강화', () => {
+  it('따뜻한 품은 체력을 천천히 채운다', () => {
+    const sim = quietSim(1, { meta: { mend: 3 } });
+    sim.state.player.hp = 50;
+    advance(sim, 10);
+    expect(sim.state.player.hp).toBeCloseTo(53, 1);
+    sim.state.player.hp = sim.maxHp - 0.01;
+    advance(sim, 5);
+    expect(sim.state.player.hp).toBe(sim.maxHp);
+  });
+
+  it('되살림 등불이 있으면 쓰러져도 한 번은 다시 일어난다', () => {
+    const sim = quietSim(1, { meta: { second: 1 } });
+    expect(sim.state.revives).toBe(1);
+    sim.state.player.hp = 1;
+    sim.state.enemies.push(enemy('brute', 2, 0, 30), enemy('brute', 200, 0, 30));
+    sim.state.hazards.push({ x: 90, y: 0, vx: 0, vy: 0, life: 9, radius: 3, damage: 5 });
+    sim.step(STEP, 0, 0);
+    expect(sim.events).toContainEqual({ type: 'revive' });
+    expect(sim.state.over).toBeNull();
+    expect(sim.state.revives).toBe(0);
+    expect(sim.state.player.hp).toBe(Math.round(sim.maxHp * 0.5));
+    // 둘레의 적은 밀려나 쓰러지고, 먼 적은 그대로다. 날아오던 빛덩이도 사라진다.
+    expect(sim.state.enemies).toHaveLength(1);
+    expect(sim.state.enemies[0].x).toBeGreaterThan(190);
+    expect(sim.state.hazards).toHaveLength(0);
+
+    // 두 번째에는 판이 끝난다.
+    sim.state.player.hp = 1;
+    sim.state.player.inv = 0;
+    sim.state.enemies.push(enemy('brute', 2, 0, 9999));
+    sim.step(STEP, 0, 0);
+    expect(sim.state.over).toBe('dead');
+  });
+
+  it('되살림 등불이 없으면 그대로 끝난다', () => {
+    const sim = quietSim();
+    sim.state.player.hp = 1;
+    sim.state.enemies.push(enemy('brute', 2, 0, 9999));
+    sim.step(STEP, 0, 0);
+    expect(sim.state.over).toBe('dead');
+  });
+});
+
 describe('저장과 이어하기', () => {
   it('상태를 글자로 바꿨다가 되돌려도 그대로 이어진다', () => {
     const sim = newSim(5);
@@ -450,6 +730,31 @@ describe('저장과 이어하기', () => {
     advance(resumed, 5, -1, 0);
     expect(resumed.state.t).toBeCloseTo(45, 1);
     expect(resumed.state.kills).toBeGreaterThanOrEqual(sim.state.kills);
+  });
+
+  it('캐릭터와 스테이지가 없던 예전 저장은 기본값을 채워 이어한다', () => {
+    const old = JSON.parse(JSON.stringify(createRun(config))) as Record<string, unknown>;
+    old.version = 2;
+    delete old.hero;
+    delete old.stage;
+    delete old.seed;
+    delete old.hazards;
+    delete old.revives;
+    delete (old.player as Record<string, unknown>).wading;
+    expect(looksLikeRun(old)).toBe(false);
+
+    const restored = restoreRun(old);
+    expect(restored).toMatchObject({ version: RUN_STATE_VERSION, hero: 'keeper', stage: 'meadow', hazards: [], revives: 0 });
+    expect(restored && looksLikeRun(restored)).toBe(true);
+    // 되살린 판은 그대로 돌아간다.
+    const sim = newSim(3, restored as RunState);
+    advance(sim, 2, 1, 0);
+    expect(sim.state.t).toBeCloseTo(2, 1);
+
+    expect(restoreRun(createRun(config))).not.toBeNull();
+    expect(restoreRun(null)).toBeNull();
+    expect(restoreRun({ version: 1 })).toBeNull();
+    expect(restoreRun({ ...old, over: 'dead' })).toBeNull();
   });
 
   it('끝난 판이나 엉뚱한 값은 이어하지 않는다', () => {
@@ -466,6 +771,16 @@ describe('자동 플레이로 본 밸런스', () => {
       const result = playRun(seed, 'still', config);
       expect(result.over).toBe('dead');
       expect(result.seconds).toBeLessThan(240);
+    }
+  });
+
+  it('어느 캐릭터로 어느 스테이지에 가도 피하면서 싸우면 2분 30초는 버틴다', () => {
+    for (const stage of STAGE_ORDER) {
+      for (const hero of HERO_ORDER) {
+        const result = playRun(2, 'kite', { ...config, hero, stage, seed: 2 }, 150);
+        expect(result.over, `${hero} @ ${stage}`).toBeNull();
+        expect(result.level, `${hero} @ ${stage}`).toBeGreaterThan(4);
+      }
     }
   });
 

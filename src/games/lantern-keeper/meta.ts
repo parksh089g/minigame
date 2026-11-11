@@ -3,11 +3,21 @@
  * 허브 세이브(core/save.ts)와 따로 기기 안에 저장해서 공용 세이브 구조를 건드리지 않는다.
  */
 import { createStore, get, set, type UseStore } from 'idb-keyval';
-import { META, META_ORDER, type MetaId } from './data';
-import { metaCost, type Levels } from './rules';
-import { looksLikeRun, type RunState } from './sim';
+import {
+  HERO_ORDER,
+  HEROES,
+  META,
+  META_ORDER,
+  STAGE_ORDER,
+  STAGES,
+  type HeroId,
+  type MetaId,
+  type StageId,
+} from './data';
+import { isUnlocked, metaCost, type Levels } from './rules';
+import { restoreRun, type RunState } from './sim';
 
-export const META_VERSION = 1;
+export const META_VERSION = 2;
 
 export interface LanternMeta {
   version: number;
@@ -16,11 +26,26 @@ export interface LanternMeta {
   runs: number;
   clears: number;
   bestSeconds: number;
+  /** 준비 화면에서 고른 캐릭터와 스테이지. 다음에 들어와도 그대로다. */
+  hero: HeroId;
+  stage: StageId;
 }
 
 export function createDefaultMeta(): LanternMeta {
-  return { version: META_VERSION, embers: 0, upgrades: {}, runs: 0, clears: 0, bestSeconds: 0 };
+  return {
+    version: META_VERSION,
+    embers: 0,
+    upgrades: {},
+    runs: 0,
+    clears: 0,
+    bestSeconds: 0,
+    hero: 'keeper',
+    stage: 'meadow',
+  };
 }
+
+const isHero = (value: unknown): value is HeroId => typeof value === 'string' && value in HEROES;
+const isStage = (value: unknown): value is StageId => typeof value === 'string' && value in STAGES;
 
 const count = (value: unknown): number =>
   typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
@@ -39,7 +64,31 @@ export function normalizeMeta(raw: unknown): LanternMeta {
     const level = Math.min(count((upgrades as Record<string, unknown>)[id]), META[id].maxLevel);
     if (level > 0) meta.upgrades[id] = level;
   }
+  // 아직 열리지 않은 것이 골라져 있으면 기본으로 돌린다.
+  if (isHero(data.hero) && isUnlocked(HEROES[data.hero], meta.bestSeconds)) meta.hero = data.hero;
+  if (isStage(data.stage) && isUnlocked(STAGES[data.stage], meta.bestSeconds)) meta.stage = data.stage;
   return meta;
+}
+
+/** 최고 기록이 before에서 after(초)로 늘면서 새로 열린 캐릭터와 스테이지의 이름 */
+export function newUnlocks(before: number, after: number): string[] {
+  const opened = (item: { unlockSeconds: number }): boolean => !isUnlocked(item, before) && isUnlocked(item, after);
+  return [
+    ...HERO_ORDER.filter((id) => opened(HEROES[id])).map((id) => HEROES[id].name),
+    ...STAGE_ORDER.filter((id) => opened(STAGES[id])).map((id) => STAGES[id].name),
+  ];
+}
+
+/** 캐릭터를 고른다. 아직 열리지 않았으면 그대로 돌려준다. */
+export function chooseHero(meta: LanternMeta, id: HeroId): LanternMeta {
+  if (meta.hero === id || !isUnlocked(HEROES[id], meta.bestSeconds)) return meta;
+  return { ...meta, hero: id };
+}
+
+/** 스테이지를 고른다. 아직 열리지 않았으면 그대로 돌려준다. */
+export function chooseStage(meta: LanternMeta, id: StageId): LanternMeta {
+  if (meta.stage === id || !isUnlocked(STAGES[id], meta.bestSeconds)) return meta;
+  return { ...meta, stage: id };
 }
 
 /** 불씨로 영구 강화를 한 단계 올린다. 돈이 모자라거나 최대 단계면 그대로 돌려준다. */
@@ -101,8 +150,7 @@ class MetaStore {
       this.idb = null;
     }
     this.data = normalizeMeta(await this.readKey(KEY, FALLBACK_KEY));
-    const run = await this.readKey(RUN_KEY, RUN_FALLBACK_KEY);
-    this.run = looksLikeRun(run) ? run : null;
+    this.run = restoreRun(await this.readKey(RUN_KEY, RUN_FALLBACK_KEY));
   }
 
   private async readKey(key: string, fallbackKey: string): Promise<unknown> {

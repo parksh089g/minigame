@@ -9,8 +9,8 @@ import { ENEMIES, LANTERN_GAME_ID, LANTERN_SCENE } from './data';
 import { HUD_HEIGHT, RunHud } from './hud';
 import { Joystick } from './joystick';
 import { levelUpHeader, showChoices, TICKET_HEADER } from './levelup';
-import { buildLobby } from './lobby';
-import { applyRun, metaStore } from './meta';
+import { buildLobby, type LobbyPage } from './lobby';
+import { applyRun, metaStore, newUnlocks } from './meta';
 import { embersFor, formatClock, scoreFor } from './rules';
 import { createRun, Sim } from './sim';
 import { RunView } from './view';
@@ -18,6 +18,8 @@ import { RunView } from './view';
 /** 씬을 시작할 때 넘기는 값. 없으면 준비 화면부터 연다. */
 interface StartData {
   mode?: 'new' | 'resume';
+  /** 준비 화면의 어느 쪽을 열지 */
+  page?: LobbyPage;
 }
 
 type Phase = 'loading' | 'lobby' | 'run' | 'choosing' | 'over';
@@ -51,6 +53,7 @@ export class LanternKeeperScene extends MiniGameScene {
   private seconds = 0;
   private lastKillSound = 0;
   private lastGemSound = 0;
+  private lastVolleySound = 0;
   private hud!: RunHud;
   private hint?: Phaser.GameObjects.Text;
 
@@ -60,6 +63,7 @@ export class LanternKeeperScene extends MiniGameScene {
 
   create(data: StartData = {}): void {
     const mode = data.mode;
+    const page = data.page ?? 'main';
     // Phaser는 값 없이 다시 시작하면 지난번 값을 그대로 넘긴다. "다시 하기"가 준비 화면으로 가도록 비워 둔다.
     this.sys.settings.data = {};
     this.beginMiniGame();
@@ -75,22 +79,28 @@ export class LanternKeeperScene extends MiniGameScene {
       if (!this.sys.isActive() || this.phase !== 'loading') return;
       if (mode === 'new') this.startRun(false);
       else if (mode === 'resume' && metaStore.run) this.startRun(true);
-      else this.openLobby();
+      else this.openLobby(page);
     });
   }
 
   // ------------------------------------------------------------ 준비 화면
 
-  private openLobby(): void {
+  private openLobby(page: LobbyPage): void {
     this.phase = 'lobby';
-    buildLobby(this, {
-      getMeta: () => metaStore.data,
-      setMeta: (meta) => metaStore.set(meta),
-      savedRun: metaStore.run,
-      onStart: () => this.restartWith('new'),
-      onResume: () => this.restartWith('resume'),
-      onBack: () => fadeToScene(this, SCENE.hub),
-    });
+    buildLobby(
+      this,
+      {
+        getMeta: () => metaStore.data,
+        setMeta: (meta) => metaStore.set(meta),
+        savedRun: metaStore.run,
+        onStart: () => this.restartWith('new'),
+        onResume: () => this.restartWith('resume'),
+        onBack: () => fadeToScene(this, SCENE.hub),
+        // 쪽을 넘길 때는 기다림 없이 바로 다시 그린다.
+        onPage: (next) => this.scene.restart({ page: next } satisfies StartData),
+      },
+      page,
+    );
   }
 
   private restartWith(mode: StartData['mode']): void {
@@ -108,11 +118,17 @@ export class LanternKeeperScene extends MiniGameScene {
     const saved = resume ? metaStore.run : null;
     const state = saved
       ? { ...structuredClone(saved), ...view }
-      : createRun({ ...view, meta: metaStore.data.upgrades });
+      : createRun({
+          ...view,
+          meta: metaStore.data.upgrades,
+          hero: metaStore.data.hero,
+          stage: metaStore.data.stage,
+          seed: Math.floor(Math.random() * 0x7fffffff),
+        });
     if (!saved) metaStore.setRun(null);
     this.sim = new Sim(state, Math.random);
 
-    this.view = new RunView(this, centerY);
+    this.view = new RunView(this, centerY, this.sim);
     this.hud = new RunHud(this, { top: DEPTH.hud, field: DEPTH.field }, GAME_WIDTH / 2, this.view.centerY, () => {
       sfx.click();
       this.pauseGame();
@@ -223,6 +239,18 @@ export class LanternKeeperScene extends MiniGameScene {
           showBanner(this, this.scale.height * 0.3, '그림자 밀물!', CSS.orange, 1400, DEPTH.banner);
           sfx.count();
           break;
+        case 'revive':
+          showBanner(this, this.scale.height * 0.3, '등불이 다시 켜졌다!', CSS.yellow, 1600, DEPTH.banner);
+          this.view.burst(sim, sim.state.player.x, sim.state.player.y, 30);
+          sfx.fanfare();
+          vibrate([20, 30, 60]);
+          break;
+        case 'volley':
+          if (now - this.lastVolleySound > 200) {
+            this.lastVolleySound = now;
+            sfx.count();
+          }
+          break;
         case 'levelup':
         case 'ticket':
         case 'shoot':
@@ -316,9 +344,11 @@ export class LanternKeeperScene extends MiniGameScene {
     this.stick.reset();
 
     const summary = this.sim.summary();
-    const embers = embersFor(summary);
+    const embers = embersFor(summary, metaStore.data.upgrades.lucky);
+    const bestBefore = metaStore.data.bestSeconds;
     metaStore.setRun(null);
     metaStore.set(applyRun(metaStore.data, embers, summary.seconds, summary.cleared));
+    const opened = newUnlocks(bestBefore, metaStore.data.bestSeconds);
 
     showBanner(
       this,
@@ -337,6 +367,10 @@ export class LanternKeeperScene extends MiniGameScene {
       ['레벨', String(summary.level)],
       ['얻은 불씨', `+${embers}`],
     ];
+    // 이번 기록으로 캐릭터나 스테이지가 열렸으면 알려 준다.
+    if (opened.length > 0) {
+      stats.push(['새로 열림', opened.length <= 2 ? opened.join(' · ') : `${opened[0]} 외 ${opened.length - 1}`]);
+    }
     this.finishMiniGame(scoreFor(summary), stats);
   }
 

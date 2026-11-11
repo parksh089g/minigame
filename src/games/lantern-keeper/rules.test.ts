@@ -11,7 +11,8 @@ import {
   MID_BOSS_TIERS,
   PASSIVES,
   RUN_SECONDS,
-  SPAWN_TABLE,
+  STAGE_ORDER,
+  STAGES,
   SURGES,
   WEAPON_ORDER,
   WEAPONS,
@@ -93,10 +94,13 @@ describe('데이터', () => {
   });
 
   it('등장표와 밀물 시각이 한 판 안에 있고, 처음부터 나오는 적이 있다', () => {
-    expect(SPAWN_TABLE.some((row) => row.from === 0)).toBe(true);
-    for (const row of SPAWN_TABLE) {
-      expect(row.from).toBeLessThan(RUN_SECONDS);
-      expect(ENEMIES[row.kind].boss).toBeFalsy();
+    for (const id of STAGE_ORDER) {
+      const { spawns } = STAGES[id];
+      expect(spawns.some((row) => row.from === 0)).toBe(true);
+      for (const row of spawns) {
+        expect(row.from).toBeLessThan(RUN_SECONDS);
+        expect(ENEMIES[row.kind].boss).toBeFalsy();
+      }
     }
     expect([...SURGES].sort((a, b) => a - b)).toEqual([...SURGES]);
     expect(SURGES[SURGES.length - 1]).toBeLessThan(RUN_SECONDS);
@@ -135,8 +139,12 @@ describe('난이도 곡선', () => {
 
   it('적은 끝까지 플레이어보다 느리다', () => {
     const playerSpeed = 62;
-    for (const row of SPAWN_TABLE) {
-      expect(ENEMIES[row.kind].speed * speedScale(RUN_SECONDS)).toBeLessThan(playerSpeed);
+    for (const id of STAGE_ORDER) {
+      for (const row of STAGES[id].spawns) {
+        // 뛰는 적은 뛰는 순간에만 빠르고, 쉬는 시간까지 치면 느리다. 그쪽은 sim 테스트에서 본다.
+        if (ENEMIES[row.kind].hops) continue;
+        expect(ENEMIES[row.kind].speed * speedScale(RUN_SECONDS)).toBeLessThan(playerSpeed);
+      }
     }
   });
 
@@ -150,7 +158,12 @@ describe('난이도 곡선', () => {
     for (let i = 0; i < 200; i += 1) expect(pickSpawnKind(0, rand)).toBe('shade');
     const late = new Set<string>();
     for (let i = 0; i < 400; i += 1) late.add(pickSpawnKind(RUN_SECONDS, rand));
-    expect(late.size).toBe(SPAWN_TABLE.length);
+    expect(late.size).toBe(STAGES.meadow.spawns.length);
+    // 스테이지마다 제 적만 나온다.
+    const marsh = new Set<string>();
+    for (let i = 0; i < 400; i += 1) marsh.add(pickSpawnKind(RUN_SECONDS, rand, 'marsh'));
+    expect([...marsh].sort()).toEqual(STAGES.marsh.spawns.map((row) => row.kind).sort());
+    for (const kind of marsh) expect(late.has(kind)).toBe(false);
   });
 });
 

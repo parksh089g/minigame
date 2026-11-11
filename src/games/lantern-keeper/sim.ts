@@ -4,14 +4,18 @@
  */
 import {
   ENEMIES,
+  HEROES,
   MID_BOSS_COUNT,
   MID_BOSS_EVERY,
   PLAYER_BASE,
   RUN_SECONDS,
+  STAGES,
   SURGES,
   type EnemyKind,
+  type HeroId,
   type MetaId,
   type PassiveId,
+  type StageId,
   type WeaponId,
 } from './data';
 import {
@@ -26,7 +30,9 @@ import {
   isEvolved,
   lanceStats,
   maxAlive,
+  midBossKind,
   midBossTier,
+  minionKind,
   modifiers,
   oilStats,
   pickSpawnKind,
@@ -42,8 +48,9 @@ import {
   type RunSummary,
   type Upgrade,
 } from './rules';
+import { inPuddle, PUDDLE_SLOW } from './terrain';
 
-export const RUN_STATE_VERSION = 2;
+export const RUN_STATE_VERSION = 3;
 
 export interface Enemy {
   uid: number;
@@ -60,9 +67,9 @@ export interface Enemy {
   slowTo: number;
   /** 반딧불에 다시 맞을 수 있을 때까지(초) */
   fireflyCd: number;
-  /** 보스의 다음 행동까지(초) */
+  /** 보스의 다음 행동까지, 뛰는 적의 다음 뜀이나 착지까지(초) */
   timer: number;
-  /** 보스의 상태. 0 쫓기, 1 힘 모으기, 2 돌진 */
+  /** 보스의 상태: 0 쫓기, 1 힘 모으기, 2 돌진. 뛰는 적: 0 웅크림, 1 뛰는 중 */
   mode: number;
   /** 몇 번째 중간 보스인지(0부터). 다른 적은 0 */
   tier: number;
@@ -107,6 +114,18 @@ export interface Strike {
   evolved: boolean;
 }
 
+/** 보스가 쏜 빛덩이. 플레이어가 닿으면 다친다. */
+export interface Hazard {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  /** 남은 시간(초) */
+  life: number;
+  radius: number;
+  damage: number;
+}
+
 /** 등잔 기름이 남긴 불길 */
 export interface Fire {
   x: number;
@@ -132,6 +151,10 @@ export interface RunState {
   viewH: number;
   /** 이 판을 시작할 때의 영구 강화 */
   meta: Levels<MetaId>;
+  hero: HeroId;
+  stage: StageId;
+  /** 지형을 정하는 씨앗. 같은 값이면 웅덩이가 같은 자리에 있다. */
+  seed: number;
   player: {
     x: number;
     y: number;
@@ -140,6 +163,8 @@ export interface RunState {
     inv: number;
     face: 1 | -1;
     moving: boolean;
+    /** 웅덩이에 빠져 느려진 상태 */
+    wading: boolean;
     level: number;
     xp: number;
   };
@@ -150,6 +175,7 @@ export interface RunState {
   gems: Gem[];
   strikes: Strike[];
   fires: Fire[];
+  hazards: Hazard[];
   cd: { ember: number; aura: number; star: number; lance: number; oil: number; bolt: number };
   fireflyAngle: number;
   spawnDebt: number;
@@ -164,6 +190,8 @@ export interface RunState {
   pendingLevelUps: number;
   /** 아직 쓰지 않은 무기 강화권. 0보다 크면 시뮬레이션이 멈춘다. */
   pendingTickets: number;
+  /** 쓰러졌을 때 다시 일어날 수 있는 남은 횟수 */
+  revives: number;
   nextUid: number;
   over: null | 'dead' | 'cleared';
 }
@@ -180,12 +208,22 @@ export type SimEvent =
   | { type: 'bolt'; points: number[]; evolved: boolean }
   | { type: 'boss'; kind: EnemyKind }
   | { type: 'ticket' }
+  /** 보스가 빛덩이를 쏘았다 */
+  | { type: 'volley' }
+  /** 쓰러졌다가 되살림 등불로 다시 일어났다 */
+  | { type: 'revive' }
   | { type: 'surge' };
 
 export interface RunConfig {
   viewW: number;
   viewH: number;
   meta: Levels<MetaId>;
+  /** 안 주면 등불지기 */
+  hero?: HeroId;
+  /** 안 주면 밤의 풀밭 */
+  stage?: StageId;
+  /** 지형 씨앗. 안 주면 1 */
+  seed?: number;
 }
 
 const CELL = 20;
@@ -203,23 +241,35 @@ const SPAWN_MARGIN = 14;
 /** 쓰러진 적이 회복 떡을 떨어뜨릴 확률 */
 const HEAL_DROP_CHANCE = 0.008;
 const HEAL_DROP_VALUE = 15;
+/** 뛰는 적이 한 번 뛰는 시간과 웅크리고 쉬는 시간(초) */
+export const HOP_SECONDS = 0.38;
+export const HOP_REST = 0.44;
+/** 보스가 쏘는 빛덩이 */
+const HAZARD = { speed: 56, life: 3.6, radius: 3, spread: 0.24 } as const;
+/** 되살아날 때: 채워지는 체력 비율, 무적 시간(초), 둘레의 적을 밀어내는 반경과 피해 */
+const REVIVE = { hp: 0.5, invulnerable: 2.5, radius: 64, damage: 40 } as const;
 
 export function createRun(config: RunConfig): RunState {
-  const mods = modifiers({}, config.meta);
+  const hero = config.hero ?? 'keeper';
+  const mods = modifiers({}, config.meta, HEROES[hero].trait);
   return {
     version: RUN_STATE_VERSION,
     t: 0,
     viewW: config.viewW,
     viewH: config.viewH,
     meta: { ...config.meta },
-    player: { x: 0, y: 0, hp: mods.maxHp, inv: 0, face: 1, moving: false, level: 1, xp: 0 },
-    weapons: { ember: 1 },
+    hero,
+    stage: config.stage ?? 'meadow',
+    seed: config.seed ?? 1,
+    player: { x: 0, y: 0, hp: mods.maxHp, inv: 0, face: 1, moving: false, wading: false, level: 1, xp: 0 },
+    weapons: { [HEROES[hero].weapon]: 1 },
     passives: {},
     enemies: [],
     shots: [],
     gems: [],
     strikes: [],
     fires: [],
+    hazards: [],
     cd: { ember: 0.6, aura: 0, star: 1, lance: 0.8, oil: 0.5, bolt: 0.7 },
     fireflyAngle: 0,
     spawnDebt: 0,
@@ -231,6 +281,7 @@ export function createRun(config: RunConfig): RunState {
     bonusEmbers: 0,
     pendingLevelUps: 0,
     pendingTickets: 0,
+    revives: config.meta.second ? 1 : 0,
     nextUid: 1,
     over: null,
   };
@@ -246,12 +297,39 @@ export function looksLikeRun(raw: unknown): raw is RunState {
     run.over === null &&
     typeof run.player === 'object' &&
     run.player !== null &&
+    typeof run.hero === 'string' &&
+    run.hero in HEROES &&
+    typeof run.stage === 'string' &&
+    run.stage in STAGES &&
     Array.isArray(run.enemies) &&
     Array.isArray(run.gems) &&
     Array.isArray(run.shots) &&
     Array.isArray(run.strikes) &&
-    Array.isArray(run.fires)
+    Array.isArray(run.fires) &&
+    Array.isArray(run.hazards)
   );
+}
+
+/**
+ * 저장해 둔 판을 이어서 할 수 있는 상태로 되돌린다. 쓸 수 없으면 null.
+ * 캐릭터와 스테이지가 생기기 전(버전 2)에 저장한 판은 등불지기, 밤의 풀밭으로 이어 준다.
+ */
+export function restoreRun(raw: unknown): RunState | null {
+  if (looksLikeRun(raw)) return raw;
+  if (typeof raw !== 'object' || raw === null) return null;
+  const old = raw as Record<string, unknown>;
+  if (old.version !== 2 || typeof old.player !== 'object' || old.player === null) return null;
+  const upgraded = {
+    ...old,
+    version: RUN_STATE_VERSION,
+    hero: 'keeper',
+    stage: 'meadow',
+    seed: 1,
+    hazards: [],
+    revives: 0,
+    player: { ...old.player, wading: false },
+  };
+  return looksLikeRun(upgraded) ? upgraded : null;
 }
 
 export class Sim {
@@ -266,7 +344,12 @@ export class Sim {
     readonly state: RunState,
     private readonly rand: Rand,
   ) {
-    this.mods = modifiers(state.passives, state.meta);
+    this.mods = this.computeMods();
+  }
+
+  private computeMods(): Modifiers {
+    const s = this.state;
+    return modifiers(s.passives, s.meta, HEROES[s.hero].trait);
   }
 
   get maxHp(): number {
@@ -322,7 +405,7 @@ export class Sim {
         s.bonusEmbers += EMBER_BONUS;
         break;
     }
-    this.mods = modifiers(s.passives, s.meta);
+    this.mods = this.computeMods();
     // 외투는 늘어난 만큼 바로 채워 준다.
     if (upgrade.type === 'passive' && upgrade.id === 'coat') s.player.hp += 20;
     s.player.hp = Math.min(s.player.hp, this.mods.maxHp);
@@ -355,6 +438,8 @@ export class Sim {
     this.buildGrid();
     this.moveEnemies(dt);
     if (s.over) return;
+    this.moveHazards(dt);
+    if (s.over) return;
     this.fireWeapons(dt);
     this.moveShots(dt);
     this.landStrikes(dt);
@@ -365,17 +450,56 @@ export class Sim {
 
   // ------------------------------------------------------------ 플레이어
 
+  /** 세상 좌표 (x, y)가 발이 빠지는 웅덩이인지. 웅덩이가 없는 스테이지에서는 늘 아니다. */
+  isMire(x: number, y: number): boolean {
+    const s = this.state;
+    return STAGES[s.stage].puddles && inPuddle(x, y, s.seed);
+  }
+
   private movePlayer(dt: number, moveX: number, moveY: number): void {
     const p = this.state.player;
     const length = Math.hypot(moveX, moveY);
     p.moving = length > 0.05;
+    p.wading = this.isMire(p.x, p.y);
     if (p.moving) {
-      const scale = (PLAYER_BASE.speed * this.mods.speed * dt) / Math.max(1, length);
+      const speed = PLAYER_BASE.speed * this.mods.speed * (p.wading ? PUDDLE_SLOW : 1);
+      const scale = (speed * dt) / Math.max(1, length);
       p.x += moveX * scale;
       p.y += moveY * scale;
       if (Math.abs(moveX) > 0.15) p.face = moveX > 0 ? 1 : -1;
     }
     if (p.inv > 0) p.inv -= dt;
+    if (this.mods.regen > 0) p.hp = Math.min(this.mods.maxHp, p.hp + this.mods.regen * dt);
+  }
+
+  /**
+   * 플레이어가 다친다. 체력이 다하면 되살림 등불이 남아 있을 때는 다시 일어나고, 없으면 판이 끝난다.
+   * 판이 끝났으면 true.
+   */
+  private hurt(amount: number): boolean {
+    const s = this.state;
+    const p = s.player;
+    p.hp -= amount;
+    p.inv = PLAYER_BASE.invulnerable;
+    this.events.push({ type: 'hurt' });
+    if (p.hp > 0) return false;
+    if (s.revives > 0) {
+      s.revives -= 1;
+      p.hp = Math.round(this.mods.maxHp * REVIVE.hp);
+      p.inv = REVIVE.invulnerable;
+      // 일어나면서 둘레의 적을 밀쳐 내 숨 돌릴 틈을 만든다.
+      for (const e of s.enemies) {
+        if (e.hp <= 0) continue;
+        const reach = REVIVE.radius + ENEMIES[e.kind].radius;
+        if ((e.x - p.x) ** 2 + (e.y - p.y) ** 2 < reach * reach) this.damage(e, REVIVE.damage);
+      }
+      s.hazards.length = 0;
+      this.events.push({ type: 'revive' });
+      return false;
+    }
+    p.hp = 0;
+    s.over = 'dead';
+    return true;
   }
 
   // ------------------------------------------------------------ 적 등장
@@ -394,7 +518,8 @@ export class Sim {
       slow: 0,
       slowTo: 1,
       fireflyCd: 0,
-      timer: kind === 'giant' ? 5 : kind === 'lord' ? 3 : 0,
+      // 보스는 나타나고 조금 뒤에 첫 행동을 한다. 뛰는 적은 저마다 다른 박자로 뛴다.
+      timer: ENEMIES[kind].boss ? (kind === 'giant' ? 5 : 3) : ENEMIES[kind].hops ? this.rand() * HOP_REST : 0,
       mode: 0,
       tier: 0,
       vx: 0,
@@ -431,14 +556,14 @@ export class Sim {
       }
       s.spawnDebt -= 1;
       const [x, y] = this.edgePoint();
-      this.makeEnemy(pickSpawnKind(t, this.rand), x, y);
+      this.makeEnemy(pickSpawnKind(t, this.rand, s.stage), x, y);
     }
 
     // 밀물: 화면 가장자리를 따라 둥글게 에워싼다.
     if (s.surgeIndex < SURGES.length && s.t >= SURGES[s.surgeIndex]) {
       s.surgeIndex += 1;
       const count = 18 + 6 * s.surgeIndex;
-      const kind: EnemyKind = s.surgeIndex >= 3 ? 'wisp' : 'shade';
+      const kind = STAGES[s.stage].surge[s.surgeIndex >= 3 ? 1 : 0];
       const rx = s.viewW / 2 + SPAWN_MARGIN;
       const ry = s.viewH / 2 + SPAWN_MARGIN;
       const offset = this.rand() * Math.PI * 2;
@@ -451,7 +576,7 @@ export class Sim {
 
     // 중간 보스: 정해진 간격마다 하나씩, 나올 때마다 더 강하게
     if (s.midBosses < MID_BOSS_COUNT && s.t >= (s.midBosses + 1) * MID_BOSS_EVERY) {
-      const boss = this.spawnBoss('giant');
+      const boss = this.spawnBoss(midBossKind(s.stage, s.midBosses));
       boss.tier = s.midBosses;
       boss.hp = midBossTier(boss.tier).hp;
       boss.maxHp = boss.hp;
@@ -459,7 +584,8 @@ export class Sim {
     }
     if (!s.finalBoss && s.t >= RUN_SECONDS) {
       s.finalBoss = true;
-      this.spawnBoss('lord');
+      // 마지막 보스는 가장 센 중간 보스와 같은 단계로 부하를 부른다.
+      this.spawnBoss(STAGES[s.stage].finalBoss).tier = MID_BOSS_COUNT - 1;
     }
   }
 
@@ -530,32 +656,72 @@ export class Sim {
         // 보스가 화면 밖으로 멀리 떨어지면 서둘러 따라온다.
         if (distance > recycle) speed *= 4;
         e.timer -= dt;
-        if (e.kind === 'giant' && e.timer <= 0) {
-          const tier = midBossTier(e.tier);
-          e.timer = 7;
-          this.summon(e, tier.minion, tier.summon, 26);
-        } else if (e.kind === 'lord') {
-          if (e.mode === 0 && e.timer <= 0) {
+        const brain = info.brain ?? 'summon';
+        if (brain === 'summon') {
+          if (e.timer <= 0) {
+            e.timer = 7;
+            this.summon(e, minionKind(s.stage, e.tier), midBossTier(e.tier).summon, 26);
+          }
+        } else if (brain === 'volley') {
+          if (e.timer <= 0) {
+            e.timer = 2.9 - 0.2 * e.tier;
+            // 플레이어 쪽으로 부채꼴로 쏜다. 뒤에 나오는 것일수록 갈래가 많다.
+            this.volley(e, Math.atan2(dy, dx), e.tier >= 2 ? 5 : 3, HAZARD.spread, 9 + 2 * e.tier);
+          }
+        } else if (brain === 'matron') {
+          if (e.timer <= 0) {
+            // 사방으로 쏘기와 부하 부르기를 번갈아 한다.
+            e.timer = 3.4;
+            e.mode = e.mode === 0 ? 1 : 0;
+            if (e.mode === 1) this.volley(e, this.rand() * Math.PI * 2, 12, (Math.PI * 2) / 12, 14);
+            else this.summon(e, minionKind(s.stage, e.tier), 5, 30);
+          }
+        } else if (e.mode === 0) {
+          // 돌진하는 보스: 쫓다가(0) 멈춰서 힘을 모으고(1) 그때 본 쪽으로 내달린다(2).
+          if (e.timer <= 0) {
             e.mode = 1;
-            e.timer = 0.7;
-          } else if (e.mode === 1) {
-            speed = 0;
-            e.flash = 0.05;
-            if (e.timer <= 0) {
-              e.mode = 2;
-              e.timer = 0.75;
-              e.vx = dirX;
-              e.vy = dirY;
-            }
-          } else if (e.mode === 2) {
-            speed = 125;
-            dirX = e.vx;
-            dirY = e.vy;
-            if (e.timer <= 0) {
-              e.mode = 0;
+            e.timer = brain === 'lord' ? 0.7 : 0.6;
+          }
+        } else if (e.mode === 1) {
+          speed = 0;
+          e.flash = 0.05;
+          if (e.timer <= 0) {
+            e.mode = 2;
+            e.timer = brain === 'lord' ? 0.75 : 0.7;
+            e.vx = dirX;
+            e.vy = dirY;
+          }
+        } else {
+          speed = brain === 'lord' ? 125 : 108 + 8 * e.tier;
+          dirX = e.vx;
+          dirY = e.vy;
+          if (e.timer <= 0) {
+            e.mode = 0;
+            if (brain === 'lord') {
               e.timer = 4.2;
-              this.summon(e, 'wisp', 6, 30);
+              this.summon(e, minionKind(s.stage, e.tier), 6, 30);
+            } else {
+              e.timer = 3.2 - 0.3 * e.tier;
             }
+          }
+        }
+      } else if (info.hops) {
+        // 웅크렸다가(0) 그때 본 쪽으로 한 번에 뛴다(1).
+        e.timer -= dt;
+        if (e.mode === 0) {
+          speed = 0;
+          if (e.timer <= 0) {
+            e.mode = 1;
+            e.timer = HOP_SECONDS;
+            e.vx = dirX;
+            e.vy = dirY;
+          }
+        } else {
+          dirX = e.vx;
+          dirY = e.vy;
+          if (e.timer <= 0) {
+            e.mode = 0;
+            e.timer = HOP_REST;
           }
         }
       }
@@ -595,16 +761,50 @@ export class Sim {
       const px = p.x - e.x;
       const py = p.y - e.y;
       if (p.inv <= 0 && px * px + py * py < reach * reach) {
-        p.hp -= info.boss ? info.damage : Math.round(info.damage * hard);
-        p.inv = PLAYER_BASE.invulnerable;
-        this.events.push({ type: 'hurt' });
-        if (p.hp <= 0) {
-          p.hp = 0;
-          s.over = 'dead';
-          return;
-        }
+        if (this.hurt(info.boss ? info.damage : Math.round(info.damage * hard))) return;
       }
     }
+  }
+
+  /** 보스가 angle 쪽을 가운데로 count갈래의 빛덩이를 쏜다. gap은 갈래 사이의 각도. */
+  private volley(source: Enemy, angle: number, count: number, gap: number, damage: number): void {
+    const hazards = this.state.hazards;
+    const first = angle - (gap * (count - 1)) / 2;
+    for (let i = 0; i < count; i += 1) {
+      const a = first + gap * i;
+      hazards.push({
+        x: source.x,
+        y: source.y,
+        vx: Math.cos(a) * HAZARD.speed,
+        vy: Math.sin(a) * HAZARD.speed,
+        life: HAZARD.life,
+        radius: HAZARD.radius,
+        damage,
+      });
+    }
+    this.events.push({ type: 'volley' });
+  }
+
+  private moveHazards(dt: number): void {
+    const s = this.state;
+    const p = s.player;
+    let kept = 0;
+    for (const hazard of s.hazards) {
+      hazard.life -= dt;
+      if (hazard.life <= 0) continue;
+      hazard.x += hazard.vx * dt;
+      hazard.y += hazard.vy * dt;
+      const reach = hazard.radius + PLAYER_BASE.radius;
+      if (p.inv <= 0 && (hazard.x - p.x) ** 2 + (hazard.y - p.y) ** 2 < reach * reach) {
+        if (this.hurt(hazard.damage)) return;
+        // 되살아나면 hurt가 빛덩이를 모두 치운다.
+        if (s.hazards.length === 0) return;
+        continue;
+      }
+      s.hazards[kept] = hazard;
+      kept += 1;
+    }
+    s.hazards.length = kept;
   }
 
   private summon(source: Enemy, kind: EnemyKind, count: number, radius: number): void {
@@ -953,7 +1153,7 @@ export class Sim {
       if (info.boss) {
         s.bossKills += 1;
         this.dropGem(e.x + 8, e.y, HEAL_DROP_VALUE * 2, 'heal');
-        if (e.kind === 'lord') {
+        if (e.kind === STAGES[s.stage].finalBoss) {
           s.over = 'cleared';
         } else {
           // 중간 보스를 잡으면 무기 강화권을 한 장 받는다.

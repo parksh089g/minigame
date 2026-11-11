@@ -1,11 +1,13 @@
 import Phaser from 'phaser';
-import { darknessTexture, flashOf, LK, LOOK } from './art';
-import { ENEMIES, type EnemyKind } from './data';
+import { darknessTexture, flashOf, FLOOR_OF, HERO_FRAMES, LK, LOOK } from './art';
+import { ENEMIES, STAGES } from './data';
 import { auraStats, fireflyStats, isEvolved } from './rules';
 import type { ShotLook, Sim } from './sim';
+import { puddlesAround } from './terrain';
 
 const DEPTH = {
   floor: 0,
+  terrain: 1,
   ground: 2,
   gem: 3,
   enemy: 5,
@@ -83,6 +85,7 @@ export class RunView {
   readonly centerY: number;
 
   private readonly floor: Phaser.GameObjects.TileSprite;
+  private readonly terrain: Phaser.GameObjects.Graphics;
   private readonly ground: Phaser.GameObjects.Graphics;
   private readonly air: Phaser.GameObjects.Graphics;
   private readonly player: Phaser.GameObjects.Image;
@@ -94,22 +97,30 @@ export class RunView {
   private readonly flashes: Flash[] = [];
   private readonly width: number;
   private readonly height: number;
+  /** 이 판의 캐릭터가 걷는 그림 두 장 */
+  private readonly frames: readonly [string, string];
+  /** 웅덩이가 있는 스테이지인지 */
+  private readonly puddles: boolean;
   private stride = 0;
 
-  constructor(scene: Phaser.Scene, centerY: number) {
+  constructor(scene: Phaser.Scene, centerY: number, sim: Sim) {
     const { width, height } = scene.scale;
+    const { hero, stage } = sim.state;
+    this.frames = HERO_FRAMES[hero];
+    this.puddles = STAGES[stage].puddles;
     this.width = width;
     this.height = height;
     this.centerX = Math.round(width / 2);
     this.centerY = Math.round(centerY);
 
-    this.floor = scene.add.tileSprite(0, 0, width, height, LK.floor).setOrigin(0, 0).setDepth(DEPTH.floor);
+    this.floor = scene.add.tileSprite(0, 0, width, height, FLOOR_OF[stage]).setOrigin(0, 0).setDepth(DEPTH.floor);
+    this.terrain = scene.add.graphics().setDepth(DEPTH.terrain);
     this.ground = scene.add.graphics().setDepth(DEPTH.ground);
     this.gems = new Pool(scene, DEPTH.gem);
     this.enemies = new Pool(scene, DEPTH.enemy);
     this.shots = new Pool(scene, DEPTH.shot);
     this.air = scene.add.graphics().setDepth(DEPTH.shot);
-    this.player = scene.add.image(this.centerX, this.centerY, LK.keeper[0]).setDepth(DEPTH.player);
+    this.player = scene.add.image(this.centerX, this.centerY, this.frames[0]).setDepth(DEPTH.player);
 
     // 어둠 덮개는 플레이어를 중심으로 화면 전체를 덮을 만큼 크게 만든다.
     const reach = Math.max(this.centerY, height - this.centerY);
@@ -149,9 +160,35 @@ export class RunView {
   private playerKey(sim: Sim, seconds: number): string {
     const p = sim.state.player;
     const frame = p.moving ? Math.floor(this.stride / 7) % 2 : 0;
-    const key = LK.keeper[frame];
+    const key = this.frames[frame];
     const hurt = p.inv > 0 && Math.floor(seconds * 16) % 2 === 0;
     return hurt ? flashOf(key) : key;
+  }
+
+  /** 화면에 걸치는 웅덩이를 그린다. 플레이어가 빠져 있으면 발밑에 물결이 인다. */
+  private drawPuddles(sim: Sim, seconds: number): void {
+    const s = sim.state;
+    const p = s.player;
+    const g = this.terrain;
+    g.clear();
+    const midX = p.x + this.width / 2 - this.centerX;
+    const midY = p.y + this.height / 2 - this.centerY;
+    for (const puddle of puddlesAround(midX, midY, this.width / 2 + 34, this.height / 2 + 24, s.seed)) {
+      const x = Math.round(puddle.x - p.x + this.centerX);
+      const y = Math.round(puddle.y - p.y + this.centerY);
+      g.fillStyle(LOOK.puddleRim, 0.55);
+      g.fillEllipse(x, y, puddle.rx * 2 + 4, puddle.ry * 2 + 4);
+      g.fillStyle(LOOK.puddle, 0.9);
+      g.fillEllipse(x, y, puddle.rx * 2, puddle.ry * 2);
+      // 물에 비친 빛 한 줄
+      g.fillStyle(LOOK.puddleShine, 0.28);
+      g.fillRect(x - Math.round(puddle.rx * 0.5), y - Math.round(puddle.ry * 0.45), Math.round(puddle.rx * 0.6), 1);
+    }
+    if (p.wading) {
+      const spread = (seconds * 1.6) % 1;
+      g.lineStyle(1, LOOK.puddleShine, 0.6 * (1 - spread));
+      g.strokeEllipse(this.centerX, this.centerY + 7, 10 + 12 * spread, 4 + 5 * spread);
+    }
   }
 
   sync(sim: Sim, seconds: number, dt: number): void {
@@ -164,7 +201,10 @@ export class RunView {
 
     this.floor.setTilePosition(Math.round(p.x - this.centerX), Math.round(p.y - this.centerY));
 
-    if (p.moving) this.stride += 60 * dt;
+    if (this.puddles) this.drawPuddles(sim, seconds);
+
+    // 웅덩이에서는 발이 무거워 걸음도 느려진다.
+    if (p.moving) this.stride += (p.wading ? 36 : 60) * dt;
     const playerKey = this.playerKey(sim, seconds);
     if (this.player.texture.key !== playerKey) this.player.setTexture(playerKey);
     this.player.setFlipX(p.face < 0);
@@ -189,8 +229,10 @@ export class RunView {
       const y = e.y + offsetY;
       const reach = ENEMIES[e.kind].radius + 6;
       if (x < -reach || x > this.width + reach || y < -reach || y > this.height + reach) continue;
-      const frames = LK[e.kind as EnemyKind];
-      const key = frames[Math.floor(beat + e.uid * 0.37) % 2];
+      const frames = LK[e.kind];
+      // 뛰는 적은 웅크렸을 때와 뛸 때의 그림이 다르고, 나머지는 박자에 맞춰 꿈틀거린다.
+      const frame = ENEMIES[e.kind].hops ? (e.mode === 1 ? 0 : 1) : Math.floor(beat + e.uid * 0.37) % 2;
+      const key = frames[frame];
       const boss = Boolean(ENEMIES[e.kind].boss);
       const image = this.enemies.put(e.flash > 0 ? flashOf(key) : key, x, y);
       const depth = boss ? DEPTH.boss : DEPTH.enemy;
@@ -201,7 +243,7 @@ export class RunView {
     // 불씨탄, 빛화살, 반딧불, 떨어지는 별. 돌려쓰는 그림이라 방향을 매번 다시 정한다.
     this.shots.begin();
     for (const shot of s.shots) {
-      const image = this.shots.put(SHOT_KEY[shot.look], shot.x + offsetX, shot.y + offsetY);
+      const image = this.shots.put(SHOT_KEY[shot.look], shot.x + offsetX, shot.y + offsetY).setScale(1);
       const turned = shot.look === 'lance' || shot.look === 'lanceEvo';
       image.setRotation(turned ? Math.atan2(shot.vy, shot.vx) : 0);
     }
@@ -212,15 +254,22 @@ export class RunView {
         const angle = s.fireflyAngle + (k / stats.count) * Math.PI * 2;
         this.shots
           .put(key, this.centerX + Math.cos(angle) * stats.orbit, this.centerY + Math.sin(angle) * stats.orbit)
-          .setRotation(0);
+          .setRotation(0)
+          .setScale(1);
       }
+    }
+    // 보스가 쏜 빛덩이는 숨 쉬듯 커졌다 작아져서 우리 편 공격과 헷갈리지 않는다.
+    const throb = 1 + 0.18 * Math.sin(seconds * 14);
+    for (const hazard of s.hazards) {
+      this.shots.put(LK.orb, hazard.x + offsetX, hazard.y + offsetY).setRotation(0).setScale(throb);
     }
     for (const strike of s.strikes) {
       // 비스듬히 떨어져 내려온다.
       const fall = strike.delay * 260;
       this.shots
         .put(strike.evolved ? LK.starEvo : LK.star, strike.x + offsetX + fall * 0.35, strike.y + offsetY - fall)
-        .setRotation(0);
+        .setRotation(0)
+        .setScale(1);
     }
     this.shots.end();
 
