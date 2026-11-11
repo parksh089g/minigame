@@ -70,7 +70,59 @@ function drawSpark(): HTMLCanvasElement {
   return canvas;
 }
 
+/** 모서리 한 픽셀을 깎은 사각형을 칠한다. */
+function fillChamfer(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  color: string,
+): void {
+  context.fillStyle = color;
+  context.fillRect(x + 1, y, width - 2, 1);
+  context.fillRect(x, y + 1, width, height - 2);
+  context.fillRect(x + 1, y + height - 1, width - 2, 1);
+}
+
+/** 카드 뒷면: 남색 바탕에 마름모 무늬. 어느 카드든 똑같이 보여야 한다. */
+function drawCardBack(width: number, height: number): HTMLCanvasElement {
+  const [canvas, context] = createCanvas(width, height);
+  fillChamfer(context, 0, 0, width, height, PALETTE[0]);
+  fillChamfer(context, 1, 1, width - 2, height - 2, PALETTE[9]);
+  context.fillStyle = PALETTE[8];
+  context.fillRect(3, 3, width - 6, height - 6);
+
+  // 가운데에서부터 대칭이 되도록 6px 간격으로 작은 마름모를 놓는다.
+  const step = 6;
+  context.fillStyle = PALETTE[9];
+  for (let y = 7; y <= height - 8; y += step) {
+    for (let x = 6; x <= width - 7; x += step) {
+      context.fillRect(x, y - 1, 1, 3);
+      context.fillRect(x - 1, y, 3, 1);
+    }
+  }
+  // 아래쪽 두께
+  context.fillStyle = PALETTE[0];
+  context.globalAlpha = 0.35;
+  context.fillRect(1, height - 3, width - 2, 2);
+  context.globalAlpha = 1;
+  return canvas;
+}
+
+/** 카드 앞면: 그림이 잘 보이도록 밝은 바탕. */
+function drawCardFront(width: number, height: number): HTMLCanvasElement {
+  const [canvas, context] = createCanvas(width, height);
+  fillChamfer(context, 0, 0, width, height, PALETTE[0]);
+  fillChamfer(context, 1, 1, width - 2, height - 2, PALETTE[12]);
+  context.fillStyle = PALETTE[13];
+  context.fillRect(2, height - 3, width - 4, 2);
+  return canvas;
+}
+
 export const ORB_SIZE = 28;
+export const CARD_WIDTH = 48;
+export const CARD_HEIGHT = 56;
 
 /** 모든 텍스처를 한 번에 등록한다. 부트 씬에서 부른다. */
 export function registerTextures(scene: Phaser.Scene): void {
@@ -100,5 +152,7 @@ export function registerTextures(scene: Phaser.Scene): void {
     ]),
   );
   add(TEXTURE.spark, drawSpark());
+  add(TEXTURE.cardBack, drawCardBack(CARD_WIDTH, CARD_HEIGHT));
+  add(TEXTURE.cardFront, drawCardFront(CARD_WIDTH, CARD_HEIGHT));
   add(TEXTURE.backdrop, drawBackdrop());
 }

@@ -5,6 +5,7 @@ import { initPwa, isStandalone } from './core/pwa';
 import { initAudioUnlock } from './core/sfx';
 import { store } from './core/store';
 import { LightningTapScene } from './games/lightning-tap/LightningTapScene';
+import { MemoryCardsScene } from './games/memory-cards/MemoryCardsScene';
 import { BootScene } from './scenes/BootScene';
 import { HubScene } from './scenes/HubScene';
 import { PauseScene } from './scenes/PauseScene';
@@ -53,7 +54,15 @@ async function boot(): Promise<void> {
     // 효과음은 core/sfx.ts가 Web Audio로 직접 만든다.
     audio: { noAudio: true },
     banner: false,
-    scene: [BootScene, HubScene, SettingsScene, LightningTapScene, PauseScene, ResultScene],
+    scene: [
+      BootScene,
+      HubScene,
+      SettingsScene,
+      LightningTapScene,
+      MemoryCardsScene,
+      PauseScene,
+      ResultScene,
+    ],
   });
   window.__pocketArcade = game;
 

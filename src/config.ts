@@ -94,4 +94,5 @@ export const SCENE = {
   result: 'Result',
   pause: 'Pause',
   lightningTap: 'LightningTap',
+  memoryCards: 'MemoryCards',
 } as const;
