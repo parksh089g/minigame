@@ -96,6 +96,8 @@ export const ACHIEVEMENTS: readonly Achievement[] = [
   { id: 'tower-220', group: 'score', title: '하늘에 닿은 탑', description: '탑 쌓기 220점 이상', goal: 220, reward: 50, measure: bestOf('stack-tower') },
   { id: 'sort-250', group: 'score', title: '깔끔한 정리', description: '물 나누기 250점 이상', goal: 250, reward: 20, measure: bestOf('color-sort') },
   { id: 'sort-420', group: 'score', title: '색의 달인', description: '물 나누기 420점 이상', goal: 420, reward: 50, measure: bestOf('color-sort') },
+  { id: 'gate-200', group: 'score', title: '눈치 빠른 무리', description: '관문 달리기 200점 이상', goal: 200, reward: 20, measure: bestOf('gate-run') },
+  { id: 'gate-400', group: 'score', title: '관문의 달인', description: '관문 달리기 400점 이상', goal: 400, reward: 50, measure: bestOf('gate-run') },
 
   { id: 'daily-1', group: 'daily', title: '오늘도 도전', description: '오늘의 도전 한 번 달성', goal: 1, reward: 10, measure: (stats) => stats.dailyCleared },
   { id: 'daily-streak-3', group: 'daily', title: '사흘 연속', description: '도전 3일 연속 달성', goal: 3, reward: 30, measure: (stats) => stats.bestStreak },

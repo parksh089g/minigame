@@ -73,8 +73,8 @@ export const GAMES: readonly MiniGameInfo[] = [
     tagline: '관문 골라 무리 불리기',
     icon: 'icon-gate',
     sceneKey: SCENE.gateRun,
-    coinsFor: (score) => Math.floor(score / 15),
-    dailyTargets: [60, 100, 150],
+    coinsFor: (score) => Math.floor(score / 12),
+    dailyTargets: [80, 150, 250],
   },
   {
     id: 'pin-pull',
