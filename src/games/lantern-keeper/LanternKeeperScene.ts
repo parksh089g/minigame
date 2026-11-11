@@ -45,6 +45,8 @@ export class LanternKeeperScene extends MiniGameScene {
   protected readonly gameId = LANTERN_GAME_ID;
 
   private phase: Phase = 'loading';
+  /** 준비 화면에서 지금 열려 있는 쪽 */
+  private lobbyPage: LobbyPage = 'main';
   private sim!: Sim;
   private view!: RunView;
   private stick!: Joystick;
@@ -87,6 +89,7 @@ export class LanternKeeperScene extends MiniGameScene {
 
   private openLobby(page: LobbyPage): void {
     this.phase = 'lobby';
+    this.lobbyPage = page;
     buildLobby(
       this,
       {
@@ -328,6 +331,16 @@ export class LanternKeeperScene extends MiniGameScene {
   private saveRun(): void {
     this.sinceSave = 0;
     if (!this.sim.state.over) metaStore.setRun(this.sim.state);
+  }
+
+  /** 뒤로 가기: 준비 화면에서는 한 걸음 뒤로(강화를 사는 쪽 → 고르는 쪽 → 허브), 판 중에는 일시정지 */
+  override onBackRequest(): void {
+    if (this.phase !== 'lobby') {
+      super.onBackRequest();
+      return;
+    }
+    if (this.lobbyPage === 'upgrades') this.scene.restart({ page: 'main' } satisfies StartData);
+    else fadeToScene(this, SCENE.hub);
   }
 
   protected override pauseGame(): void {
