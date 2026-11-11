@@ -1,9 +1,9 @@
 /** 픽셀 UI 부품: 글자, 패널, 버튼, 씬 전환. 모든 씬이 같이 쓴다. */
 import Phaser from 'phaser';
 import { COLOR, CSS, FONT_FAMILY, FONT_SIZE } from '../config';
-import { TEXTURE } from '../art/sprites';
 import { vibrate } from './haptics';
 import { sfx } from './sfx';
+import { store } from './store';
 
 export interface TextOptions {
   size?: number;
@@ -96,10 +96,82 @@ export function addPanel(
   return graphics;
 }
 
-/** 화면을 덮는 점무늬 배경. */
+/** 화면을 덮는 배경 무늬. 상점에서 고른 배경을 쓴다. */
 export function addBackdrop(scene: Phaser.Scene): Phaser.GameObjects.TileSprite {
   const { width, height } = scene.scale;
-  return scene.add.tileSprite(0, 0, width, height, TEXTURE.backdrop).setOrigin(0, 0);
+  return scene.add
+    .tileSprite(0, 0, width, height, store.data.cosmetics.equipped.backdrop)
+    .setOrigin(0, 0);
+}
+
+/**
+ * 누르는 동안 모양이 바뀌고, 그 위에서 손을 떼면 onTap이 불리는 영역을 만든다.
+ * draw는 눌린 상태가 바뀔 때마다 불린다. 누른 채 밖으로 끌면 취소된다.
+ */
+export function addTapZone(
+  scene: Phaser.Scene,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  draw: (pressed: boolean) => void,
+  onTap: () => void,
+): Phaser.GameObjects.Zone {
+  const zone = scene.add
+    .zone(x, y, width, height)
+    .setOrigin(0, 0)
+    .setInteractive({ useHandCursor: true });
+  let pressed = false;
+  const release = (): void => {
+    pressed = false;
+    draw(false);
+  };
+  zone.on(Phaser.Input.Events.GAMEOBJECT_POINTER_DOWN, () => {
+    pressed = true;
+    draw(true);
+  });
+  zone.on(Phaser.Input.Events.GAMEOBJECT_POINTER_OUT, release);
+  zone.on(Phaser.Input.Events.GAMEOBJECT_POINTER_UP, () => {
+    if (!pressed) return;
+    release();
+    onTap();
+  });
+  return zone;
+}
+
+/** 가진 코인을 보여 주는 작은 패널. 오른쪽 끝이 right에 맞춰지고, 금액에 따라 왼쪽으로 늘어난다. */
+export class CoinCounter {
+  private readonly panel: Phaser.GameObjects.Graphics;
+  private readonly icon: Phaser.GameObjects.Image;
+  private readonly amount: Phaser.GameObjects.Text;
+  /** 패널의 왼쪽 끝. 옆에 다른 것을 놓을 때 쓴다. */
+  left = 0;
+
+  constructor(
+    scene: Phaser.Scene,
+    private readonly right: number,
+    private readonly y: number,
+    coins: number,
+  ) {
+    this.panel = scene.add.graphics();
+    this.icon = scene.add.image(0, y + 6, 'coin').setOrigin(0, 0);
+    this.amount = addText(scene, 0, y + 4, '', { color: CSS.yellow });
+    this.set(coins);
+  }
+
+  set(coins: number): void {
+    this.amount.setText(String(coins));
+    const width = Math.ceil(this.amount.width) + 24;
+    this.left = this.right - width;
+    this.panel.clear();
+    drawPanel(this.panel, this.left, this.y, width, 20, {
+      fill: COLOR.ink,
+      border: COLOR.slate,
+      highlight: COLOR.ink,
+    });
+    this.icon.setX(this.left + 6);
+    this.amount.setX(this.left + 18);
+  }
 }
 
 const BUTTON_STYLES = {

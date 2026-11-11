@@ -12,8 +12,16 @@ import {
   type DailyChallenge,
   type DailyState,
 } from './daily';
+import {
+  createCosmetics,
+  equip,
+  normalizeCosmetics,
+  purchase,
+  type CosmeticItem,
+  type CosmeticsState,
+} from './shop';
 
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 export interface GameRecord {
   /** 최고 점수 */
@@ -37,6 +45,8 @@ export interface SaveData {
   games: Record<string, GameRecord>;
   /** 오늘의 도전 달성 기록 */
   daily: DailyState;
+  /** 상점에서 산 꾸미기와 지금 쓰는 꾸미기 */
+  cosmetics: CosmeticsState;
   createdAt: number;
   updatedAt: number;
 }
@@ -72,6 +82,7 @@ export function createDefaultSave(now: number = Date.now()): SaveData {
     settings: { sound: true, vibration: true },
     games: {},
     daily: createDailyState(),
+    cosmetics: createCosmetics(),
     createdAt: now,
     updatedAt: now,
   };
@@ -123,6 +134,7 @@ export function normalizeSave(raw: unknown, now: number = Date.now()): SaveData 
     },
     games,
     daily: normalizeDaily(raw.daily),
+    cosmetics: normalizeCosmetics(raw.cosmetics),
     createdAt: toTimestamp(raw.createdAt, now),
     updatedAt: toTimestamp(raw.updatedAt, now),
   };
@@ -191,7 +203,29 @@ export function applyPlayResult(
   };
 }
 
-/** 기록과 코인을 지우고 설정은 남긴다. */
+export type BuyResult =
+  | { ok: true; save: SaveData; item: CosmeticItem }
+  | { ok: false; reason: 'unknown' | 'owned' }
+  | { ok: false; reason: 'coins'; shortBy: number };
+
+/** 코인으로 꾸미기를 사서 바로 끼운 새 세이브를 돌려준다. 살 수 없으면 이유를 알려 준다. */
+export function buyCosmetic(save: SaveData, itemId: string, now: number = Date.now()): BuyResult {
+  const result = purchase(save.coins, save.cosmetics, itemId);
+  if (!result.ok) return result;
+  return {
+    ok: true,
+    save: { ...save, coins: result.coins, cosmetics: result.cosmetics, updatedAt: now },
+    item: result.item,
+  };
+}
+
+/** 가진 꾸미기를 끼운 새 세이브를 돌려준다. 바뀌는 것이 없으면 받은 세이브 그대로다. */
+export function equipCosmetic(save: SaveData, itemId: string, now: number = Date.now()): SaveData {
+  const cosmetics = equip(save.cosmetics, itemId);
+  return cosmetics === save.cosmetics ? save : { ...save, cosmetics, updatedAt: now };
+}
+
+/** 기록, 코인, 산 꾸미기를 지우고 설정은 남긴다. */
 export function resetProgress(save: SaveData, now: number = Date.now()): SaveData {
   return { ...createDefaultSave(now), settings: { ...save.settings } };
 }

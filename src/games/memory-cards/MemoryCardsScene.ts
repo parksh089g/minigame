@@ -4,6 +4,7 @@ import { CARD_HEIGHT, CARD_WIDTH } from '../../art/textures';
 import { COLOR, CSS, GAME_WIDTH, SCENE } from '../../config';
 import { vibrate } from '../../core/haptics';
 import { sfx } from '../../core/sfx';
+import { store } from '../../core/store';
 import { addBackdrop, addText } from '../../core/ui';
 import { floatText, GameHud, HUD_HEIGHT, showBanner } from '../../scenes/GameHud';
 import { MiniGameScene } from '../../scenes/MiniGameScene';
@@ -203,7 +204,7 @@ export class MemoryCardsScene extends MiniGameScene {
   }
 
   private createCard(symbol: number, center: { x: number; y: number }, index: number): Card {
-    const back = this.add.image(0, 0, TEXTURE.cardBack).setVisible(false);
+    const back = this.add.image(0, 0, store.data.cosmetics.equipped.cardBack).setVisible(false);
     const front = this.add.image(0, 0, TEXTURE.cardFront);
     const icon = this.add.image(0, -1, CARD_SYMBOLS[symbol]).setScale(2);
     const container = this.add.container(center.x, center.y, [back, front, icon]).setScale(0);

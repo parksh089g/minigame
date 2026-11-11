@@ -147,7 +147,7 @@ export class SettingsScene extends Phaser.Scene {
       onTap: () => {
         if (this.time.now < this.resetArmedUntil) {
           store.resetProgress();
-          this.scene.restart({ notice: { text: '기록과 코인을 모두 지웠어요.', ok: true } });
+          this.scene.restart({ notice: { text: '기록, 코인, 꾸미기를 모두 지웠어요.', ok: true } });
           return;
         }
         // 실수로 지우지 않도록 두 번 눌러야 초기화된다.

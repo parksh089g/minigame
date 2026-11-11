@@ -1,6 +1,18 @@
 /** 스프라이트 문자열과 간단한 도형으로 게임에서 쓸 텍스처를 만든다. */
 import type Phaser from 'phaser';
 import { PALETTE } from '../config';
+import {
+  BACKDROP_LOOKS,
+  CARD_BACK_LOOKS,
+  ORB_LOOKS,
+  RUNNER_FRAMES,
+  RUNNER_LOOKS,
+  RUNNER_SOURCE,
+  cardBackPreviewTexture,
+  runnerTexture,
+  type BackdropLook,
+  type CardBackLook,
+} from './cosmetics';
 import { SPRITES, TEXTURE, type SpriteRows } from './sprites';
 
 function createCanvas(width: number, height: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
@@ -12,13 +24,14 @@ function createCanvas(width: number, height: number): [HTMLCanvasElement, Canvas
   return [canvas, context];
 }
 
-function drawRows(rows: SpriteRows): HTMLCanvasElement {
+/** recolor를 주면 그 색 번호들을 다른 번호로 바꿔서 그린다(같은 그림의 색만 다른 판). */
+function drawRows(rows: SpriteRows, recolor: ReadonlyMap<number, number> = new Map()): HTMLCanvasElement {
   const [canvas, context] = createCanvas(rows[0].length, rows.length);
   rows.forEach((row, y) => {
     for (let x = 0; x < row.length; x += 1) {
       const index = Number.parseInt(row[x], 16);
       if (Number.isNaN(index)) continue;
-      context.fillStyle = PALETTE[index];
+      context.fillStyle = PALETTE[recolor.get(index) ?? index];
       context.fillRect(x, y, 1, 1);
     }
   });
@@ -52,14 +65,14 @@ function drawOrb(size: number, rings: ReadonlyArray<readonly [number, number]>):
   return canvas;
 }
 
-function drawBackdrop(): HTMLCanvasElement {
-  const size = 16;
-  const [canvas, context] = createCanvas(size, size);
-  context.fillStyle = PALETTE[0];
-  context.fillRect(0, 0, size, size);
-  context.fillStyle = PALETTE[8];
-  context.fillRect(0, 0, 1, 1);
-  context.fillRect(8, 8, 1, 1);
+function drawBackdrop(look: BackdropLook): HTMLCanvasElement {
+  const [canvas, context] = createCanvas(look.size, look.size);
+  context.fillStyle = PALETTE[look.base];
+  context.fillRect(0, 0, look.size, look.size);
+  for (const [x, y, width, height, color] of look.marks) {
+    context.fillStyle = PALETTE[color];
+    context.fillRect(x, y, width, height);
+  }
   return canvas;
 }
 
@@ -85,21 +98,41 @@ function fillChamfer(
   context.fillRect(x + 1, y + height - 1, width - 2, 1);
 }
 
-/** 카드 뒷면: 남색 바탕에 마름모 무늬. 어느 카드든 똑같이 보여야 한다. */
-function drawCardBack(width: number, height: number): HTMLCanvasElement {
+/** 카드 뒷면: 테두리 안쪽에 무늬를 채운다. 어느 카드든 똑같이 보여야 한다. */
+function drawCardBack(width: number, height: number, look: CardBackLook): HTMLCanvasElement {
   const [canvas, context] = createCanvas(width, height);
   fillChamfer(context, 0, 0, width, height, PALETTE[0]);
-  fillChamfer(context, 1, 1, width - 2, height - 2, PALETTE[9]);
-  context.fillStyle = PALETTE[8];
+  fillChamfer(context, 1, 1, width - 2, height - 2, PALETTE[look.border]);
+  context.fillStyle = PALETTE[look.fill];
   context.fillRect(3, 3, width - 6, height - 6);
 
-  // 가운데에서부터 대칭이 되도록 6px 간격으로 작은 마름모를 놓는다.
-  const step = 6;
-  context.fillStyle = PALETTE[9];
-  for (let y = 7; y <= height - 8; y += step) {
-    for (let x = 6; x <= width - 7; x += step) {
-      context.fillRect(x, y - 1, 1, 3);
-      context.fillRect(x - 1, y, 3, 1);
+  context.fillStyle = PALETTE[look.mark];
+  if (look.motif === 'stripes') {
+    // 안쪽을 비스듬히 가로지르는 줄무늬
+    for (let y = 3; y < height - 3; y += 1) {
+      for (let x = 3; x < width - 3; x += 1) {
+        if ((x + y) % 6 < 2) context.fillRect(x, y, 1, 1);
+      }
+    }
+  } else if (look.motif === 'checks') {
+    // 4px 바둑판. 가장자리에 한 칸 여백을 둔다.
+    for (let y = 5; y + 4 <= height - 5; y += 4) {
+      for (let x = 5; x + 4 <= width - 5; x += 4) {
+        if (((x - 5) / 4 + (y - 5) / 4) % 2 === 0) context.fillRect(x, y, 4, 4);
+      }
+    }
+  } else {
+    // 가운데에서부터 대칭이 되도록 6px 간격으로 작은 무늬를 놓는다.
+    const step = 6;
+    for (let y = 7; y <= height - 8; y += step) {
+      for (let x = 6; x <= width - 7; x += step) {
+        if (look.motif === 'diamond') {
+          context.fillRect(x, y - 1, 1, 3);
+          context.fillRect(x - 1, y, 3, 1);
+        } else {
+          context.fillRect(x - 1, y - 1, 2, 2);
+        }
+      }
     }
   }
   // 아래쪽 두께
@@ -195,6 +228,9 @@ function drawRunnerMoon(): HTMLCanvasElement {
 export const ORB_SIZE = 28;
 export const CARD_WIDTH = 48;
 export const CARD_HEIGHT = 56;
+/** 상점에서 보여 주는 작은 카드 뒷면의 크기 */
+const CARD_PREVIEW_WIDTH = 28;
+const CARD_PREVIEW_HEIGHT = 34;
 
 /** 모든 텍스처를 한 번에 등록한다. 부트 씬에서 부른다. */
 export function registerTextures(scene: Phaser.Scene): void {
@@ -204,16 +240,24 @@ export function registerTextures(scene: Phaser.Scene): void {
 
   for (const [key, rows] of Object.entries(SPRITES)) add(key, drawRows(rows));
 
-  add(
-    TEXTURE.orb,
-    drawOrb(ORB_SIZE, [
-      [14, 0],
-      [13, 9],
-      [10.5, 10],
-      [7, 11],
-      [3.5, 12],
-    ]),
-  );
+  // 꾸미기: 어떤 것을 쓰고 있든 바로 바꿀 수 있게 모두 만들어 둔다.
+  for (const [id, look] of Object.entries(BACKDROP_LOOKS)) add(id, drawBackdrop(look));
+  for (const [id, look] of Object.entries(RUNNER_LOOKS)) {
+    const recolor = new Map([
+      [RUNNER_SOURCE.light, look.light],
+      [RUNNER_SOURCE.shade, look.shade],
+      [RUNNER_SOURCE.dark, look.dark],
+    ]);
+    for (const frame of RUNNER_FRAMES) {
+      add(runnerTexture(id, frame), drawRows(SPRITES[`runner-${frame}`], recolor));
+    }
+  }
+  for (const [id, look] of Object.entries(CARD_BACK_LOOKS)) {
+    add(id, drawCardBack(CARD_WIDTH, CARD_HEIGHT, look));
+    add(cardBackPreviewTexture(id), drawCardBack(CARD_PREVIEW_WIDTH, CARD_PREVIEW_HEIGHT, look));
+  }
+  for (const [id, look] of Object.entries(ORB_LOOKS)) add(id, drawOrb(ORB_SIZE, look.rings));
+
   add(
     TEXTURE.orbGold,
     drawOrb(ORB_SIZE, [
@@ -224,11 +268,9 @@ export function registerTextures(scene: Phaser.Scene): void {
     ]),
   );
   add(TEXTURE.spark, drawSpark());
-  add(TEXTURE.cardBack, drawCardBack(CARD_WIDTH, CARD_HEIGHT));
   add(TEXTURE.cardFront, drawCardFront(CARD_WIDTH, CARD_HEIGHT));
   add(TEXTURE.runnerSoil, drawRunnerSoil());
   add(TEXTURE.runnerEdge, drawRunnerEdge());
   add(TEXTURE.runnerHills, drawRunnerHills());
   add(TEXTURE.runnerMoon, drawRunnerMoon());
-  add(TEXTURE.backdrop, drawBackdrop());
 }

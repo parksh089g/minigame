@@ -43,6 +43,11 @@ export const PALETTE = [
 
 const hex = (index: number): number => Number.parseInt(PALETTE[index].slice(1), 16);
 
+/** 팔레트 번호(0~15)를 Phaser 도형·틴트용 숫자 색으로 바꾼다. */
+export function paletteColor(index: number): number {
+  return hex(index);
+}
+
 /** Phaser 도형·틴트용 숫자 색. */
 export const COLOR = {
   ink: hex(0),
@@ -91,6 +96,7 @@ export const SCENE = {
   boot: 'Boot',
   hub: 'Hub',
   settings: 'Settings',
+  shop: 'Shop',
   result: 'Result',
   pause: 'Pause',
   lightningTap: 'LightningTap',

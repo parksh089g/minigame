@@ -2,13 +2,16 @@ import { describe, expect, it } from 'vitest';
 import type { DailyChallenge } from './daily';
 import {
   applyPlayResult,
+  buyCosmetic,
   createDefaultSave,
+  equipCosmetic,
   getRecord,
   looksLikeSave,
   normalizeSave,
   resetProgress,
   SAVE_VERSION,
 } from './save';
+import { createCosmetics } from './shop';
 
 const NOW = 1_700_000_000_000;
 
@@ -26,10 +29,35 @@ describe('normalizeSave', () => {
       settings: { sound: false, vibration: true },
       games: { 'lightning-tap': { best: 80, plays: 4, lastPlayedAt: NOW - 1000 } },
       daily: { lastClearedOn: '2026-11-11', streak: 3, totalCleared: 8 },
+      cosmetics: {
+        owned: ['runner-drop'],
+        equipped: {
+          backdrop: 'backdrop-night',
+          runner: 'runner-drop',
+          cardBack: 'cardback-blue',
+          orb: 'orb-blue',
+        },
+      },
       createdAt: NOW - 5000,
       updatedAt: NOW - 1000,
     };
     expect(normalizeSave(save, NOW)).toEqual(save);
+  });
+
+  it('꾸미기가 생기기 전의 세이브는 기본 꾸미기로 읽는다', () => {
+    const old = {
+      version: 2,
+      coins: 55,
+      settings: { sound: true, vibration: true },
+      games: {},
+      daily: { lastClearedOn: '2026-11-11', streak: 2, totalCleared: 2 },
+      createdAt: NOW - 5000,
+      updatedAt: NOW - 1000,
+    };
+    const save = normalizeSave(old, NOW);
+    expect(save.coins).toBe(55);
+    expect(save.daily).toEqual(old.daily);
+    expect(save.cosmetics).toEqual(createCosmetics());
   });
 
   it('오늘의 도전이 생기기 전의 세이브도 기록을 잃지 않고 읽는다', () => {
@@ -181,6 +209,40 @@ describe('오늘의 도전과 한 판의 결과', () => {
   });
 });
 
+describe('꾸미기 사기와 끼우기', () => {
+  const rich = (): ReturnType<typeof createDefaultSave> => ({ ...createDefaultSave(NOW), coins: 120 });
+
+  it('사면 코인이 줄고 바로 끼워진다', () => {
+    const save = rich();
+    const result = buyCosmetic(save, 'backdrop-forest', NOW + 10);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.item.name).toBe('숲속');
+    expect(result.save.coins).toBe(80);
+    expect(result.save.cosmetics.owned).toEqual(['backdrop-forest']);
+    expect(result.save.cosmetics.equipped.backdrop).toBe('backdrop-forest');
+    expect(result.save.updatedAt).toBe(NOW + 10);
+    // 원본은 그대로다.
+    expect(save.coins).toBe(120);
+    expect(save.cosmetics).toEqual(createCosmetics());
+  });
+
+  it('코인이 모자라면 사지 못한다', () => {
+    expect(buyCosmetic(rich(), 'orb-moon', NOW)).toEqual({ ok: false, reason: 'coins', shortBy: 60 });
+  });
+
+  it('가진 것으로 바꿔 끼우고, 바뀌는 것이 없으면 같은 세이브를 돌려준다', () => {
+    const bought = buyCosmetic(rich(), 'backdrop-forest', NOW);
+    if (!bought.ok) throw new Error('구매 실패');
+    const back = equipCosmetic(bought.save, 'backdrop-night', NOW + 20);
+    expect(back.cosmetics.equipped.backdrop).toBe('backdrop-night');
+    expect(back.cosmetics.owned).toEqual(['backdrop-forest']);
+    expect(back.coins).toBe(80);
+    expect(equipCosmetic(back, 'backdrop-night', NOW + 30)).toBe(back);
+    expect(equipCosmetic(back, 'backdrop-galaxy', NOW + 30)).toBe(back);
+  });
+});
+
 describe('resetProgress', () => {
   it('기록과 코인은 지우고 설정은 남긴다', () => {
     let save = createDefaultSave(NOW);
@@ -190,6 +252,12 @@ describe('resetProgress', () => {
     expect(reset.coins).toBe(0);
     expect(reset.games).toEqual({});
     expect(reset.settings).toEqual({ sound: false, vibration: true });
+  });
+
+  it('산 꾸미기도 지우고 기본으로 되돌린다', () => {
+    const bought = buyCosmetic({ ...createDefaultSave(NOW), coins: 200 }, 'runner-ghost', NOW);
+    if (!bought.ok) throw new Error('구매 실패');
+    expect(resetProgress(bought.save, NOW + 100).cosmetics).toEqual(createCosmetics());
   });
 
   it('오늘의 도전 기록도 지운다', () => {
