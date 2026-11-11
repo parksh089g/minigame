@@ -5,6 +5,7 @@ import { initPwa, isStandalone } from './core/pwa';
 import { initAudioUnlock } from './core/sfx';
 import { store } from './core/store';
 import { JumpRunnerScene } from './games/jump-runner/JumpRunnerScene';
+import { LanternKeeperScene } from './games/lantern-keeper/LanternKeeperScene';
 import { LightningTapScene } from './games/lightning-tap/LightningTapScene';
 import { MemoryCardsScene } from './games/memory-cards/MemoryCardsScene';
 import { AchievementsScene } from './scenes/AchievementsScene';
@@ -66,6 +67,7 @@ async function boot(): Promise<void> {
       LightningTapScene,
       MemoryCardsScene,
       JumpRunnerScene,
+      LanternKeeperScene,
       PauseScene,
       ResultScene,
     ],

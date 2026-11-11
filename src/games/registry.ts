@@ -5,6 +5,8 @@
 import { SCENE } from '../config';
 import { challengeFor, dateKeyOf, type DailyChallenge } from '../core/daily';
 import type { SpriteKey } from '../art/sprites';
+import { LANTERN_GAME_ID, LANTERN_SCENE } from './lantern-keeper/data';
+import { coinsFor as lanternCoins } from './lantern-keeper/rules';
 
 export interface MiniGameInfo {
   /** 세이브에 쓰이는 고유 id. 한 번 정하면 바꾸지 않는다. */
@@ -48,6 +50,15 @@ export const GAMES: readonly MiniGameInfo[] = [
     sceneKey: SCENE.jumpRunner,
     coinsFor: (score) => Math.floor(score / 20),
     dailyTargets: [80, 140, 200],
+  },
+  {
+    id: LANTERN_GAME_ID,
+    title: '등불지기',
+    tagline: '그림자 무리에서 생존',
+    icon: 'icon-lantern',
+    sceneKey: LANTERN_SCENE,
+    coinsFor: lanternCoins,
+    dailyTargets: [300, 700, 1300],
   },
 ];
 
