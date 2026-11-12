@@ -11,9 +11,11 @@ import {
   claimAchievement,
   equipCosmetic,
   createDefaultSave,
+  isFavorite,
   looksLikeSave,
   normalizeSave,
   resetProgress,
+  toggleFavorite,
   type BuyResult,
   type ClaimAchievementResult,
   type PlayResult,
@@ -102,6 +104,16 @@ class SaveStore {
     this.data = next;
     this.commit();
     return true;
+  }
+
+  /** 게임을 즐겨찾기에 넣거나 뺀다. 넣은 뒤의 상태(들어 있으면 true)를 돌려준다. */
+  toggleFavorite(gameId: string): boolean {
+    const next = toggleFavorite(this.data, gameId);
+    if (next !== this.data) {
+      this.data = next;
+      this.commit();
+    }
+    return isFavorite(this.data, gameId);
   }
 
   /** 달성한 업적의 보상을 받는다. */

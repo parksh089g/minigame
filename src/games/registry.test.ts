@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { SPRITES } from '../art/sprites';
 import { dateKeyOf } from '../core/daily';
-import { GAMES, getGame, HUB_GAMES, orderForHub, todaysChallenge } from './registry';
+import { GAMES, getGame, HUB_GAMES, orderForHub, personalHubOrder, todaysChallenge } from './registry';
 
 describe('게임 목록', () => {
   it('id가 겹치지 않는다', () => {
@@ -68,6 +68,35 @@ describe('게임 목록', () => {
     const plain: Entry[] = [{ id: 'a' }, { id: 'b' }];
     expect(orderForHub(games).map((game) => game.id)).toEqual(['b', 'd', 'a', 'c']);
     expect(orderForHub(plain).map((game) => game.id)).toEqual(['a', 'b']);
+  });
+
+  it('사람마다의 허브 순서는 대표 게임, 즐겨찾기, 최근에 한 게임, 안 해 본 게임 차례다', () => {
+    type Entry = { id: string; featured?: boolean };
+    const games: Entry[] = [
+      { id: 'a' },
+      { id: 'b' },
+      { id: 'c', featured: true },
+      { id: 'd' },
+      { id: 'e' },
+      { id: 'f' },
+    ];
+    const times: Record<string, number> = { a: 100, d: 300, e: 200, f: 50 };
+    const lastPlayedAt = (id: string): number | null => times[id] ?? null;
+    // f와 a는 즐겨찾기라 넣은 순서와 상관없이 적힌 순서(a, f)로 앞에 온다.
+    const order = personalHubOrder(games, ['f', 'a', '없는-게임'], lastPlayedAt);
+    expect(order.map((game) => game.id)).toEqual(['c', 'a', 'f', 'd', 'e', 'b']);
+  });
+
+  it('즐겨찾기도 기록도 없으면 사람마다의 허브 순서는 기본 순서와 같다', () => {
+    const none = (): null => null;
+    expect(personalHubOrder(GAMES, [], none)).toEqual([...HUB_GAMES]);
+  });
+
+  it('같은 때에 한 게임들은 적힌 순서를 지키고, 대표 게임은 즐겨찾기에 넣어도 한 번만 나온다', () => {
+    type Entry = { id: string; featured?: boolean };
+    const games: Entry[] = [{ id: 'a' }, { id: 'b', featured: true }, { id: 'c' }, { id: 'd' }];
+    const order = personalHubOrder(games, ['b'], () => 500);
+    expect(order.map((game) => game.id)).toEqual(['b', 'a', 'c', 'd']);
   });
 
   it('허브 목록은 게임 목록과 같은 게임들이다', () => {
