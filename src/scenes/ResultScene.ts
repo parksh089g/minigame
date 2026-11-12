@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { mascotTexture } from '../art/cosmetics';
 import { TEXTURE } from '../art/sprites';
+import { paintArt } from '../art/vector';
 import { FONT_SIZE, GAME_WIDTH, SCENE, THEME, THEME_CSS } from '../config';
 import type { BackAware } from '../core/app-events';
 import { vibrate } from '../core/haptics';
@@ -9,9 +10,13 @@ import { store } from '../core/store';
 import { addPanel, addScrim, addTapZone, addText, fadeToScene, PixelButton } from '../core/ui';
 import type { Achievement } from '../core/achievements';
 import type { DailyOutcome } from '../core/save';
+import { getGame } from '../games/registry';
 import { loadBoard, scoreSync, syncScores } from '../online/online';
 import { isJoined } from '../online/profile';
 import { isRankedGame, rankLabel } from '../online/protocol';
+import { makeShareImage } from '../share/card';
+import { displayHost, shareFileName, shareNotice, shareText, shareTitle, shareUrl } from '../share/link';
+import { sendShare } from '../share/send';
 import type { ResultData, ResultStrip } from './MiniGameScene';
 import { askNickname } from './nickname';
 import type { RankingData } from './RankingScene';
@@ -26,11 +31,17 @@ const STRIP = { caption: 13, row: 20, icon: 18, gap: 2, between: 12, tight: 2 } 
 const MASCOT = { above: 46, overlap: 20 } as const;
 const BUTTON_HEIGHT = 30;
 const BUTTON_GAP = 7;
+/** 카드 오른쪽 위의 공유 버튼: 한 변, 카드 모서리에서 떨어진 거리, 공유한 뒤 알림이 떠 있는 시간(ms), 그림을 만들기 시작할 때까지의 여유(ms) */
+const SHARE = { size: 24, margin: 10, noticeMs: 1800, prepareMs: 400 } as const;
 
 /** 한 판이 끝난 뒤 게임 위에 겹쳐 뜨는 결과 화면. 기록은 게임 씬이 이미 저장해 두었다. */
 export class ResultScene extends Phaser.Scene implements BackAware {
   /** 결과를 낸 게임 씬의 이름 */
   private gameKey = '';
+  /** 공유할 점수 카드 그림. 결과 화면이 뜨면 바로 만들기 시작하고, 다 되기 전에는 null이다. */
+  private shareImage: File | null = null;
+  /** 결과 화면이 열릴 때마다 올라간다. 지난 판의 그림이나 알림이 뒤늦게 끼어들지 않게 한다. */
+  private shareRound = 0;
 
   constructor() {
     super(SCENE.result);
@@ -91,6 +102,7 @@ export class ResultScene extends Phaser.Scene implements BackAware {
       .setVisible(showMascot);
 
     addText(this, centerX, top + 23, data.title, { color: THEME_CSS.sub, originX: 0.5 });
+    this.addShareButton(data, left + PANEL_WIDTH - SHARE.margin - SHARE.size, top + SHARE.margin, centerX, top + 31);
 
     const scoreText = addText(this, centerX, top + 36, '0', {
       size: FONT_SIZE.huge,
@@ -203,6 +215,104 @@ export class ResultScene extends Phaser.Scene implements BackAware {
       height: BUTTON_HEIGHT,
       label: '다른 게임 고르기',
       onTap: () => this.leave(),
+    });
+  }
+
+  /**
+   * 공유 버튼. 누르면 점수 카드 그림과 이 게임을 바로 여는 주소를 공유 창으로 넘기고,
+   * 공유 창이 없는 브라우저에서는 문구와 주소를 복사한 뒤 (noticeX, noticeY)에 잠깐 알린다.
+   */
+  private addShareButton(data: ResultData, x: number, y: number, noticeX: number, noticeY: number): void {
+    const { result } = data;
+    this.shareRound += 1;
+    const round = this.shareRound;
+    this.shareImage = null;
+    const pageUrl = window.location.href;
+
+    // 그림은 미리 만들어 둔다. 누른 그 자리에서 공유 창을 열어야 브라우저가 허락하기 때문이다.
+    // 점수가 올라가는 연출이 버벅이지 않게 조금 뒤에 시작한다. 그 전에 누르면 그림 없이 주소만 보낸다.
+    const mascot = mascotTexture(store.data.cosmetics.equipped.runner, result.isNewBest ? 'cheer' : 'idle');
+    this.time.delayedCall(SHARE.prepareMs, () => {
+      void makeShareImage(
+        {
+          title: data.title,
+          score: result.score,
+          best: result.best,
+          isNewBest: result.isNewBest,
+          host: displayHost(pageUrl),
+          icon: getGame(data.gameId)?.icon ?? '',
+          mascot,
+          paint: (context, key, left, top, width, height) =>
+            this.paintTexture(context, key, left, top, width, height),
+        },
+        shareFileName(data.gameId),
+      ).then((file) => {
+        if (round === this.shareRound) this.shareImage = file;
+      });
+    });
+
+    let busy = false;
+    new PixelButton(this, {
+      x,
+      y,
+      width: SHARE.size,
+      height: SHARE.size,
+      icon: 'icon-share',
+      style: 'blue',
+      hitPadding: 6,
+      onTap: () => {
+        if (busy) return;
+        busy = true;
+        void sendShare({
+          title: shareTitle(data.title),
+          text: shareText(data.title, result.score),
+          url: shareUrl(pageUrl, data.gameId),
+          image: this.shareImage,
+        }).then((outcome) => {
+          busy = false;
+          if (round !== this.shareRound || !this.scene.isActive()) return;
+          const notice = shareNotice(outcome);
+          if (notice) this.showNotice(notice, noticeX, noticeY);
+        });
+      },
+    });
+  }
+
+  /**
+   * 텍스처 이름이 가리키는 그림을 공유 카드에 그린다. 곡선 그림은 그 크기로 새로 그리고,
+   * 픽셀 그림(등불지기 아이콘)은 번지지 않게 점을 그대로 키운다.
+   */
+  private paintTexture(
+    context: CanvasRenderingContext2D,
+    key: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+  ): void {
+    if (paintArt(context, key, x, y, width, height)) return;
+    if (!this.textures.exists(key)) return;
+    const source = this.textures.get(key).getSourceImage() as CanvasImageSource;
+    context.save();
+    context.imageSmoothingEnabled = false;
+    context.drawImage(source, x, y, width, height);
+    context.restore();
+  }
+
+  /** 게임 이름 자리에 잠깐 떴다가 사라지는 알림 */
+  private showNotice(message: string, x: number, y: number): void {
+    const label = addText(this, x, y, message, { color: THEME_CSS.white, originX: 0.5, originY: 0.5 }).setDepth(31);
+    const width = Math.ceil(label.width) + 20;
+    const back = this.add.graphics().setDepth(30);
+    back.fillStyle(THEME.inkDeep, 0.92);
+    back.fillRoundedRect(Math.round(x - width / 2), Math.round(y - 11), width, 22, 11);
+    const parts = [back, label];
+    this.tweens.add({
+      targets: parts,
+      alpha: 0,
+      delay: SHARE.noticeMs,
+      duration: 200,
+      onComplete: () => parts.forEach((part) => part.destroy()),
     });
   }
 
