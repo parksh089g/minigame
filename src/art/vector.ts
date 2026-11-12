@@ -654,12 +654,38 @@ const ICONS: Record<string, Art> = {
       roundRect(c, 4, 4, 24, 24, 7, '#9dd6ff');
     },
   },
-  /** 블록 채우기: (자리만 잡아 둔 그림. 이 게임을 만들 때 새로 그린다.) */
+  /** 블록 채우기: 네 칸씩 네 줄인 판에 놓인 말랑한 블록 세 개. 맨 아랫줄이 가득 찼다 */
   'icon-block': {
     width: 32,
     height: 32,
     draw(c) {
-      roundRect(c, 4, 4, 24, 24, 7, '#ffe9a8');
+      roundRect(c, 2, 4, 28, 27, 6, '#e6cfc6');
+      roundRect(c, 2, 2, 28, 27, 6, '#ffffff');
+      for (let row = 0; row < 4; row += 1) {
+        for (let col = 0; col < 4; col += 1) {
+          roundRect(c, 4.500 + col * 6, 4 + row * 6, 5, 5, 1.600, '#f3e4dd');
+        }
+      }
+      /** 칸 여러 개를 이어 붙인 블록 한 토막. 아래로 도톰한 옆면이 보인다. */
+      const slab = (col: number, row: number, cols: number, rows: number, lip: string, top: string): void => {
+        const x = 4.500 + col * 6;
+        const y = 4 + row * 6;
+        const w = cols * 6 - 1;
+        const h = rows * 6 - 1;
+        roundRect(c, x, y, w, h, 1.900, lip);
+        roundRect(c, x, y, w, h - 1.100, 1.900, top);
+      };
+      slab(2, 0, 2, 2, '#7dbef2', '#9dd6ff');
+      slab(0, 1, 1, 3, '#7fd3ae', '#9be3c9');
+      slab(0, 3, 2, 1, '#7fd3ae', '#9be3c9');
+      slab(2, 3, 2, 1, '#f2b93b', '#ffcf5c');
+      for (const [col, row] of [
+        [2, 0],
+        [0, 1],
+        [2, 3],
+      ]) {
+        roundRect(c, 5.500 + col * 6, 5 + row * 6, 2.400, 0.900, 0.450, 'rgba(255, 255, 255, 0.75)');
+      }
     },
   },
   /** 초성 퀴즈: 글자 조각 두 개에 적힌 초성 ㅊ과 ㅅ. 글꼴이 준비되기 전에도 그릴 수 있게 획으로 긋는다. */
