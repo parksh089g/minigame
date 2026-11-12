@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { damageRanking, levelLabel, passiveRows, percent, weaponRows } from './build';
+import { boonRows, damageRanking, levelLabel, passiveRows, percent, weaponRows } from './build';
 import { EVOLVE_LEVEL, MAX_LEVEL, WEAPONS } from './data';
 import { seededRandom } from './rules';
 import { createRun, Sim } from './sim';
@@ -68,6 +68,17 @@ describe('무기별 피해 기록', () => {
     // 들고 있는 무기만 기록된다.
     for (const id of Object.keys(dealt)) expect(state.weapons).toHaveProperty(id);
     expect(damageRanking(state.weapons, dealt).length).toBeGreaterThan(0);
+  });
+
+  it('받은 밤의 축복을 정해진 차례로, 받은 횟수와 함께 늘어놓는다', () => {
+    expect(boonRows(undefined)).toEqual([]);
+    expect(boonRows({})).toEqual([]);
+    const rows = boonRows({ breath: 1, blaze: 3, ward: 0 });
+    expect(rows.map((row) => [row.id, row.level])).toEqual([
+      ['blaze', 3],
+      ['breath', 1],
+    ]);
+    expect(rows[0]).toMatchObject({ icon: 'blaze', name: '타오르는 심지' });
   });
 
   it('이 기록이 없거나 엉뚱한 예전 저장도 그대로 이어서 할 수 있다', () => {

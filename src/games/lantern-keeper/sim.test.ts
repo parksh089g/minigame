@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { playRun, steer } from './bot';
 import {
+  BOON_ORDER,
+  BOON_VALUES,
   ENDLESS,
   ENEMIES,
   EVOLVE_LEVEL,
@@ -24,6 +26,7 @@ import {
   STAGE_ORDER,
   STAGES,
   SURGES,
+  WEAPON_ORDER,
   type EnemyKind,
   type PassiveId,
 } from './data';
@@ -93,10 +96,11 @@ function enemy(kind: Enemy['kind'], x: number, y: number, hp = ENEMIES[kind].hp)
   };
 }
 
-/** seconds초 동안 돌리면서 일어난 일을 모은다. 레벨업과 강화권은 첫 선택지로 넘긴다. */
+/** seconds초 동안 돌리면서 일어난 일을 모은다. 레벨업과 강화권, 밤의 축복은 첫 선택지로 넘긴다. */
 function advance(sim: Sim, seconds: number, moveX = 0, moveY = 0): SimEvent[] {
   const events: SimEvent[] = [];
   for (let i = 0; i < Math.round(seconds / STEP); i += 1) {
+    while (sim.pendingBoons > 0) sim.takeBoon(sim.boonChoices()[0]);
     while (sim.state.pendingTickets > 0) sim.useTicket(sim.ticketChoices()[0]);
     while (sim.state.pendingLevelUps > 0) sim.applyUpgrade(sim.options()[0]);
     sim.step(STEP, moveX, moveY);
@@ -1689,6 +1693,29 @@ describe('잿빛 고개', () => {
     expect((VENT.erupt / VENT.tick) * VENT.share).toBeLessThan(0.8);
   });
 
+  it('끝없는 밤에서 불어난 체력은 불길이 치지 않는다', () => {
+    const vent = someVent();
+    /** 끝없는 밤에 들어선 지 minutes분이 지났을 때, 불길 위의 그림자가 0.6초 동안 잃는 체력 */
+    const scorch = (minutes: number): number => {
+      const sim = quietSim(1, { stage: 'ridge', seed });
+      sim.state.player.x = vent.x - 150;
+      sim.state.player.y = vent.y;
+      sim.state.player.inv = 1e9;
+      const foe = enemy('slag', vent.x, vent.y, 1000);
+      sim.state.enemies.push(foe);
+      sim.state.t = timeAt(vent, VENT.warm + 0.01);
+      // 보스와 밀물, 축복은 이미 다 나온 것으로 해서 불길만 본다.
+      sim.state.endless = { at: sim.state.t - minutes * 60, kills: 0, bosses: 99, surges: 99, boons: 99 };
+      advance(sim, 0.6);
+      return foe.maxHp - foe.hp;
+    };
+    const early = scorch(0);
+    const late = scorch(3);
+    expect(early).toBeGreaterThan(1.9 * VENT.share * 1000);
+    // 3분이면 체력이 ENDLESS.hp의 세제곱 배로 불어나 있다. 불길은 불어나기 전의 체력만큼만 태운다.
+    expect(late / early).toBeCloseTo(1 / ENDLESS.hp ** 3, 1);
+  });
+
   it('숯덩이는 쓰러지면 재방울 둘로 쪼개지고, 쪼개져 나온 것은 다시 쪼개지지 않는다', () => {
     const sim = quietSim(1, { stage: 'ridge', seed });
     sim.state.player.hp = 1e9;
@@ -2068,6 +2095,153 @@ describe('끝없는 밤', () => {
     expect(new Set(kinds.slice(0, 3)).size).toBe(3);
     for (const kind of kinds) expect(STAGES.meadow.midBosses).toContain(kind);
     expect(kinds[3]).toBe(kinds[0]);
+  });
+
+  it('들어서면 밤의 축복 하나를 고를 때까지 멈춘다', () => {
+    const sim = atDawn();
+    expect(sim.pendingBoons).toBe(0);
+    sim.chooseDawn(true);
+    expect(sim.pendingBoons).toBe(1);
+    const t = sim.state.t;
+    sim.step(STEP, 0, 0);
+    expect(sim.state.t).toBe(t);
+    // 여섯 가지 가운데 서로 다른 셋이 나오고, 고를 때까지 같은 것이 나온다.
+    const choices = sim.boonChoices();
+    expect(choices).toHaveLength(3);
+    expect(new Set(choices.map((u) => (u.type === 'boon' ? u.id : ''))).size).toBe(3);
+    for (const upgrade of choices) expect(upgrade).toMatchObject({ type: 'boon', level: 1 });
+    expect(sim.boonChoices()).toEqual(choices);
+    // 고르던 채로 저장했다가 이어도 같은 선택지다(나갔다 들어와서 다시 뽑지 못한다).
+    const copy = JSON.parse(JSON.stringify(sim.state)) as RunState;
+    expect(newSim(99, copy).boonChoices()).toEqual(choices);
+
+    const picked = choices[1];
+    sim.takeBoon(picked);
+    expect(sim.pendingBoons).toBe(0);
+    expect(sim.state.boons).toEqual(picked.type === 'boon' ? { [picked.id]: 1 } : {});
+    expect(sim.state.boonOffer).toBeUndefined();
+    sim.step(STEP, 0, 0);
+    expect(sim.state.t).toBeGreaterThan(t);
+  });
+
+  it('그림자가 세지는 1분마다 축복을 하나씩 더 고른다', () => {
+    const sim = atDawn();
+    sim.chooseDawn(true);
+    sim.takeBoon(sim.boonChoices()[0]);
+    sim.state.weapons = {};
+    sim.state.player.inv = 1e9;
+    const events: SimEvent[] = [];
+    for (let i = 0; i < 61 / STEP && sim.pendingBoons === 0; i += 1) {
+      sim.step(STEP, 0, 0);
+      events.push(...sim.events);
+    }
+    expect(sim.endlessSeconds).toBeCloseTo(ENDLESS.boonEvery, 0);
+    expect(sim.pendingBoons).toBe(1);
+    expect(sim.state.endless?.boons).toBe(2);
+    expect(events.filter((event) => event.type === 'boon')).toHaveLength(1);
+    // 같은 축복을 다시 받으면 겹친다.
+    const first = Object.keys(sim.state.boons ?? {})[0];
+    sim.state.boonOffer = [{ type: 'boon', id: first as (typeof BOON_ORDER)[number], level: 2 }];
+    sim.takeBoon(sim.boonChoices()[0]);
+    expect(sim.state.boons).toEqual({ [first]: 2 });
+    expect(sim.boonChoices().every((u) => u.type === 'boon' && u.level === (u.id === first ? 3 : 1))).toBe(true);
+  });
+
+  it('두꺼운 솜옷은 최대 체력을 늘리고 그만큼 채워 준다', () => {
+    const sim = atDawn();
+    sim.chooseDawn(true);
+    sim.state.player.hp = 50;
+    const before = sim.maxHp;
+    sim.takeBoon({ type: 'boon', id: 'bulwark', level: 1 });
+    expect(sim.maxHp).toBe(before + BOON_VALUES.bulwark);
+    expect(sim.state.player.hp).toBe(50 + BOON_VALUES.bulwark);
+  });
+
+  it('끝없는 밤에서는 레벨업과 강화권의 빈자리도 축복이 채운다', () => {
+    const maxed = (sim: Sim): void => {
+      sim.state.weapons = Object.fromEntries(WEAPON_ORDER.slice(0, MAX_WEAPONS).map((id) => [id, EVOLVE_LEVEL]));
+      sim.state.passives = Object.fromEntries(
+        (Object.keys(PASSIVES) as PassiveId[]).slice(0, MAX_PASSIVES).map((id) => [id, MAX_LEVEL]),
+      );
+    };
+    // 새벽 전에는 전처럼 회복과 불씨다.
+    const plain = quietSim();
+    maxed(plain);
+    plain.state.pendingLevelUps = 1;
+    expect(plain.options().map((u) => u.type)).toEqual(['heal', 'embers']);
+    expect(plain.ticketChoices().map((u) => u.type)).toEqual(['heal', 'embers']);
+
+    const sim = atDawn();
+    sim.chooseDawn(true);
+    sim.takeBoon(sim.boonChoices()[0]);
+    maxed(sim);
+    sim.state.pendingLevelUps = 1;
+    const options = sim.options();
+    expect(options).toHaveLength(3);
+    expect(options.every((u) => u.type === 'boon')).toBe(true);
+    const before = { ...sim.state.boons };
+    sim.applyUpgrade(options[0]);
+    expect(sim.state.pendingLevelUps).toBe(0);
+    expect(Object.values(sim.state.boons ?? {}).reduce((a, b) => a + (b ?? 0), 0)).toBe(
+      Object.values(before).reduce((a, b) => a + (b ?? 0), 0) + 1,
+    );
+    // 강화권도 올릴 무기가 없으면 축복을 고른다.
+    sim.state.pendingTickets = 1;
+    const tickets = sim.ticketChoices();
+    expect(tickets.every((u) => u.type === 'boon')).toBe(true);
+    sim.useTicket(tickets[0]);
+    expect(sim.state.pendingTickets).toBe(0);
+    // 올릴 무기가 남아 있으면 강화권은 무기를 올린다.
+    sim.state.weapons = { ember: MAX_LEVEL };
+    expect(sim.ticketChoices()).toEqual([{ type: 'weapon', id: 'ember', level: EVOLVE_LEVEL }]);
+  });
+
+  it('축복이 생기기 전에 저장한 끝없는 밤은 밀린 축복을 받는다', () => {
+    const sim = atDawn();
+    sim.chooseDawn(true);
+    sim.takeBoon(sim.boonChoices()[0]);
+    const old = JSON.parse(JSON.stringify(sim.state)) as RunState;
+    delete old.boons;
+    delete old.pendingBoons;
+    if (old.endless) {
+      delete old.endless.boons;
+      old.endless.at -= 130;
+    }
+    const resumed = newSim(3, old);
+    resumed.state.player.inv = 1e9;
+    let taken = 0;
+    for (let i = 0; i < 20; i += 1) {
+      while (resumed.pendingBoons > 0) {
+        resumed.takeBoon(resumed.boonChoices()[0]);
+        taken += 1;
+      }
+      resumed.step(STEP, 0, 0);
+    }
+    // 들어설 때의 하나와 1분, 2분의 것까지 셋이다.
+    expect(taken).toBe(3);
+    expect(resumed.state.endless?.boons).toBe(3);
+  });
+
+  it('세진 그림자는 종소리에 덜 밀린다', () => {
+    /** 끝없는 밤에 들어선 지 minutes분이 지났을 때, 종소리 한 번에 밀려난 거리 */
+    const pushed = (minutes: number): number => {
+      const ring = (weapons: RunState['weapons']): number => {
+        const sim = quietSim();
+        sim.state.weapons = weapons;
+        sim.state.cd.bell = 0;
+        sim.state.player.inv = 1e9;
+        sim.state.enemies.push(enemy('brute', 30, 0, 1e6));
+        sim.state.endless = { at: sim.state.t - minutes * 60, kills: 0, bosses: 99, surges: 99, boons: 99 };
+        advance(sim, 0.6);
+        return sim.state.enemies[0].x;
+      };
+      return ring({ bell: 1 }) - ring({});
+    };
+    const early = pushed(0);
+    const late = pushed(4);
+    expect(early).toBeGreaterThan(10);
+    expect(late).toBeGreaterThan(0);
+    expect(late / early).toBeCloseTo(1 / ENDLESS.damage ** 4, 1);
   });
 
   it('하던 판을 그 자리에서 마칠 수 있다', () => {

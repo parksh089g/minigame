@@ -3,6 +3,8 @@
  * 상태(RunState)가 평범한 데이터라서 그대로 저장했다가 이어서 할 수 있다.
  */
 import {
+  BOON_VALUES,
+  BOONS,
   ENDLESS,
   ENEMIES,
   FLINT,
@@ -17,6 +19,7 @@ import {
   RUN_SECONDS,
   STAGES,
   SURGES,
+  type BoonId,
   type BurstInfo,
   type EnemyKind,
   type HeroId,
@@ -29,6 +32,8 @@ import {
   auraStats,
   bellStats,
   boltStats,
+  boonLevel,
+  boonOptions,
   clampDepth,
   damageScale,
   depthRules,
@@ -326,7 +331,13 @@ export interface RunState {
    * 끝없는 밤: 새벽을 맞은 뒤에 이어 가기로 했을 때만 있다.
    * at은 들어선 때(초), kills는 그때까지 쓰러뜨린 수, bosses와 surges는 그 뒤로 나온 보스와 밀물의 수.
    */
-  endless?: { at: number; kills: number; bosses: number; surges: number };
+  endless?: { at: number; kills: number; bosses: number; surges: number; boons?: number };
+  /** 끝없는 밤에서 받은 밤의 축복. 축복마다 받은 횟수다. */
+  boons?: Levels<BoonId>;
+  /** 아직 고르지 않은 밤의 축복. 0보다 크면 시뮬레이션이 멈춘다. */
+  pendingBoons?: number;
+  /** 지금 보여 주고 있는 밤의 축복 선택지. 고르면 지워진다(레벨업의 offer와 같은 까닭으로 판과 함께 저장한다). */
+  boonOffer?: Upgrade[];
   /** 새벽을 맞고 마쳤으면 cleared. 끝없는 밤에서 쓰러졌으면 dead지만 새벽을 맞은 것은 그대로다(RunSummary.cleared). */
   over: null | 'dead' | 'cleared';
 }
@@ -388,6 +399,8 @@ export type SimEvent =
   | { type: 'spark'; x: number; y: number; radius: number }
   | { type: 'boss'; kind: EnemyKind }
   | { type: 'ticket' }
+  /** 끝없는 밤에서 밤의 축복을 고를 때가 됐다 */
+  | { type: 'boon' }
   /** 보스가 빛덩이를 쏘려고 빛을 모으기 시작했다 */
   | { type: 'charge' }
   /** 보스가 빛덩이를 쏘았다 */
@@ -629,7 +642,7 @@ export class Sim {
 
   private computeMods(): Modifiers {
     const s = this.state;
-    return modifiers(s.passives, s.meta, HEROES[s.hero].trait);
+    return modifiers(s.passives, s.meta, HEROES[s.hero].trait, s.boons);
   }
 
   get maxHp(): number {
@@ -681,8 +694,36 @@ export class Sim {
     const s = this.state;
     if (!s.pendingDawn) return;
     s.pendingDawn = false;
-    if (goOn) s.endless = { at: s.t, kills: s.kills, bosses: 0, surges: 0 };
-    else s.over = 'cleared';
+    if (goOn) {
+      // 들어서는 자리에서 밤의 축복을 하나 고른다.
+      s.endless = { at: s.t, kills: s.kills, bosses: 0, surges: 0, boons: 1 };
+      s.pendingBoons = 1;
+    } else {
+      s.over = 'cleared';
+    }
+  }
+
+  /** 아직 고르지 않은 밤의 축복의 수 */
+  get pendingBoons(): number {
+    return Math.max(0, this.state.pendingBoons ?? 0);
+  }
+
+  /** 밤의 축복 선택지. 한 번 뽑으면 고를 때까지 같은 것이 나온다. */
+  boonChoices(): Upgrade[] {
+    const s = this.state;
+    const fits =
+      Array.isArray(s.boonOffer) &&
+      s.boonOffer.length > 0 &&
+      s.boonOffer.every((u) => u.type === 'boon' && u.id in BOONS && u.level === boonLevel(s.boons, u.id) + 1);
+    if (!fits) s.boonOffer = boonOptions(s.boons ?? {}, this.rand);
+    return s.boonOffer as Upgrade[];
+  }
+
+  /** 고른 밤의 축복을 반영한다. */
+  takeBoon(upgrade: Upgrade): void {
+    const s = this.state;
+    if (this.pendingBoons > 0) s.pendingBoons = this.pendingBoons - 1;
+    this.grant(upgrade);
   }
 
   /** 레벨업 선택지. 한 번 뽑으면 고르거나 다시 뽑을 때까지 같은 것이 나온다. */
@@ -693,7 +734,9 @@ export class Sim {
   }
 
   private draw(): Upgrade[] {
-    return upgradeOptions({ weapons: this.state.weapons, passives: this.state.passives }, this.rand);
+    const s = this.state;
+    // 끝없는 밤에서는 더 올릴 것이 없는 자리를 밤의 축복이 채운다.
+    return upgradeOptions({ weapons: s.weapons, passives: s.passives }, this.rand, 3, s.endless ? (s.boons ?? {}) : undefined);
   }
 
   /** 뽑아 둔 선택지가 지금 가진 것과 맞는지. 그사이에 강화권을 썼거나 저장된 값이 엉뚱하면 맞지 않는다. */
@@ -710,6 +753,9 @@ export class Sim {
       if (upgrade.type === 'passive') {
         const level = s.passives[upgrade.id] ?? 0;
         return upgrade.level === level + 1 && upgrade.level <= MAX_LEVEL && (level > 0 || !fullPassives);
+      }
+      if (upgrade.type === 'boon') {
+        return s.endless !== undefined && upgrade.id in BOONS && upgrade.level === boonLevel(s.boons, upgrade.id) + 1;
       }
       return upgrade.type === 'heal' || upgrade.type === 'embers';
     });
@@ -736,9 +782,11 @@ export class Sim {
     this.grant(upgrade);
   }
 
-  /** 무기 강화권으로 고를 수 있는 것 */
+  /** 무기 강화권으로 고를 수 있는 것. 끝없는 밤에서 더 올릴 무기가 없으면 밤의 축복을 고른다. */
   ticketChoices(): Upgrade[] {
-    return ticketOptions(this.state.weapons);
+    const options = ticketOptions(this.state.weapons);
+    if (this.state.endless && options.every((upgrade) => upgrade.type !== 'weapon')) return this.boonChoices();
+    return options;
   }
 
   /** 무기 강화권을 한 장 써서 고른 것을 반영한다. */
@@ -757,6 +805,11 @@ export class Sim {
       case 'passive':
         s.passives[upgrade.id] = upgrade.level;
         break;
+      case 'boon':
+        s.boons = { ...s.boons, [upgrade.id]: boonLevel(s.boons, upgrade.id) + 1 };
+        // 받은 것이 달라졌으니 뽑아 둔 축복 선택지는 버린다.
+        delete s.boonOffer;
+        break;
       case 'heal':
         s.player.hp += HEAL_AMOUNT;
         break;
@@ -767,6 +820,7 @@ export class Sim {
     this.mods = this.computeMods();
     // 외투는 늘어난 만큼 바로 채워 준다.
     if (upgrade.type === 'passive' && upgrade.id === 'coat') s.player.hp += 20;
+    if (upgrade.type === 'boon' && upgrade.id === 'bulwark') s.player.hp += BOON_VALUES.bulwark;
     s.player.hp = Math.min(s.player.hp, this.mods.maxHp);
   }
 
@@ -793,7 +847,7 @@ export class Sim {
   step(dt: number, moveX: number, moveY: number): void {
     this.events.length = 0;
     const s = this.state;
-    if (s.over || s.pendingDawn || s.pendingLevelUps > 0 || s.pendingTickets > 0) return;
+    if (s.over || s.pendingDawn || this.pendingBoons > 0 || s.pendingLevelUps > 0 || s.pendingTickets > 0) return;
 
     s.t += dt;
     this.late = s.endless ? endlessScale(s.t - s.endless.at) : NO_ENDLESS;
@@ -860,7 +914,8 @@ export class Sim {
       const vent = ventAt(e.x, e.y, s.seed);
       if (!vent || ventPhase(vent, s.t) !== 'erupt') continue;
       const boss = Boolean(ENEMIES[e.kind].boss);
-      this.damage(e, boss ? VENT.boss : Math.max(VENT.floor, e.maxHp * VENT.share), null);
+      // 끝없는 밤에서 불어난 체력은 치지 않는다. 그러지 않으면 불구멍만으로 끝없이 버틸 수 있다.
+      this.damage(e, boss ? VENT.boss : Math.max(VENT.floor, (e.maxHp * VENT.share) / this.late.hp), null);
     }
   }
 
@@ -1010,6 +1065,12 @@ export class Sim {
     if (s.endless) {
       // 끝없는 밤: 밀물과 보스가 정해진 간격으로 끝없이 온다. 체력은 그때의 난이도(late)를 따른다.
       const since = s.t - s.endless.at;
+      // 그림자가 세지는 간격마다 밤의 축복을 하나씩 받는다. 들어설 때 받은 것까지 센다.
+      if ((s.endless.boons ?? 0) < Math.floor(since / ENDLESS.boonEvery) + 1) {
+        s.endless.boons = (s.endless.boons ?? 0) + 1;
+        s.pendingBoons = this.pendingBoons + 1;
+        this.events.push({ type: 'boon' });
+      }
       if (since >= (s.endless.surges + 0.5) * ENDLESS.surgeEvery) {
         s.endless.surges += 1;
         this.surge(STAGES[s.stage].surge[1], ENDLESS.surgeCount);
@@ -1744,10 +1805,11 @@ export class Sim {
         wave.hit.push(e.uid);
         this.damage(e, wave.damage, 'bell');
         this.chill(e, wave.slow);
-        // 보스는 밀리지 않는다.
+        // 보스는 밀리지 않는다. 끝없는 밤에서 세진 그림자는 그만큼 덜 밀린다.
         if (!info.boss) {
-          const scale = distance > 0.001 ? wave.push / distance : 0;
-          e.kx = (e.kx ?? 0) + (distance > 0.001 ? dx * scale : wave.push);
+          const push = wave.push / this.late.damage;
+          const scale = distance > 0.001 ? push / distance : 0;
+          e.kx = (e.kx ?? 0) + (distance > 0.001 ? dx * scale : push);
           e.ky = (e.ky ?? 0) + dy * scale;
         }
       }

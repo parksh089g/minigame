@@ -110,6 +110,7 @@ export function playRun(
   const sim = new Sim(createRun(config), seededRandom(seed));
   let peakEnemies = 0;
   while (!sim.state.over && sim.state.t < maxSeconds) {
+    while (sim.pendingBoons > 0) sim.takeBoon(sim.boonChoices()[0]);
     while (sim.state.pendingTickets > 0) sim.useTicket(spendTicket(sim.ticketChoices()));
     while (sim.state.pendingLevelUps > 0) sim.applyUpgrade(choose(sim.options()));
     const [x, y] = style === 'kite' ? steer(sim) : [0, 0];

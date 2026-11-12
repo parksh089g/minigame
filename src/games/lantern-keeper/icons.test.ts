@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EVOLVE_LEVEL, MAX_LEVEL, PASSIVES, WEAPON_ORDER, type PassiveId } from './data';
+import { BOON_ORDER, EVOLVE_LEVEL, MAX_LEVEL, PASSIVES, WEAPON_ORDER, type PassiveId } from './data';
 import { ICON_IDS, ICON_SIZE, ICONS, iconKey, passiveSlots, upgradeIcon, weaponSlots, withOutline } from './icons';
 
 describe('강화 아이콘', () => {
@@ -28,6 +28,9 @@ describe('강화 아이콘', () => {
   it('고를 수 있는 것마다 아이콘이 있다', () => {
     for (const id of Object.keys(PASSIVES) as PassiveId[]) {
       expect(ICONS[upgradeIcon({ type: 'passive', id, level: 1 })]).toBeDefined();
+    }
+    for (const id of BOON_ORDER) {
+      expect(ICONS[upgradeIcon({ type: 'boon', id, level: 1 })]).toBeDefined();
     }
     expect(ICONS[upgradeIcon({ type: 'heal' })]).toBeDefined();
     expect(ICONS[upgradeIcon({ type: 'embers' })]).toBeDefined();

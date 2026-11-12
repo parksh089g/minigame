@@ -3,9 +3,9 @@
  * 일시정지 화면의 "지금 빌드"와 결과 화면의 "무기별 피해"가 함께 쓴다.
  * 화면이나 Phaser에 의존하지 않는다.
  */
-import { PASSIVES, WEAPONS, type PassiveId, type WeaponId } from './data';
+import { BOON_ORDER, BOONS, PASSIVES, WEAPONS, type BoonId, type PassiveId, type WeaponId } from './data';
 import { upgradeIcon, type IconId } from './icons';
-import { isEvolved, type Levels } from './rules';
+import { boonLevel, isEvolved, type Levels } from './rules';
 
 export interface WeaponRow {
   id: WeaponId;
@@ -58,6 +58,21 @@ export function weaponRows(weapons: Levels<WeaponId>, dealt?: Levels<WeaponId>):
 /** 지금 가진 패시브를 얻은 순서대로 */
 export function passiveRows(passives: Levels<PassiveId>): PassiveRow[] {
   return owned(passives).map(([id, level]) => ({ id, icon: id, name: PASSIVES[id].name, level }));
+}
+
+export interface BoonRow {
+  id: BoonId;
+  icon: IconId;
+  name: string;
+  /** 받은 횟수 */
+  level: number;
+}
+
+/** 끝없는 밤에서 받은 밤의 축복을 정해진 차례로. 받은 것이 없으면 비어 있다. */
+export function boonRows(boons: Levels<BoonId> | undefined): BoonRow[] {
+  return BOON_ORDER.map((id) => ({ id, icon: id, name: BOONS[id].name, level: boonLevel(boons, id) })).filter(
+    (row) => row.level > 0,
+  );
 }
 
 /** 레벨을 적는 말. 진화한 무기는 레벨 대신 "진화"라고 적는다. */
