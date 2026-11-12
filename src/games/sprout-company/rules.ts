@@ -5,6 +5,7 @@
  */
 import {
   AWAY,
+  BRANCH,
   CANDIDATE_COUNT,
   CHEER_BOOST,
   CHEER_SECONDS,
@@ -18,8 +19,11 @@ import {
   INBOX_SLOTS,
   LEAD,
   LEVEL_SPEED,
+  OFFICE_COINS,
   OFFICES,
   OLD_HAND_TIPS,
+  PERK_ORDER,
+  PERKS,
   PLAY_STARS,
   PROJECT_ORDER,
   PROJECTS,
@@ -37,6 +41,8 @@ import {
   type EquipmentDef,
   type EquipmentId,
   type LeadLevel,
+  type PerkDef,
+  type PerkId,
   type ProjectDef,
   type ProjectId,
   type StaffDef,
@@ -143,6 +149,16 @@ export interface CompanyState {
   departments: Partial<Record<DepartmentId, number>>;
   /** 예약해 둔 게임. 지금 것을 출시하면 맨 앞의 것부터 시작한다. */
   queue: ProjectId[];
+  /** 세운 자회사의 수 */
+  branches: number;
+  /** 자회사가 된 회사들이 쌓았던 평판의 합. 지금 회사의 평판과 더한 것이 허브에 남는 기록이다. */
+  legacy: number;
+  /** 아직 쓰지 않은 열매 */
+  fruit: number;
+  /** 본사의 힘 id → 단계. 자회사를 세워도 남는다. */
+  perks: Partial<Record<PerkId, number>>;
+  /** 지금까지 가 본 가장 큰 사무실. 처음 이사할 때만 코인을 주려고 적어 둔다. */
+  topOffice: number;
   /** 이미 본 처음 안내의 id */
   tips: string[];
   /** 마지막으로 저장한 때(ms). 닫아 둔 시간을 재는 데 쓴다. */
@@ -187,6 +203,11 @@ export function createCompany(boss: StaffId, now = 0): CompanyState {
     goals: createGoals(),
     departments: {},
     queue: [],
+    branches: 0,
+    legacy: 0,
+    fruit: 0,
+    perks: {},
+    topOffice: 0,
     tips: [],
     savedAt: now,
   };
@@ -229,6 +250,24 @@ export function companyBonus(state: CompanyState, key: EffectKey): number {
   return sum;
 }
 
+/** 본사의 힘의 지금 단계 */
+export function perkLevel(state: CompanyState, id: PerkId): number {
+  return state.perks[id] ?? 0;
+}
+
+/**
+ * 본사의 힘과 자회사가 주는 보너스의 합. 0.5면 +50%.
+ * 장비나 성격의 보너스(companyBonus)와 더해지지 않고 따로 곱해져서, 회사를 다 키운 뒤에도 그대로 효과가 난다.
+ */
+export function legacyBonus(state: CompanyState, key: EffectKey): number {
+  let sum = key === 'income' ? BRANCH.income * state.branches : 0;
+  for (const id of PERK_ORDER) {
+    const effect = (PERKS[id] as PerkDef).effect;
+    if (effect?.key === key) sum += effect.amount * perkLevel(state, id);
+  }
+  return sum;
+}
+
 /** 사장은 특기 없이 모든 업무를 고르게 한다. */
 export function specialtyOf(state: CompanyState, staff: StaffId): TaskKind | null {
   return staff === state.boss ? null : STAFF[staff].specialty;
@@ -239,13 +278,13 @@ export function baseSpeed(state: CompanyState, index: number): number {
   const desk = state.desks[index];
   if (!desk?.staff) return 0;
   const trait = (STAFF[desk.staff] as StaffDef).trait;
-  return (
+  const own =
     1 +
     gearBonus(desk.gear, 'desk', 'workSpeed') +
     gearBonus(state.gear, 'company', 'workSpeed') +
     (trait.key === 'workSpeed' ? trait.amount : 0) +
-    desk.level * LEVEL_SPEED
-  );
+    desk.level * LEVEL_SPEED;
+  return own * (1 + legacyBonus(state, 'workSpeed'));
 }
 
 /**
@@ -287,14 +326,14 @@ export function projectWork(state: CompanyState, id: ProjectId): number {
 export function projectBonus(state: CompanyState, id: ProjectId): number {
   const def: ProjectDef = PROJECTS[id];
   const base = def.bonus * UPDATE_SCALE.bonus ** versionOf(state, id);
-  return Math.round(base * (1 + companyBonus(state, 'bonus')));
+  return Math.round(base * (1 + companyBonus(state, 'bonus')) * (1 + legacyBonus(state, 'bonus')));
 }
 
 /** 이 프로젝트를 지금 내면 오르는 평판 */
 export function projectReputation(state: CompanyState, id: ProjectId): number {
   const def: ProjectDef = PROJECTS[id];
   const base = versionOf(state, id) === 0 ? def.reputation : Math.ceil(def.reputation * UPDATE_SCALE.reputation);
-  return Math.round(base * (1 + companyBonus(state, 'reputation')));
+  return Math.round(base * (1 + companyBonus(state, 'reputation')) * (1 + legacyBonus(state, 'reputation')));
 }
 
 /** 이 프로젝트를 지금 내면 늘어나는 초당 수익 (회사 보너스는 뺀 것) */
@@ -331,17 +370,22 @@ export function setStars(state: CompanyState, stars: Partial<Record<ProjectId, n
   return risen;
 }
 
+/** 수익에 걸리는 배수: 회사 보너스에 본사의 힘과 자회사의 몫을 곱한 것 */
+function incomeScale(state: CompanyState): number {
+  return (1 + companyBonus(state, 'income')) * (1 + legacyBonus(state, 'income'));
+}
+
 /** 출시작 하나가 초마다 버는 잎사귀. 딴 별과 회사 보너스까지 넣은 것이다. 아직 내지 않은 게임은 0 */
 export function gameIncome(state: CompanyState, id: ProjectId): number {
   const starred = baseIncome(id, versionOf(state, id)) * (1 + PLAY_STARS.income * starsOf(state, id));
-  return starred * (1 + companyBonus(state, 'income'));
+  return starred * incomeScale(state);
 }
 
 /** 출시작이 모두 합쳐 초마다 버는 잎사귀 */
 export function incomePerSecond(state: CompanyState): number {
   let sum = 0;
   for (const id of PROJECT_ORDER) sum += baseIncome(id, versionOf(state, id)) * (1 + PLAY_STARS.income * starsOf(state, id));
-  return sum * (1 + companyBonus(state, 'income'));
+  return sum * incomeScale(state);
 }
 
 export function isUnlocked(state: CompanyState, id: ProjectId): boolean {
@@ -984,13 +1028,111 @@ export function moveBlock(state: CompanyState): MoveBlock | null {
   return null;
 }
 
+/** 지금 다음 사무실로 이사하면 받는 허브의 코인. 전에 가 본 곳이면 0 */
+export function moveCoins(state: CompanyState): number {
+  const next = state.office + 1;
+  return next > state.topOffice ? (OFFICE_COINS[next] ?? 0) : 0;
+}
+
 /** 다음 사무실로 이사한다. 책상 자리가 늘어난다. */
 export function moveOffice(state: CompanyState): boolean {
   if (moveBlock(state) !== null) return false;
   const next = OFFICES[state.office + 1];
   state.leaves -= next.cost;
   state.office += 1;
+  state.topOffice = Math.max(state.topOffice, state.office);
   while (state.desks.length < next.desks) state.desks.push(emptyDesk());
+  return true;
+}
+
+// ───────── 자회사 ─────────
+
+/** 허브에 남는 기록: 자회사들이 쌓았던 평판에 지금 회사의 평판을 더한 것. 자회사를 세워도 줄지 않는다. */
+export function totalReputation(state: CompanyState): number {
+  return state.legacy + state.reputation;
+}
+
+/** 평판이 이만큼인 회사를 자회사로 세우면 받는 열매 */
+export function fruitFor(reputation: number): number {
+  return Math.max(0, Math.floor(reputation / BRANCH.perFruit));
+}
+
+/** 자회사를 세울 수 없는 까닭: 아직 가장 큰 사무실이 아니거나, 평판이 모자란다. */
+export type FoundBlock = 'office' | 'reputation';
+
+export function foundBlock(state: CompanyState): FoundBlock | null {
+  if (state.office < OFFICES.length - 1) return 'office';
+  if (state.reputation < BRANCH.reputation) return 'reputation';
+  return null;
+}
+
+/** 본사의 힘 '종잣돈'으로 새 회사가 들고 시작하는 잎사귀 */
+export function seedLeaves(state: CompanyState): number {
+  let sum = 0;
+  for (const id of PERK_ORDER) {
+    const seed = (PERKS[id] as PerkDef).seed;
+    const level = perkLevel(state, id);
+    if (seed && level > 0) sum += seed[Math.min(level, seed.length) - 1];
+  }
+  return sum;
+}
+
+export interface Founding {
+  /** 이번에 받은 열매 */
+  fruit: number;
+  /** 세우고 난 뒤의 자회사 수 */
+  branches: number;
+  /** 새 회사가 들고 시작하는 잎사귀 */
+  seed: number;
+}
+
+/**
+ * 지금 회사를 자회사로 세우고, 옥탑방에서 새 회사를 시작한다.
+ * 잎사귀, 직원, 장비, 사무실, 부서, 낸 게임이 처음으로 돌아간다. 열매와 본사의 힘, 직접 해서 딴 별,
+ * 지금까지의 평판 기록, 오늘의 목표, 본 안내는 그대로 남는다.
+ */
+export function foundBranch(state: CompanyState): Founding | null {
+  if (foundBlock(state) !== null) return null;
+  const fruit = fruitFor(state.reputation);
+  const fresh = createCompany(state.boss, state.savedAt);
+  const kept: Partial<CompanyState> = {
+    branches: state.branches + 1,
+    legacy: state.legacy + state.reputation,
+    fruit: state.fruit + fruit,
+    perks: state.perks,
+    topOffice: state.topOffice,
+    stars: state.stars,
+    releases: state.releases,
+    goals: state.goals,
+    tips: state.tips,
+  };
+  Object.assign(state, fresh, kept);
+  const seed = seedLeaves(state);
+  state.leaves = seed;
+  return { fruit, branches: state.branches, seed };
+}
+
+/** n단계에서 n+1단계로 올리는 데 드는 열매 */
+export function perkCost(id: PerkId, level: number): number {
+  return (PERKS[id] as PerkDef).baseCost * (level + 1);
+}
+
+/** 본사의 힘을 한 단계 올릴 수 없는 까닭. 올릴 수 있으면 null */
+export function perkBlock(state: CompanyState, id: PerkId): 'max' | 'poor' | null {
+  const level = perkLevel(state, id);
+  if (level >= (PERKS[id] as PerkDef).maxLevel) return 'max';
+  if (state.fruit < perkCost(id, level)) return 'poor';
+  return null;
+}
+
+/** 열매를 써서 본사의 힘을 한 단계 올린다. 종잣돈은 올린 그 자리에서도 한 번 받는다. */
+export function buyPerk(state: CompanyState, id: PerkId): boolean {
+  if (perkBlock(state, id) !== null) return false;
+  const def: PerkDef = PERKS[id];
+  const level = perkLevel(state, id);
+  state.fruit -= perkCost(id, level);
+  state.perks[id] = level + 1;
+  if (def.seed) state.leaves += def.seed[Math.min(level + 1, def.seed.length) - 1];
   return true;
 }
 
@@ -1064,6 +1206,18 @@ export function normalizeCompany(raw: unknown): CompanyState | null {
   state.leaves = toNumber(raw.leaves);
   state.reputation = toCount(raw.reputation);
   state.office = toCount(raw.office, OFFICES.length - 1);
+  state.branches = toCount(raw.branches);
+  state.legacy = toCount(raw.legacy);
+  state.fruit = toCount(raw.fruit);
+  if (isObject(raw.perks)) {
+    for (const id of PERK_ORDER) {
+      const level = toCount(raw.perks[id], (PERKS[id] as PerkDef).maxLevel);
+      if (level > 0) state.perks[id] = level;
+    }
+  }
+  // 자회사를 세운 적이 있으면 가장 큰 사무실까지 가 본 것이다.
+  const reached = state.branches > 0 ? OFFICES.length - 1 : state.office;
+  state.topOffice = Math.max(reached, toCount(raw.topOffice, OFFICES.length - 1));
   state.gear = normalizeLevels(raw.gear, 'company');
   if (DEPARTMENT.unlockOffice <= state.office && isObject(raw.departments)) {
     for (const id of DEPARTMENT_ORDER) {

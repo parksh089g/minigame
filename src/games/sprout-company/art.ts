@@ -75,6 +75,7 @@ export const SC = {
   internet: 'sc-internet',
   server: 'sc-server',
   rush: 'sc-rush',
+  fruit: 'sc-fruit',
 } as const;
 
 export const COMPUTER_SIZE = { width: 26, height: 22 } as const;
@@ -156,6 +157,19 @@ const ARTS: Record<string, Art> = {
       fill(c, 'M4 20C3 10 9 3.500 21 3c.500 12-6 18-16 17z', '#5cc79a');
       fill(c, 'M4 20C3 10 9 3.500 21 3 12 6 7 11 4 20z', '#8fe0bd');
       stroke(c, 'M4.500 19.500C8 13 12 9 17 6.500', '#3fa77c', 1.8);
+    },
+  },
+  /** 열매: 자회사를 세우면 받는다. 본사의 힘을 올리는 데 쓴다. */
+  'sc-fruit': {
+    width: 12,
+    height: 12,
+    view: [24, 24],
+    draw(c) {
+      stroke(c, 'M12 9C12 6.5 12.6 4.6 14 3', '#9a7353', 1.8);
+      fill(c, 'M13.4 6.4C15 3.2 18.4 2.4 21 3.6 19.8 6.6 16.6 8 13.4 6.4z', '#5cc79a');
+      oval(c, 12, 14.4, 8.4, 7.8, '#ff8a9e');
+      oval(c, 12, 15.4, 8.4, 6.8, '#ff9fb0');
+      oval(c, 8.6, 12, 2, 2.8, '#ffd3db', -0.5);
     },
   },
   /** 컴퓨터가 없을 때: 공책과 연필 */
