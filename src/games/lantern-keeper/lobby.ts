@@ -5,6 +5,8 @@ import { sfx } from '../../core/sfx';
 import { addTapZone, addText, drawPanel, Pager, PAGER_HEIGHT, PixelButton } from '../../core/ui';
 import { DARK_PANEL, FLOOR_OF, HERO_FRAMES, LK } from './art';
 import { CHALLENGES, claimable, isDone, progressOf, type Challenge } from './challenges';
+import { foundCount } from './codex';
+import { addCodexPage, startingTab } from './codexpage';
 import {
   HERO_ORDER,
   HEROES,
@@ -50,10 +52,20 @@ const MAX_SPREAD = 30;
 /** 긴 화면에서만 보이는 미리보기 띠: 이만큼 남아야 넣고, 이 높이까지 키운다. */
 const SHOWCASE = { needs: 64, max: 84, gap: 6 } as const;
 
-/** 준비 화면의 쪽. main은 캐릭터와 스테이지를 고르는 곳, upgrades는 영구 강화를 사는 곳, challenges는 도전 과제를 보는 곳. */
-export type LobbyPage = 'main' | 'upgrades' | 'challenges';
+/**
+ * 준비 화면의 쪽. main은 캐릭터와 스테이지를 고르는 곳, upgrades는 영구 강화를 사는 곳,
+ * challenges는 도전 과제를 보는 곳, codex는 무기와 그림자와 줍는 것을 모아 보는 도감.
+ */
+export type LobbyPage = 'main' | 'upgrades' | 'challenges' | 'codex';
 
-const PAGE_TITLE: Record<LobbyPage, string> = { main: '등불지기', upgrades: '영구 강화', challenges: '도전 과제' };
+const PAGE_TITLE: Record<LobbyPage, string> = {
+  main: '등불지기',
+  upgrades: '영구 강화',
+  challenges: '도전 과제',
+  codex: '도감',
+};
+/** 첫 쪽의 오른쪽 위에 놓이는 도감 버튼 */
+const CODEX_BUTTON = { width: 50, height: 26 } as const;
 
 export interface LobbyHandlers {
   getMeta: () => LanternMeta;
@@ -63,7 +75,7 @@ export interface LobbyHandlers {
   onStart: () => void;
   onResume: () => void;
   onBack: () => void;
-  /** 다른 쪽으로 넘어간다. list는 그 쪽의 목록이 길어 나뉘었을 때 몇 번째 묶음을 보일지(0부터) */
+  /** 다른 쪽으로 넘어간다. list는 그 쪽의 목록이 길어 나뉘었을 때 몇 번째 묶음을 보일지(0부터). 도감에서는 몇 번째 쪽인지다. */
   onPage: (page: LobbyPage, list?: number) => void;
 }
 
@@ -98,18 +110,21 @@ export function buildLobby(
     shadow: CSS.orange,
   });
 
-  // 가진 불씨와 지금까지의 기록
+  // 가진 불씨와 지금까지의 기록. 도감에서는 기록 대신 얼마나 찾았는지를 적는다.
   const info = scene.add.graphics();
   drawPanel(info, MARGIN, 40, ROW_WIDTH, 24, { fill: COLOR.ink, border: COLOR.navy, shadow: null });
   scene.add.image(MARGIN + 8, 52, LK.ember).setOrigin(0, 0.5);
   const embers = addText(scene, MARGIN + 18, 46, '', { color: CSS.orange, bold: true });
   const meta = handlers.getMeta();
+  const found = foundCount(meta);
   const record =
-    meta.runs === 0
-      ? '첫 밤을 기다려요'
-      : meta.clears > 0
-        ? `새벽을 본 횟수 ${meta.clears}`
-        : `최고 ${formatClock(meta.bestSeconds)}`;
+    page === 'codex'
+      ? `찾은 것 ${found.found}/${found.total}`
+      : meta.runs === 0
+        ? '첫 밤을 기다려요'
+        : meta.clears > 0
+          ? `새벽을 본 횟수 ${meta.clears}`
+          : `최고 ${formatClock(meta.bestSeconds)}`;
   addText(scene, MARGIN + ROW_WIDTH - 8, 46, record, { color: CSS.silver, originX: 1 });
 
   const refreshers: Array<() => void> = [
@@ -123,6 +138,7 @@ export function buildLobby(
 
   if (page === 'upgrades') addUpgradeRows(scene, handlers, refreshers, refresh, list ?? 0);
   else if (page === 'challenges') addChallengeRows(scene, handlers, refreshers, refresh, list);
+  else if (page === 'codex') addCodexPage(scene, handlers, startingTab(handlers, list));
   else addMainPage(scene, handlers, refreshers, refresh, height);
   refresh();
 }
@@ -136,6 +152,19 @@ function addMainPage(
   refresh: () => void,
   height: number,
 ): void {
+  // 도감으로 가는 버튼. 새로 열린 항목이 있으면 그 수가 붙는다.
+  const fresh = handlers.getMeta().unread.length;
+  new PixelButton(scene, {
+    x: GAME_WIDTH - 8 - CODEX_BUTTON.width,
+    y: 8,
+    width: CODEX_BUTTON.width,
+    height: CODEX_BUTTON.height,
+    label: fresh > 0 ? `도감 ${fresh}` : '도감',
+    style: fresh > 0 ? 'green' : 'neutral',
+    hitPadding: 4,
+    onTap: () => handlers.onPage('codex'),
+  });
+
   const saved = handlers.savedRun;
   const buttonsTop = height - (saved ? 78 : 50);
   // 영구 강화 버튼은 출발 버튼 바로 위에 붙이고, 남는 높이는 고르는 구역의 위아래와 가운데에 나눠 준다.

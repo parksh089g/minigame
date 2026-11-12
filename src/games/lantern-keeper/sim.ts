@@ -215,6 +215,11 @@ export interface RunState {
   posts?: Post[];
   /** 지금까지 나타난 등불 기둥의 수. POSTS.times의 몇 번째까지 나왔는지를 가리킨다. */
   postsSpawned?: number;
+  /**
+   * 이 판에서 만난 것: 나타난 적의 종류와, 주운 것('heal', 'pull', 'blast'), 등불 기둥('post').
+   * 판이 끝나면 도감에 적힌다. 도감이 생기기 전에 저장한 판에는 없다.
+   */
+  seen?: string[];
   cd: { ember: number; aura: number; star: number; lance: number; oil: number; bolt: number };
   fireflyAngle: number;
   spawnDebt: number;
@@ -389,6 +394,7 @@ export function createRun(config: RunConfig): RunState {
     hazards: [],
     posts: [],
     postsSpawned: 0,
+    seen: [],
     cd: { ember: 0.6, aura: 0, star: 1, lance: 0.8, oil: 0.5, bolt: 0.7 },
     fireflyAngle: 0,
     spawnDebt: 0,
@@ -477,6 +483,18 @@ export class Sim {
     if (typeof state.postsSpawned !== 'number') {
       state.postsSpawned = POSTS.times.filter((time) => time <= state.t).length;
     }
+    // 도감이 생기기 전에 저장한 판: 지금 싸움터에 있는 것부터 만난 것으로 적는다.
+    if (!Array.isArray(state.seen)) {
+      state.seen = [];
+      for (const e of state.enemies) this.note(e.kind);
+      if (state.posts.length > 0) this.note('post');
+    }
+  }
+
+  /** 이 판에서 만난 것으로 적어 둔다. */
+  private note(id: string): void {
+    const seen = (this.state.seen ??= []);
+    if (!seen.includes(id)) seen.push(id);
   }
 
   private computeMods(): Modifiers {
@@ -728,6 +746,7 @@ export class Sim {
       vy: 0,
     };
     s.nextUid += 1;
+    this.note(kind);
     s.enemies.push(enemy);
     return enemy;
   }
@@ -1474,6 +1493,7 @@ export class Sim {
       const post: Post = { x: p.x + Math.cos(angle) * distance, y: p.y + Math.sin(angle) * distance, lit: 0, tick: 0 };
       posts.push(post);
       spawned += 1;
+      this.note('post');
       this.events.push({ type: 'post', x: post.x, y: post.y, first: spawned === 1 });
     }
     s.postsSpawned = spawned;
@@ -1595,6 +1615,7 @@ export class Sim {
   private collect(gem: Gem): void {
     const s = this.state;
     const p = s.player;
+    if (gem.kind !== 'xp') this.note(gem.kind);
     if (gem.kind === 'heal') {
       p.hp = Math.min(this.mods.maxHp, p.hp + gem.value);
       this.events.push({ type: 'heal' });

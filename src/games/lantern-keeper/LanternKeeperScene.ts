@@ -557,6 +557,7 @@ export class LanternKeeperScene extends MiniGameScene {
         bossKills: summary.bossKills,
         level: summary.level,
         evolved: ownedWeapons(state.weapons).filter((id) => isEvolved(state.weapons[id] ?? 0)),
+        seen: state.seen,
       }),
     );
     const opened = newUnlocks(before.bestSeconds, metaStore.data.bestSeconds);
