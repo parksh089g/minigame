@@ -3,6 +3,7 @@ import { TEXTURE } from '../../art/sprites';
 import { GAME_WIDTH, SCENE } from '../../config';
 import { vibrate } from '../../core/haptics';
 import { sfx, tone } from '../../core/sfx';
+import { store } from '../../core/store';
 import { addBackdrop, addText } from '../../core/ui';
 import { GameHud, HUD_HEIGHT, showBanner } from '../../scenes/GameHud';
 import { MiniGameScene } from '../../scenes/MiniGameScene';
@@ -15,6 +16,7 @@ import {
   drawRibbonEdge,
   drawRibbonFace,
   drawRibbonHead,
+  drawRibbonMarks,
   fillCell,
   ghostLook,
   LOOK,
@@ -149,6 +151,8 @@ export class PathLinkScene extends MiniGameScene {
   private run!: RunState;
   private layout: BoardLayout = { cell: 0, left: 0, top: 0 };
   private stroke: Stroke | null = null;
+  /** 색 구분 도우미가 켜져 있는지. 판을 시작할 때 설정에서 읽는다. */
+  private assist = false;
   /** 시계가 가기 시작했는지. 처음 판을 누를 때, 또는 조금 기다리면 시작한다. */
   private started = false;
   private waited = 0;
@@ -192,6 +196,7 @@ export class PathLinkScene extends MiniGameScene {
   create(): void {
     this.beginMiniGame();
     this.resetState();
+    this.assist = store.data.settings.colorAssist;
 
     addBackdrop(this);
     this.card = this.add.graphics();
@@ -417,6 +422,15 @@ export class PathLinkScene extends MiniGameScene {
     lines.forEach((points, pair) => {
       if (points.length >= 2) drawRibbonFace(this.ribbons, points, width, pairLook(pair));
     });
+    // 색 구분 도우미: 길이 지나는 칸마다 그 쌍의 모양을 찍는다. 양 끝의 점에는 이미 모양이 있다.
+    if (this.assist) {
+      board.paths.forEach((path, pair) => {
+        if (path.length < 2) return;
+        const ends = board.puzzle.dots[pair];
+        const inner = path.filter((at) => !ends.includes(at)).map((at) => this.spotOf(at));
+        drawRibbonMarks(this.ribbons, inner, width, pairLook(pair));
+      });
+    }
 
     // 그리고 있는 길의 머리. 길 가운데를 누르고 아직 움직이지 않았으면 누른 칸에 둔다.
     const stroke = this.stroke;

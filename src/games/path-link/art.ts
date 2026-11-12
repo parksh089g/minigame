@@ -199,54 +199,67 @@ function starPoints(outer: number, inner: number): Point[] {
   });
 }
 
-/** 가운데(원점)에서 둘레의 점들로 부채꼴처럼 세모를 이어 붙여 별 같은 모양을 칠한다. */
-function fillFan(g: Graphics, points: readonly Point[]): void {
+/** 가운데 (cx, cy)에서 둘레의 점들로 부채꼴처럼 세모를 이어 붙여 별 같은 모양을 칠한다. */
+function fillFan(g: Graphics, points: readonly Point[], cx: number, cy: number): void {
   points.forEach((point, index) => {
     const next = points[(index + 1) % points.length];
-    g.fillTriangle(0, 0, point.x, point.y, next.x, next.y);
+    g.fillTriangle(cx, cy, cx + point.x, cy + point.y, cx + next.x, cy + next.y);
   });
 }
 
 /**
- * 점에 얹는 모양을 그린다. 원점이 모양의 가운데이고, s는 모양의 반쯤 되는 크기다.
- * 달과 고리는 바깥 모양을 칠한 뒤 점의 색(face)으로 안쪽을 덮어서 만든다.
+ * 쌍의 모양을 그린다. (cx, cy)가 모양의 가운데이고, s는 모양의 반쯤 되는 크기다.
+ * 달과 고리는 바깥 모양을 칠한 뒤 바탕의 색(face)으로 안쪽을 덮어서 만든다.
  */
-function drawMark(g: Graphics, mark: Mark, s: number, color: number, face: number): void {
+function drawMark(g: Graphics, mark: Mark, s: number, color: number, face: number, cx = 0, cy = 0): void {
   g.fillStyle(color, 1);
   switch (mark) {
     case 'heart':
-      g.fillCircle(-s * 0.48, -s * 0.28, s * 0.56);
-      g.fillCircle(s * 0.48, -s * 0.28, s * 0.56);
-      g.fillTriangle(-s * 0.99, s * 0.02, s * 0.99, s * 0.02, 0, s * 1.02);
+      g.fillCircle(cx - s * 0.48, cy - s * 0.28, s * 0.56);
+      g.fillCircle(cx + s * 0.48, cy - s * 0.28, s * 0.56);
+      g.fillTriangle(cx - s * 0.99, cy + s * 0.02, cx + s * 0.99, cy + s * 0.02, cx, cy + s * 1.02);
       break;
     case 'drop':
-      g.fillCircle(0, s * 0.3, s * 0.68);
-      g.fillTriangle(0, -s * 1.05, -s * 0.6, s * 0.02, s * 0.6, s * 0.02);
+      g.fillCircle(cx, cy + s * 0.3, s * 0.68);
+      g.fillTriangle(cx, cy - s * 1.05, cx - s * 0.6, cy + s * 0.02, cx + s * 0.6, cy + s * 0.02);
       break;
     case 'triangle':
-      g.fillTriangle(0, -s * 0.95, -s, s * 0.75, s, s * 0.75);
+      g.fillTriangle(cx, cy - s * 0.95, cx - s, cy + s * 0.75, cx + s, cy + s * 0.75);
       break;
     case 'star':
-      fillFan(g, starPoints(s * 1.12, s * 0.52));
+      fillFan(g, starPoints(s * 1.12, s * 0.52), cx, cy);
       break;
     case 'diamond':
-      g.fillTriangle(0, -s * 1.1, s * 0.78, 0, -s * 0.78, 0);
-      g.fillTriangle(0, s * 1.1, s * 0.78, 0, -s * 0.78, 0);
+      g.fillTriangle(cx, cy - s * 1.1, cx + s * 0.78, cy, cx - s * 0.78, cy);
+      g.fillTriangle(cx, cy + s * 1.1, cx + s * 0.78, cy, cx - s * 0.78, cy);
       break;
     case 'moon':
-      g.fillCircle(-s * 0.1, 0, s * 0.95);
+      g.fillCircle(cx - s * 0.1, cy, s * 0.95);
       g.fillStyle(face, 1);
-      g.fillCircle(s * 0.38, -s * 0.22, s * 0.78);
+      g.fillCircle(cx + s * 0.38, cy - s * 0.22, s * 0.78);
       break;
     case 'plus':
-      g.fillRoundedRect(-s, -s * 0.34, s * 2, s * 0.68, s * 0.2);
-      g.fillRoundedRect(-s * 0.34, -s, s * 0.68, s * 2, s * 0.2);
+      g.fillRoundedRect(cx - s, cy - s * 0.34, s * 2, s * 0.68, s * 0.2);
+      g.fillRoundedRect(cx - s * 0.34, cy - s, s * 0.68, s * 2, s * 0.2);
       break;
     case 'ring':
-      g.fillCircle(0, 0, s);
+      g.fillCircle(cx, cy, s);
       g.fillStyle(face, 1);
-      g.fillCircle(0, 0, s * 0.46);
+      g.fillCircle(cx, cy, s * 0.46);
       break;
+  }
+}
+
+/** 길 위에 찍는 모양의 크기: 길의 굵기에 대한 비율(모양의 반쯤 되는 크기) */
+const RIBBON_MARK = 0.4;
+
+/**
+ * 색 구분 도우미: 길이 지나는 칸마다 그 쌍의 모양을 찍는다. 길이 나란히 붙어 있어도 어느 쌍의 길인지 모양으로 알 수 있다.
+ * 양 끝의 점에는 이미 모양이 있으므로 points에는 그 사이의 칸만 넘긴다. 윗면을 그린 뒤에 부른다.
+ */
+export function drawRibbonMarks(g: Graphics, points: readonly Point[], width: number, look: PairLook): void {
+  for (const point of points) {
+    drawMark(g, look.mark, width * RIBBON_MARK, look.markColor, look.face, point.x, point.y);
   }
 }
 

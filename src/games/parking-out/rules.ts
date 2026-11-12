@@ -4,6 +4,7 @@
  * 차는 폭이 한 칸, 길이가 두세 칸이고, 가로나 세로로 서서 앞머리 쪽으로만 나간다.
  * 무작위가 필요한 곳은 random(0 이상 1 미만의 수를 돌려주는 함수)을 받아서 쓴다.
  */
+import { difficultyOf, STAGE_HEARTS } from '../../core/stages';
 
 export type Facing = 'up' | 'down' | 'left' | 'right';
 
@@ -523,4 +524,37 @@ export function isOver(run: RunState): boolean {
 export function nextStage(run: RunState, random: () => number): RunState {
   const stage = run.stage + 1;
   return { ...run, stage, lot: generateLot(stage, random) };
+}
+
+// ───────── 단계 모드 ─────────
+
+/** 단계 모드가 거치는 난이도의 수: 가장 작은 주차장부터 가장 붐비는 주차장까지 */
+export const LEVEL_STEPS = STAGES.length;
+
+/** 단계 모드의 level(1부터)번째 단계가 쓰는 판 번호. stageSpec과 generateLot의 stage로 넘긴다. */
+export function levelStage(level: number): number {
+  return difficultyOf(level, LEVEL_STEPS);
+}
+
+/**
+ * 단계 모드의 한 단계. 시간은 흐르지 않고(elapse를 부르지 않는다), 주차장 하나를 비우면 깬 것이다.
+ * 막힌 차를 누를 수 있는 횟수가 정해져 있어서, 아무 차나 눌러 보는 것으로는 깰 수 없다.
+ */
+export function levelRun(level: number, random: () => number): RunState {
+  const stage = levelStage(level);
+  return {
+    stage,
+    lot: generateLot(stage, random),
+    timeLeft: TIME_BANK_SECONDS,
+    score: 0,
+    streak: 0,
+    carsOut: 0,
+    lotsCleared: 0,
+    bumps: 0,
+  };
+}
+
+/** 단계 모드에서 남은 기회: 막힌 차를 더 누를 수 있는 횟수 */
+export function chancesLeft(run: RunState): number {
+  return Math.max(0, STAGE_HEARTS - run.bumps);
 }

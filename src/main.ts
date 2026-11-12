@@ -36,6 +36,8 @@ import { PauseScene } from './scenes/PauseScene';
 import { RankingScene } from './scenes/RankingScene';
 import { ResultScene } from './scenes/ResultScene';
 import { SettingsScene } from './scenes/SettingsScene';
+import { StageResultScene } from './scenes/StageResultScene';
+import { StagesScene } from './scenes/StagesScene';
 import { ShopScene } from './scenes/ShopScene';
 import { StatsScene } from './scenes/StatsScene';
 
@@ -117,6 +119,8 @@ async function boot(): Promise<void> {
       SproutCompanyScene,
       PauseScene,
       ResultScene,
+      StagesScene,
+      StageResultScene,
     ],
   });
   window.__pocketArcade = game;

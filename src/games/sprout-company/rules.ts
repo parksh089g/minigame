@@ -16,6 +16,7 @@ import {
   LEAD,
   LEVEL_SPEED,
   OFFICES,
+  OLD_HAND_TIPS,
   PROJECT_ORDER,
   PROJECTS,
   RUSH,
@@ -23,6 +24,7 @@ import {
   STAFF,
   STAFF_ORDER,
   TASK_KINDS,
+  TIPS,
   TRAINING,
   UPDATE_SCALE,
   type EffectKey,
@@ -35,6 +37,7 @@ import {
   type StaffId,
   type TaskKind,
 } from './data';
+import { bumpGoals, createGoals, normalizeGoals, type GoalsState } from './goals';
 
 export const COMPANY_VERSION = 1;
 
@@ -124,6 +127,10 @@ export interface CompanyState {
   lead: number;
   /** 팀장이 다음 카드를 맡기기까지 남은 시간(초) */
   leadWait: number;
+  /** 오늘의 목표와 그 진행 */
+  goals: GoalsState;
+  /** 이미 본 처음 안내의 id */
+  tips: string[];
   /** 마지막으로 저장한 때(ms). 닫아 둔 시간을 재는 데 쓴다. */
   savedAt: number;
 }
@@ -162,6 +169,8 @@ export function createCompany(boss: StaffId, now = 0): CompanyState {
     candidates: null,
     lead: 0,
     leadWait: 0,
+    goals: createGoals(),
+    tips: [],
     savedAt: now,
   };
 }
@@ -339,6 +348,7 @@ export function release(state: CompanyState): Release | null {
   state.reputation += reputation;
   state.released[id] = version;
   state.releases += 1;
+  bumpGoals(state.goals, 'release');
   state.project = null;
   // 급한 의뢰의 카드는 프로젝트와 상관없이 남는다.
   state.inbox = state.inbox.filter((task) => task.rush);
@@ -373,6 +383,7 @@ export function cheer(state: CompanyState, index: number): boolean {
   const desk = state.desks[index];
   if (!desk?.task) return false;
   desk.cheer = CHEER_SECONDS;
+  bumpGoals(state.goals, 'cheer');
   return true;
 }
 
@@ -417,11 +428,13 @@ function work(state: CompanyState, dt: number, random: () => number): CompanyEve
       desk.task = null;
       desk.cheer = 0;
       done.push({ type: 'task', desk: index, kind: task.kind, rush: task.rush === true });
+      bumpGoals(state.goals, 'task');
       if (task.rush) {
         const rush = state.rush;
         if (rush && (rush.done += 1) >= rush.total) {
           state.leaves += rush.reward;
           done.push({ type: 'rushWon', reward: rush.reward });
+          bumpGoals(state.goals, 'rush');
           state.rush = null;
           state.rushIn = nextRushIn(random);
         }
@@ -456,6 +469,7 @@ export function train(state: CompanyState, index: number): boolean {
   const desk = state.desks[index];
   state.leaves -= trainCost(desk.level);
   desk.level += 1;
+  bumpGoals(state.goals, 'train');
   return true;
 }
 
@@ -674,6 +688,7 @@ export function buyEquipment(state: CompanyState, id: EquipmentId, desk = -1): b
   state.leaves -= equipmentCost(id, level);
   const levels = def.scope === 'company' ? state.gear : state.desks[desk].gear;
   levels[id] = level + 1;
+  bumpGoals(state.goals, 'upgrade');
   return true;
 }
 
@@ -925,6 +940,14 @@ export function normalizeCompany(raw: unknown): CompanyState | null {
     const pool = hirePool(state);
     const candidates = raw.candidates.filter(isStaffId).filter((id) => pool.includes(id));
     state.candidates = candidates.length > 0 ? [...new Set(candidates)].slice(0, CANDIDATE_COUNT) : null;
+  }
+
+  state.goals = normalizeGoals(raw.goals);
+  // 안내가 생기기 전부터 하던 회사에는, 그때도 있던 일에 대한 안내를 띄우지 않는다.
+  if (Array.isArray(raw.tips)) {
+    state.tips = [...new Set(raw.tips.filter((id): id is string => typeof id === 'string' && id in TIPS))];
+  } else if (state.releases > 0) {
+    state.tips = [...OLD_HAND_TIPS];
   }
   return state;
 }

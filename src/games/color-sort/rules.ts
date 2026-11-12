@@ -2,6 +2,7 @@
  * 색깔 물 나누기의 규칙: 병과 붓기, 다 나눴는지 판정, 단계 만들기.
  * 화면과 Phaser에 의존하지 않는 순수 함수들이다. 무작위가 필요한 곳은 random을 받아서 쓴다.
  */
+import { difficultyOf } from '../../core/stages';
 
 /** 병 하나에 들어가는 칸 수 */
 export const TUBE_CAPACITY = 4;
@@ -103,6 +104,25 @@ export function slackFor(stage: number): number {
 /** 한 단계에서 부을 수 있는 횟수 */
 export function pourBudget(par: number, stage: number): number {
   return par + slackFor(stage);
+}
+
+// ───────── 단계 모드 ─────────
+
+/** 단계 모드가 거치는 난이도의 수: 세 색에서 시작해 MAX_COLORS색이 나오는 난이도까지 */
+export const LEVEL_STEPS = (MAX_COLORS - MIN_COLORS) * 2;
+
+/** 단계 모드의 level(1부터)번째 단계가 쓰는 난이도. dealStage의 stage로 넘긴다. */
+export function levelStage(level: number): number {
+  return difficultyOf(level, LEVEL_STEPS, 0);
+}
+
+/**
+ * 단계 모드에서 한 단계에 부을 수 있는 횟수. 시간에 쫓기지 않는 모드라 점수 도전보다 넉넉하고,
+ * 뒤로 가도 여유가 줄지 않는다: 찾아 둔 풀이의 절반만큼, 적어도 여섯 번은 더 부을 수 있다.
+ */
+export function levelPourBudget(par: number): number {
+  const moves = Math.max(0, Math.floor(par));
+  return moves + Math.max(6, Math.ceil(moves / 2));
 }
 
 /** 병 하나를 한 색으로 채울 때마다 받는 점수 */

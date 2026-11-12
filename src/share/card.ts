@@ -23,6 +23,10 @@ export interface ShareCardInput {
   icon: string;
   /** 카드 위에 올라앉는 캐릭터의 텍스처 이름 */
   mascot: string;
+  /** 최고 기록 자리에 대신 적을 한 줄. 판이 없는 게임(새싹 컴퍼니)이 회사의 모습을 적는다. */
+  note?: string;
+  /** 받는 사람에게 건네는 말. 안 주면 "나도 도전하기" */
+  invite?: string;
   /** 이름이 가리키는 그림을 (x, y)에 width × height로 그린다. */
   paint: (context: Ctx, key: string, x: number, y: number, width: number, height: number) => void;
 }
@@ -159,7 +163,8 @@ export function drawShareCard(input: ShareCardInput): HTMLCanvasElement {
     input.paint(c, 'icon-star', middle - width / 2 - badge.starGap - badge.star, starY, badge.star, badge.star);
     input.paint(c, 'icon-star', middle + width / 2 + badge.starGap, starY, badge.star, badge.star);
   } else {
-    centered(c, `최고 기록 ${input.best}`, middle, badgeY, badge.size, THEME_CSS.sub);
+    const line = input.note ?? `최고 기록 ${input.best}`;
+    centered(c, line, middle, badgeY, fitSize(c, line, badge.size, LOOK.score.maxWidth), THEME_CSS.sub);
   }
 
   // 받는 사람에게 건네는 말과 주소
@@ -167,7 +172,7 @@ export function drawShareCard(input: ShareCardInput): HTMLCanvasElement {
   const buttonLeft = middle - button.width / 2;
   pill(c, buttonLeft, button.y + button.lip, button.width, button.height, button.height / 2, THEME_CSS.pinkDeep);
   pill(c, buttonLeft, button.y, button.width, button.height, button.height / 2, THEME_CSS.pink);
-  centered(c, '나도 도전하기', middle, button.y + button.height / 2 + 2, button.size, THEME_CSS.inkDeep);
+  centered(c, input.invite ?? '나도 도전하기', middle, button.y + button.height / 2 + 2, button.size, THEME_CSS.inkDeep);
   const host = LOOK.host;
   centered(c, input.host, middle, host.y, fitSize(c, input.host, host.size, host.maxWidth), THEME_CSS.sub);
 

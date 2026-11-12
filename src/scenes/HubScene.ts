@@ -16,6 +16,7 @@ import {
 } from '../core/pwa';
 import { getRecord, isFavorite } from '../core/save';
 import { sfx } from '../core/sfx';
+import { clearedOf, totalCleared } from '../core/stages';
 import { store } from '../core/store';
 import { setToastAnchor } from '../core/toast';
 import { claimableMissions } from '../core/weekly';
@@ -38,6 +39,7 @@ import {
   GAMES,
   getGame,
   personalHubOrder,
+  stageGames,
   thisWeek,
   todaysChallenge,
   type MiniGameInfo,
@@ -94,6 +96,9 @@ const OFFLINE_LABEL: Record<OfflineStatus, { text: string; color: number }> = {
 
 /** 게임 카드의 아이콘 뒤에 까는 색. 게임 순서대로 돌아가며 쓴다. */
 const ICON_TILES = [THEME.butterSoft, THEME.lilacSoft, THEME.mintSoft, THEME.skySoft, THEME.pinkSoft] as const;
+
+/** 허브의 격자에 놓이는 카드: 게임이거나, 퍼즐 단계 모드로 들어가는 카드 */
+type HubCard = { kind: 'game'; game: MiniGameInfo } | { kind: 'stages' };
 
 /** 게임을 고르는 첫 화면. */
 export class HubScene extends Phaser.Scene {
@@ -327,7 +332,7 @@ export class HubScene extends Phaser.Scene {
     this.pager = null;
 
     const available = height - FOOTER_HEIGHT - CARDS_TOP;
-    const rows = layoutPages(Math.ceil(GAMES.length / COLUMNS), available, ROW_STEP, PAGER_HEIGHT);
+    const rows = layoutPages(Math.ceil(this.cards().length / COLUMNS), available, ROW_STEP, PAGER_HEIGHT);
     this.rowsPerPage = rows.perPage;
     this.layout = { perPage: rows.perPage * COLUMNS, pages: rows.pages };
     this.page = clampPage(lastPage, this.layout.pages);
@@ -360,14 +365,27 @@ export class HubScene extends Phaser.Scene {
     return personalHubOrder(GAMES, save.favorites, (id) => getRecord(save, id).lastPlayedAt);
   }
 
+  /**
+   * 격자에 놓는 카드들. 퍼즐 단계 모드의 카드는 대표 게임 바로 뒤에 두어 언제나 첫 쪽에서 보인다.
+   */
+  private cards(): HubCard[] {
+    const games = this.orderedGames();
+    const cards: HubCard[] = games.map((game) => ({ kind: 'game', game }));
+    if (stageGames().length > 0) {
+      cards.splice(games.filter((game) => game.featured).length, 0, { kind: 'stages' });
+    }
+    return cards;
+  }
+
   private buildCards(): void {
     this.tweens.killTweensOf(this.cardObjects);
     for (const object of this.cardObjects) object.destroy();
     this.cardObjects = [];
-    pageSlice(this.orderedGames(), this.page, this.layout.perPage).forEach((game, index) => {
-      const column = index % COLUMNS;
-      const row = Math.floor(index / COLUMNS);
-      this.addCard(game, MARGIN + column * (TILE_WIDTH + TILE_GAP), CARDS_TOP + row * ROW_STEP);
+    pageSlice(this.cards(), this.page, this.layout.perPage).forEach((card, index) => {
+      const x = MARGIN + (index % COLUMNS) * (TILE_WIDTH + TILE_GAP);
+      const y = CARDS_TOP + Math.floor(index / COLUMNS) * ROW_STEP;
+      if (card.kind === 'game') this.addCard(card.game, x, y);
+      else this.addStagesCard(x, y);
     });
     // 넘겨서 다시 그린 것이 아니면(즐겨찾기를 바꿨을 때) 다음에는 밀려 들어오지 않는다.
     this.slideFrom = 0;
@@ -414,11 +432,15 @@ export class HubScene extends Phaser.Scene {
     if (playable) {
       // 승패로 끝나는 게임은 최고 기록이 없으므로, 둘이 하는 게임이라는 것을 대신 알린다.
       // 이어지는 성장 게임은 최고 기록 자리에 지금까지 쌓은 평판을 보여 준다.
+      // 단계 모드로만 해 본 게임은 최고 점수가 없으니, 0점이라고 적는 대신 깬 단계를 적는다.
+      const cleared = record.best === 0 ? clearedOf(store.data.stages, game.id) : 0;
       const line = game.versus
         ? { text: '둘이서', color: THEME_CSS.lilacDeep }
-        : record.plays > 0
-          ? { text: `${game.ongoing ? '평판' : '최고'} ${record.best}`, color: THEME_CSS.accent }
-          : { text: '새 게임', color: THEME_CSS.faint };
+        : cleared > 0
+          ? { text: `깬 단계 ${cleared}`, color: THEME_CSS.accent }
+          : record.plays > 0
+            ? { text: `${game.ongoing ? '평판' : '최고'} ${record.best}`, color: THEME_CSS.accent }
+            : { text: '새 게임', color: THEME_CSS.faint };
       const best = addText(this, center, TILE.recordY, line.text, {
         size: FONT_SIZE.small,
         color: line.color,
@@ -455,6 +477,52 @@ export class HubScene extends Phaser.Scene {
     });
     this.cardObjects.push(zone);
     if (playable) this.addStar(game, card, x, y, favorite);
+  }
+
+  /** 퍼즐 단계 모드로 들어가는 카드. 게임 카드와 같은 모양이고, 기록 자리에 지금까지 깬 단계 수를 적는다. */
+  private addStagesCard(x: number, y: number): void {
+    const card = this.add.container(x, y);
+    this.cardObjects.push(card);
+    if (this.slideFrom !== 0) {
+      card.setX(x + this.slideFrom * 16).setAlpha(0);
+      this.tweens.add({ targets: card, x, alpha: 1, duration: 130, ease: 'Quad.Out' });
+    }
+
+    const center = TILE_WIDTH / 2;
+    const frame = this.add.graphics();
+    const drawFrame = (pressed: boolean): void => {
+      frame.clear();
+      drawPanel(frame, 0, 0, TILE_WIDTH, TILE_HEIGHT, { fill: pressed ? THEME.dim : THEME.card, radius: 12 });
+      frame.fillStyle(THEME.butterSoft, 1);
+      frame.fillRoundedRect(center - TILE.iconBox / 2, TILE.iconTop, TILE.iconBox, TILE.iconBox, 10);
+    };
+    drawFrame(false);
+    const icon = this.add
+      .image(center, TILE.iconTop + TILE.iconBox / 2, 'icon-stages')
+      .setDisplaySize(TILE.iconSize, TILE.iconSize);
+    const title = addText(this, center, TILE.titleY, '퍼즐 단계', {
+      size: FONT_SIZE.small,
+      color: THEME_CSS.inkDeep,
+      originX: 0.5,
+    });
+    const cleared = totalCleared(
+      store.data.stages,
+      stageGames().map((game) => game.id),
+    );
+    const line = addText(this, center, TILE.recordY, cleared > 0 ? `깬 단계 ${cleared}` : '새 모드', {
+      size: FONT_SIZE.small,
+      color: cleared > 0 ? THEME_CSS.accent : THEME_CSS.lilacDeep,
+      originX: 0.5,
+    });
+    line.setScale(Math.min(1, (TILE_WIDTH - 4) / line.width));
+    card.add([frame, icon, title, line]);
+
+    const zone = addTapZone(this, x, y, TILE_WIDTH, TILE_HEIGHT, drawFrame, () => {
+      sfx.click();
+      vibrate(8);
+      fadeToScene(this, SCENE.stages);
+    });
+    this.cardObjects.push(zone);
   }
 
   /** 게임을 하러 간다. 방금 한 게임은 목록의 앞쪽으로 오므로, 돌아왔을 때는 그 게임이 보이는 첫 쪽을 연다. */

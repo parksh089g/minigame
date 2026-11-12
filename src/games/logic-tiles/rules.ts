@@ -5,6 +5,7 @@
  * 칸은 번호 하나로 적는다: row * cols + col, 왼쪽 위가 0번이다.
  * 무작위가 필요한 곳은 random(0 이상 1 미만의 수를 돌려주는 함수)을 받아서 쓴다.
  */
+import { difficultyOf } from '../../core/stages';
 
 export interface BoardSize {
   cols: number;
@@ -664,4 +665,24 @@ export function isOver(run: RunState): boolean {
 export function nextStage(run: RunState): RunState {
   const stage = run.stage + 1;
   return { ...run, stage, board: freshBoard(stage), flawless: true };
+}
+
+// ───────── 단계 모드 ─────────
+
+/** 단계 모드가 거치는 난이도의 수: 가장 작은 판부터 가장 큰 판까지 */
+export const LEVEL_STEPS = STAGES.length;
+
+/** 단계 모드의 level(1부터)번째 단계가 쓰는 판 번호. stageSpec의 stage로 넘긴다. */
+export function levelStage(level: number): number {
+  return difficultyOf(level, LEVEL_STEPS);
+}
+
+/**
+ * 단계 모드의 한 단계. 시간은 흐르지 않고(elapse를 부르지 않는다), 판 하나를 깨면 끝난다.
+ * 목숨은 단계마다 새로 받는다. 함정은 여느 때처럼 첫 칸을 누를 때 놓이므로,
+ * 같은 단계라도 누른 첫 칸이 다르면 다른 판이 된다.
+ */
+export function levelRun(level: number): RunState {
+  const stage = levelStage(level);
+  return { ...newRun(), stage, board: freshBoard(stage) };
 }
