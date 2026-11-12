@@ -448,7 +448,7 @@ export const FLINT = {
 /** 등갓의 빛막이 다시 생기는 데 걸리는 시간(초): 1레벨의 값과 레벨마다 줄어드는 값 */
 export const GUARD = { seconds: 24, perLevel: 3 } as const;
 
-export type HeroId = 'keeper' | 'stargazer' | 'stormer';
+export type HeroId = 'keeper' | 'stargazer' | 'stormer' | 'ringer';
 
 /** 캐릭터마다 다른 능력. 더하는 값(maxHp)과 곱하는 값(나머지)이 있다. */
 export interface HeroTrait {
@@ -458,6 +458,8 @@ export interface HeroTrait {
   cooldown?: number;
   area?: number;
   xp?: number;
+  /** 받는 피해에 곱한다 */
+  taken?: number;
 }
 
 export interface HeroInfo {
@@ -502,9 +504,18 @@ export const HEROES: Readonly<Record<HeroId, HeroInfo>> = {
     trait: { speed: 1.12, cooldown: 0.85, maxHp: -20 },
     unlockSeconds: 360,
   },
+  ringer: {
+    name: '종지기',
+    blurb: '느리지만 좀처럼 쓰러지지 않는다',
+    perk: '최대 체력 +30 · 받는 피해 -10%',
+    flaw: '이동 -10% · 재사용 +5%',
+    weapon: 'bell',
+    trait: { maxHp: 30, taken: 0.9, speed: 0.9, cooldown: 1.05 },
+    unlockSeconds: 480,
+  },
 };
 
-export const HERO_ORDER: readonly HeroId[] = ['keeper', 'stargazer', 'stormer'];
+export const HERO_ORDER: readonly HeroId[] = ['keeper', 'stargazer', 'stormer', 'ringer'];
 
 /** 판 밖에서 불씨로 올리는 영구 강화 */
 export type MetaId =

@@ -208,7 +208,7 @@ export function modifiers(passives: Levels<PassiveId>, meta: Levels<MetaId>, tra
     xp: (1 + 0.08 * m('greed')) * (trait.xp ?? 1),
     maxHp: Math.max(MIN_MAX_HP, PLAYER_BASE.maxHp + 20 * p('coat') + 10 * m('vigor') + (trait.maxHp ?? 0)),
     regen: 0.1 * m('mend') + HERB_REGEN * p('herb'),
-    taken: 1 - 0.04 * m('armor'),
+    taken: (1 - 0.04 * m('armor')) * (trait.taken ?? 1),
     guard: guardSeconds(p('hood')),
     spark: sparkChance(p('flint')),
   };
