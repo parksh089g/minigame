@@ -1,13 +1,21 @@
 import Phaser from 'phaser';
 import { mascotTexture } from '../../art/cosmetics';
+import { paintArt } from '../../art/vector';
 import { FONT_SIZE, GAME_WIDTH, SCENE, THEME, THEME_CSS } from '../../config';
 import type { BackAware } from '../../core/app-events';
+import { dateKeyOf } from '../../core/daily';
 import { vibrate } from '../../core/haptics';
-import { sfx } from '../../core/sfx';
+import { music } from '../../core/music';
+import { sfx, tone } from '../../core/sfx';
 import { store } from '../../core/store';
 import { holdToasts } from '../../core/toast';
 import { addBackdrop, addTapZone, addText, drawPanel, fadeIn, fadeToScene, PixelButton } from '../../core/ui';
+import { syncScores } from '../../online/online';
+import { MAX_SCORE } from '../../online/protocol';
 import { floatText, showBanner } from '../../scenes/GameHud';
+import { makeShareImage } from '../../share/card';
+import { displayHost, shareFileName, shareNotice, shareTitle, shareUrl } from '../../share/link';
+import { sendShare } from '../../share/send';
 import { thisWeek } from '../registry';
 import { COMPUTER_SIZE, computerTexture, registerCompanyTextures, SC, TASK_COLORS, taskTexture } from './art';
 import {
@@ -19,11 +27,13 @@ import {
   INBOX_SLOTS,
   LEAD,
   LEVEL_SPEED,
+  OFFICE_COINS,
   OFFICES,
   PROJECTS,
   RUSH,
   STAFF,
   TASKS,
+  TIPS,
   TRAINING,
   type Effect,
   type EquipmentDef,
@@ -76,7 +86,11 @@ import {
   type CompanyEvent,
   type CompanyState,
 } from './rules';
+import { claimGoal, GOAL_REWARD, goalText, hasGoalToClaim, isGoalDone, rollGoals, takeReleaseCoin } from './goals';
+import { OFFICE_SONG } from './music';
+import { SOUNDS, type Note, type SoundId } from './sound';
 import { companyStore } from './store';
+import { markTip, nextTip } from './tips';
 
 type Container = Phaser.GameObjects.Container;
 type Graphics = Phaser.GameObjects.Graphics;
@@ -98,6 +112,12 @@ const TILE_HEIGHT = { min: 58, max: 104, named: 80 } as const;
 const CARD = { width: 23, height: 30, step: 27 } as const;
 
 const DEPTH = { fx: 40, panel: 60, banner: 80 } as const;
+
+/** 허브와 공유 카드에 적히는 이 게임의 이름 */
+const COMPANY_TITLE = '새싹 컴퍼니';
+/** 처음 안내가 떠 있는 시간(ms)과, 다음 안내까지 쉬는 시간(초) */
+const TIP_MS = 4500;
+const TIP_GAP = 8;
 
 /** 저장하는 간격(초). 무언가를 사거나 맡길 때는 바로 저장한다. */
 const SAVE_EVERY = 10;
@@ -127,13 +147,14 @@ interface Button {
   setStyle(style: ButtonStyle): void;
 }
 
-/** 아래쪽 버튼으로 여는 창 넷과, 돌아왔을 때 저절로 뜨는 알림 */
-type PanelKind = 'project' | 'gear' | 'staff' | 'office' | 'away';
+/** 아래쪽 버튼으로 여는 창 다섯과, 돌아왔을 때 저절로 뜨는 알림 */
+type PanelKind = 'project' | 'gear' | 'staff' | 'office' | 'goals' | 'away';
 const PANELS: readonly { kind: PanelKind; label: string }[] = [
-  { kind: 'project', label: '프로젝트' },
+  { kind: 'project', label: '게임' },
   { kind: 'gear', label: '장비' },
   { kind: 'staff', label: '직원' },
   { kind: 'office', label: '사무실' },
+  { kind: 'goals', label: '목표' },
 ];
 
 interface DeskView {
@@ -225,6 +246,13 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
   private offerBar: Graphics | null = null;
   private offerSignature = '';
   private hintColor = '';
+  /** 떠 있는 처음 안내와, 다음 안내를 살피기까지 남은 시간(초) */
+  private tipView: Container | null = null;
+  private tipIn = 3;
+  /** 미리 만들어 둔 공유 카드와, 그것을 만든 때의 회사 모습 */
+  private shareImage: File | null = null;
+  private shareKey = '';
+  private sharing = false;
   private desks: DeskView[] = [];
 
   /** 일감함에서 고른 카드의 번호 */
@@ -263,6 +291,11 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     this.offerBar = null;
     this.offerSignature = '';
     this.hintColor = '';
+    this.tipView = null;
+    this.tipIn = 3;
+    this.shareKey = '';
+    this.shareImage = null;
+    this.sharing = false;
 
     registerCompanyTextures(this);
     addBackdrop(this);
@@ -283,7 +316,13 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     const onVisible = (): void => this.welcomeBack();
     this.game.events.on(Phaser.Core.Events.HIDDEN, onHidden);
     this.game.events.on(Phaser.Core.Events.VISIBLE, onVisible);
+    // 멈추거나 떠나면 음악도 잦아든다.
+    music.hush(false);
+    const rest = (): void => music.rest();
+    this.events.on(Phaser.Scenes.Events.PAUSE, rest);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.events.off(Phaser.Scenes.Events.PAUSE, rest);
+      rest();
       this.game.events.off(Phaser.Core.Events.HIDDEN, onHidden);
       this.game.events.off(Phaser.Core.Events.VISIBLE, onVisible);
       holdToasts(false);
@@ -312,6 +351,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     if (!this.built) return;
     const dt = Math.min(delta / 1000, MAX_STEP);
     this.clock += dt;
+    music.tick();
     for (const event of advance(this.state, dt)) this.onEvent(event);
 
     this.syncTop();
@@ -320,6 +360,8 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     this.slowTick -= dt;
     if (this.slowTick <= 0) {
       this.slowTick = 0.3;
+      this.rollDay();
+      this.syncTip(0.3);
       this.syncStrip();
       this.syncInbox();
       this.syncOffer();
@@ -342,6 +384,8 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     }
     if (!companyStore.data) return;
     this.state = companyStore.data;
+    this.rollDay();
+    music.play(OFFICE_SONG);
 
     const height = this.scale.height;
     const buttonsTop = height - MARGIN - BUTTON_HEIGHT;
@@ -383,7 +427,13 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     if (away.leaves < 1 && away.tasks === 0) return;
     this.away = away;
     this.openPanel('away');
-    sfx.coin();
+    this.play('reward');
+  }
+
+  /** 날이 바뀌었으면 오늘의 목표를 새로 정한다. */
+  private rollDay(): void {
+    const state = this.state;
+    state.goals = rollGoals(state.goals, dateKeyOf(new Date()), state.office);
   }
 
   private save(): void {
@@ -514,7 +564,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     const state = this.state;
     const result = release(state);
     if (!result) return;
-    sfx.fanfare();
+    this.play('release');
     vibrate([12, 50, 12]);
     const centerY = (ROOM_TOP + this.roomBottom) / 2;
     showBanner(this, centerY, result.version === 1 ? '출시!' : '업데이트!', THEME_CSS.accent, 1500, DEPTH.banner);
@@ -523,8 +573,12 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     floatText(this, W - 40, 44, `평판 +${result.reputation}`, THEME_CSS.accent, bounds, DEPTH.fx);
     this.burst(W / 2, STRIP.top + STRIP.height / 2, 10, 46);
 
-    // 허브에는 출시 한 번을 한 판으로 적는다. 카드에는 평판이 기록으로 남는다.
-    store.recordPlay(COMPANY_GAME_ID, state.reputation, 1, null, thisWeek(store.data.weekly));
+    // 허브에는 출시 한 번을 한 판으로 적는다. 카드에는 평판이 기록으로 남고, 랭킹에도 평판이 오른다.
+    // 코인은 하루 상한까지만 나온다.
+    const coins = takeReleaseCoin(state.goals);
+    store.recordPlay(COMPANY_GAME_ID, Math.min(state.reputation, MAX_SCORE), coins, null, thisWeek(store.data.weekly));
+    if (coins > 0) floatText(this, W / 2, 60, `코인 +${coins}`, THEME_CSS.accent, bounds, DEPTH.fx);
+    void syncScores();
     this.selected = 0;
     this.save();
     this.refreshNow();
@@ -799,7 +853,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     }
     if (desk.task) {
       cheer(state, index);
-      sfx.tick();
+      this.play('cheer');
       vibrate(6);
       this.burst(view.x + view.width / 3, view.deskTop - 22, 3, 18);
       return;
@@ -807,7 +861,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     if (state.inbox.length > 0) {
       const card = Math.min(this.selected, state.inbox.length - 1);
       if (assign(state, card, index)) {
-        sfx.flip();
+        this.play('assign');
         vibrate(8);
         this.selected = 0;
         this.save();
@@ -833,19 +887,18 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
         const color = event.rush ? THEME_CSS.accent : TASK_COLORS[event.kind].css;
         floatText(this, view.x + view.width / 2, view.y + 22, `${TASKS[event.kind].name} 끝`, color, bounds, DEPTH.fx);
       }
-      if (!event.rush && isReady(this.state)) sfx.gold();
-      else sfx.pop();
+      this.play(!event.rush && isReady(this.state) ? 'ready' : 'done');
     } else if (event.type === 'rushOffer') {
-      sfx.go();
+      this.play('rushIn');
       vibrate(10);
     } else if (event.type === 'rushWon') {
-      sfx.fanfare();
+      this.play('rushWon');
       vibrate([12, 50, 12]);
       showBanner(this, centerY, '의뢰 성공!', THEME_CSS.good, 1300, DEPTH.banner);
       floatText(this, 70, 44, `+${formatLeaves(event.reward)}`, THEME_CSS.good, bounds, DEPTH.fx);
       this.burst(W / 2, centerY, 8, 40);
     } else {
-      sfx.deny();
+      this.play('rushLost');
       showBanner(this, centerY, '의뢰를 놓쳤어요', THEME_CSS.sub, 1300, DEPTH.banner);
     }
     this.selected = Math.min(this.selected, Math.max(0, this.state.inbox.length - 1));
@@ -1008,7 +1061,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
   private takeRush(): void {
     if (!acceptRush(this.state)) return;
     this.selected = 0;
-    sfx.go();
+    this.play('rushStart');
     this.save();
     this.refreshNow();
   }
@@ -1067,6 +1120,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     this.dots.gear?.setVisible(canBuy);
     this.dots.staff?.setVisible(canHire);
     this.dots.office?.setVisible(moveBlock(state) === null);
+    this.dots.goals?.setVisible(hasGoalToClaim(state.goals));
   }
 
   /** 누르면 들어가는 둥근 버튼을 parent 안에 만든다. */
@@ -1153,6 +1207,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     else if (kind === 'gear') this.buildGearPanel(panel);
     else if (kind === 'staff') this.buildStaffPanel(panel);
     else if (kind === 'office') this.buildOfficePanel(panel);
+    else if (kind === 'goals') this.buildGoalsPanel(panel);
     else this.buildAwayPanel(panel);
     // 창을 만드는 동안 쪽 번호가 맞춰지므로, 다 만든 뒤의 모습을 적어 둔다.
     this.panelSignature = this.signatureOf(kind);
@@ -1190,6 +1245,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
       return `${page}|${staff}|${state.leaves >= hireCost(state)}|${state.office}|${state.lead}${leadBlock(state) ?? ''}`;
     }
     if (kind === 'away') return 'away';
+    if (kind === 'goals') return `${state.goals.day}|${state.goals.progress.join(',')}|${state.goals.claimed.join(',')}`;
     return `${state.office}|${moveBlock(state) ?? ''}|${state.reputation}`;
   }
 
@@ -1372,7 +1428,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
       }
       this.costButton(panel, left + width - 66, middle - 13, equipmentCost(id, level), block === null, () => {
         if (!buyEquipment(state, id, desk)) return;
-        sfx.coin();
+        this.play('upgrade');
         this.save();
         if (id === 'coffee' && level === 0) this.buildRoom();
         this.refreshNow();
@@ -1404,7 +1460,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
         this.rowDetail(panel, left + 56, middle, right, `${TASKS[def.specialty].name} 2배  ${effectText(def.trait)}`);
         this.costButton(panel, left + width - 66, middle - 13, cost, hireBlock(state, row.id) === null, () => {
           if (hire(state, row.id) < 0) return;
-          sfx.gold();
+          this.play('hire');
           this.save();
           this.buildRoom();
           this.closePanel();
@@ -1434,7 +1490,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
         }
         this.costButton(panel, left + width - 66, middle - 13, next.cost, block === null, () => {
           if (!promoteLead(state)) return;
-          sfx.gold();
+          this.play('hire');
           this.save();
           this.buildRoom();
           this.refreshNow();
@@ -1473,7 +1529,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
       }
       this.costButton(panel, left + width - 66, middle - 13, trainCost(desk.level), block === null, () => {
         if (!train(state, row.desk)) return;
-        sfx.coin();
+        this.play('upgrade');
         this.save();
         this.refreshNow();
       });
@@ -1499,7 +1555,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
   private buildOfficePanel(panel: Container): void {
     const state = this.state;
     const rowHeight = 42;
-    const { left, top, width } = this.panelFrame(panel, '사무실', OFFICES.length * rowHeight + 20);
+    const { left, top, width } = this.panelFrame(panel, '사무실', OFFICES.length * rowHeight + 20 + 34);
     OFFICES.forEach((office, index) => {
       const y = top + index * rowHeight;
       if (index > 0) this.rowLine(panel, left, y, width);
@@ -1519,13 +1575,25 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
       if (next) {
         this.costButton(panel, left + width - 66, middle - 13, office.cost, moveBlock(state) === null, () => {
           if (!moveOffice(state)) return;
-          sfx.fanfare();
+          this.play('move');
           vibrate([12, 50, 12]);
+          // 새 사무실에 처음 온 값으로 허브의 코인을 한 번 받는다.
+          const coins = OFFICE_COINS[state.office] ?? 0;
+          if (coins > 0) {
+            store.update((save) => {
+              save.coins += coins;
+            });
+          }
           this.save();
           this.shownReputation = -1;
           this.buildRoom();
           this.closePanel();
-          showBanner(this, (ROOM_TOP + this.roomBottom) / 2, '이사했어요!', THEME_CSS.good, 1500, DEPTH.banner);
+          const centerY = (ROOM_TOP + this.roomBottom) / 2;
+          showBanner(this, centerY, '이사했어요!', THEME_CSS.good, 1500, DEPTH.banner);
+          if (coins > 0) {
+            const bounds = new Phaser.Geom.Rectangle(0, 0, W, this.scale.height);
+            floatText(this, W / 2, centerY + 26, `코인 +${coins}`, THEME_CSS.accent, bounds, DEPTH.banner);
+          }
           this.refreshNow();
         });
         return;
@@ -1541,9 +1609,177 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
       );
     });
     const note = state.office + 1 < OFFICES.length ? '평판은 게임을 출시하면 올라요' : '가장 큰 사무실에 왔어요';
+    const below = top + OFFICES.length * rowHeight;
+    panel.add(addText(this, W / 2, below + 4, note, { size: FONT_SIZE.small, color: THEME_CSS.faint, originX: 0.5 }));
+
+    // 회사의 모습이 적힌 카드를 친구에게 보낸다.
+    this.rowLine(panel, left, below + 20, width);
+    panel.add(addText(this, left + 14, below + 37, '우리 회사를 친구에게 자랑해요', { size: FONT_SIZE.small, color: THEME_CSS.sub, originY: 0.5 }));
+    this.button(panel, left + width - 66, below + 25, 56, 24, '공유', 'yellow', () => this.share());
+    this.prepareShare();
+  }
+
+  /** 오늘의 목표: 채우면 허브의 코인을 받는다. */
+  private buildGoalsPanel(panel: Container): void {
+    const state = this.state;
+    const goals = state.goals;
+    const rowHeight = 42;
+    const { left, top, width } = this.panelFrame(panel, '오늘의 목표', goals.list.length * rowHeight + 20);
+    goals.list.forEach((goal, index) => {
+      const y = top + index * rowHeight;
+      if (index > 0) this.rowLine(panel, left, y, width);
+      const middle = y + rowHeight / 2;
+      const done = isGoalDone(goals, index);
+      const claimed = goals.claimed[index] === true;
+      const progress = Math.min(goal.target, goals.progress[index] ?? 0);
+      panel.add(addText(this, left + 14, middle - 16, goalText(goal), { color: claimed ? THEME_CSS.faint : THEME_CSS.inkDeep }));
+      const barWidth = 96;
+      const bar = this.add.graphics();
+      bar.fillStyle(THEME.dim, 1).fillRoundedRect(left + 14, middle + 4, barWidth, 6, 3);
+      if (progress > 0) {
+        bar
+          .fillStyle(done ? THEME.mintDeep : THEME.gold, 1)
+          .fillRoundedRect(left + 14, middle + 4, Math.max(6, (barWidth * progress) / goal.target), 6, 3);
+      }
+      panel.add(bar);
+      panel.add(
+        addText(this, left + 14 + barWidth + 6, middle + 7, `${progress}/${goal.target}`, {
+          size: FONT_SIZE.small,
+          color: THEME_CSS.sub,
+          originY: 0.5,
+        }),
+      );
+
+      if (claimed) {
+        this.rowState(panel, left, width, middle, '받았어요');
+        return;
+      }
+      const x = left + width - 66;
+      const button = this.button(panel, x, middle - 13, 56, 26, `  ${GOAL_REWARD}`, done ? 'yellow' : 'neutral', () => {
+        const coins = claimGoal(goals, index);
+        if (coins <= 0) return;
+        store.update((save) => {
+          save.coins += coins;
+        });
+        this.play('reward');
+        this.save();
+        const bounds = new Phaser.Geom.Rectangle(0, 0, W, this.scale.height);
+        floatText(this, x + 28, middle - 18, `코인 +${coins}`, THEME_CSS.accent, bounds, DEPTH.banner);
+        this.refreshNow();
+      });
+      panel.add(this.add.image(x + 15, middle - 1.5, 'coin').setDisplaySize(12, 12).setAlpha(done ? 1 : 0.45));
+      if (!done) button.setEnabled(false);
+    });
     panel.add(
-      addText(this, W / 2, top + OFFICES.length * rowHeight + 4, note, { size: FONT_SIZE.small, color: THEME_CSS.faint, originX: 0.5 }),
+      addText(this, W / 2, top + goals.list.length * rowHeight + 4, '목표는 날마다 바뀌어요', {
+        size: FONT_SIZE.small,
+        color: THEME_CSS.faint,
+        originX: 0.5,
+      }),
     );
+  }
+
+  // ───────── 처음 안내와 알림 ─────────
+
+  /** 사무실 위쪽에 잠깐 떴다가 사라지는 한 줄. 끝나면 after를 부른다. */
+  private pill(text: string, hold: number, after?: () => void): Container {
+    const y = ROOM_TOP + 16;
+    const label = addText(this, W / 2, y, text, { size: FONT_SIZE.small, color: THEME_CSS.white, originX: 0.5, originY: 0.5 });
+    label.setScale(Math.min(1, (INNER - 24) / label.width));
+    const width = Math.ceil(label.displayWidth) + 20;
+    const back = this.add.graphics();
+    back.fillStyle(THEME.inkDeep, 0.9).fillRoundedRect(Math.round(W / 2 - width / 2), y - 10, width, 20, 10);
+    const view = this.add.container(0, 0, [back, label]).setDepth(DEPTH.fx).setAlpha(0);
+    this.tweens.add({ targets: view, alpha: 1, duration: 180 });
+    this.tweens.add({
+      targets: view,
+      alpha: 0,
+      delay: hold,
+      duration: 250,
+      onComplete: () => {
+        view.destroy(true);
+        after?.();
+      },
+    });
+    return view;
+  }
+
+  /** 처음 겪는 일이 있으면 안내를 한 번 띄운다. 창이 떠 있는 동안에는 기다린다. */
+  private syncTip(dt: number): void {
+    if (this.tipView || this.panel) return;
+    this.tipIn -= dt;
+    if (this.tipIn > 0) return;
+    const id = nextTip(this.state);
+    if (!id) {
+      this.tipIn = 1;
+      return;
+    }
+    markTip(this.state, id);
+    this.save();
+    this.play('tip');
+    this.tipView = this.pill(TIPS[id], TIP_MS, () => {
+      this.tipView = null;
+      this.tipIn = TIP_GAP;
+    });
+  }
+
+  // ───────── 소리 ─────────
+
+  private play(id: SoundId): void {
+    for (const note of SOUNDS[id] as readonly Note[]) {
+      tone(note.f, note.d, { type: note.type ?? 'triangle', volume: note.v ?? 0.3, slideTo: note.to, delay: note.at });
+    }
+  }
+
+  // ───────── 공유 ─────────
+
+  /**
+   * 회사의 모습이 적힌 카드를 미리 만들어 둔다. 누른 그 자리에서 공유 창을 열어야 브라우저가 허락하기 때문이다.
+   * 그림이 되기 전에 누르면 그림 없이 주소만 보낸다.
+   */
+  private prepareShare(): void {
+    const state = this.state;
+    const key = `${state.reputation}|${state.office}|${state.releases}`;
+    if (key === this.shareKey) return;
+    this.shareKey = key;
+    this.shareImage = null;
+    void makeShareImage(
+      {
+        title: COMPANY_TITLE,
+        score: state.reputation,
+        best: state.reputation,
+        isNewBest: false,
+        note: `${OFFICES[state.office].name} · 게임 ${state.releases}번 출시`,
+        invite: '나도 회사 차리기',
+        host: displayHost(window.location.href),
+        icon: 'icon-company',
+        mascot: mascotTexture(store.data.cosmetics.equipped.runner, 'cheer'),
+        paint: (context, name, x, y, width, height) => {
+          if (paintArt(context, name, x, y, width, height) || !this.textures.exists(name)) return;
+          context.drawImage(this.textures.get(name).getSourceImage() as CanvasImageSource, x, y, width, height);
+        },
+      },
+      shareFileName(COMPANY_GAME_ID),
+    ).then((file) => {
+      if (key === this.shareKey) this.shareImage = file;
+    });
+  }
+
+  private share(): void {
+    if (this.sharing) return;
+    this.sharing = true;
+    const state = this.state;
+    const pageUrl = window.location.href;
+    void sendShare({
+      title: shareTitle(COMPANY_TITLE),
+      text: `포켓 아케이드 [${COMPANY_TITLE}] 평판 ${state.reputation}! 우리 회사에 놀러 오세요`,
+      url: shareUrl(pageUrl, COMPANY_GAME_ID),
+      image: this.shareImage,
+    }).then((outcome) => {
+      this.sharing = false;
+      const notice = shareNotice(outcome);
+      if (notice && this.sys.isActive()) this.pill(notice, 1600).setDepth(DEPTH.banner);
+    });
   }
 
   /** 돌아왔을 때 뜨는 알림: 닫아 둔 동안 번 잎사귀와 끝난 업무 */

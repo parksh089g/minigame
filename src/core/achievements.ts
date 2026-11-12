@@ -97,6 +97,9 @@ export const ACHIEVEMENTS: readonly Achievement[] = [
   { id: 'play-30', group: 'play', title: '단골손님', description: '모두 합쳐 30판', goal: 30, reward: 30, measure: plays },
   { id: 'play-100', group: 'play', title: '백전노장', description: '모두 합쳐 100판', goal: 100, reward: 80, measure: plays },
   { id: 'duel-10', group: 'play', title: '단짝 승부', description: '둘이서 대결 열 판', goal: 10, reward: 30, measure: playedOf('duel') },
+  // 새싹 컴퍼니는 출시 한 번이 한 판이고, 평판이 최고 기록으로 남는다.
+  { id: 'company-release-1', group: 'play', title: '첫 출시', description: '새싹 컴퍼니 첫 출시', goal: 1, reward: 10, measure: playedOf('sprout-company') },
+  { id: 'company-release-30', group: 'play', title: '부지런한 회사', description: '새싹 컴퍼니 출시 30번', goal: 30, reward: 40, measure: playedOf('sprout-company') },
 
   { id: 'tap-80', group: 'score', title: '번개 손가락', description: '번개 탭 80점 이상', goal: 80, reward: 20, measure: bestOf('lightning-tap') },
   { id: 'tap-140', group: 'score', title: '번개의 달인', description: '번개 탭 140점 이상', goal: 140, reward: 50, measure: bestOf('lightning-tap') },
@@ -132,6 +135,9 @@ export const ACHIEVEMENTS: readonly Achievement[] = [
   { id: 'chosung-1000', group: 'score', title: '초성의 달인', description: '초성 퀴즈 1000점 이상', goal: 1000, reward: 50, measure: bestOf('chosung-quiz') },
   { id: 'lantern-3000', group: 'score', title: '꺼지지 않는 불', description: '등불지기 3000점 이상', goal: 3000, reward: 20, measure: bestOf('lantern-keeper') },
   { id: 'lantern-8000', group: 'score', title: '새벽을 본 등불', description: '등불지기 8000점 이상', goal: 8000, reward: 50, measure: bestOf('lantern-keeper') },
+  { id: 'company-200', group: 'score', title: '소문난 회사', description: '새싹 컴퍼니 평판 200', goal: 200, reward: 20, measure: bestOf('sprout-company') },
+  { id: 'company-1000', group: 'score', title: '이름난 회사', description: '새싹 컴퍼니 평판 1000', goal: 1000, reward: 50, measure: bestOf('sprout-company') },
+  { id: 'company-5000', group: 'score', title: '사옥의 주인', description: '새싹 컴퍼니 평판 5000', goal: 5000, reward: 80, measure: bestOf('sprout-company') },
 
   { id: 'daily-1', group: 'daily', title: '오늘도 도전', description: '오늘의 도전 한 번 달성', goal: 1, reward: 10, measure: (stats) => stats.dailyCleared },
   { id: 'daily-streak-3', group: 'daily', title: '사흘 연속', description: '도전 3일 연속 달성', goal: 3, reward: 30, measure: (stats) => stats.bestStreak },

@@ -116,6 +116,36 @@ export const LEAD: { unlockOffice: number; levels: readonly LeadLevel[] } = {
   ],
 };
 
+// ───────── 처음 안내 ─────────
+
+/**
+ * 처음 겪는 일마다 한 번씩 뜨는 한 줄 안내. 언제 뜨는지는 tips.ts에 있다.
+ * 적힌 차례가 띄우는 차례다.
+ */
+export const TIPS = {
+  income: '출시한 게임은 초마다 잎사귀를 벌어요',
+  gear: '장비 버튼에서 컴퓨터를 올리면 일이 빨라져요',
+  update: '이미 낸 게임을 다시 만들면 업데이트가 돼요',
+  move: '평판이 찼어요. 잎사귀를 모아 이사해요',
+  hire: '빈 자리를 누르면 새 친구를 뽑을 수 있어요',
+  goals: '목표 버튼에서 오늘의 목표를 볼 수 있어요',
+  train: '직원 창에서 교육하면 그 친구가 빨라져요',
+  lead: '팀장을 두면 카드를 알아서 맡겨 줘요',
+  rush: '급한 의뢰를 제때 끝내면 잎사귀를 받아요',
+  backlog: '큰 게임은 맡기는 대로 다음 카드가 나와요',
+} as const;
+
+export type TipId = keyof typeof TIPS;
+export const TIP_IDS = Object.keys(TIPS) as TipId[];
+
+/** 이 안내들이 생기기 전부터 하던 사람에게는 띄우지 않는 것: 그때도 있던 일에 대한 안내 */
+export const OLD_HAND_TIPS: readonly TipId[] = ['income', 'gear', 'update', 'move', 'hire'];
+
+// ───────── 사무실을 옮길 때의 코인 ─────────
+
+/** 그 사무실로 이사하면 한 번 받는 허브의 코인 */
+export const OFFICE_COINS: readonly number[] = [0, 10, 20, 40, 80];
+
 // ───────── 닫아 둔 동안 ─────────
 
 /**
