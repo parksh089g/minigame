@@ -1,6 +1,6 @@
 /**
  * 업적: 오래 두고 노릴 목표. 달성하면 업적 화면에서 눌러서 코인을 받는다.
- * 진행도는 세이브에 이미 있는 기록(판 수, 최고 점수, 오늘의 도전, 꾸미기)에서 그때그때 계산하고,
+ * 진행도는 세이브에 이미 있는 기록(판 수, 최고 점수, 깬 단계, 오늘의 도전, 꾸미기)에서 그때그때 계산하고,
  * 세이브에는 보상을 받은 업적만 남긴다. 그래서 업적이 생기기 전에 쌓은 기록도 그대로 인정된다.
  * 저장소와 화면 어느 쪽에도 의존하지 않는 순수 함수들이다.
  */
@@ -33,6 +33,12 @@ export interface AchievementStats {
   bestStreak: number;
   /** 코인으로 산 꾸미기의 수 */
   cosmeticsOwned: number;
+  /** 퍼즐 단계 모드에서 깬 단계를 모든 게임에 걸쳐 더한 수 */
+  stagesCleared: number;
+  /** 한 게임에서 가장 멀리 깬 단계 */
+  stageBest: number;
+  /** 단계를 하나라도 깬 게임의 수 */
+  stageGames: number;
 }
 
 /** statsOf가 읽는 세이브의 부분. save.ts를 끌어오지 않으려고 필요한 모양만 적는다. */
@@ -40,6 +46,8 @@ export interface AchievementSource {
   games: Record<string, { best: number; plays: number }>;
   daily: { totalCleared: number; bestStreak: number };
   cosmetics: { owned: readonly string[] };
+  /** 게임 id → 깬 가장 높은 단계 */
+  stages: Readonly<Record<string, number>>;
 }
 
 export function statsOf(save: AchievementSource): AchievementStats {
@@ -50,6 +58,7 @@ export function statsOf(save: AchievementSource): AchievementStats {
     best[id] = record.best;
     played[id] = record.plays;
   }
+  const cleared = Object.values(save.stages).filter((level) => level > 0);
   return {
     totalPlays: records.reduce((sum, [, record]) => sum + record.plays, 0),
     gamesTried: records.filter(([, record]) => record.plays > 0).length,
@@ -58,6 +67,9 @@ export function statsOf(save: AchievementSource): AchievementStats {
     dailyCleared: save.daily.totalCleared,
     bestStreak: save.daily.bestStreak,
     cosmeticsOwned: save.cosmetics.owned.length,
+    stagesCleared: cleared.reduce((sum, level) => sum + level, 0),
+    stageBest: cleared.reduce((best, level) => Math.max(best, level), 0),
+    stageGames: cleared.length,
   };
 }
 
@@ -87,6 +99,8 @@ const playedOf =
   (stats: AchievementStats): number =>
     stats.played[gameId] ?? 0;
 const owned = (stats: AchievementStats): number => stats.cosmeticsOwned;
+const stages = (stats: AchievementStats): number => stats.stagesCleared;
+const stageBest = (stats: AchievementStats): number => stats.stageBest;
 
 /** 살 수 있는 꾸미기의 수. 꾸미기가 늘면 "모두 모으기"의 목표도 따라 늘어난다. */
 const PAID_COSMETICS = CATALOG.filter((item) => item.price > 0).length;
@@ -100,6 +114,14 @@ export const ACHIEVEMENTS: readonly Achievement[] = [
   // 새싹 컴퍼니는 출시 한 번이 한 판이고, 평판이 최고 기록으로 남는다.
   { id: 'company-release-1', group: 'play', title: '첫 출시', description: '새싹 컴퍼니 첫 출시', goal: 1, reward: 10, measure: playedOf('sprout-company') },
   { id: 'company-release-30', group: 'play', title: '부지런한 회사', description: '새싹 컴퍼니 출시 30번', goal: 30, reward: 40, measure: playedOf('sprout-company') },
+  // 퍼즐 단계 모드. 깬 단계는 줄어들지 않으므로 한 번 달성하면 그대로 남는다.
+  { id: 'stage-first', group: 'play', title: '첫 단계', description: '퍼즐 단계 하나 깨기', goal: 1, reward: 5, measure: stages },
+  { id: 'stage-variety', group: 'play', title: '단계 맛보기', description: '세 게임에서 단계 깨기', goal: 3, reward: 15, measure: (stats) => stats.stageGames },
+  { id: 'stage-30', group: 'play', title: '차근차근', description: '모두 합쳐 30단계 깨기', goal: 30, reward: 30, measure: stages },
+  { id: 'stage-100', group: 'play', title: '단계 수집가', description: '모두 합쳐 100단계 깨기', goal: 100, reward: 60, measure: stages },
+  { id: 'stage-300', group: 'play', title: '퍼즐 박사', description: '모두 합쳐 300단계 깨기', goal: 300, reward: 120, measure: stages },
+  { id: 'stage-game-50', group: 'play', title: '한 우물 파기', description: '한 게임 50단계 깨기', goal: 50, reward: 50, measure: stageBest },
+  { id: 'stage-game-100', group: 'play', title: '끝까지 간 사람', description: '한 게임 100단계 깨기', goal: 100, reward: 150, measure: stageBest },
 
   { id: 'tap-80', group: 'score', title: '번개 손가락', description: '번개 탭 80점 이상', goal: 80, reward: 20, measure: bestOf('lightning-tap') },
   { id: 'tap-140', group: 'score', title: '번개의 달인', description: '번개 탭 140점 이상', goal: 140, reward: 50, measure: bestOf('lightning-tap') },

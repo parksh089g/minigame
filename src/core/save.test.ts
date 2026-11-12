@@ -683,6 +683,36 @@ describe('단계 모드', () => {
     expect(getRecord(result!.save, 'color-sort')).toEqual({ best: 240, plays: 2, lastPlayedAt: NOW + 10 });
   });
 
+  it('처음 깬 단계로 달성한 업적을 알린다: 첫 판과 첫 단계', () => {
+    const result = applyStageClear(createDefaultSave(NOW), 'color-sort', 1, NOW);
+    expect(result?.newAchievements.map((achievement) => achievement.id).sort()).toEqual(['play-first', 'stage-first']);
+  });
+
+  it('깬 단계가 쌓여서 달성한 업적도 알리고, 이미 달성한 것은 다시 알리지 않는다', () => {
+    const save = {
+      ...createDefaultSave(NOW),
+      games: { 'color-sort': { best: 0, plays: 29, lastPlayedAt: NOW } },
+      stages: { 'color-sort': 29 },
+    };
+    const result = applyStageClear(save, 'color-sort', 30, NOW);
+    expect(result?.newAchievements.map((achievement) => achievement.id).sort()).toEqual(['play-30', 'stage-30']);
+    const again = applyStageClear(result!.save, 'color-sort', 30, NOW);
+    expect(again?.newAchievements).toEqual([]);
+  });
+
+  it('세 번째 게임에서 첫 단계를 깨면 여러 게임의 업적을 달성한다', () => {
+    const save = {
+      ...createDefaultSave(NOW),
+      games: {
+        'color-sort': { best: 0, plays: 2, lastPlayedAt: NOW },
+        'parking-out': { best: 0, plays: 1, lastPlayedAt: NOW },
+      },
+      stages: { 'color-sort': 2, 'parking-out': 1 },
+    };
+    const ids = applyStageClear(save, 'pin-pull', 1, NOW)?.newAchievements.map((achievement) => achievement.id);
+    expect(ids).toContain('stage-variety');
+  });
+
   it('다른 게임의 단계 기록은 그대로 둔다', () => {
     const save = { ...createDefaultSave(NOW), stages: { 'parking-out': 4 } };
     expect(applyStageClear(save, 'color-sort', 1, NOW)?.save.stages).toEqual({ 'parking-out': 4, 'color-sort': 1 });

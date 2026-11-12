@@ -5,6 +5,7 @@
  * 길끼리 겹치지 않고 모든 칸이 길로 덮여야 판을 깬다.
  * 무작위가 필요한 곳은 random(0 이상 1 미만의 수를 돌려주는 함수)을 받아서 쓴다.
  */
+import { difficultyOf } from '../../core/stages';
 
 // ───────── 칸 ─────────
 
@@ -266,14 +267,17 @@ export function fallbackPartition(size: number): number[][] {
  * 만들어진 판에는 모든 칸을 채우는 풀이가 반드시 하나는 있다.
  * 길 나누기는 MAX_GENERATE_ATTEMPTS번까지만 해 보고, 그래도 안 되면 정해 둔 판을 쓴다.
  * 그래서 random이 무엇을 내놓든 언제나 끝난다.
+ * pairs를 주면 쌍의 수를 그것으로 정한다(단계 모드가 쓴다). 주지 않으면 판 크기에 맞는 범위에서 뽑는다.
  */
-export function generatePuzzle(size: number, random: () => number): Puzzle {
+export function generatePuzzle(size: number, random: () => number, pairs?: number): Puzzle {
   const [fewest, most] = pairRange(size);
   // 쌍의 수는 한 번만 정한다. 다시 해 볼 때마다 새로 뽑으면 만들기 쉬운 쪽(쌍이 많은 판)으로 쏠린다.
-  const target = fewest + Math.min(most - fewest, Math.floor(random() * (most - fewest + 1)));
+  const target = pairs ?? fewest + Math.min(most - fewest, Math.floor(random() * (most - fewest + 1)));
   for (let attempt = 0; attempt < MAX_GENERATE_ATTEMPTS; attempt += 1) {
     const paths = tryPartition(size, target, random);
     if (!paths || !isGoodPartition(size, paths) || stubCount(paths) > MAX_STUBS) continue;
+    // 길을 잇다 보면 바란 것보다 쌍이 적어질 수 있다. 쌍의 수를 정해서 받았으면 꼭 그 수여야 한다.
+    if (pairs !== undefined && paths.length !== pairs) continue;
     // 길의 순서와 방향을 섞어서, 쌍 번호(색과 모양)가 판의 자리와 얽히지 않게 한다.
     const mixed = shuffled(paths, random).map((path) => (random() < 0.5 ? path : [...path].reverse()));
     return puzzleFrom(size, mixed);
@@ -734,4 +738,57 @@ export function pendingPoints(run: RunState): number {
 /** 끝났을 때의 점수: 깬 판의 점수에, 풀던 판에서 이어 둔 쌍의 점수를 더한다. */
 export function finalScore(run: RunState): number {
   return run.score + pendingPoints(run);
+}
+
+// ───────── 단계 모드 ─────────
+
+/** 단계 모드의 난이도 한 칸: 판의 크기와 쌍의 수 */
+export interface LevelPlan {
+  size: number;
+  pairs: number;
+}
+
+/**
+ * 단계 모드가 거치는 난이도. 판이 커지고, 같은 크기에서는 쌍이 줄어든다:
+ * 쌍이 적을수록 길 하나가 길고 구불구불해서 어렵다. 쌍은 모양의 가짓수(여덟)를 넘지 않는다.
+ */
+export const LEVEL_PLANS: readonly LevelPlan[] = [
+  { size: 5, pairs: 5 },
+  { size: 5, pairs: 4 },
+  { size: 6, pairs: 6 },
+  { size: 6, pairs: 5 },
+  { size: 7, pairs: 8 },
+  { size: 7, pairs: 7 },
+  { size: 7, pairs: 6 },
+  { size: 8, pairs: 8 },
+  { size: 8, pairs: 7 },
+];
+
+/** 단계 모드가 거치는 난이도의 수 */
+export const LEVEL_STEPS = LEVEL_PLANS.length;
+
+/** 단계 모드의 level(1부터)번째 단계가 쓰는 난이도 번호(1부터) */
+export function levelStage(level: number): number {
+  return difficultyOf(level, LEVEL_STEPS);
+}
+
+/** 단계 모드의 level번째 단계의 판 크기와 쌍의 수 */
+export function levelPlan(level: number): LevelPlan {
+  return LEVEL_PLANS[levelStage(level) - 1];
+}
+
+/**
+ * 단계 모드의 한 단계. 시간은 흐르지 않고(elapse를 부르지 않는다), 판 하나를 깨면 끝난다.
+ * 같은 random이면 같은 판이 나온다.
+ */
+export function levelRun(level: number, random: () => number): RunState {
+  const plan = levelPlan(level);
+  return {
+    stage: 1,
+    board: newBoard(generatePuzzle(plan.size, random, plan.pairs)),
+    timeLeft: START_SECONDS,
+    score: 0,
+    boardsCleared: 0,
+    pairsLinked: 0,
+  };
 }
