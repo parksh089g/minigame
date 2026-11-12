@@ -58,6 +58,7 @@ import {
   type RunState,
   type SimEvent,
 } from './sim';
+import { dailyPlan } from './daily';
 import { inPuddle, PUDDLE_SLOW, puddleInCell, VENT, ventAt, ventClock, ventInCell, ventPhase, type Vent } from './terrain';
 
 const config = { viewW: 240, viewH: 520, meta: {} };
@@ -1349,6 +1350,42 @@ describe('보스와 끝', () => {
     sim.step(STEP, 0, 0);
     expect(sim.events).toContainEqual({ type: 'surge' });
     expect(sim.state.enemies.length - before).toBeGreaterThanOrEqual(20);
+  });
+});
+
+describe('오늘의 판', () => {
+  it('그날의 조건으로 시작하고, 저장했다가 이어도 오늘의 판으로 남는다', () => {
+    const plan = dailyPlan(20_769);
+    const state = createRun({ ...config, meta: {}, hero: plan.hero, stage: plan.stage, seed: plan.seed, daily: plan.day });
+    expect(state).toMatchObject({ hero: plan.hero, stage: plan.stage, seed: plan.seed, daily: plan.day, depth: 0 });
+    expect(state.weapons).toEqual({ [HEROES[plan.hero].weapon]: 1 });
+    // 영구 강화가 없으니 캐릭터의 타고난 체력 그대로다.
+    expect(state.player.hp).toBe(100 + (HEROES[plan.hero].trait.maxHp ?? 0));
+    expect(state.revives).toBe(0);
+    const restored = restoreRun(JSON.parse(JSON.stringify(state)));
+    expect(restored?.daily).toBe(plan.day);
+    // 보통 판에는 그 표시가 없다.
+    expect('daily' in createRun(config)).toBe(false);
+  });
+
+  it('같은 씨앗으로 똑같이 움직이면 판이 똑같이 흘러간다', () => {
+    const plan = dailyPlan(20_769);
+    const play = (): { kills: number; hp: number; enemies: number; level: number } => {
+      const sim = new Sim(
+        createRun({ ...config, meta: {}, hero: plan.hero, stage: plan.stage, seed: plan.seed, daily: plan.day }),
+        seededRandom(plan.seed),
+      );
+      sim.state.player.hp = 1e9;
+      for (let i = 0; i < Math.round(40 / STEP); i += 1) {
+        sim.step(STEP, Math.cos(i / 90), Math.sin(i / 90));
+        // 강화는 늘 첫 번째 것을 고른다.
+        while (sim.state.pendingLevelUps > 0) sim.applyUpgrade(sim.options()[0]);
+      }
+      return { kills: sim.state.kills, hp: sim.state.player.hp, enemies: sim.state.enemies.length, level: sim.state.player.level };
+    };
+    const first = play();
+    expect(first.kills).toBeGreaterThan(5);
+    expect(play()).toEqual(first);
   });
 });
 

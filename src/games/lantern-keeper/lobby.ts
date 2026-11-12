@@ -6,6 +6,7 @@ import { addTapZone, addText, drawPanel, Pager, PAGER_HEIGHT, PixelButton } from
 import { DARK_PANEL, FLOOR_OF, HERO_FRAMES, LK } from './art';
 import { CHALLENGES, claimable, isDone, progressOf, type Challenge } from './challenges';
 import { foundCount } from './codex';
+import { DAILY_REWARD, dailyPlan, dailyToday, dayLabel, withRo } from './daily';
 import { addCodexPage, startingTab } from './codexpage';
 import {
   HERO_ORDER,
@@ -54,6 +55,11 @@ const PICK_HEIGHT = 15 + HERO_CARD.height + 4 + DETAIL_HEIGHT + 15 + STAGE_CARD.
 /** 화면이 가장 짧을 때(400)의 배치를 기준으로 하고, 길면 구역 사이를 이만큼까지 벌린다. */
 const MAX_SPREAD = 30;
 
+/** 영구 강화, 도전 과제, 오늘의 판으로 가는 버튼 셋 사이의 틈 */
+const LINK_GAP = 4;
+/** 오늘의 판 쪽: 가장 짧은 화면에서의 미리보기와 기록 칸의 높이 */
+const DAILY = { showcase: 70, record: 46 } as const;
+
 /** 긴 화면에서만 보이는 미리보기 띠: 이만큼 남아야 넣고, 이 높이까지 키운다. */
 const SHOWCASE = { needs: 64, max: 84, gap: 6 } as const;
 
@@ -61,13 +67,14 @@ const SHOWCASE = { needs: 64, max: 84, gap: 6 } as const;
  * 준비 화면의 쪽. main은 캐릭터와 스테이지를 고르는 곳, upgrades는 영구 강화를 사는 곳,
  * challenges는 도전 과제를 보는 곳, codex는 무기와 그림자와 줍는 것을 모아 보는 도감.
  */
-export type LobbyPage = 'main' | 'upgrades' | 'challenges' | 'codex';
+export type LobbyPage = 'main' | 'upgrades' | 'challenges' | 'codex' | 'daily';
 
 const PAGE_TITLE: Record<LobbyPage, string> = {
   main: '등불지기',
   upgrades: '영구 강화',
   challenges: '도전 과제',
   codex: '도감',
+  daily: '오늘의 판',
 };
 /** 첫 쪽의 오른쪽 위에 놓이는 도감 버튼 */
 const CODEX_BUTTON = { width: 50, height: 26 } as const;
@@ -77,7 +84,11 @@ export interface LobbyHandlers {
   setMeta: (meta: LanternMeta) => void;
   /** 저장해 둔 판. 없으면 null */
   savedRun: RunState | null;
+  /** 오늘이 며칠째인지(daily.ts의 dayIndexOf) */
+  today: number;
   onStart: () => void;
+  /** 오늘의 판을 시작한다. */
+  onDaily: () => void;
   onResume: () => void;
   onBack: () => void;
   /** 다른 쪽으로 넘어간다. list는 그 쪽의 목록이 길어 나뉘었을 때 몇 번째 묶음을 보일지(0부터). 도감에서는 몇 번째 쪽인지다. */
@@ -125,7 +136,9 @@ export function buildLobby(
   const record =
     page === 'codex'
       ? `찾은 것 ${found.found}/${found.total}`
-      : meta.runs === 0
+      : page === 'daily'
+        ? dayLabel(handlers.today)
+        : meta.runs === 0
         ? '첫 밤을 기다려요'
         : meta.clears > 0
           ? `새벽을 본 횟수 ${meta.clears}`
@@ -144,6 +157,7 @@ export function buildLobby(
   if (page === 'upgrades') addUpgradeRows(scene, handlers, refreshers, refresh, list ?? 0);
   else if (page === 'challenges') addChallengeRows(scene, handlers, refreshers, refresh, list);
   else if (page === 'codex') addCodexPage(scene, handlers, startingTab(handlers, list));
+  else if (page === 'daily') addDailyPage(scene, handlers, refreshers, height);
   else addMainPage(scene, handlers, refreshers, refresh, height);
   refresh();
 }
@@ -182,7 +196,7 @@ function addMainPage(
 
   let y = 68;
   if (showcase > 0) {
-    addShowcase(scene, handlers, refreshers, y, showcase);
+    addShowcase(scene, () => handlers.getMeta(), refreshers, y, showcase);
     y += showcase + SHOWCASE.gap;
   }
   y += Math.floor((slack - spread) / 2);
@@ -199,29 +213,42 @@ function addMainPage(
   y += STAGE_CARD.height + 4;
   addDepthRow(scene, handlers, refreshers, refresh, y);
 
-  // 영구 강화와 도전 과제로 가는 버튼. 받을 보상이 있으면 도전 과제 버튼에 그 수가 붙는다.
-  const half = (ROW_WIDTH - CARD_GAP) / 2;
+  // 영구 강화, 도전 과제, 오늘의 판으로 가는 버튼. 받을 보상이 있으면 도전 과제 버튼에 그 수가 붙고,
+  // 오늘의 판을 아직 하지 않았으면 그 버튼이 눈에 띄게 칠해진다.
+  const third = (ROW_WIDTH - LINK_GAP * 2) / 3;
+  const linkX = (index: number): number => Math.round(MARGIN + index * (third + LINK_GAP));
   new PixelButton(scene, {
-    x: MARGIN,
+    x: linkX(0),
     y: upgradeTop,
-    width: half,
+    width: Math.floor(third),
     height: UPGRADE_BUTTON_HEIGHT,
     label: '영구 강화',
     style: 'yellow',
     onTap: () => handlers.onPage('upgrades'),
   });
   const feats = new PixelButton(scene, {
-    x: MARGIN + half + CARD_GAP,
+    x: linkX(1),
     y: upgradeTop,
-    width: half,
+    width: Math.floor(third),
     height: UPGRADE_BUTTON_HEIGHT,
     label: '도전 과제',
     onTap: () => handlers.onPage('challenges'),
   });
+  const played = dailyToday(handlers.getMeta().daily, handlers.today).tries > 0;
+  new PixelButton(scene, {
+    x: linkX(2),
+    y: upgradeTop,
+    width: Math.floor(third),
+    height: UPGRADE_BUTTON_HEIGHT,
+    label: '오늘의 판',
+    style: played ? 'neutral' : 'green',
+    onTap: () => handlers.onPage('daily'),
+  });
   refreshers.push(() => {
     const meta = handlers.getMeta();
     const ready = claimable(meta, meta.claimed).length;
-    feats.setLabel(ready > 0 ? `도전 과제 ${ready}` : '도전 과제').setStyle(ready > 0 ? 'green' : 'neutral');
+    // 버튼이 좁아서 두 자리가 되면 넘친다.
+    feats.setLabel(ready > 0 ? `도전 과제 ${ready > 9 ? '9+' : ready}` : '도전 과제').setStyle(ready > 0 ? 'green' : 'neutral');
   });
 
   const buttonX = MARGIN + 12;
@@ -232,7 +259,10 @@ function addMainPage(
       y: height - 78,
       width: buttonWidth,
       height: 30,
-      label: `이어하기 (${formatClock(saved.t)} · Lv ${saved.player.level})`,
+      label:
+        saved.daily === undefined
+          ? `이어하기 (${formatClock(saved.t)} · Lv ${saved.player.level})`
+          : `오늘의 판 이어하기 (${formatClock(saved.t)})`,
       style: 'green',
       onTap: handlers.onResume,
     });
@@ -270,10 +300,96 @@ function addMainPage(
   }
 }
 
-/** 고른 캐릭터가 고른 스테이지에서 그곳의 적에게 둘러싸여 있는 미리보기 */
-function addShowcase(
+/** 오늘의 판: 오늘의 조건과 기록을 보여 주고 거기서 바로 시작한다. */
+function addDailyPage(
   scene: Phaser.Scene,
   handlers: LobbyHandlers,
+  refreshers: Array<() => void>,
+  height: number,
+): void {
+  const plan = dailyPlan(handlers.today);
+  const hero = HEROES[plan.hero];
+  const stage = STAGES[plan.stage];
+  const record = dailyToday(handlers.getMeta().daily, handlers.today);
+  const middle = GAME_WIDTH / 2;
+  // 화면이 길면 미리보기를 키우고 구역 사이를 벌린다.
+  const room = Math.max(0, height - 400);
+  const showcase = DAILY.showcase + Math.min(24, Math.floor(room / 3));
+  const gap = 8 + Math.min(14, Math.floor(room / 6));
+
+  let y = 72;
+  addShowcase(scene, () => plan, refreshers, y, showcase);
+  y += showcase + gap;
+  addText(scene, middle, y, `${hero.name} · ${stage.name}`, { color: CSS.white, bold: true, originX: 0.5 });
+  y += 17;
+  addText(scene, middle, y, `${withRo(WEAPONS[hero.weapon].name)} 시작 · ${hero.perk}`, {
+    color: CSS.cyan,
+    size: FONT_SIZE.small,
+    originX: 0.5,
+  });
+  y += 14;
+  addText(scene, middle, y, '영구 강화 없이, 누구나 같은 조건이에요', {
+    color: CSS.silver,
+    size: FONT_SIZE.small,
+    originX: 0.5,
+  });
+  y += 14 + gap;
+
+  const panel = scene.add.graphics();
+  drawPanel(panel, MARGIN, y, ROW_WIDTH, DAILY.record, { fill: COLOR.ink, border: COLOR.navy, shadow: null });
+  addText(scene, MARGIN + 10, y + 7, '오늘의 기록', { color: CSS.silver });
+  addText(
+    scene,
+    MARGIN + ROW_WIDTH - 10,
+    y + 7,
+    record.tries > 0 ? `${record.best}점 · ${formatClock(record.seconds)}${record.cleared ? ' · 새벽' : ''}` : '아직 없어요',
+    { color: record.tries > 0 ? CSS.yellow : CSS.silver, bold: record.tries > 0, originX: 1 },
+  );
+  addText(scene, MARGIN + 10, y + 25, '이어 온 날', { color: CSS.silver });
+  addText(
+    scene,
+    MARGIN + ROW_WIDTH - 10,
+    y + 25,
+    record.streak > 0 ? `${record.streak}일${record.tries > 0 ? '' : ' (오늘 하면 하루 더)'}` : '오늘부터 시작',
+    { color: CSS.white, originX: 1 },
+  );
+  y += DAILY.record + gap;
+  addText(
+    scene,
+    middle,
+    y,
+    record.tries > 0 ? `오늘 ${record.tries}판 했어요. 더 높은 기록에 도전해 보세요` : `오늘 첫 판을 마치면 불씨 +${DAILY_REWARD}`,
+    { color: record.tries > 0 ? CSS.silver : CSS.orange, size: FONT_SIZE.small, originX: 0.5 },
+  );
+
+  // 하던 판이 있으면 그 판이 사라지므로 한 번 더 누르게 한다.
+  let armed = !handlers.savedRun;
+  const go = new PixelButton(scene, {
+    x: MARGIN + 12,
+    y: height - 50,
+    width: ROW_WIDTH - 24,
+    height: 34,
+    label: record.tries > 0 ? '다시 도전!' : '도전!',
+    style: 'green',
+    onTap: () => {
+      if (armed) {
+        handlers.onDaily();
+        return;
+      }
+      armed = true;
+      go.setLabel(DISCARD.label).setStyle('red');
+      scene.time.delayedCall(DISCARD.ms, () => {
+        armed = false;
+        go.setLabel(record.tries > 0 ? '다시 도전!' : '도전!').setStyle('green');
+      });
+    },
+  });
+}
+
+/** 그 캐릭터가 그 스테이지에서 그곳의 적에게 둘러싸여 있는 미리보기 */
+function addShowcase(
+  scene: Phaser.Scene,
+  pick: () => { hero: HeroId; stage: StageId },
   refreshers: Array<() => void>,
   top: number,
   height: number,
@@ -301,7 +417,7 @@ function addShowcase(
   const foes = spots.map(([dx, dy]) => scene.add.image(centerX + dx, centerY + dy, LK.shade[0]));
   let step = 0;
   const draw = (): void => {
-    const meta = handlers.getMeta();
+    const meta = pick();
     const spawns = STAGES[meta.stage].spawns;
     floor.setTexture(FLOOR_OF[meta.stage]);
     hero.setTexture(HERO_FRAMES[meta.hero][step % 2]);

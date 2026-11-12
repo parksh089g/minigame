@@ -28,6 +28,7 @@ import {
   type MetaId,
   type StageId,
 } from './data';
+import { addDailyRun, createDaily, DAILY_REWARD, normalizeDaily, type DailyRecord } from './daily';
 import { clampDepth, depthName, isUnlocked, metaCost, type Levels } from './rules';
 import { restoreRun, type RunState } from './sim';
 import { normalizeTips, OLD_HAND_TIPS, type TipId } from './tips';
@@ -61,6 +62,8 @@ export interface LanternMeta {
   unread: string[];
   /** 이미 본 안내(tips.ts). 처음 겪는 일마다 한 번씩만 뜬다. */
   tips: TipId[];
+  /** 오늘의 판(daily.ts)의 기록: 마지막으로 한 날과 그날의 최고 기록, 이어 온 날 수 */
+  daily: DailyRecord;
 }
 
 export function createDefaultMeta(): LanternMeta {
@@ -80,6 +83,7 @@ export function createDefaultMeta(): LanternMeta {
     codex: [],
     unread: [],
     tips: [],
+    daily: createDaily(),
   };
 }
 
@@ -124,6 +128,7 @@ export function normalizeMeta(raw: unknown): LanternMeta {
   Object.assign(meta, normalizeCodex(data.codex, data.unread));
   // 안내가 생기기 전부터 하던 사람에게는 그때도 있던 일을 새삼 알려 주지 않는다.
   meta.tips = Array.isArray(data.tips) ? normalizeTips(data.tips) : meta.runs > 0 ? [...OLD_HAND_TIPS] : [];
+  meta.daily = normalizeDaily(data.daily);
   return meta;
 }
 
@@ -179,6 +184,8 @@ export interface RunResult extends RunFeats {
   seconds: number;
   /** 그 판에서 만난 것(sim.ts의 state.seen). 도감에 적힌다. */
   seen?: readonly string[];
+  /** 오늘의 판이었으면 그날과 그 판의 점수. 그날의 기록에 남고, 그날 처음이면 불씨가 더 붙는다. */
+  daily?: { day: number; score: number };
 }
 
 /** 한 판의 결과를 반영한다. 완주했으면 그 스테이지의 다음 깊은 밤이 열리고, 도전 과제의 기록이 쌓인다. */
@@ -188,15 +195,23 @@ export function applyRun(meta: LanternMeta, result: RunResult): LanternMeta {
     const next = Math.min(MAX_DEPTH, clampDepth(result.depth) + 1);
     if (next > openDepth(meta, result.stage)) depths[result.stage] = next;
   }
+  const daily = result.daily
+    ? addDailyRun(meta.daily, result.daily.day, {
+        score: result.daily.score,
+        seconds: result.seconds,
+        cleared: result.cleared,
+      })
+    : null;
   return {
     ...meta,
-    embers: meta.embers + Math.max(0, Math.floor(result.embers)),
+    embers: meta.embers + Math.max(0, Math.floor(result.embers)) + (daily?.first ? DAILY_REWARD : 0),
     runs: meta.runs + 1,
     clears: meta.clears + (result.cleared ? 1 : 0),
     bestSeconds: Math.max(meta.bestSeconds, Math.floor(result.seconds)),
     depths,
-    stats: addRun(meta.stats, result),
+    stats: addRun(meta.stats, { ...result, dailyFirst: daily?.first ?? false }),
     ...discover(meta, result.seen ?? [], result.evolved),
+    daily: daily ? daily.record : meta.daily,
   };
 }
 
