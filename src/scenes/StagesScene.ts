@@ -6,6 +6,7 @@ import { clampPage, layoutPages, pageOfIndex, type PageLayout } from '../core/pa
 import { sfx } from '../core/sfx';
 import { clearedOf, isUnlocked, MILESTONE_EVERY, nextLevel, STAGE_LEVELS } from '../core/stages';
 import { store } from '../core/store';
+import { tabRows } from '../core/tabs';
 import {
   addBackdrop,
   addTapZone,
@@ -31,11 +32,20 @@ export interface StagesData {
 
 const MARGIN = 12;
 const CONTENT_WIDTH = GAME_WIDTH - MARGIN * 2;
-/** 게임을 고르는 탭: 한 줄에 다섯 개까지 */
-const TAB = { top: 42, height: 44, gap: 4, icon: 24 } as const;
-/** 고른 게임의 이름과 깬 단계 수를 적는 줄 */
-const TITLE_TOP = TAB.top + TAB.height + 8;
-const GRID_TOP = TITLE_TOP + 20;
+/**
+ * 게임을 고르는 탭: 한 줄에 다섯 개까지 놓고, 게임이 그보다 많으면 줄을 늘린다(core/tabs).
+ * 한 줄에 다 넣으면 탭이 좁아져서 누르기 어렵다. 여러 줄일 때는 단계 칸의 자리를 덜 빼앗도록 탭을 조금 낮춘다.
+ */
+const TAB = {
+  top: 42,
+  gap: 4,
+  /** 한 줄일 때 */
+  one: { height: 44, icon: 24, iconTop: 4, countTop: 30 },
+  /** 여러 줄일 때 */
+  many: { height: 36, icon: 20, iconTop: 3, countTop: 23 },
+} as const;
+/** 탭 아래에서 고른 게임의 이름을 적는 줄까지의 틈, 그 줄에서 단계 칸까지의 거리 */
+const TITLE = { above: 8, height: 20 } as const;
 /** 단계 칸: 한 줄에 다섯 개 */
 const COLUMNS = 5;
 const CELL = { height: 32, gap: 4 } as const;
@@ -68,6 +78,10 @@ export class StagesScene extends Phaser.Scene implements BackAware {
   /** 지금 쪽의 단계 칸을 이루는 것들. 쪽을 넘기면 지우고 다시 만든다. */
   private cellObjects: Phaser.GameObjects.GameObject[] = [];
   private cellsDirty = false;
+  /** 고른 게임의 이름과 깬 단계 수를 적는 줄의 위치. 탭이 몇 줄인지에 따라 달라진다. */
+  private titleTop = 0;
+  /** 단계 칸이 시작하는 위치 */
+  private gridTop = 0;
 
   constructor() {
     super(SCENE.stages);
@@ -120,15 +134,19 @@ export class StagesScene extends Phaser.Scene implements BackAware {
   // ───────── 게임 고르기 ─────────
 
   private addTabs(): void {
-    const count = this.games.length;
-    const width = (CONTENT_WIDTH - TAB.gap * (count - 1)) / count;
+    const { rows, perRow } = tabRows(this.games.length);
+    const size = rows > 1 ? TAB.many : TAB.one;
+    const width = (CONTENT_WIDTH - TAB.gap * (perRow - 1)) / perRow;
+    this.titleTop = TAB.top + rows * size.height + (rows - 1) * TAB.gap + TITLE.above;
+    this.gridTop = this.titleTop + TITLE.height;
     this.games.forEach((game, index) => {
-      const x = MARGIN + index * (width + TAB.gap);
+      const x = MARGIN + (index % perRow) * (width + TAB.gap);
+      const top = TAB.top + Math.floor(index / perRow) * (size.height + TAB.gap);
       const selected = game === this.picked;
       const frame = this.add.graphics();
       const draw = (pressed: boolean): void => {
         frame.clear();
-        drawPanel(frame, x, TAB.top, width, TAB.height, {
+        drawPanel(frame, x, top, width, size.height, {
           fill: selected ? LOOK.tab.on : pressed ? THEME.dim : LOOK.tab.off,
           shadow: selected ? LOOK.tab.onShadow : undefined,
           radius: 10,
@@ -136,15 +154,15 @@ export class StagesScene extends Phaser.Scene implements BackAware {
       };
       draw(false);
       this.add
-        .image(x + width / 2, TAB.top + 4 + TAB.icon / 2, game.icon)
-        .setDisplaySize(TAB.icon, TAB.icon);
+        .image(x + width / 2, top + size.iconTop + size.icon / 2, game.icon)
+        .setDisplaySize(size.icon, size.icon);
       // 아이콘 아래에 그 게임에서 깬 단계 수를 적는다.
-      addText(this, x + width / 2, TAB.top + 30, String(clearedOf(store.data.stages, game.id)), {
+      addText(this, x + width / 2, top + size.countTop, String(clearedOf(store.data.stages, game.id)), {
         size: FONT_SIZE.small,
         color: selected ? THEME_CSS.inkDeep : THEME_CSS.sub,
         originX: 0.5,
       });
-      addTapZone(this, x, TAB.top, width, TAB.height, draw, () => {
+      addTapZone(this, x, top, width, size.height, draw, () => {
         if (selected) return;
         sfx.click();
         this.scene.restart({ gameId: game.id, quiet: true } satisfies StagesData);
@@ -153,9 +171,9 @@ export class StagesScene extends Phaser.Scene implements BackAware {
   }
 
   private addTitle(): void {
-    addText(this, MARGIN, TITLE_TOP, this.picked.title, { color: THEME_CSS.inkDeep });
+    addText(this, MARGIN, this.titleTop, this.picked.title, { color: THEME_CSS.inkDeep });
     const cleared = clearedOf(store.data.stages, this.picked.id);
-    addText(this, GAME_WIDTH - MARGIN, TITLE_TOP, `${cleared} / ${STAGE_LEVELS}단계`, {
+    addText(this, GAME_WIDTH - MARGIN, this.titleTop, `${cleared} / ${STAGE_LEVELS}단계`, {
       color: THEME_CSS.accent,
       originX: 1,
     });
@@ -164,7 +182,7 @@ export class StagesScene extends Phaser.Scene implements BackAware {
   // ───────── 단계 고르기 ─────────
 
   private addGrid(height: number): void {
-    const available = height - GRID_TOP - (FOOT.above + FOOT.button + FOOT.below);
+    const available = height - this.gridTop - (FOOT.above + FOOT.button + FOOT.below);
     const rows = layoutPages(Math.ceil(STAGE_LEVELS / COLUMNS), available, ROW_STEP, PAGER_HEIGHT);
     this.layout = { perPage: rows.perPage * COLUMNS, pages: rows.pages };
     // 다음에 깰 단계가 있는 쪽을 연다. 다 깼으면 마지막 쪽이다.
@@ -174,9 +192,9 @@ export class StagesScene extends Phaser.Scene implements BackAware {
     if (this.layout.pages <= 1) return;
 
     const listHeight = rows.perPage * ROW_STEP;
-    this.pager = new Pager(this, GAME_WIDTH / 2, GRID_TOP + listHeight, (page) => this.showPage(page));
+    this.pager = new Pager(this, GAME_WIDTH / 2, this.gridTop + listHeight, (page) => this.showPage(page));
     this.pager.set(this.layout.pages, this.page);
-    onSwipe(this, new Phaser.Geom.Rectangle(0, GRID_TOP, GAME_WIDTH, listHeight), (direction) => {
+    onSwipe(this, new Phaser.Geom.Rectangle(0, this.gridTop, GAME_WIDTH, listHeight), (direction) => {
       if (this.showPage(this.page + direction)) sfx.click();
     });
   }
@@ -200,7 +218,7 @@ export class StagesScene extends Phaser.Scene implements BackAware {
     for (let level = first; level <= last; level += 1) {
       const index = level - first;
       const x = MARGIN + (index % COLUMNS) * (CELL_WIDTH + CELL.gap);
-      const y = GRID_TOP + Math.floor(index / COLUMNS) * ROW_STEP;
+      const y = this.gridTop + Math.floor(index / COLUMNS) * ROW_STEP;
       this.addCell(level, x, y);
     }
   }
