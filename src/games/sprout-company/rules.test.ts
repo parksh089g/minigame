@@ -842,8 +842,9 @@ describe('부서', () => {
     for (let level = 1; level < DEPARTMENT.seats.length; level += 1) {
       expect(DEPARTMENT.seats[level]).toBeGreaterThanOrEqual(DEPARTMENT.seats[level - 1]);
     }
-    // 업무마다 그것을 맡는 부서가 하나씩 있다.
-    expect(DEPARTMENT_ORDER.map((id) => DEPARTMENTS[id].kind).sort()).toEqual([...TASK_KINDS].sort());
+    // 업무마다 그것을 맡는 부서가 하나씩 있다. 나머지는 맡는 업무 없이 회사를 돕는 부서다.
+    const kinds = DEPARTMENT_ORDER.map((id) => DEPARTMENTS[id].kind).filter((kind) => kind !== null);
+    expect([...kinds].sort()).toEqual([...TASK_KINDS].sort());
     for (const id of PROJECT_ORDER) {
       const def: ProjectDef = PROJECTS[id];
       if (def.departments === undefined) continue;
@@ -1127,10 +1128,10 @@ describe('예약 줄', () => {
   it('맞지 않는 부서와 예약은 버린다', () => {
     const state = grown(LAST);
     const raw = JSON.parse(JSON.stringify(state)) as Record<string, unknown> & { desks: { dept: unknown }[] };
-    raw.departments = { art: 99, music: 3, code: -2 };
+    raw.departments = { art: 99, dance: 3, code: -2 };
     // 세우지 않은 부서와 모르는 부서, 자리를 넘는 사람은 뺀다.
     raw.desks.forEach((desk, index) => {
-      desk.dept = index < 6 ? 'art' : index < 8 ? 'code' : 'music';
+      desk.dept = index < 6 ? 'art' : index < 8 ? 'code' : 'dance';
     });
     raw.queue = ['stack-tower', 'no-such-game', 'lantern-keeper'];
     const read = normalizeCompany(raw) as CompanyState;

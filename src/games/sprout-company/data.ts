@@ -170,16 +170,29 @@ export const OLD_HAND_TIPS: readonly TipId[] = ['income', 'gear', 'update', 'mov
 
 export interface DepartmentDef {
   name: string;
-  /** 이 부서가 맡는 업무. 부서원은 이 업무를 더 빨리 한다. */
-  kind: TaskKind;
+  /** 이 부서가 맡는 업무. 부서원은 이 업무를 더 빨리 한다. 돕는 부서는 맡는 업무가 없어서 null이다. */
+  kind: TaskKind | null;
+  /**
+   * 돕는 부서가 회사에 주는 효과. 부서원 한 명이 부서의 단계마다 amount만큼 올린다.
+   * 부서원이 넷이고 5단계면 amount의 스무 배다. 일하는 부서에는 없다.
+   */
+  effect?: Effect;
 }
 
-/** 부서는 직원을 묶어 한 가지 업무를 더 잘하게 한다. 줄을 더하면 부서가 늘어난다. */
+/**
+ * 부서는 두 가지다. 줄을 더하면 부서가 늘어난다.
+ * - 일하는 부서(kind가 있음): 직원을 묶어 한 가지 업무를 더 잘하게 한다.
+ * - 돕는 부서(effect가 있음): 부서원의 수만큼 회사 전체의 수익이나 평판을 올린다.
+ *   부서원은 하던 대로 카드를 맡아 일하지만, 한 사람은 한 부서에만 들 수 있어서 일하는 부서의 덤은 받지 못한다.
+ */
 export const DEPARTMENTS = {
   plan: { name: '기획부', kind: 'plan' },
   art: { name: '그림부', kind: 'art' },
   code: { name: '개발부', kind: 'code' },
   test: { name: '검사부', kind: 'test' },
+  music: { name: '음악부', kind: null, effect: { key: 'income', amount: 0.06 } },
+  pr: { name: '홍보부', kind: null, effect: { key: 'reputation', amount: 0.04 } },
+  service: { name: '고객 응대부', kind: null, effect: { key: 'away', amount: 0.04 } },
 } as const satisfies Record<string, DepartmentDef>;
 
 export type DepartmentId = keyof typeof DEPARTMENTS;
@@ -188,7 +201,7 @@ export const DEPARTMENT_ORDER = Object.keys(DEPARTMENTS) as DepartmentId[];
 /**
  * 부서를 세우고 키우는 규칙. 0단계는 아직 세우지 않은 것이다.
  * n단계에서 n+1단계로 올리는 값은 baseCost × growth^n이고, seats[n - 1]이 n단계의 자리 수다.
- * 부서원은 그 부서의 업무를 단계마다 boost만큼 더 빨리 한다. 특기와는 곱으로 겹친다.
+ * 일하는 부서의 부서원은 그 부서의 업무를 단계마다 boost만큼 더 빨리 한다. 특기와는 곱으로 겹친다.
  * 직원은 한 부서에만 들 수 있다.
  */
 export const DEPARTMENT = {

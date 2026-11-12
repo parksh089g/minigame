@@ -5,7 +5,7 @@
 import type Phaser from 'phaser';
 import { THEME_CSS } from '../../config';
 import { addHiResCanvas, renderScale } from '../../core/hidpi';
-import type { TaskKind } from './data';
+import { DEPARTMENTS, type DepartmentDef, type DepartmentId, type TaskKind } from './data';
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -56,6 +56,20 @@ export const TASK_COLORS: Readonly<Record<TaskKind, { face: number; deep: number
 };
 
 export const taskTexture = (kind: TaskKind): string => `sc-task-${kind}`;
+
+/** 돕는 부서의 색. 일하는 부서는 맡은 업무의 색을 쓴다. */
+const SUPPORT_COLORS: Readonly<Record<string, { face: number; deep: number; css: string }>> = {
+  music: { face: 0xe0d4ff, deep: 0xb9a2f0, css: '#7a63c9' },
+  pr: { face: 0xffd9c2, deep: 0xf5a57a, css: '#c9662e' },
+  service: { face: 0xdcefb0, deep: 0xb5d671, css: '#5f8f1e' },
+};
+
+/** 부서의 색과 그림. 일하는 부서는 맡은 업무의 것을, 돕는 부서는 제 것을 쓴다. */
+export function departmentLook(id: DepartmentId): { face: number; deep: number; css: string; texture: string } {
+  const kind = (DEPARTMENTS[id] as DepartmentDef).kind;
+  if (kind) return { ...TASK_COLORS[kind], texture: taskTexture(kind) };
+  return { ...(SUPPORT_COLORS[id] ?? TASK_COLORS.plan), texture: `sc-dept-${id}` };
+}
 
 /** 컴퓨터는 레벨이 오르면 모습이 바뀐다. */
 const COMPUTER_TIERS = [1, 5, 10, 15] as const;
@@ -357,6 +371,42 @@ const ARTS: Record<string, Art> = {
       oval(c, 11, 14, 9, 3.6, '#f0cfa5');
       box(c, 10, 16.5, 2, 4, 0, '#e0b98a');
       box(c, 7, 19.6, 8, 1.8, 0.9, '#e0b98a');
+    },
+  },
+  /** 음악부: 음표 */
+  'sc-dept-music': {
+    width: 16,
+    height: 16,
+    view: [24, 24],
+    draw(c) {
+      stroke(c, 'M10 18V6.5l9-2V16', '#8d7aa8', 2.2);
+      oval(c, 7.2, 18, 3.6, 2.8, '#9684e0', -0.3);
+      oval(c, 16.2, 16, 3.6, 2.8, '#9684e0', -0.3);
+    },
+  },
+  /** 홍보부: 확성기 */
+  'sc-dept-pr': {
+    width: 16,
+    height: 16,
+    view: [24, 24],
+    draw(c) {
+      box(c, 6.5, 13, 3.4, 7.5, 1.4, '#8d7aa8');
+      fill(c, 'M3.5 9.5h4.5l8-5v15l-8-5H3.5z', '#f59a5c');
+      box(c, 2.5, 9, 3.6, 6, 1.4, '#ffd0a8');
+      stroke(c, 'M19 9c1.6 1.6 1.6 4.4 0 6', '#f59a5c', 1.8);
+    },
+  },
+  /** 고객 응대부: 머리에 쓰는 전화기 */
+  'sc-dept-service': {
+    width: 16,
+    height: 16,
+    view: [24, 24],
+    draw(c) {
+      stroke(c, 'M5.5 14v-2.5a6.5 6.5 0 0 1 13 0V14', '#8d7aa8', 2.2);
+      box(c, 3, 12.5, 4.6, 7.5, 2, '#8fcf5c');
+      box(c, 16.4, 12.5, 4.6, 7.5, 2, '#8fcf5c');
+      stroke(c, 'M18.6 20c0 1.8-2 2.4-4.6 2.4', '#8d7aa8', 1.6);
+      oval(c, 13, 22.3, 1.7, 1.3, '#5f8f1e');
     },
   },
   /** 단짝이 옆자리에 앉았다 */
