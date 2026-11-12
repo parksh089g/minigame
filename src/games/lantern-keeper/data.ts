@@ -340,8 +340,8 @@ export const SURGES: readonly number[] = [180, 300, 420, 540];
 export const ENDLESS = {
   /** 1분마다 그림자와 보스의 체력에 곱해지는 값 */
   hp: 1.6,
-  /** 1분마다 받는 피해에 더해지는 비율 */
-  damage: 0.25,
+  /** 1분마다 받는 피해에 곱해지는 값. 체력처럼 곱으로 자라서, 막는 쪽 축복만 쌓아서는 끝까지 버틸 수 없다. */
+  damage: 1.25,
   /** 1분마다 그림자의 빠르기에 더해지는 비율과 그 상한. 오래 끌면 걸어서는 따돌릴 수 없게 된다. */
   speed: 0.04,
   maxSpeed: 0.6,
@@ -350,7 +350,48 @@ export const ENDLESS = {
   /** 밀물의 간격(초)과, 한 번에 에워싸는 수. 첫 밀물은 간격의 절반이 지났을 때 온다. */
   surgeEvery: 60,
   surgeCount: 42,
+  /** 밤의 축복을 하나 고르는 간격(초). 끝없는 밤에 들어설 때 한 번, 그 뒤로 이 간격마다 한 번씩 고른다. */
+  boonEvery: 60,
 } as const;
+
+/**
+ * 밤의 축복: 끝없는 밤에서만 받는 강화. 같은 것을 몇 번이든 겹쳐 받을 수 있다.
+ * 그림자가 세지는 간격(1분)마다 셋 가운데 하나를 고르고, 끝없는 밤에서는 레벨업과 무기 강화권의 빈자리도 축복이 채운다.
+ * 겹칠수록 세지지만 그림자가 곱으로 자라는 것을 따라잡지는 못한다. 무엇을 고르느냐에 따라 버티는 길이가 달라진다.
+ */
+export type BoonId = 'blaze' | 'haste' | 'bulwark' | 'ward' | 'bloom' | 'breath';
+
+export interface BoonInfo {
+  name: string;
+  description: string;
+}
+
+/** 축복 하나가 올려 주는 양. 설명의 숫자와 맞춘다. */
+export const BOON_VALUES = {
+  /** 주는 피해에 더해지는 비율 */
+  blaze: 0.2,
+  /** 공격 간격에 곱해지는 값 */
+  haste: 0.9,
+  /** 늘어나는 최대 체력. 받는 자리에서 그만큼 찬다. */
+  bulwark: 20,
+  /** 받는 피해에 곱해지는 값 */
+  ward: 0.9,
+  /** 공격 범위에 더해지는 비율 */
+  bloom: 0.1,
+  /** 1초에 차는 체력 */
+  breath: 0.5,
+} as const;
+
+export const BOONS: Record<BoonId, BoonInfo> = {
+  blaze: { name: '타오르는 심지', description: '주는 피해 +20%' },
+  haste: { name: '잰 손놀림', description: '공격 간격 -10%' },
+  bulwark: { name: '두꺼운 솜옷', description: '최대 체력 +20, 그만큼 회복' },
+  ward: { name: '밤의 갑옷', description: '받는 피해 -10%' },
+  bloom: { name: '넓은 빛', description: '공격 범위 +10%' },
+  breath: { name: '깊은 숨', description: '1초에 체력 0.5씩 회복' },
+};
+
+export const BOON_ORDER: readonly BoonId[] = ['blaze', 'haste', 'bulwark', 'ward', 'bloom', 'breath'];
 
 export type WeaponId = 'ember' | 'aura' | 'firefly' | 'star' | 'lance' | 'oil' | 'bolt' | 'bell' | 'moon';
 export type PassiveId = 'wick' | 'hourglass' | 'boots' | 'magnet' | 'coat' | 'lens' | 'hood' | 'herb' | 'flint';

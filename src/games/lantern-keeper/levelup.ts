@@ -31,6 +31,7 @@ const ARM_DELAY_MS = 380;
 const TITLE_COLOR: Record<Upgrade['type'], string> = {
   weapon: CSS.yellow,
   passive: CSS.cyan,
+  boon: CSS.sky,
   heal: CSS.lime,
   embers: CSS.orange,
 };
@@ -40,6 +41,8 @@ const evolves = (upgrade: Upgrade): boolean => upgrade.type === 'weapon' && isEv
 
 function badge(upgrade: Upgrade): string {
   if (upgrade.type === 'heal' || upgrade.type === 'embers') return '';
+  // 밤의 축복은 몇 번이든 겹친다. 이미 받은 것이면 몇 번째인지 적는다.
+  if (upgrade.type === 'boon') return upgrade.level > 1 ? `${upgrade.level}번째` : '';
   if (upgrade.level === 1) return '새로!';
   if (evolves(upgrade)) return '진화!';
   // 무기는 최대 레벨 다음에 진화가 남아 있다.
@@ -66,6 +69,14 @@ export const TICKET_HEADER: ChoiceHeader = {
   title: '무기 강화권',
   subtitle: '무기 하나를 올려요 · Lv 5는 진화',
   color: CSS.cyan,
+  shadow: CSS.blue,
+};
+
+/** 끝없는 밤에서 밤의 축복을 고를 때의 머리글 */
+export const BOON_HEADER: ChoiceHeader = {
+  title: '밤의 축복',
+  subtitle: '몇 번이든 겹쳐요 · 하나를 골라요',
+  color: CSS.sky,
   shadow: CSS.blue,
 };
 
