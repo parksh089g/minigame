@@ -62,6 +62,11 @@ export interface ShootInfo {
   windup: number;
   /** 어둠 방울에 맞았을 때의 피해 */
   damage: number;
+  /**
+   * 싸움터에 한꺼번에 있을 수 있는 수. 멀리 서서 버티는 적이라 잘 쓰러지지 않아서,
+   * 정해 두지 않으면 판이 길어질수록 쌓인다. 이만큼 있으면 그 자리에는 스테이지의 가장 흔한 적이 대신 나온다.
+   */
+  limit: number;
 }
 
 /** 가까이 와서 부풀었다가 터지는 적의 숫자 */
@@ -110,7 +115,7 @@ export const ENEMIES: Readonly<Record<EnemyKind, EnemyInfo>> = {
     damage: 5,
     xp: 2,
     radius: 6,
-    shoots: { range: 84, every: 5, windup: 0.7, damage: 4 },
+    shoots: { range: 84, every: 5, windup: 0.7, damage: 4, limit: 4 },
   },
   puff: {
     name: '부푼 그림자',
@@ -133,7 +138,7 @@ export const ENEMIES: Readonly<Record<EnemyKind, EnemyInfo>> = {
     damage: 5,
     xp: 2,
     radius: 6,
-    shoots: { range: 90, every: 5.2, windup: 0.7, damage: 4 },
+    shoots: { range: 90, every: 5.2, windup: 0.7, damage: 4, limit: 4 },
   },
   spore: {
     name: '포자 주머니',

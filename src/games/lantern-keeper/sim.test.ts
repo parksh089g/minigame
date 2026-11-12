@@ -629,6 +629,32 @@ describe('쫓아오기만 하지 않는 적', () => {
     expect(until(sim, 'spit', 3)).toBe(true);
   });
 
+  it('쏘는 적은 싸움터에 정해진 수까지만 있고, 그만큼 있으면 더 나오지 않는다', () => {
+    /** 4분부터 1분 동안 적이 저절로 나오게 두고, 그동안 가장 많았던 눈총 그림자의 수를 센다 */
+    const mostShooters = (placed: number): number => {
+      const sim = quietSim(7);
+      sim.state.t = 240;
+      sim.state.spawnDebt = 0;
+      sim.state.player.hp = 1e9;
+      for (let i = 0; i < placed; i += 1) sim.state.enemies.push(enemy('glare', 200, i * 30 - 45, 9999));
+      let most = 0;
+      for (let i = 0; i < 60 / STEP; i += 1) {
+        sim.step(STEP, 0, 0);
+        most = Math.max(most, sim.state.enemies.filter((e) => e.kind === 'glare').length);
+      }
+      // 다른 적은 평소처럼 나온다.
+      expect(sim.state.enemies.length).toBeGreaterThan(100);
+      return most;
+    };
+    const limit = ENEMIES.glare.shoots!.limit;
+    // 비어 있으면 나오되, 쓰러뜨리지 않고 두어도 정해진 수를 넘지 않는다.
+    const alone = mostShooters(0);
+    expect(alone).toBeGreaterThan(0);
+    expect(alone).toBeLessThanOrEqual(limit);
+    // 이미 그만큼 있으면 더 나오지 않는다.
+    expect(mostShooters(limit)).toBe(limit);
+  });
+
   it('부푼 그림자는 가까이 와서 부풀었다가 터지고, 그 자리에 서 있으면 다친다', () => {
     const sim = quietSim();
     const foe = enemy('puff', 70, 0, 9999);

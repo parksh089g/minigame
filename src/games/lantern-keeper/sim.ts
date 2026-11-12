@@ -758,7 +758,8 @@ export class Sim {
       }
       s.spawnDebt -= 1;
       const [x, y] = this.edgePoint();
-      this.makeEnemy(pickSpawnKind(t, this.rand, s.stage), x, y);
+      const kind = pickSpawnKind(t, this.rand, s.stage);
+      this.makeEnemy(this.crowded(kind) ? STAGES[s.stage].spawns[0].kind : kind, x, y);
     }
 
     // 밀물: 화면 가장자리를 따라 둥글게 에워싼다.
@@ -791,6 +792,17 @@ export class Sim {
       // 마지막 보스는 가장 센 중간 보스와 같은 단계로 부하를 부른다.
       this.spawnBoss(STAGES[s.stage].finalBoss).tier = MID_BOSS_COUNT - 1;
     }
+  }
+
+  /** 쏘는 적이 싸움터에 이미 정해진 수만큼 있는지. 그렇다면 더 내보내지 않는다. */
+  private crowded(kind: EnemyKind): boolean {
+    const limit = ENEMIES[kind].shoots?.limit;
+    if (limit === undefined) return false;
+    let alive = 0;
+    for (const e of this.state.enemies) {
+      if (e.hp > 0 && e.kind === kind) alive += 1;
+    }
+    return alive >= limit;
   }
 
   private spawnBoss(kind: EnemyKind): Enemy {
