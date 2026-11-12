@@ -704,12 +704,25 @@ const ICONS: Record<string, Art> = {
       strokePath(c, 'M23.500 9.800Q23.300 15.800 19.500 19.800M23.900 14.200Q25.200 17.800 27.500 19.800', INK, 2);
     },
   },
-  /** 둘이서 대결: (자리만 잡아 둔 그림. 이 게임을 만들 때 새로 그린다.) */
+  /** 둘이서 대결: 가운데 줄을 사이에 두고 마주 앉은 하늘색 친구와 분홍 친구 */
   'icon-duel': {
     width: 32,
     height: 32,
     draw(c) {
-      roundRect(c, 4, 4, 24, 24, 7, '#ff9fb5');
+      // 위쪽 친구는 반 바퀴 돌려 그려서 맞은편에 앉은 것처럼 보인다.
+      c.save();
+      c.translate(32, 32);
+      c.rotate(Math.PI);
+      oval(c, 16, 24.200, 11.500, 7.300, '#9dd6ff');
+      oval(c, 9.800, 20.400, 2.600, 1.300, '#d3ecff', -0.5);
+      face(c, 16, 23, { gap: 7.600, eye: 1.250, blush: false });
+      c.restore();
+      oval(c, 16, 24.200, 11.500, 7.300, '#ff9fb5');
+      oval(c, 9.800, 20.400, 2.600, 1.300, '#ffd0db', -0.5);
+      face(c, 16, 23, { gap: 7.600, eye: 1.250, blush: false });
+      roundRect(c, 2.500, 15, 5, 2, 1, '#e9c9a6');
+      roundRect(c, 24.500, 15, 5, 2, 1, '#e9c9a6');
+      softPath(c, starPath(16, 16.200, 3.300, 0.5), '#ffcf5c', 1.600);
     },
   },
 };
