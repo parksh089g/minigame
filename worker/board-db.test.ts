@@ -199,3 +199,38 @@ describe('옮기기 코드', () => {
     expect(db.stash('x', 1000 + TRANSFER_TTL_MS, bytes)).not.toBeNull();
   });
 });
+
+describe('모든 게임의 내 순위', () => {
+  it('올라 있는 게임마다 순위와 점수를 알려 준다', () => {
+    const db = new BoardDb(memorySql());
+    db.submit(device(1), '하나', { [GAME]: 500, [OTHER]: 70 }, 1000);
+    db.submit(device(2), '둘', { [GAME]: 900 }, 2000);
+    db.submit(device(3), '셋', { [GAME]: 500, [OTHER]: 90 }, 3000);
+
+    expect(db.standings(device(1))).toEqual({ [GAME]: { rank: 2, score: 500 }, [OTHER]: { rank: 2, score: 70 } });
+    expect(db.standings(device(2))).toEqual({ [GAME]: { rank: 1, score: 900 } });
+    // 점수가 같으면 먼저 낸 쪽이 앞이다. 랭킹 화면이 알려 주는 순위와 같아야 한다.
+    expect(db.standings(device(3))).toEqual({ [GAME]: { rank: 3, score: 500 }, [OTHER]: { rank: 1, score: 90 } });
+    for (const n of [1, 2, 3]) {
+      for (const [game, mine] of Object.entries(db.standings(device(n)))) {
+        expect(db.board(game as (typeof RANKED_GAMES)[number], device(n)).me?.rank).toBe(mine.rank);
+      }
+    }
+  });
+
+  it('어디에도 올라 있지 않으면 비어 있고, 기록을 지우면 다시 비어 있다', () => {
+    const db = new BoardDb(memorySql());
+    expect(db.standings(device(1))).toEqual({});
+    db.submit(device(1), '하나', { [GAME]: 500 }, 1000);
+    expect(Object.keys(db.standings(device(1)))).toEqual([GAME]);
+    db.forget(device(1));
+    expect(db.standings(device(1))).toEqual({});
+  });
+
+  it('순위는 RANK_SCAN까지만 세고, 그 밖이면 RANK_SCAN + 1이다', () => {
+    const db = new BoardDb(memorySql());
+    for (let n = 1; n <= RANK_SCAN + 5; n += 1) db.submit(device(n), `이름${n}`, { [GAME]: 10_000 - n }, n);
+    expect(db.standings(device(RANK_SCAN))[GAME].rank).toBe(RANK_SCAN);
+    expect(db.standings(device(RANK_SCAN + 5))[GAME].rank).toBe(RANK_SCAN + 1);
+  });
+});

@@ -92,6 +92,14 @@ export async function handleApi(request: Request, board: BoardApi): Promise<Resp
     return result === TOO_FAST ? fail('slow') : json(result);
   }
 
+  // GET /api/rank?me=<기기 id>: 그 기기가 올라 있는 모든 게임의 순위. 누구의 것인지 적지 않은 요청은 받지 않는다.
+  const whose = url.searchParams.get('me');
+  if (path === '/api/rank' && method === 'GET' && whose !== null) {
+    if (!isDeviceId(whose)) return fail('invalid');
+    const result = await board.standings(ip, whose);
+    return result === TOO_FAST ? fail('slow') : json({ mine: result });
+  }
+
   if (path === '/api/rank' && (method === 'POST' || method === 'DELETE')) {
     const body = await readBody(request);
     if (!body || !isDeviceId(body.device)) return fail('invalid');

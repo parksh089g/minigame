@@ -103,6 +103,12 @@ export interface RankBoard {
   me: { rank: number; score: number; name: string } | null;
 }
 
+/**
+ * 한 기기가 올라 있는 게임마다의 순위와 점수(게임 id → 기록). 올라 있지 않은 게임은 들어 있지 않다.
+ * rank가 RANK_SCAN보다 크면 그 밖이라는 뜻이다.
+ */
+export type Standings = Record<string, { rank: number; score: number }>;
+
 export interface SubmitRequest {
   device: string;
   name: string;

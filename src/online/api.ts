@@ -7,6 +7,7 @@ import {
   type RankBoard,
   type RankedGame,
   type RankRow,
+  type Standings,
   type StashResult,
   type SubmitRequest,
   type SubmitResult,
@@ -42,6 +43,16 @@ function asBoard(value: unknown): RankBoard | null {
   if (me === null || me === undefined) return { top: value.top, me: null };
   if (!isObject(me) || !isCount(me.rank) || !isCount(me.score) || typeof me.name !== 'string') return null;
   return { top: value.top, me: { rank: me.rank, score: me.score, name: me.name } };
+}
+
+function asStandings(value: unknown): Standings | null {
+  if (!isObject(value) || !isObject(value.mine)) return null;
+  const standings: Standings = {};
+  for (const [game, entry] of Object.entries(value.mine)) {
+    if (!isObject(entry) || !isCount(entry.rank) || !isCount(entry.score)) return null;
+    standings[game] = { rank: entry.rank, score: entry.score };
+  }
+  return standings;
 }
 
 function asSubmit(value: unknown): SubmitResult | null {
@@ -102,6 +113,9 @@ export function createApi(
     /** 한 게임의 랭킹. me를 주면 그 기기의 순위도 같이 온다. */
     board: (game: RankedGame, me: string | null): Promise<ApiResult<RankBoard>> =>
       call(`/api/rank/${game}${me ? `?me=${encodeURIComponent(me)}` : ''}`, asBoard),
+    /** 이 기기가 올라 있는 모든 게임의 순위를 한 번에 받는다. */
+    standings: (me: string): Promise<ApiResult<Standings>> =>
+      call(`/api/rank?me=${encodeURIComponent(me)}`, asStandings),
     /** 최고 점수와 닉네임을 올린다. */
     submit: (request: SubmitRequest): Promise<ApiResult<SubmitResult>> =>
       call('/api/rank', asSubmit, 'POST', request),
