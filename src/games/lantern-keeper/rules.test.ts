@@ -3,7 +3,9 @@ import {
   ENEMIES,
   EVOLVE_LEVEL,
   MAX_DEPTH,
+  GUARD,
   MAX_LEVEL,
+  MAX_PASSIVES,
   MAX_WEAPONS,
   META,
   META_ORDER,
@@ -44,6 +46,7 @@ import {
   midBossTier,
   modifiers,
   oilStats,
+  ownedPassives,
   ownedWeapons,
   pickSpawnKind,
   scoreFor,
@@ -279,6 +282,18 @@ describe('성장', () => {
     expect(strong.maxHp).toBe(base.maxHp + 20 + 30);
     expect(emberStats(1, strong).damage).toBeGreaterThan(emberStats(1, base).damage);
   });
+
+  it('등갓은 올릴수록 빛막이 빨리 다시 생기고, 없으면 빛막도 없다', () => {
+    expect(base.guard).toBe(0);
+    expect(modifiers({ hood: 1 }, {}).guard).toBe(GUARD.seconds);
+    const waits = Array.from({ length: MAX_LEVEL }, (_, i) => modifiers({ hood: i + 1 }, {}).guard);
+    for (let i = 1; i < waits.length; i += 1) expect(waits[i]).toBeLessThan(waits[i - 1]);
+    // 다 올려도 맞을 때마다 막아 주지는 않는다.
+    expect(waits[MAX_LEVEL - 1]).toBeGreaterThanOrEqual(10);
+    // 선택 카드에는 그 레벨에서 몇 초마다 막아 주는지가 적힌다.
+    expect(upgradeDescription({ type: 'passive', id: 'hood', level: 1 })).toContain(`${GUARD.seconds}초`);
+    expect(upgradeDescription({ type: 'passive', id: 'hood', level: 3 })).toContain(`${waits[2]}초`);
+  });
 });
 
 describe('레벨업 선택지', () => {
@@ -302,7 +317,8 @@ describe('레벨업 선택지', () => {
   it('다 올린 것은 나오지 않고, 모두 채우면 회복과 불씨를 준다', () => {
     const full: Build = { weapons: {}, passives: {} };
     for (const id of WEAPON_ORDER.slice(0, MAX_WEAPONS)) full.weapons[id] = MAX_LEVEL;
-    for (const id of Object.keys(PASSIVES) as PassiveId[]) full.passives[id] = MAX_LEVEL;
+    // 패시브는 칸 수만큼만 들 수 있으므로, 그만큼 다 올리면 남은 하나는 나오지 않는다.
+    for (const id of (Object.keys(PASSIVES) as PassiveId[]).slice(0, MAX_PASSIVES)) full.passives[id] = MAX_LEVEL;
     expect(upgradeOptions(full, seededRandom(1)).map((u) => u.type)).toEqual(['heal', 'embers']);
 
     full.weapons.star = MAX_LEVEL - 1;
@@ -327,6 +343,28 @@ describe('레벨업 선택지', () => {
       for (const option of upgradeOptions(roomy, rand)) if (option.type === 'weapon') seen.add(option.id);
     }
     expect(seen.size).toBe(WEAPON_ORDER.length);
+  });
+
+  it('패시브 칸이 다 차면 새 패시브는 나오지 않고, 든 것만 더 올릴 수 있다', () => {
+    const all = Object.keys(PASSIVES) as PassiveId[];
+    expect(all.length).toBeGreaterThan(MAX_PASSIVES);
+    const rand = seededRandom(5);
+    const packed: Build = { weapons: { ember: 1 }, passives: {} };
+    for (const id of all.slice(0, MAX_PASSIVES)) packed.passives[id] = 1;
+    expect(ownedPassives(packed.passives)).toHaveLength(MAX_PASSIVES);
+    for (let i = 0; i < 200; i += 1) {
+      for (const option of upgradeOptions(packed, rand)) {
+        if (option.type === 'passive') expect(packed.passives[option.id]).toBe(1);
+      }
+    }
+    // 칸이 남아 있으면 어느 패시브든 나온다.
+    const seen = new Set<PassiveId>();
+    for (let i = 0; i < 400; i += 1) {
+      for (const option of upgradeOptions({ weapons: { ember: 1 }, passives: {} }, rand)) {
+        if (option.type === 'passive') seen.add(option.id);
+      }
+    }
+    expect(seen.size).toBe(all.length);
   });
 
   it('레벨업으로는 진화하지 못하고, 5레벨 무기에 강화권을 써야 진화한다', () => {

@@ -6,7 +6,16 @@ import Phaser from 'phaser';
 import { COLOR, CSS, FONT_SIZE, GAME_WIDTH } from '../../config';
 import { addTapZone, addText, drawPanel } from '../../core/ui';
 import { LK } from './art';
-import { ENEMIES, MAX_LEVEL, MAX_WEAPONS, PASSIVES, RUN_SECONDS, WEAPON_ORDER, type PassiveId } from './data';
+import {
+  ENEMIES,
+  MAX_LEVEL,
+  MAX_PASSIVES,
+  MAX_WEAPONS,
+  PASSIVES,
+  RUN_SECONDS,
+  WEAPON_ORDER,
+  type PassiveId,
+} from './data';
 import { iconKey, passiveSlots, weaponSlots, type Slot } from './icons';
 import { formatClock, xpToNext } from './rules';
 import type { Enemy, Sim } from './sim';
@@ -28,7 +37,7 @@ const SLOT_Y = 38;
 const SLOT_HEIGHT = 26;
 const WEAPON_SLOT = { x: 8, width: 22, step: 24 } as const;
 const PASSIVE_SLOT = { x: 108, width: 20, step: 21 } as const;
-const PASSIVE_COUNT = Object.keys(PASSIVES).length;
+const PASSIVE_COUNT = MAX_PASSIVES;
 /** 레벨을 나타내는 점 하나의 크기와 간격 */
 const PIP = { size: 2, step: 3 } as const;
 const PIPS_WIDTH = MAX_LEVEL * PIP.step - 1;

@@ -1,23 +1,29 @@
 import { describe, expect, it } from 'vitest';
-import { playRun } from './bot';
+import { playRun, steer } from './bot';
 import {
   ENEMIES,
   EVOLVE_LEVEL,
+  GUARD,
   HERO_ORDER,
   HEROES,
   MAX_DEPTH,
   MAX_LEVEL,
+  MAX_PASSIVES,
   MAX_WEAPONS,
+  PASSIVES,
   META,
   META_ORDER,
   MID_BOSS_COUNT,
   MID_BOSS_EVERY,
   MID_BOSS_TIERS,
+  PLAYER_BASE,
+  POSTS,
   RUN_SECONDS,
   STAGE_ORDER,
   STAGES,
   SURGES,
   type EnemyKind,
+  type PassiveId,
 } from './data';
 import {
   depthRules,
@@ -388,6 +394,463 @@ describe('빛 조각과 레벨업', () => {
     sim.step(STEP, 0, 0);
     expect(sim.events).toContainEqual({ type: 'heal' });
     expect(sim.state.player.hp).toBe(BASE_HP);
+  });
+});
+
+describe('드물게 떨어지는 것', () => {
+  /** 쓰러진 적이 무엇을 떨어뜨릴지 정하는 난수를 roll로 고정한 조용한 판 */
+  const dropWith = (roll: number): string[] => {
+    const sim = new Sim(quietSim().state, () => roll);
+    sim.state.enemies.push(enemy('shade', 100, 0, 0));
+    sim.step(STEP, 0, 0);
+    return sim.state.gems.map((gem) => gem.kind);
+  };
+
+  it('그림자는 아주 가끔 회복 떡이나 자석이나 불꽃 단지를 떨어뜨린다', () => {
+    expect(dropWith(0.001)).toEqual(['xp', 'heal']);
+    expect(dropWith(0.0085)).toEqual(['xp', 'pull']);
+    expect(dropWith(0.0095)).toEqual(['xp', 'blast']);
+    expect(dropWith(0.5)).toEqual(['xp']);
+
+    // 셋을 다 합쳐도 백에 하나를 조금 넘는 정도라서, 떨어지면 반가운 일이 된다.
+    const sim = quietSim(4);
+    const kills = 20000;
+    const seen: Record<string, number> = {};
+    for (let i = 0; i < kills; i += 1) {
+      sim.state.enemies.push(enemy('shade', 9000, 0, 0));
+      sim.state.gems.length = 0;
+      sim.step(STEP, 0, 0);
+      for (const gem of sim.state.gems) seen[gem.kind] = (seen[gem.kind] ?? 0) + 1;
+    }
+    expect(seen.pull).toBeGreaterThan(5);
+    expect(seen.blast).toBeGreaterThan(5);
+    expect(seen.pull + seen.blast).toBeLessThan(kills * 0.005);
+    expect(seen.heal).toBeGreaterThan(seen.pull);
+  });
+
+  it('자석을 주우면 멀리 있는 빛 조각까지 모두 끌려온다', () => {
+    const sim = quietSim();
+    sim.state.gems.push(
+      { x: 3, y: 0, value: 0, kind: 'pull', pulled: false },
+      { x: 600, y: 0, value: 1, kind: 'xp', pulled: false },
+      { x: -500, y: 400, value: 1, kind: 'xp', pulled: false },
+      { x: 300, y: 0, value: 15, kind: 'heal', pulled: false },
+    );
+    sim.step(STEP, 0, 0);
+    expect(sim.events).toContainEqual({ type: 'pull' });
+    // 빛 조각만 끌려오고, 회복 떡은 필요할 때 주우러 갈 수 있게 그 자리에 남는다.
+    expect(sim.state.gems.map((gem) => [gem.kind, gem.pulled])).toEqual([
+      ['xp', true],
+      ['xp', true],
+      ['heal', false],
+    ]);
+    const before = sim.state.player.xp;
+    advance(sim, 6);
+    expect(sim.state.gems.map((gem) => gem.kind)).toEqual(['heal']);
+    expect(sim.state.player.xp + (sim.state.player.level - 1) * 100).toBeGreaterThan(before);
+  });
+
+  it('불꽃 단지를 주우면 화면 안의 그림자가 모두 쓰러지고, 보스는 조금만 다친다', () => {
+    const sim = quietSim();
+    const near = enemy('brute', 100, 200, 500);
+    const edge = enemy('wisp', -115, -250, 30);
+    const far = enemy('brute', 400, 0, 500);
+    const boss = enemy('giant', 60, 0, 1000);
+    sim.state.enemies.push(near, edge, far, boss);
+    sim.state.gems.push({ x: 3, y: 0, value: 0, kind: 'blast', pulled: false });
+    sim.step(STEP, 0, 0);
+    expect(sim.events).toContainEqual({ type: 'blast' });
+    expect(near.hp).toBeLessThanOrEqual(0);
+    expect(edge.hp).toBeLessThanOrEqual(0);
+    expect(far.hp).toBe(500);
+    expect(boss.hp).toBeGreaterThan(800);
+    expect(boss.hp).toBeLessThan(1000);
+
+    // 쓰러진 그림자는 다음 걸음에 치워지면서 쓰러뜨린 수에 들어가고 빛 조각을 남긴다.
+    const kills = sim.state.kills;
+    sim.step(STEP, 0, 0);
+    expect(sim.state.kills).toBe(kills + 2);
+    expect(sim.state.enemies).toHaveLength(2);
+    expect(sim.state.gems.filter((gem) => gem.kind === 'xp').length).toBe(2);
+    // 무기가 한 일이 아니므로 무기별 피해에는 들어가지 않는다.
+    expect(sim.state.dealt).toEqual({});
+  });
+});
+
+describe('등갓', () => {
+  const guarded = (): Sim => {
+    const sim = quietSim();
+    sim.applyUpgrade({ type: 'passive', id: 'hood', level: 1 });
+    return sim;
+  };
+
+  it('빛막이 피해를 한 번 막고, 다시 생길 때까지는 그대로 맞는다', () => {
+    const sim = guarded();
+    expect(sim.guardReady).toBe(true);
+    expect(sim.guardCharge).toBe(1);
+    sim.state.enemies.push(enemy('brute', 2, 0, 9999));
+    sim.step(STEP, 0, 0);
+    expect(sim.events).toContainEqual({ type: 'block' });
+    expect(sim.events).not.toContainEqual({ type: 'hurt' });
+    expect(sim.state.player.hp).toBe(BASE_HP);
+    expect(sim.guardReady).toBe(false);
+    expect(sim.guardCharge).toBeLessThan(0.01);
+
+    // 막은 뒤에도 잠깐은 무적이지만, 빛막이 없는 동안에는 다시 닿으면 다친다.
+    const events = advance(sim, 2);
+    expect(events).toContainEqual({ type: 'hurt' });
+    expect(events).not.toContainEqual({ type: 'block' });
+    expect(sim.state.player.hp).toBeLessThan(BASE_HP);
+  });
+
+  it('빛막은 시간이 지나면 다시 생긴다', () => {
+    const sim = guarded();
+    sim.state.enemies.push(enemy('brute', 2, 0, 9999));
+    sim.step(STEP, 0, 0);
+    sim.state.enemies.length = 0;
+    advance(sim, GUARD.seconds / 2);
+    expect(sim.guardReady).toBe(false);
+    expect(sim.guardCharge).toBeCloseTo(0.5, 1);
+    advance(sim, GUARD.seconds / 2 + 0.1);
+    expect(sim.guardReady).toBe(true);
+
+    const hp = sim.state.player.hp;
+    sim.state.enemies.push(enemy('brute', 2, 0, 9999));
+    sim.step(STEP, 0, 0);
+    expect(sim.events).toContainEqual({ type: 'block' });
+    expect(sim.state.player.hp).toBe(hp);
+  });
+
+  it('등갓이 없으면 빛막도 없고, 등갓이 생기기 전에 저장한 판도 그대로 이어진다', () => {
+    const plain = quietSim();
+    expect(plain.guardReady).toBe(false);
+    expect(plain.guardCharge).toBe(0);
+    plain.state.enemies.push(enemy('brute', 2, 0, 9999));
+    plain.step(STEP, 0, 0);
+    expect(plain.events).toContainEqual({ type: 'hurt' });
+
+    const old = JSON.parse(JSON.stringify(createRun(config))) as RunState;
+    delete old.player.guard;
+    const sim = newSim(1, old);
+    expect(sim.guardReady).toBe(false);
+    sim.applyUpgrade({ type: 'passive', id: 'hood', level: 1 });
+    expect(sim.guardReady).toBe(true);
+    // 깨진 빛막도 저장했다가 이어하면 남은 시간이 그대로다.
+    sim.state.player.guard = 7;
+    const resumed = newSim(2, JSON.parse(JSON.stringify(sim.state)) as RunState);
+    expect(resumed.guardReady).toBe(false);
+    expect(resumed.state.player.guard).toBe(7);
+  });
+
+  it('패시브 칸이 다 찬 뒤에는 저장돼 있던 선택지에 새 패시브가 있어도 다시 뽑는다', () => {
+    const sim = newSim();
+    const all = Object.keys(PASSIVES) as PassiveId[];
+    for (const id of all.slice(0, MAX_PASSIVES)) sim.state.passives[id] = 1;
+    const extra = all[MAX_PASSIVES];
+    sim.state.offer = [{ type: 'passive', id: extra, level: 1 }];
+    const options = sim.options();
+    expect(options.some((option) => option.type === 'passive' && option.id === extra)).toBe(false);
+    // 든 패시브를 올리는 선택지는 그대로 둔다.
+    const kept: Upgrade[] = [{ type: 'passive', id: all[0], level: 2 }];
+    sim.state.offer = kept;
+    expect(sim.options()).toEqual(kept);
+  });
+});
+
+describe('쫓아오기만 하지 않는 적', () => {
+  const distanceTo = (sim: Sim, e: Enemy): number => Math.hypot(e.x - sim.state.player.x, e.y - sim.state.player.y);
+  /** type인 일이 일어날 때까지 돌린다. limit초 안에 일어나지 않으면 false */
+  const until = (sim: Sim, type: SimEvent['type'], limit = 12, moveX = 0, moveY = 0): boolean => {
+    for (let i = 0; i < limit / STEP; i += 1) {
+      sim.step(STEP, moveX, moveY);
+      if (sim.events.some((event) => event.type === type)) return true;
+    }
+    return false;
+  };
+
+  it('눈총 그림자는 멀찍이 멈춰 서서 숨을 들이쉬었다가 어둠 방울을 쏜다', () => {
+    const sim = quietSim();
+    const foe = enemy('glare', 160, 0, 9999);
+    foe.timer = 0;
+    sim.state.enemies.push(foe);
+    const shot = ENEMIES.glare.shoots!;
+    expect(until(sim, 'spit')).toBe(true);
+    // 닿는 거리까지만 다가오고, 더 붙지 않는다.
+    expect(distanceTo(sim, foe)).toBeGreaterThan(shot.range - 4);
+    expect(distanceTo(sim, foe)).toBeLessThanOrEqual(shot.range);
+    // 방울은 플레이어 쪽으로, 걷는 것보다 느리게 날아온다.
+    expect(sim.state.hazards).toHaveLength(1);
+    const [orb] = sim.state.hazards;
+    expect(orb.vx).toBeLessThan(0);
+    expect(orb.vy).toBeCloseTo(0, 5);
+    expect(Math.hypot(orb.vx, orb.vy)).toBeLessThan(PLAYER_BASE.speed);
+    // 가만히 서 있으면 맞는다.
+    expect(until(sim, 'hurt', 3)).toBe(true);
+    expect(sim.state.player.hp).toBe(BASE_HP - shot.damage);
+  });
+
+  it('쏜 뒤에 옆으로 비키면 방울에 맞지 않는다', () => {
+    const sim = quietSim();
+    const foe = enemy('glare', 120, 0, 9999);
+    foe.timer = 0;
+    sim.state.enemies.push(foe);
+    expect(until(sim, 'spit')).toBe(true);
+    expect(advance(sim, 2.4, 0, 1)).not.toContainEqual({ type: 'hurt' });
+    expect(sim.state.player.hp).toBe(BASE_HP);
+  });
+
+  it('숨을 들이쉬는 동안에는 멈춰 있고, 그 틈에 쓰러뜨리면 쏘지 못한다', () => {
+    const sim = quietSim();
+    const foe = enemy('glare', 60, 0, 9999);
+    foe.timer = 0;
+    sim.state.enemies.push(foe);
+    sim.step(STEP, 0, 0);
+    expect(foe.mode).toBe(1);
+    const at = foe.x;
+    advance(sim, ENEMIES.glare.shoots!.windup / 2);
+    expect(foe.x).toBe(at);
+    expect(sim.state.hazards).toHaveLength(0);
+    foe.hp = 0;
+    expect(advance(sim, 2)).not.toContainEqual({ type: 'spit' });
+  });
+
+  it('날아다니는 것이 많으면 쏘는 적은 쉬어 간다', () => {
+    const sim = quietSim();
+    for (let i = 0; i < 6; i += 1) {
+      sim.state.hazards.push({ x: 5000, y: i * 20, vx: 0, vy: 0, life: 99, radius: 3, damage: 1 });
+    }
+    for (let i = 0; i < 6; i += 1) {
+      const foe = enemy('squirt', 70, i * 14 - 35, 9999);
+      foe.timer = 0;
+      sim.state.enemies.push(foe);
+    }
+    expect(advance(sim, 3)).not.toContainEqual({ type: 'spit' });
+    sim.state.hazards.length = 0;
+    expect(until(sim, 'spit', 3)).toBe(true);
+  });
+
+  it('쏘는 적은 싸움터에 정해진 수까지만 있고, 그만큼 있으면 더 나오지 않는다', () => {
+    /** 4분부터 1분 동안 적이 저절로 나오게 두고, 그동안 가장 많았던 눈총 그림자의 수를 센다 */
+    const mostShooters = (placed: number): number => {
+      const sim = quietSim(7);
+      sim.state.t = 240;
+      sim.state.spawnDebt = 0;
+      sim.state.player.hp = 1e9;
+      for (let i = 0; i < placed; i += 1) sim.state.enemies.push(enemy('glare', 200, i * 30 - 45, 9999));
+      let most = 0;
+      for (let i = 0; i < 60 / STEP; i += 1) {
+        sim.step(STEP, 0, 0);
+        most = Math.max(most, sim.state.enemies.filter((e) => e.kind === 'glare').length);
+      }
+      // 다른 적은 평소처럼 나온다.
+      expect(sim.state.enemies.length).toBeGreaterThan(100);
+      return most;
+    };
+    const limit = ENEMIES.glare.shoots!.limit;
+    // 비어 있으면 나오되, 쓰러뜨리지 않고 두어도 정해진 수를 넘지 않는다.
+    const alone = mostShooters(0);
+    expect(alone).toBeGreaterThan(0);
+    expect(alone).toBeLessThanOrEqual(limit);
+    // 이미 그만큼 있으면 더 나오지 않는다.
+    expect(mostShooters(limit)).toBe(limit);
+  });
+
+  it('부푼 그림자는 가까이 와서 부풀었다가 터지고, 그 자리에 서 있으면 다친다', () => {
+    const sim = quietSim();
+    const foe = enemy('puff', 70, 0, 9999);
+    sim.state.enemies.push(foe);
+    const info = ENEMIES.puff.bursts!;
+    for (let i = 0; i < 600 && foe.mode === 0; i += 1) sim.step(STEP, 0, 0);
+    // 닿기 전에 멈춰서 부푼다.
+    expect(foe.mode).toBe(1);
+    expect(distanceTo(sim, foe)).toBeGreaterThan(ENEMIES.puff.radius + PLAYER_BASE.radius);
+    expect(sim.state.player.hp).toBe(BASE_HP);
+    const at = foe.x;
+    advance(sim, info.fuse / 2);
+    expect(foe.x).toBe(at);
+    expect(until(sim, 'burst', info.fuse)).toBe(true);
+    expect(sim.events).toContainEqual({ type: 'burst', x: foe.x, y: foe.y, radius: info.radius });
+    expect(sim.events).toContainEqual({ type: 'hurt' });
+    expect(sim.state.player.hp).toBe(BASE_HP - info.damage);
+    // 터진 것은 여느 적처럼 쓰러진 것으로 치고 빛 조각을 남긴다.
+    sim.step(STEP, 0, 0);
+    expect(sim.state.enemies).toHaveLength(0);
+    expect(sim.state.kills).toBe(1);
+    expect(sim.state.gems).toHaveLength(1);
+  });
+
+  it('부푸는 동안 둘레 밖으로 나가면 다치지 않는다', () => {
+    const sim = quietSim();
+    const foe = enemy('spore', 60, 0, 9999);
+    sim.state.enemies.push(foe);
+    for (let i = 0; i < 600 && foe.mode === 0; i += 1) sim.step(STEP, 0, 0);
+    expect(foe.mode).toBe(1);
+    expect(until(sim, 'burst', 2, -1, 0)).toBe(true);
+    expect(sim.events).not.toContainEqual({ type: 'hurt' });
+    expect(sim.state.player.hp).toBe(BASE_HP);
+    expect(distanceTo(sim, foe)).toBeGreaterThan(ENEMIES.spore.bursts!.radius + PLAYER_BASE.radius);
+  });
+
+  it('터지면 둘레의 다른 그림자도 함께 다치고, 부푸는 동안 쓰러뜨리면 터지지 않는다', () => {
+    const sim = quietSim();
+    sim.state.player.hp = 1e9;
+    const info = ENEMIES.puff.bursts!;
+    const foe = enemy('puff', 20, 0, 9999);
+    const beside = enemy('brute', 36, 12, 500);
+    const away = enemy('brute', 20, info.radius + 40, 500);
+    sim.state.enemies.push(foe, beside, away);
+    expect(until(sim, 'burst', 3)).toBe(true);
+    expect(beside.hp).toBe(500 - info.splash);
+    expect(away.hp).toBe(500);
+
+    const calm = quietSim();
+    const dud = enemy('puff', 20, 0, 9999);
+    calm.state.enemies.push(dud);
+    calm.step(STEP, 0, 0);
+    expect(dud.mode).toBe(1);
+    dud.hp = 0;
+    expect(advance(calm, 2)).not.toContainEqual(expect.objectContaining({ type: 'burst' }));
+    expect(calm.state.player.hp).toBe(BASE_HP);
+  });
+
+  it('자동 플레이는 부풀고 있는 적의 둘레 밖으로 걸어 나간다', () => {
+    const sim = quietSim();
+    const foe = enemy('puff', 18, 0, 9999);
+    foe.mode = 1;
+    foe.timer = 5;
+    sim.state.enemies.push(foe);
+    const reach = ENEMIES.puff.bursts!.radius + PLAYER_BASE.radius;
+    for (let i = 0; i < 90 && distanceTo(sim, foe) <= reach; i += 1) {
+      const [x, y] = steer(sim);
+      sim.step(STEP, x, y);
+    }
+    expect(distanceTo(sim, foe)).toBeGreaterThan(reach);
+    expect(sim.state.player.x).toBeLessThan(0);
+  });
+
+  it('스테이지마다 쏘는 적과 터지는 적이 하나씩 있고, 처음부터 나오지는 않는다', () => {
+    for (const id of STAGE_ORDER) {
+      const rows = STAGES[id].spawns;
+      const shooters = rows.filter((row) => ENEMIES[row.kind].shoots);
+      const bursters = rows.filter((row) => ENEMIES[row.kind].bursts);
+      expect(shooters).toHaveLength(1);
+      expect(bursters).toHaveLength(1);
+      // 쫓아오는 적에 익숙해진 뒤에 나오고, 무리의 대부분은 여전히 쫓아오는 적이다.
+      expect(shooters[0].from).toBeGreaterThanOrEqual(90);
+      expect(bursters[0].from).toBeGreaterThan(shooters[0].from);
+      const total = rows.reduce((sum, row) => sum + row.weight, 0);
+      expect((shooters[0].weight + bursters[0].weight) / total).toBeLessThan(0.15);
+    }
+  });
+});
+
+describe('등불 기둥', () => {
+  /** 플레이어 바로 옆에 켜지 않은 기둥 하나만 서 있는 조용한 판. 때가 되어 저절로 나오는 기둥은 없다. */
+  const besidePost = (): Sim => {
+    const sim = quietSim();
+    sim.state.player.hp = 1e9;
+    sim.state.postsSpawned = POSTS.times.length;
+    sim.state.posts = [{ x: 8, y: 0, lit: 0, tick: 0 }];
+    return sim;
+  };
+
+  it('정해진 시각마다 플레이어 가까이에 하나씩 나타난다', () => {
+    const sim = quietSim();
+    sim.state.t = POSTS.times[0] - 0.05;
+    const appeared = advance(sim, 0.2);
+    expect(sim.state.posts).toHaveLength(1);
+    const [post] = sim.state.posts!;
+    expect(appeared).toContainEqual({ type: 'post', x: post.x, y: post.y, first: true });
+    const distance = Math.hypot(post.x - sim.state.player.x, post.y - sim.state.player.y);
+    // 화면 안에 보이지만, 걸어가야 닿는 거리다.
+    expect(distance).toBeGreaterThanOrEqual(POSTS.near);
+    expect(distance).toBeLessThanOrEqual(POSTS.far);
+    expect(distance).toBeLessThan(config.viewW / 2);
+    expect(post.lit).toBe(0);
+    // 다음 시각이 되기 전에는 더 나오지 않는다.
+    expect(advance(sim, 5)).not.toContainEqual(expect.objectContaining({ type: 'post' }));
+    sim.state.t = POSTS.times[1] - 0.05;
+    expect(advance(sim, 0.2)).toContainEqual(expect.objectContaining({ type: 'post', first: false }));
+    expect(sim.state.posts).toHaveLength(2);
+  });
+
+  it('닿으면 불이 켜지고, 켜져 있는 동안 둘레의 그림자를 태우고 느리게 한다', () => {
+    const sim = besidePost();
+    const inside = enemy('brute', 30, 0, 1000);
+    const outside = enemy('brute', 8, 130, 1000);
+    sim.state.enemies.push(inside, outside);
+    sim.step(STEP, 0, 0);
+    expect(sim.events).toContainEqual({ type: 'light', x: 8, y: 0 });
+    expect(sim.state.posts![0].lit).toBeGreaterThan(POSTS.seconds - 0.1);
+    advance(sim, 1);
+    expect(inside.hp).toBeLessThanOrEqual(1000 * (1 - 2 * POSTS.burn));
+    expect(inside.slow).toBeGreaterThan(0);
+    expect(inside.slowTo).toBeLessThanOrEqual(POSTS.slow);
+    expect(outside.hp).toBe(1000);
+    expect(outside.slow).toBeLessThanOrEqual(0);
+    // 무기가 한 일이 아니므로 무기별 피해에는 들어가지 않는다.
+    expect(sim.state.dealt).toEqual({});
+  });
+
+  it('빛 속의 보통 그림자는 체력이 얼마든 3초 안에 쓰러지고, 보스는 조금만 잃는다', () => {
+    const sim = besidePost();
+    const tough = enemy('brute', 24, 0, 50000);
+    const boss = enemy('giant', 30, 12, 10000);
+    sim.state.enemies.push(tough, boss);
+    advance(sim, 3);
+    expect(sim.state.kills).toBe(1);
+    expect(sim.state.enemies).toEqual([boss]);
+    // 다 타면 기둥이 사라진다. 보스는 끝까지 빛 속에 있어도 열에 하나쯤만 잃는다.
+    const events = advance(sim, POSTS.seconds - 2.9);
+    expect(events).toContainEqual({ type: 'dim', x: 8, y: 0 });
+    expect(sim.state.posts).toHaveLength(0);
+    expect(boss.hp).toBeLessThan(10000);
+    expect(boss.hp).toBeGreaterThan(10000 * 0.88);
+  });
+
+  it('켜지 않은 기둥은 아껴 둘 수 있고, 너무 쌓이면 가장 오래된 것부터 사라진다', () => {
+    const sim = quietSim();
+    sim.state.postsSpawned = 1;
+    sim.state.posts = [1000, 2000, 3000].map((x) => ({ x, y: 0, lit: 0, tick: 0 }));
+    // 오래 두어도 꺼지거나 사라지지 않는다.
+    sim.state.t = POSTS.times[0] + 1;
+    advance(sim, 20);
+    expect(sim.state.posts!.map((post) => post.x)).toEqual([1000, 2000, 3000]);
+    sim.state.t = POSTS.times[1] - 0.05;
+    advance(sim, 0.2);
+    expect(sim.state.posts).toHaveLength(POSTS.keep);
+    expect(sim.state.posts!.map((post) => post.x).slice(0, 2)).toEqual([2000, 3000]);
+    // 걸어가서 닿으면 그때 켜진다.
+    const saved = sim.state.posts![2];
+    sim.state.player.x = saved.x;
+    sim.state.player.y = saved.y;
+    sim.step(STEP, 0, 0);
+    expect(saved.lit).toBeGreaterThan(0);
+  });
+
+  it('기둥이 생기기 전에 저장한 판을 이어 해도 지난 시각의 기둥이 한꺼번에 나오지 않는다', () => {
+    const old = JSON.parse(JSON.stringify(createRun(config))) as RunState;
+    delete old.posts;
+    delete old.postsSpawned;
+    old.t = POSTS.times[2] + 5;
+    const sim = newSim(1, old);
+    expect(sim.state.posts).toEqual([]);
+    expect(sim.state.postsSpawned).toBe(3);
+    sim.step(STEP, 0, 0);
+    expect(sim.events).not.toContainEqual(expect.objectContaining({ type: 'post' }));
+    // 켜진 기둥은 저장했다가 이어 해도 남은 시간이 그대로다.
+    sim.state.posts = [{ x: 500, y: 0, lit: 7, tick: 0.2 }];
+    const resumed = newSim(2, JSON.parse(JSON.stringify(sim.state)) as RunState);
+    expect(resumed.state.posts).toEqual([{ x: 500, y: 0, lit: 7, tick: 0.2 }]);
+  });
+
+  it('기둥은 밀물이 오기 전에 나와서 밀물에 대비할 수 있다', () => {
+    for (const surge of SURGES) {
+      const before = POSTS.times.filter((time) => time < surge && surge - time <= 40);
+      expect(before, `밀물 ${surge}초`).toHaveLength(1);
+    }
+    expect(POSTS.times[0]).toBeLessThan(60);
+    expect(POSTS.times[POSTS.times.length - 1]).toBeLessThan(RUN_SECONDS);
   });
 });
 
