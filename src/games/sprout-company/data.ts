@@ -166,6 +166,16 @@ export const TIP_IDS = Object.keys(TIPS) as TipId[];
 /** 이 안내들이 생기기 전부터 하던 사람에게는 띄우지 않는 것: 그때도 있던 일에 대한 안내 */
 export const OLD_HAND_TIPS: readonly TipId[] = ['income', 'gear', 'update', 'move', 'hire'];
 
+// ───────── 길잡이 ─────────
+
+/**
+ * 처음 하는 사람에게 차례로 짚어 주는 걸음. 무엇을 짚는지는 guide.ts에 있다.
+ * pick: 게임 고르기, assign: 카드 맡기기, cheer: 응원하기, finish: 남은 카드 맡기기, release: 출시하기,
+ * gear: 장비 사기, grow: 평판 모으기, move: 이사하기, hire: 새 친구 뽑기
+ */
+export const GUIDE_STEPS = ['pick', 'assign', 'cheer', 'finish', 'release', 'gear', 'grow', 'move', 'hire'] as const;
+export type GuideStep = (typeof GUIDE_STEPS)[number];
+
 // ───────── 부서 ─────────
 
 export interface DepartmentDef {

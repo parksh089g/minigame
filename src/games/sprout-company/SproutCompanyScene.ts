@@ -147,6 +147,7 @@ import {
   type CompanyState,
   type Release,
 } from './rules';
+import { advanceGuide, GUIDE_DONE, guideStep, guideView, skipGuide, type GuideTarget } from './guide';
 import { claimGoal, GOAL_REWARD, goalText, hasGoalToClaim, isGoalDone, rollGoals, takeReleaseCoin } from './goals';
 import { nextStarTarget, readStars } from './link';
 import { OFFICE_SONG } from './music';
@@ -173,7 +174,7 @@ const TILE_GAP = 4;
 const TILE_HEIGHT = { min: 58, max: 104, named: 80 } as const;
 const CARD = { width: 23, height: 30, step: 27 } as const;
 
-const DEPTH = { fx: 40, panel: 60, banner: 80 } as const;
+const DEPTH = { fx: 40, guide: 45, panel: 60, banner: 80 } as const;
 
 /** 허브와 공유 카드에 적히는 이 게임의 이름 */
 const COMPANY_TITLE = '새싹 컴퍼니';
@@ -408,6 +409,12 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
   /** 꾸미기 창에서 보고 있는 곳 */
   private decorShown: DecorSlot = 'wall';
   private signPlate!: Graphics;
+  /** 길잡이의 말풍선과, 짚는 곳에 두르는 테 */
+  private guideLayer!: Container;
+  private guideRing!: Graphics;
+  private guideSignature = '';
+  /** 아래쪽 버튼이 놓인 자리. 길잡이가 짚을 때 쓴다. */
+  private buttonRects: Partial<Record<PanelKind, Phaser.Geom.Rectangle>> = {};
   private shownSign = '';
   private dots: Partial<Record<PanelKind, Phaser.GameObjects.Arc>> = {};
   /** 창마다 보고 있는 쪽 */
@@ -529,6 +536,8 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
 
     this.syncTop();
     for (const view of this.desks) this.syncDesk(view);
+    // 길잡이가 짚는 곳의 테는 숨 쉬듯 밝아졌다 어두워진다.
+    if (this.guideRing.visible) this.guideRing.setAlpha(0.6 + 0.4 * Math.sin(this.clock * 6));
 
     this.slowTick -= dt;
     if (this.slowTick <= 0) {
@@ -541,6 +550,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
       this.syncHint();
       this.syncDots();
       this.syncPanel();
+      this.syncGuide();
     }
     this.saveIn -= dt;
     if (this.saveIn <= 0) this.save();
@@ -581,6 +591,9 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     this.offerChip = this.add.container(0, 0);
     this.buildButtons(buttonsTop);
     this.buildRoom();
+    this.guideRing = this.add.graphics().setDepth(DEPTH.guide).setVisible(false);
+    this.guideLayer = this.add.container(0, 0).setDepth(DEPTH.guide);
+    this.guideSignature = '';
 
     this.built = true;
     this.update(0, 0);
@@ -1420,6 +1433,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     PANELS.forEach(({ kind, label }, index) => {
       const x = MARGIN + index * (width + gap);
       this.button(layer, x, top, width, BUTTON_HEIGHT, label, 'neutral', () => this.openPanel(kind));
+      this.buttonRects[kind] = new Phaser.Geom.Rectangle(x, top, width, BUTTON_HEIGHT);
       const dot = this.add.circle(x + width - 5, top + 4, 4, THEME.coral).setStrokeStyle(1.5, THEME.white).setVisible(false);
       layer.add(dot);
       this.dots[kind] = dot;
@@ -1512,6 +1526,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     this.syncHint();
     this.syncDots();
     this.syncPanel();
+    this.syncGuide();
   }
 
   // ───────── 겹쳐 뜨는 창 ─────────
@@ -2821,7 +2836,8 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
 
   /** 처음 겪는 일이 있으면 안내를 한 번 띄운다. 창이 떠 있는 동안에는 기다린다. */
   private syncTip(dt: number): void {
-    if (this.tipView || this.panel) return;
+    // 길잡이가 짚어 주는 동안에는 한 줄 안내를 미뤄 둔다.
+    if (this.tipView || this.panel || guideStep(this.state)) return;
     this.tipIn -= dt;
     if (this.tipIn > 0) return;
     const id = nextTip(this.state);
@@ -2836,6 +2852,85 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
       this.tipView = null;
       this.tipIn = TIP_GAP;
     });
+  }
+
+  // ───────── 길잡이 ─────────
+
+  /** 길잡이가 짚는 곳의 네모. 지금 화면에 없으면 null */
+  private guideRect(target: GuideTarget): Phaser.Geom.Rectangle | null {
+    if (target.kind === 'pick') return new Phaser.Geom.Rectangle(MARGIN + INNER - 92, STRIP.top + 5, 86, 28);
+    if (target.kind === 'release') return new Phaser.Geom.Rectangle(MARGIN + INNER - 82, STRIP.top + 5, 76, 28);
+    if (target.kind === 'button') return this.buttonRects[target.panel] ?? null;
+    const view = this.desks[target.index];
+    return view ? new Phaser.Geom.Rectangle(view.x, view.y, view.width, view.height) : null;
+  }
+
+  /**
+   * 처음 하는 사람에게 지금 누를 곳을 짚어 준다: 그곳에 테를 두르고 말풍선을 붙인다.
+   * 창이 떠 있는 동안에는 숨기고, 하라는 일을 하면 다음 걸음으로 넘어간다.
+   */
+  private syncGuide(): void {
+    const state = this.state;
+    if (guideStep(state)) {
+      const passed = advanceGuide(state);
+      if (passed.length > 0) {
+        this.save();
+        if (!guideStep(state)) {
+          this.play('tip');
+          this.pill(GUIDE_DONE, 3200).setDepth(DEPTH.banner);
+        }
+      }
+    }
+    const view = this.panel ? null : guideView(state, this.selected);
+    const rect = view ? this.guideRect(view.target) : null;
+    const signature = view && rect ? `${view.title}|${view.detail}|${rect.x}|${rect.y}|${rect.width}|${rect.height}` : '';
+    if (signature === this.guideSignature) return;
+    this.guideSignature = signature;
+    const layer = this.guideLayer;
+    layer.removeAll(true);
+    this.guideRing.clear().setVisible(false);
+    if (!view || !rect) return;
+
+    this.guideRing
+      .setVisible(true)
+      .lineStyle(3, THEME.coral, 1)
+      .strokeRoundedRect(rect.x - 2, rect.y - 2, rect.width + 4, rect.height + 4, 12);
+
+    const title = addText(this, 0, 0, view.title, { color: THEME_CSS.white });
+    const detail = addText(this, 0, 0, view.detail, { size: FONT_SIZE.small, color: THEME_CSS.butter });
+    const close = 18;
+    const width = Math.min(INNER - 4, Math.ceil(Math.max(title.width, detail.width)) + 20 + close);
+    const height = 36;
+    // 짚는 곳이 위쪽이면 말풍선을 아래에, 아래쪽이면 위에 붙인다.
+    const below = rect.centerY < this.scale.height * 0.4;
+    const left = Phaser.Math.Clamp(Math.round(rect.centerX - width / 2), MARGIN + 2, W - MARGIN - 2 - width);
+    const top = Math.round(below ? rect.bottom + 9 : rect.y - 9 - height);
+    const tipX = Phaser.Math.Clamp(rect.centerX, left + 12, left + width - 12);
+    const back = this.add.graphics();
+    back.fillStyle(THEME.inkDeep, 0.94).fillRoundedRect(left, top, width, height, 10);
+    if (below) back.fillTriangle(tipX - 6, top + 1, tipX + 6, top + 1, tipX, top - 6);
+    else back.fillTriangle(tipX - 6, top + height - 1, tipX + 6, top + height - 1, tipX, top + height + 6);
+    title.setPosition(left + 10, top + 5);
+    detail.setPosition(left + 10, top + 20);
+    const cross = addText(this, left + width - 11, top + 10, '×', { color: THEME_CSS.faint, originX: 0.5, originY: 0.5 });
+    layer.add([back, title, detail, cross]);
+    // 말풍선의 ×를 누르면 길잡이를 그만 본다.
+    layer.add(
+      addTapZone(
+        this,
+        left + width - 24,
+        top,
+        24,
+        24,
+        () => undefined,
+        () => {
+          sfx.click();
+          skipGuide(state);
+          this.save();
+          this.syncGuide();
+        },
+      ),
+    );
   }
 
   // ───────── 소리 ─────────
