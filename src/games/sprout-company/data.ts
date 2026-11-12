@@ -190,8 +190,8 @@ export const DEPARTMENTS = {
   art: { name: '그림부', kind: 'art' },
   code: { name: '개발부', kind: 'code' },
   test: { name: '검사부', kind: 'test' },
-  music: { name: '음악부', kind: null, effect: { key: 'income', amount: 0.05 } },
-  pr: { name: '홍보부', kind: null, effect: { key: 'reputation', amount: 0.03 } },
+  music: { name: '음악부', kind: null, effect: { key: 'income', amount: 0.06 } },
+  pr: { name: '홍보부', kind: null, effect: { key: 'reputation', amount: 0.04 } },
   service: { name: '고객 응대부', kind: null, effect: { key: 'away', amount: 0.04 } },
 } as const satisfies Record<string, DepartmentDef>;
 

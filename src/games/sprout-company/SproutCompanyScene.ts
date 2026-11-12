@@ -355,6 +355,13 @@ function effectText(effect: Effect, level = 1, everyone = false): string {
   return `출시 보너스 +${percent}%`;
 }
 
+/** 돕는 부서의 몫을 좁은 줄에 맞게 짧게 적는다. count는 단계 × 사람 수다. */
+function supportText(effect: Effect, count: number): string {
+  const percent = Math.round(effect.amount * count * 100);
+  if (effect.key === 'away') return `닫은 동안 수익 +${percent}%`;
+  return effectText(effect, count);
+}
+
 /** 배수를 적는다: 2배, 2.6배 */
 function timesText(value: number): string {
   return `${Number.isInteger(value) ? value : value.toFixed(1)}배`;
@@ -2352,7 +2359,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
   /** 부서가 하는 일을 한 줄로 적는다: 일하는 부서는 그 업무의 속도, 돕는 부서는 회사에 보태는 몫 */
   private deptGain(id: DepartmentId, level: number, members: number): string {
     const def: DepartmentDef = DEPARTMENTS[id];
-    if (def.effect) return effectText(def.effect, level * members);
+    if (def.effect) return supportText(def.effect, level * members);
     return `${def.kind ? TASKS[def.kind].name : ''} 일 +${Math.round(departmentBoost(level) * 100)}%`;
   }
 
@@ -2375,7 +2382,9 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
       panel.add(addText(this, name.x + name.width + 4, middle - 13, `${founded.length}곳`, { size: FONT_SIZE.small, color: THEME_CSS.lilacDeep }));
     }
     const members = state.desks.filter((desk) => desk.staff && desk.dept).length;
-    const detail = founded.length > 0 ? `부서원 ${members}명  세울 수 있는 부서 ${DEPARTMENT_ORDER.length}곳` : '일하는 부서 넷, 돕는 부서 셋';
+    const rest = DEPARTMENT_ORDER.length - founded.length;
+    const detail =
+      founded.length === 0 ? '일하는 부서 넷, 돕는 부서 셋' : rest > 0 ? `부서원 ${members}명  아직 없는 부서 ${rest}곳` : `부서원 ${members}명`;
     this.rowDetail(panel, left + 42, middle, left + width - 70, detail);
     // 세우거나 올릴 수 있는 부서가 있으면 버튼의 색으로 알린다.
     const canGrow = DEPARTMENT_ORDER.some((id) => departmentBlock(state, id) === null);
@@ -2409,7 +2418,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     const count = departmentMembers(state, id).length;
     let detail: string;
     if (level > 0) detail = `부서원 ${count}/${departmentSeats(level)}명  ${this.deptGain(id, level, count)}`;
-    else if (def.effect) detail = `세우면 부서원마다 ${effectText(def.effect)}`;
+    else if (def.effect) detail = `세우면 한 명마다 ${supportText(def.effect, 1)}`;
     else detail = `세우면 부서원의 ${this.deptGain(id, 1, 1)}`;
     this.rowDetail(panel, left + 42, middle, left + width - 70, detail);
     if (level === 0) {
@@ -2420,6 +2429,12 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
         this.save();
         this.buildRoom();
         this.pill(`새 부서 ${def.name}`, 1600).setDepth(DEPTH.banner);
+        // 모두 다른 부서에 들어 있어서 아무도 들지 못했으면, 누구를 넣을지 바로 고르게 한다.
+        if (departmentMembers(state, id).length === 0) {
+          this.deptShown = id;
+          this.pages.dept = 0;
+          this.openPanel('dept');
+        }
         this.refreshNow();
       });
       return;
@@ -2444,9 +2459,9 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     const team = 1 + departmentBoost(level);
     /** 이 부서에 들었을 때 이 친구가 부서의 업무를 하는 배수 */
     const fitOf = (staff: StaffId): number => (specialtyOf(state, staff) === kind ? SPECIALTY_BOOST : 1) * team;
-    /** 이 친구가 이 부서에 들면 얻는 것: 일하는 부서는 그 업무의 배수, 돕는 부서는 한 명이 회사에 보태는 몫 */
+    /** 이 친구가 이 부서에 들면 얻는 것: 일하는 부서는 그 업무의 배수, 돕는 부서는 한 명이 회사에 보태는 몫(무엇의 몫인지는 위에 적혀 있다) */
     const gainOf = (staff: StaffId): string =>
-      effect ? effectText(effect, level) : `${kind ? TASKS[kind].name : ''} 일 ${timesText(fitOf(staff))}`;
+      effect ? `+${Math.round(effect.amount * level * 100)}%` : `${kind ? TASKS[kind].name : ''} 일 ${timesText(fitOf(staff))}`;
     const rows: number[] = [];
     state.desks.forEach((desk, index) => {
       if (desk.staff) rows.push(index);
@@ -2477,7 +2492,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
           return;
         }
         const more = departmentSeats(level + 1) > seats ? `, 자리 ${departmentSeats(level + 1)}` : '';
-        const next = effect ? `한 명마다 ${effectText(effect, level + 1)}` : `+${Math.round(departmentBoost(level + 1) * 100)}%`;
+        const next = effect ? `한 명마다 +${Math.round(effect.amount * (level + 1) * 100)}%` : `+${Math.round(departmentBoost(level + 1) * 100)}%`;
         this.rowDetail(panel, left + 42, top + 18, left + width - 70, `다음 단계: ${next}${more}`);
         this.costButton(panel, left + width - 66, top + 5, departmentCost(level), block === null, () => {
           if (!upgradeDepartment(state, id)) return;
