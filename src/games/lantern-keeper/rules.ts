@@ -5,7 +5,9 @@
 import {
   ENEMIES,
   EVOLVE_LEVEL,
+  FLINT,
   GUARD,
+  HERB_REGEN,
   MAX_DEPTH,
   MAX_LEVEL,
   MAX_PASSIVES,
@@ -186,6 +188,8 @@ export interface Modifiers {
   taken: number;
   /** 피해를 한 번 막는 빛막이 다시 생기는 데 걸리는 시간(초). 0이면 빛막이 없다. */
   guard: number;
+  /** 쓰러진 보통 그림자가 터질 확률(0~1). 부싯돌이 없으면 0 */
+  spark: number;
 }
 
 /** 캐릭터의 최대 체력이 아무리 깎여도 이보다 낮아지지는 않는다. */
@@ -203,9 +207,10 @@ export function modifiers(passives: Levels<PassiveId>, meta: Levels<MetaId>, tra
     area: (1 + 0.1 * p('lens')) * (trait.area ?? 1),
     xp: (1 + 0.08 * m('greed')) * (trait.xp ?? 1),
     maxHp: Math.max(MIN_MAX_HP, PLAYER_BASE.maxHp + 20 * p('coat') + 10 * m('vigor') + (trait.maxHp ?? 0)),
-    regen: 0.1 * m('mend'),
+    regen: 0.1 * m('mend') + HERB_REGEN * p('herb'),
     taken: 1 - 0.04 * m('armor'),
     guard: guardSeconds(p('hood')),
+    spark: sparkChance(p('flint')),
   };
 }
 
@@ -274,6 +279,32 @@ export interface BoltStats {
   reach: number;
   /** 다음 적으로 튀는 거리 */
   hop: number;
+}
+
+export interface BellStats {
+  damage: number;
+  cooldown: number;
+  /** 종소리가 퍼지는 끝의 반지름(px) */
+  radius: number;
+  /** 닿은 보통 그림자가 밀려나는 거리(px) */
+  push: number;
+  /** 한 번에 울리는 횟수 */
+  rings: number;
+  /** 닿은 적의 이동 속도 배율 */
+  slow: number;
+}
+export interface MoonStats {
+  damage: number;
+  cooldown: number;
+  count: number;
+  /** 날아가는 거리(px) */
+  reach: number;
+  /** 판정 반지름(px) */
+  radius: number;
+  /** 날아가는 빠르기(px/초) */
+  speed: number;
+  /** 같은 적을 다시 벨 수 있을 때까지(초). 0이면 가는 길에 한 번, 오는 길에 한 번만 벤다. */
+  rehit: number;
 }
 
 const atLeast = (level: number, n: number): number => (level >= n ? 1 : 0);
@@ -359,6 +390,32 @@ export function boltStats(level: number, mods: Modifiers): BoltStats {
   };
 }
 
+export function bellStats(level: number, mods: Modifiers): BellStats {
+  const evo = atLeast(level, EVOLVE_LEVEL);
+  return {
+    // 밀어내는 힘이 커서, 피해는 다른 무기보다 낮게 둔다. 조금만 올려도 혼자서 끝까지 버틴다.
+    damage: (8 + 4 * atLeast(level, 2) + 5 * atLeast(level, 5) + 4 * evo) * mods.damage,
+    cooldown: 3.2 * (level >= 4 ? 0.8 : 1) * mods.cooldown,
+    radius: (46 + 8 * atLeast(level, 3) + 10 * evo) * mods.area,
+    push: evo ? 24 : level >= 5 ? 20 : 14,
+    rings: 1 + evo,
+    slow: evo ? 0.35 : 1,
+  };
+}
+
+export function moonStats(level: number, mods: Modifiers): MoonStats {
+  const evo = atLeast(level, EVOLVE_LEVEL);
+  return {
+    damage: (11 + 5 * atLeast(level, 2) + 6 * atLeast(level, 5) + 2 * evo) * mods.damage,
+    cooldown: 2 * (level >= 5 ? 0.8 : 1) * mods.cooldown,
+    count: 1 + atLeast(level, 4) + evo,
+    reach: 66 + 18 * atLeast(level, 3) + 6 * evo,
+    radius: (7 + 3 * evo) * mods.area,
+    speed: evo ? 120 : 150,
+    rehit: evo ? 0.3 : 0,
+  };
+}
+
 // ---------------------------------------------------------------- 레벨업 선택지
 
 export type Upgrade =
@@ -388,6 +445,11 @@ export function ownedWeapons(weapons: Levels<WeaponId>): WeaponId[] {
 /** 등갓의 빛막이 깨진 뒤 다시 생기는 데 걸리는 시간(초). 등갓이 없으면(0레벨) 0 */
 export function guardSeconds(level: number): number {
   return level > 0 ? GUARD.seconds - GUARD.perLevel * (level - 1) : 0;
+}
+
+/** 부싯돌이 이 레벨일 때 쓰러진 그림자가 터질 확률 */
+export function sparkChance(level: number): number {
+  return FLINT.chance * Math.max(0, level);
 }
 
 /** 지금 가진 패시브 */
@@ -477,6 +539,10 @@ export function upgradeDescription(upgrade: Upgrade): string {
     case 'passive':
       // 등갓은 레벨마다 달라지는 것이 "몇 초마다"라서, 그 숫자를 바로 적어 준다.
       if (upgrade.id === 'hood') return `${guardSeconds(upgrade.level)}초마다 피해를 한 번 막는 빛막`;
+      // 부싯돌도 그 레벨에서의 확률을 바로 적어 준다.
+      if (upgrade.id === 'flint') {
+        return `쓰러진 그림자가 ${Math.round(sparkChance(upgrade.level) * 100)}% 확률로 터진다`;
+      }
       return PASSIVES[upgrade.id].perLevel;
     case 'heal':
       return `체력 ${HEAL_AMOUNT} 회복`;
