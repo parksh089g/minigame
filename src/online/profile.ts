@@ -74,6 +74,11 @@ export function pendingSubmit(state: OnlineState, games: Bests): SubmitRequest |
   return { device: state.id, name: state.name, scores };
 }
 
+/** 이 게임의 최고 점수가 서버에 아직 올라가지 않았는지. 랭킹에 참여하지 않았으면 false다. */
+export function isWaitingToSend(state: OnlineState, games: Bests, game: string): boolean {
+  return pendingSubmit(state, games)?.scores[game] !== undefined;
+}
+
 /**
  * 서버가 받았다고 답한 것을 적어 둔다. request는 그때 보낸 것, bests는 서버에 남은 최고 점수다.
  * 보내는 사이에 닉네임이나 기록이 또 바뀌었을 수 있으므로, 지금 값이 아니라 보낸 값을 적는다.
