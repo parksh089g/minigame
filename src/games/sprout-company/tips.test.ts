@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BRANCH, OFFICES, OLD_HAND_TIPS, TIP_IDS, TIPS } from './data';
+import { BRANCH, BREAK, OFFICES, OLD_HAND_TIPS, TIP_IDS, TIPS } from './data';
 import { createGoals } from './goals';
 import { advance, createCompany, foundBranch, moveOffice, normalizeCompany, type CompanyState } from './rules';
 import { markTip, nextTip } from './tips';
@@ -68,6 +68,10 @@ describe('처음 안내', () => {
 
     state.backlog = [{ kind: 'plan', left: 1, total: 1 }];
     expect(drain(state)).toEqual(['backlog']);
+
+    // 휴게실이 있는 사무실에 오면 기운을 알려 준다.
+    state.office = BREAK.unlockOffice;
+    expect(drain(state)).toEqual(['energy']);
 
     // 사옥에 오면 부서를, 만드는 게임이 있으면 예약을 알려 준다.
     state.office = OFFICES.length - 1;

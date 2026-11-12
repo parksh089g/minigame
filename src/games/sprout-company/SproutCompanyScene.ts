@@ -64,6 +64,7 @@ import {
   availableProjects,
   awayRate,
   bossFor,
+  breakOpen,
   buddyOf,
   buyEquipment,
   buyPerk,
@@ -225,6 +226,12 @@ interface DeskView {
   bubble: Graphics;
   bubbleIcon: Phaser.GameObjects.Image;
   bar: Graphics;
+  /** 기운을 보여 주는 가는 막대. 휴게실이 있는 사무실에서만 그린다. */
+  energy: Graphics;
+  /** 지금 그려 둔 기운 막대의 모습 */
+  energyShown: string;
+  /** 쉬는 중일 때 다는 그림 */
+  nap: Phaser.GameObjects.Image;
   tag: Phaser.GameObjects.Text;
   pressed: boolean;
   /** 지금 그려 둔 모습. 달라졌을 때만 다시 그린다. */
@@ -251,6 +258,8 @@ const GEAR_TEXTURES: Partial<Record<EquipmentId, string>> = {
   chair: SC.chair,
   printer: SC.printer,
   meeting: SC.meeting,
+  sofa: SC.sofa,
+  snack: SC.snack,
 };
 
 /** 효과를 한 줄로 적는다. level만큼 쌓인 것을 적고, everyone이면 모두에게 걸리는 것이다. */
@@ -262,6 +271,8 @@ function effectText(effect: Effect, level = 1, everyone = false): string {
   if (effect.key === 'reputation') return `출시 평판 +${percent}%`;
   if (effect.key === 'away') return `닫아 둔 동안의 수익 +${percent}%`;
   if (effect.key === 'cheer') return `응원이 ${percent}% 더 오래가요`;
+  if (effect.key === 'rest') return `쉬는 속도 +${percent}%`;
+  if (effect.key === 'stamina') return `기운이 ${percent}% 더 오래가요`;
   return `출시 보너스 +${percent}%`;
 }
 
@@ -813,6 +824,8 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     const bubble = this.add.graphics().setVisible(false);
     const bubbleIcon = this.add.image(bubbleX, y + 13, taskTexture('plan')).setDisplaySize(13, 13).setVisible(false);
     const bar = this.add.graphics();
+    const energy = this.add.graphics();
+    const nap = this.add.image(bubbleX, y + 13, SC.nap).setVisible(false);
     const tag = addText(this, x + 21, y + 5, '2배', { size: FONT_SIZE.small, color: THEME_CSS.accent }).setVisible(false);
     const view: DeskView = {
       index,
@@ -830,6 +843,9 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
       bubble,
       bubbleIcon,
       bar,
+      energy,
+      energyShown: '',
+      nap,
       tag,
       pressed: false,
       shown: '',
@@ -871,7 +887,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
         .image(x + width - (narrow ? 14 : 20), deskTop + 1, computerTexture(0))
         .setOrigin(0.5, 1)
         .setDisplaySize(COMPUTER_SIZE.width * view.gearScale, COMPUTER_SIZE.height * view.gearScale);
-      room.add([view.body, table, view.computer, bubble, bubbleIcon, bar, tag]);
+      room.add([view.body, table, view.computer, bubble, bubbleIcon, bar, energy, nap, tag]);
 
       // 무엇을 잘하는지 왼쪽 위에 달아 둔다. 사장은 별이다.
       const specialty = specialtyOf(state, desk.staff);
@@ -934,13 +950,14 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     if (!desk?.staff) return;
     const task = desk.task;
     const cheered = desk.cheer > 0;
+    const resting = desk.resting;
     const card = state.inbox[this.selected];
-    const calling = !task && card !== undefined;
+    const calling = !task && !resting && card !== undefined;
     // 고른 카드의 업무를 남보다 잘하는 친구(특기이거나 그 부서에 든 친구)는 얼마나 빠른지를 달아 둔다.
     const fit = calling ? skill(state, view.index, card.kind) : 1;
     const match = fit > 1;
     const rush = task?.rush === true;
-    const signature = `${task?.kind ?? ''}|${rush}|${cheered}|${calling}|${fit}|${view.pressed}`;
+    const signature = `${task?.kind ?? ''}|${rush}|${cheered}|${calling}|${fit}|${view.pressed}|${resting}`;
 
     if (signature !== view.shown) {
       view.shown = signature;
@@ -970,6 +987,24 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
       }
       view.tag.setText(timesText(fit)).setVisible(match);
       if (view.body && staffDef(desk.staff).look) view.body.setTexture(staffTexture(desk.staff, cheered ? 'cheer' : 'idle'));
+      // 쉬러 간 친구는 자리가 흐려지고 쉬는 그림이 뜬다.
+      view.body?.setAlpha(resting ? 0.35 : 1);
+      view.nap.setVisible(resting);
+    }
+
+    if (breakOpen(state)) {
+      const inset = view.width < TILE_WIDTH.wide ? 9 : 15;
+      const left = view.x + inset;
+      const length = view.width - inset * 2;
+      const filled = Math.round(length * Phaser.Math.Clamp(desk.energy, 0, 1));
+      const shown = `${filled}|${resting}`;
+      if (shown !== view.energyShown) {
+        view.energyShown = shown;
+        const top = view.deskTop + 19;
+        view.energy.clear().fillStyle(THEME.white, 0.8).fillRoundedRect(left, top, length, 3, 1.5);
+        // 남은 기운은 금빛, 쉬면서 채우는 기운은 풀빛이다.
+        if (filled >= 3) view.energy.fillStyle(resting ? THEME.mintDeep : THEME.gold, 1).fillRoundedRect(left, top, filled, 3, 1.5);
+      }
     }
 
     const level = equipmentLevel(state, 'computer', view.index);
@@ -1007,6 +1042,11 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     if (!desk.staff) {
       sfx.click();
       this.openPanel('staff');
+      return;
+    }
+    if (desk.resting) {
+      sfx.deny();
+      this.pill('휴게실에서 쉬는 중이에요', 1200).setDepth(DEPTH.banner);
       return;
     }
     if (desk.task) {
@@ -1234,7 +1274,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     const state = this.state;
     let text: string;
     const rush = state.rush;
-    const idle = state.desks.some((desk) => desk.staff !== null && desk.task === null);
+    const idle = state.desks.some((desk) => desk.staff !== null && desk.task === null && !desk.resting);
     if (rush) text = `급한 의뢰 ${rush.done}/${rush.total}  남은 시간 ${Math.max(0, Math.ceil(rush.left))}초`;
     else if (isReady(state)) text = '다 만들었어요! 출시하기를 눌러요';
     else if (!state.project) text = state.releases === 0 ? '게임 고르기를 눌러 첫 게임을 만들어요' : '다음에 만들 게임을 골라요';

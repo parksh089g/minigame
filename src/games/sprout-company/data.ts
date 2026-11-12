@@ -33,8 +33,10 @@ export const TASKS: Readonly<Record<TaskKind, { name: string }>> = {
  * - reputation: 출시로 얻는 평판
  * - away: 닫아 둔 동안 쌓이는 수익
  * - cheer: 응원이 이어지는 시간
+ * - rest: 휴게실에서 기운을 채우는 빠르기
+ * - stamina: 기운이 버티는 시간
  */
-export const EFFECT_KEYS = ['workSpeed', 'income', 'bonus', 'ease', 'reputation', 'away', 'cheer'] as const;
+export const EFFECT_KEYS = ['workSpeed', 'income', 'bonus', 'ease', 'reputation', 'away', 'cheer', 'rest', 'stamina'] as const;
 export type EffectKey = (typeof EFFECT_KEYS)[number];
 
 /** amount는 한 레벨(또는 한 사람)마다 더해지는 비율이다. 0.1이면 10%. */
@@ -149,6 +151,7 @@ export const TIPS = {
   train: '직원 창에서 교육하면 그 친구가 빨라져요',
   lead: '팀장을 두면 카드를 알아서 맡겨 줘요',
   buddy: '단짝을 옆자리에 앉히면 더 빨라져요',
+  energy: '기운이 남은 친구는 일이 더 빨라요',
   rush: '급한 의뢰를 제때 끝내면 잎사귀를 받아요',
   backlog: '큰 게임은 맡기는 대로 다음 카드가 나와요',
   dept: '사무실 버튼에서 부서를 세울 수 있어요',
@@ -223,6 +226,18 @@ export const AWAY = { minSeconds: 60, maxSeconds: 4 * 3600, rate: 0.25 } as cons
 /** 일하는 책상을 누르면 이만큼(초) 동안 그 자리가 CHEER_BOOST배로 빨라진다. 다시 누르면 처음부터 다시 센다. */
 export const CHEER_SECONDS = 4;
 export const CHEER_BOOST = 2;
+
+// ───────── 휴게실과 기운 ─────────
+
+/**
+ * 한 층 사무실부터 휴게실이 생기고, 친구마다 기운이 생긴다.
+ * - 기운이 남아 있는 동안에는 일이 boost만큼 빠르다. 바닥나도 느려지지는 않고 보통 빠르기로 돌아갈 뿐이다.
+ * - 기운은 일하는 동안 줄어서, 쉬지 않고 workSeconds초를 일하면 바닥난다.
+ * - 기운이 바닥난 친구는 하던 일을 마치면 휴게실에 가서 restSeconds초 동안 쉬고 가득 채워 온다.
+ *   휴게실 자리는 seats개라서 한꺼번에 여럿이 자리를 비우지는 않고, 급한 의뢰가 있는 동안에는 쉬러 가지 않는다.
+ * - 일이 없어 자리에서 기다리는 동안에도 쉴 때의 idle배 빠르기로 천천히 찬다.
+ */
+export const BREAK = { unlockOffice: 2, boost: 0.25, workSeconds: 240, restSeconds: 40, seats: 3, idle: 0.25 } as const;
 
 // ───────── 장비 ─────────
 
@@ -331,6 +346,26 @@ export const EQUIPMENT = {
     growth: 2.4,
     effect: { key: 'away', amount: 0.2 },
     unlockOffice: 3,
+  },
+  sofa: {
+    name: '소파',
+    description: '휴게실에서 25% 더 빨리 쉬어요',
+    scope: 'company',
+    maxLevel: 8,
+    baseCost: 5000,
+    growth: 2.2,
+    effect: { key: 'rest', amount: 0.25 },
+    unlockOffice: 2,
+  },
+  snack: {
+    name: '간식',
+    description: '기운이 20% 더 오래가요',
+    scope: 'company',
+    maxLevel: 10,
+    baseCost: 4000,
+    growth: 2.2,
+    effect: { key: 'stamina', amount: 0.2 },
+    unlockOffice: 2,
   },
 } as const satisfies Record<string, EquipmentDef>;
 
