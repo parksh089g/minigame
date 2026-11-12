@@ -18,6 +18,8 @@ export const TIPS = {
   blast: '불꽃 단지가 화면의 그림자를 태워요',
   guard: '등갓의 빛막이 피해를 한 번 막아 줘요',
   vent: '붉어진 불구멍은 그림자도 태워요',
+  elite: '금빛 뿔의 정예를 잡으면 보물 상자가 나와요',
+  chest: '보물 상자는 가진 것 하나를 한 단계 올려 줘요',
 } as const;
 
 export type TipId = keyof typeof TIPS;
@@ -56,6 +58,10 @@ export function tipFor(event: SimEvent): TipId | null {
       return 'guard';
     case 'vent':
       return 'vent';
+    case 'elite':
+      return 'elite';
+    case 'chest':
+      return 'chest';
     default:
       return null;
   }

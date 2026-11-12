@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { darknessTexture, flashOf, FLOOR_OF, HERO_FRAMES, LK, LOOK } from './art';
 import { ENEMIES, POSTS, STAGES } from './data';
+import { HUD_HEIGHT } from './hud';
 import { auraStats, fireflyStats, isEvolved } from './rules';
 import {
   AIM_LOCK_SECONDS,
@@ -69,6 +70,8 @@ function gemKey(gem: Gem): string {
       return LK.pull;
     case 'blast':
       return LK.blast;
+    case 'chest':
+      return LK.chest;
     default:
       return gem.value >= 10 ? LK.gemBig : gem.value >= 3 ? LK.gemMid : LK.gemSmall;
   }
@@ -82,6 +85,9 @@ const SHOT_KEY: Record<ShotLook, string> = {
 };
 
 /** 스프라이트를 미리 만들어 두고 돌려쓴다. 프레임마다 앞에서부터 차례로 내준다. */
+/** 화면 밖의 보물 상자를 알리는 그림이 가장자리에서 이만큼(px) 안쪽에 선다. */
+const CHEST_EDGE = 10;
+
 class Pool {
   private readonly items: Phaser.GameObjects.Image[] = [];
   private used = 0;
@@ -582,6 +588,15 @@ export class RunView {
     for (const gem of s.gems) {
       const x = gem.x + offsetX;
       const y = gem.y + offsetY;
+      if (gem.kind === 'chest') {
+        // 보물 상자는 놓치지 않게 살짝 들썩이고, 화면 밖에 있으면 그쪽 가장자리에서 깜빡인다.
+        const edgeX = Phaser.Math.Clamp(x, CHEST_EDGE, this.width - CHEST_EDGE);
+        const edgeY = Phaser.Math.Clamp(y, HUD_HEIGHT + CHEST_EDGE, this.height - CHEST_EDGE);
+        const away = edgeX !== x || edgeY !== y;
+        if (away && Math.floor(seconds * 4) % 2 === 0) continue;
+        this.gems.put(LK.chest, edgeX, away ? edgeY : edgeY - (Math.floor(seconds * 3) % 2));
+        continue;
+      }
       if (x < -marginX || x > this.width + marginX || y < -marginY || y > this.height + marginY) continue;
       this.gems.put(gemKey(gem), x, y);
     }

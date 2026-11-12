@@ -32,6 +32,9 @@ export const LK = {
   slag: ['lk-slag-1', 'lk-slag-2'],
   smoker: ['lk-smoker-1', 'lk-smoker-2'],
   blister: ['lk-blister-1', 'lk-blister-2'],
+  prowler: ['lk-prowler-1', 'lk-prowler-2'],
+  lurker: ['lk-lurker-1', 'lk-lurker-2'],
+  stoker: ['lk-stoker-1', 'lk-stoker-2'],
   giant: ['lk-giant-1', 'lk-giant-2'],
   ram: ['lk-ram-1', 'lk-ram-2'],
   owl: ['lk-owl-1', 'lk-owl-2'],
@@ -46,6 +49,8 @@ export const LK = {
   heal: 'lk-heal',
   pull: 'lk-pull',
   blast: 'lk-blast',
+  /** 보물 상자 */
+  chest: 'lk-chest',
   /** 등불 기둥: 켜기 전과 켜진 뒤 */
   post: 'lk-post',
   postLit: 'lk-post-lit',
@@ -320,6 +325,19 @@ const BLAST: Rows = [
   '..000000..',
 ];
 
+/** 보물 상자: 정예 그림자가 떨어뜨린다. 주우면 가진 것 하나가 한 단계 오른다. */
+const CHEST: Rows = [
+  '..00000000..',
+  '.0433333340.',
+  '043333333340',
+  '044444444440',
+  '033330c03330',
+  '022220402220',
+  '022222222220',
+  '044444444440',
+  '.0000000000.',
+];
+
 /** 등불 기둥의 기둥과 받침. 위에 등을 얹어 한 장을 만든다. */
 const POST_POLE: Rows = [
   '...0e0...',
@@ -386,6 +404,8 @@ interface BlobLook {
   frill?: boolean;
   /** 머리 양쪽에 솟은 것. horn은 바깥으로 휜 흰 뿔, tuft는 몸과 같은 색의 뾰족한 깃 */
   ears?: 'horn' | 'tuft';
+  /** 뿔의 색. 없으면 희다. 정예 그림자는 금빛 뿔로 알아본다. */
+  horn?: number;
 }
 
 /**
@@ -440,7 +460,7 @@ function blobRows(look: BlobLook, frame: 1 | 2): Rows {
     const tall = crownRows + Math.round(size / 6);
     const wide = Math.max(3, Math.round(size / 6));
     const lean = look.ears === 'horn' ? Math.round(size / 9) : 0;
-    const fill = (look.ears === 'horn' ? 12 : look.body).toString(16);
+    const fill = (look.ears === 'horn' ? (look.horn ?? 12) : look.body).toString(16);
     for (const side of [-1, 1]) {
       const base = Math.round(cx + side * size * 0.27);
       for (let k = 0; k < tall; k += 1) {
@@ -495,6 +515,10 @@ const BLOBS = {
   slag: { size: 18, body: 2, shade: 3, eye: 4 },
   smoker: { size: 13, body: 14, shade: 13, eye: 12, ears: 'tuft' },
   blister: { size: 13, body: 3, shade: 4, eye: 0 },
+  // 정예 그림자: 그 스테이지의 흔한 그림자를 크게 키운 모습에 금빛 뿔이 솟았다.
+  prowler: { size: 22, body: 1, shade: 2, eye: 4, ears: 'horn', horn: 4, frill: true },
+  lurker: { size: 22, body: 6, shade: 5, eye: 4, ears: 'horn', horn: 4 },
+  stoker: { size: 23, body: 14, shade: 13, eye: 3, ears: 'horn', horn: 4, frill: true },
   giant: { size: 30, body: 7, shade: 6, eye: 4, frill: true },
   ram: { size: 28, body: 3, shade: 4, eye: 0, ears: 'horn' },
   owl: { size: 28, body: 9, shade: 10, eye: 4, ears: 'tuft', frill: true },
@@ -866,6 +890,7 @@ export function registerLanternTextures(scene: Phaser.Scene): void {
   add(LK.heal, drawRows(HEAL));
   add(LK.pull, drawRows(PULL));
   add(LK.blast, drawRows(BLAST));
+  add(LK.chest, drawRows(CHEST));
   add(LK.post, drawRows(POST));
   add(LK.postLit, drawRows(POST_LIT));
   add(LK.heart, drawRows(withOutline(HEART)));

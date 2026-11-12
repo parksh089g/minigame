@@ -116,6 +116,20 @@ describe('한 판의 기록 쌓기', () => {
     expect(normalizeStats({ bestEndless: 240.5 }).bestEndless).toBe(240);
   });
 
+  it('연 보물 상자가 판마다 쌓인다', () => {
+    let stats = addRun(createStats(), run({ chests: 4 }));
+    stats = addRun(stats, run({}));
+    stats = addRun(stats, run({ cleared: true, chests: 5 }));
+    expect(stats.chests).toBe(9);
+    const hunter = must('chests-25');
+    expect(progressOf(hunter, source({ chests: 24 }))).toBe(24);
+    expect(isDone(hunter, source({ chests: 24 }))).toBe(false);
+    expect(isDone(hunter, source({ chests: 25 }))).toBe(true);
+    // 이 항목이 없던 예전 저장은 0으로 채운다.
+    expect(normalizeStats({ kills: 5 }).chests).toBe(0);
+    expect(normalizeStats({ chests: 'x' }).chests).toBe(0);
+  });
+
   it('저장된 기록에서 엉뚱한 값은 버린다', () => {
     expect(normalizeStats(undefined)).toEqual(createStats());
     expect(normalizeStats({ kills: -3, bossKills: 'x', evolved: 'ember' })).toEqual(createStats());

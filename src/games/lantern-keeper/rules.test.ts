@@ -34,6 +34,7 @@ import {
   boltStats,
   boonLevel,
   boonOptions,
+  chestUpgrade,
   clampDepth,
   COIN_CAP,
   coinsFor,
@@ -510,6 +511,24 @@ describe('결과와 보상', () => {
     expect(boonLevel({ blaze: Number.NaN }, 'blaze')).toBe(0);
     expect(boonLevel(undefined, 'ward')).toBe(0);
     expect(boonLevel({ ward: 2.9 }, 'ward')).toBe(2);
+  });
+
+  it('보물 상자는 가진 것 가운데 아직 올릴 수 있는 것만 올린다', () => {
+    const rand = seededRandom(9);
+    const build = { weapons: { ember: 2, star: MAX_LEVEL, lance: EVOLVE_LEVEL }, passives: { wick: 4, coat: MAX_LEVEL } };
+    const seen = new Set<string>();
+    for (let i = 0; i < 60; i += 1) {
+      const upgrade = chestUpgrade(build, rand);
+      if (!upgrade || (upgrade.type !== 'weapon' && upgrade.type !== 'passive')) throw new Error('올릴 것이 나오지 않았다');
+      seen.add(`${upgrade.id}${upgrade.level}`);
+    }
+    // 새 무기나 패시브, 다 올린 것, 진화는 나오지 않는다.
+    expect([...seen].sort()).toEqual(['ember3', 'wick5']);
+    expect(chestUpgrade({ weapons: { ember: MAX_LEVEL }, passives: {} }, rand)).toBeNull();
+    expect(chestUpgrade({ weapons: {}, passives: {} }, rand)).toBeNull();
+    // 난수가 끝 값이어도 목록 밖을 가리키지 않는다.
+    expect(chestUpgrade(build, () => 0.999999)).toEqual({ type: 'passive', id: 'wick', level: 5 });
+    expect(chestUpgrade(build, () => 0)).toEqual({ type: 'weapon', id: 'ember', level: 3 });
   });
 
   it('밤의 축복 선택지는 겹치지 않고, 설명의 숫자가 실제 값과 맞는다', () => {

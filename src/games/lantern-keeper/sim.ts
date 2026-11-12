@@ -5,6 +5,8 @@
 import {
   BOON_VALUES,
   BOONS,
+  CHEST,
+  ELITE,
   ENDLESS,
   ENEMIES,
   FLINT,
@@ -34,6 +36,7 @@ import {
   boltStats,
   boonLevel,
   boonOptions,
+  chestUpgrade,
   clampDepth,
   damageScale,
   depthRules,
@@ -146,8 +149,9 @@ export interface Gem {
    * xp는 빛 조각, heal은 회복 떡.
    * pull은 자석: 주우면 싸움터의 빛 조각이 모두 끌려온다.
    * blast는 불꽃 단지: 주우면 화면 안의 보통 그림자가 모두 쓰러지고 보스는 조금 다친다.
+   * chest는 보물 상자: 정예 그림자가 떨어뜨리고, 주우면 가진 것 하나가 한 단계 오른다.
    */
-  kind: 'xp' | 'heal' | 'pull' | 'blast';
+  kind: 'xp' | 'heal' | 'pull' | 'blast' | 'chest';
   /** 끌려오는 중인지 */
   pulled: boolean;
 }
@@ -289,6 +293,10 @@ export interface RunState {
    * 판이 끝나면 도감에 적힌다. 도감이 생기기 전에 저장한 판에는 없다.
    */
   seen?: string[];
+  /** 지금까지 나온 정예 그림자의 수. ELITE.times의 몇 번째까지 나왔는지를 가리킨다. 정예가 생기기 전에 저장한 판에는 없다. */
+  elites?: number;
+  /** 이 판에서 연 보물 상자의 수 */
+  chests?: number;
   cd: { ember: number; aura: number; star: number; lance: number; oil: number; bolt: number; bell: number; moon: number };
   fireflyAngle: number;
   spawnDebt: number;
@@ -398,6 +406,10 @@ export type SimEvent =
   /** 부싯돌: 쓰러진 그림자가 (x, y)에서 터졌다 */
   | { type: 'spark'; x: number; y: number; radius: number }
   | { type: 'boss'; kind: EnemyKind }
+  /** 정예 그림자가 나타났다 */
+  | { type: 'elite'; kind: EnemyKind }
+  /** 보물 상자를 열었다. upgrade는 오른 것, 올릴 것이 없어 불씨를 받았으면 null */
+  | { type: 'chest'; upgrade: Upgrade | null }
   | { type: 'ticket' }
   /** 끝없는 밤에서 밤의 축복을 고를 때가 됐다 */
   | { type: 'boon' }
@@ -526,6 +538,8 @@ export function createRun(config: RunConfig): RunState {
     posts: [],
     postsSpawned: 0,
     seen: [],
+    elites: 0,
+    chests: 0,
     cd: { ember: 0.6, aura: 0, star: 1, lance: 0.8, oil: 0.5, bolt: 0.7, bell: 0.9, moon: 0.7 },
     fireflyAngle: 0,
     spawnDebt: 0,
@@ -620,6 +634,10 @@ export class Sim {
     if (!Array.isArray(state.posts)) state.posts = [];
     if (typeof state.postsSpawned !== 'number') {
       state.postsSpawned = POSTS.times.filter((time) => time <= state.t).length;
+    }
+    // 정예 그림자가 생기기 전에 저장한 판: 이미 지난 시각의 것은 나온 셈 치고, 남은 것만 나오게 한다.
+    if (typeof state.elites !== 'number') {
+      state.elites = ELITE.times.filter((time) => time <= state.t).length;
     }
     // 종소리와 초승달이 생기기 전에 저장한 판: 빈 채로 채워서 이어 간다.
     if (!Array.isArray(state.waves)) state.waves = [];
@@ -913,9 +931,10 @@ export class Sim {
       if (e.hp <= 0) continue;
       const vent = ventAt(e.x, e.y, s.seed);
       if (!vent || ventPhase(vent, s.t) !== 'erupt') continue;
-      const boss = Boolean(ENEMIES[e.kind].boss);
+      const info = ENEMIES[e.kind];
       // 끝없는 밤에서 불어난 체력은 치지 않는다. 그러지 않으면 불구멍만으로 끝없이 버틸 수 있다.
-      this.damage(e, boss ? VENT.boss : Math.max(VENT.floor, (e.maxHp * VENT.share) / this.late.hp), null);
+      const share = info.elite ? ELITE.vent : VENT.share;
+      this.damage(e, info.boss ? VENT.boss : Math.max(VENT.floor, (e.maxHp * share) / this.late.hp), null);
     }
   }
 
@@ -1082,6 +1101,16 @@ export class Sim {
         boss.maxHp = boss.hp;
         s.endless.bosses += 1;
       }
+    }
+
+    // 정예 그림자: 정해진 시각마다 하나씩 가장자리에서 걸어온다. 끝없는 밤에는 나오지 않는다.
+    const elites = s.elites ?? 0;
+    if (!s.endless && elites < ELITE.times.length && s.t >= ELITE.times[elites]) {
+      s.elites = elites + 1;
+      const [x, y] = this.edgePoint();
+      const kind = STAGES[s.stage].elite;
+      this.makeEnemy(kind, x, y);
+      this.events.push({ type: 'elite', kind });
     }
 
     // 중간 보스: 정해진 간격마다 하나씩, 나올 때마다 더 강하게
@@ -2029,7 +2058,8 @@ export class Sim {
       const info = ENEMIES[e.kind];
       const reach = POSTS.radius + info.radius;
       if ((e.x - post.x) ** 2 + (e.y - post.y) ** 2 >= reach * reach) continue;
-      this.damage(e, Math.max(1, e.maxHp * (info.boss ? POSTS.bossBurn : POSTS.burn)), null);
+      const burn = info.boss ? POSTS.bossBurn : info.elite ? ELITE.burn : POSTS.burn;
+      this.damage(e, Math.max(1, e.maxHp * burn), null);
       if (!info.boss) this.chill(e, POSTS.slow);
     }
   }
@@ -2093,6 +2123,9 @@ export class Sim {
           s.pendingTickets += 1;
           this.events.push({ type: 'ticket' });
         }
+      } else if (info.elite) {
+        // 정예는 보물 상자를 떨어뜨린다.
+        this.dropGem(e.x, e.y, 0, 'chest');
       } else {
         // 난수는 한 번만 뽑아서 무엇을 떨어뜨릴지 정한다.
         const roll = this.rand();
@@ -2178,9 +2211,19 @@ export class Sim {
       const reachY = s.viewH / 2 + BLAST_MARGIN;
       for (const e of s.enemies) {
         if (e.hp <= 0 || Math.abs(e.x - p.x) > reachX || Math.abs(e.y - p.y) > reachY) continue;
-        this.damage(e, ENEMIES[e.kind].boss ? e.maxHp * BLAST_BOSS_SHARE : e.hp, null);
+        const info = ENEMIES[e.kind];
+        this.damage(e, info.boss ? e.maxHp * BLAST_BOSS_SHARE : info.elite ? e.maxHp * ELITE.blast : e.hp, null);
       }
       this.events.push({ type: 'blast' });
+      return;
+    }
+    if (gem.kind === 'chest') {
+      // 가진 것 가운데 하나가 한 단계 오른다. 더 올릴 것이 없으면 불씨를 받는다.
+      const upgrade = chestUpgrade({ weapons: s.weapons, passives: s.passives }, this.rand);
+      if (upgrade) this.grant(upgrade);
+      else s.bonusEmbers += CHEST.embers;
+      s.chests = (s.chests ?? 0) + 1;
+      this.events.push({ type: 'chest', upgrade });
       return;
     }
     p.xp += gem.value * this.mods.xp;

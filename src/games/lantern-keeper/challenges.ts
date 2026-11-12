@@ -27,10 +27,12 @@ export interface LanternStats {
   dailyDays: number;
   /** 끝없는 밤에서 가장 오래 버틴 시간(초) */
   bestEndless: number;
+  /** 지금까지 연 보물 상자 */
+  chests: number;
 }
 
 export function createStats(): LanternStats {
-  return { kills: 0, bossKills: 0, bestLevel: 0, bestEvolved: 0, deepest: 0, evolved: [], heroes: [], stages: [], dailyDays: 0, bestEndless: 0 };
+  return { kills: 0, bossKills: 0, bestLevel: 0, bestEvolved: 0, deepest: 0, evolved: [], heroes: [], stages: [], dailyDays: 0, bestEndless: 0, chests: 0 };
 }
 
 const count = (value: unknown): number =>
@@ -56,6 +58,7 @@ export function normalizeStats(raw: unknown): LanternStats {
   stats.stages = known(data.stages, STAGE_ORDER);
   stats.dailyDays = count(data.dailyDays);
   stats.bestEndless = count(data.bestEndless);
+  stats.chests = count(data.chests);
   return stats;
 }
 
@@ -75,6 +78,8 @@ export interface RunFeats {
   dailyFirst?: boolean;
   /** 끝없는 밤에서 버틴 시간(초). 끝없는 밤에 들어가지 않았으면 0이거나 없다. */
   endlessSeconds?: number;
+  /** 이 판에서 연 보물 상자의 수 */
+  chests?: number;
 }
 
 const withItem = <T extends string>(list: readonly T[], item: T, order: readonly T[]): T[] =>
@@ -94,6 +99,7 @@ export function addRun(stats: LanternStats, run: RunFeats): LanternStats {
     stages: run.cleared ? withItem(stats.stages, run.stage, STAGE_ORDER) : stats.stages,
     dailyDays: stats.dailyDays + (run.dailyFirst ? 1 : 0),
     bestEndless: Math.max(stats.bestEndless, count(run.endlessSeconds)),
+    chests: stats.chests + count(run.chests),
   };
 }
 
@@ -135,6 +141,7 @@ export const CHALLENGES: readonly Challenge[] = [
   { id: 'boss-25', title: '보스 사냥꾼', description: '보스 25마리 쓰러뜨리기', goal: 25, reward: 60, measure: (s) => s.stats.bossKills },
   { id: 'evolve-3', title: '세 갈래 빛', description: '한 판에 무기 셋 진화시키기', goal: 3, reward: 80, measure: (s) => s.stats.bestEvolved },
   { id: 'deep-1', title: '더 깊은 곳으로', description: '깊은 밤 1에서 새벽 맞기', goal: 1, reward: 80, measure: clearedDepth(1) },
+  { id: 'chests-25', title: '보물 사냥꾼', description: '보물 상자 25개 열기', goal: 25, reward: 80, measure: (s) => s.stats.chests },
   { id: 'dawn-10', title: '새벽 단골', description: '새벽을 열 번 맞기', goal: 10, reward: 80, measure: (s) => s.clears },
   { id: 'heroes-all', title: '모두의 새벽', description: '세 캐릭터로 새벽 맞기', goal: 3, reward: 100, measure: (s) => s.stats.heroes.length },
   { id: 'heroes-every', title: '넷의 새벽', description: '네 캐릭터 모두로 새벽 맞기', goal: HERO_ORDER.length, reward: 120, measure: (s) => s.stats.heroes.length },

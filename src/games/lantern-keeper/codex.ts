@@ -5,6 +5,8 @@
  * 화면을 그리는 일은 codexpage.ts가 맡고, 여기에는 글과 열리는 규칙만 둔다.
  */
 import {
+  CHEST,
+  ELITE,
   ENEMIES,
   FLINT,
   GUARD,
@@ -35,7 +37,7 @@ export const CODEX_TABS: ReadonlyArray<{ id: CodexTab; name: string }> = [
 ];
 
 /** 줍는 것과 등불 기둥의 이름. sim.ts가 만난 것을 적을 때 쓰는 이름과 같다. */
-export type FindId = 'gem' | 'heal' | 'pull' | 'blast' | 'post';
+export type FindId = 'gem' | 'heal' | 'pull' | 'blast' | 'chest' | 'post';
 
 export interface CodexEntry {
   /** 도감 안에서 하나뿐인 이름. 그림자는 EnemyKind, 진화형은 무기 이름에 Evo를 붙인 것이다. */
@@ -76,6 +78,9 @@ const FOE_TEXT: Readonly<Record<EnemyKind, string>> = {
   slag: '아주 느리고 아주 튼튼하다. 불구멍으로 끌어들이면 빨리 쓰러진다',
   smoker: '멀찍이 멈춰 서서 어둠 방울을 쏜다. 고리가 조여들면 옆으로 비키자',
   blister: '가까이 와서 부풀었다가 터진다. 바닥의 원 밖으로 나가면 다치지 않고, 둘레의 그림자는 함께 다친다',
+  prowler: '크고 튼튼한 정예 그림자. 곧장 쫓아온다. 쓰러뜨리면 보물 상자를 떨어뜨린다',
+  lurker: '크고 튼튼한 정예 그림자. 웅크렸다가 멀리 뛰어든다. 쓰러뜨리면 보물 상자를 떨어뜨린다',
+  stoker: '느리지만 아주 튼튼한 정예 그림자. 닿으면 몹시 아프다. 쓰러뜨리면 보물 상자를 떨어뜨린다',
   giant: '부하를 자꾸 불러낸다. 쓰러뜨리면 무기 강화권을 준다',
   ram: '힘을 모았다가 곧게 내달린다. 붉은 길에서 비키자. 쓰러뜨리면 무기 강화권을 준다',
   owl: '빛을 모았다가 부채꼴로 쏜다. 쓰러뜨리면 무기 강화권을 준다',
@@ -111,6 +116,13 @@ const FINDS: ReadonlyArray<{ id: FindId; name: string; note: string; text: strin
     note: '아주 드물게 떨어짐',
     text: '주우면 화면 안의 그림자가 모두 쓰러진다. 보스는 조금만 다친다',
     hint: '쓰러진 그림자가 아주 드물게 떨어뜨려요',
+  },
+  {
+    id: 'chest',
+    name: '보물 상자',
+    note: `정예 그림자가 떨어뜨림 · 한 판에 ${ELITE.times.length}개까지`,
+    text: `주우면 가진 무기나 패시브 가운데 하나가 한 단계 오른다. 진화는 시키지 않고, 더 올릴 것이 없으면 불씨 ${CHEST.embers}개를 준다`,
+    hint: '금빛 뿔이 난 정예 그림자를 쓰러뜨리면 떨어져요',
   },
   {
     id: 'post',
@@ -223,6 +235,20 @@ function buildCodex(): CodexEntry[] {
       text: FOE_TEXT[kind],
       secret: 'met',
       hint: `${MID_BOSS_EVERY / 60}분마다 하나씩 나오는 중간 보스예요`,
+    });
+  }
+  // 정예 그림자는 중간 보스와 같은 줄에 놓는다.
+  for (const stageId of STAGE_ORDER) {
+    const stage = STAGES[stageId];
+    entries.push({
+      id: stage.elite,
+      tab: 'foes',
+      row: STAGE_ORDER.length,
+      name: ENEMIES[stage.elite].name,
+      note: `${stage.name}의 정예 · 한 판에 ${ELITE.times.length}번`,
+      text: FOE_TEXT[stage.elite],
+      secret: 'met',
+      hint: `${stage.name}에서 ${formatClock(ELITE.times[0])}쯤부터 가끔 나오는 정예 그림자예요`,
     });
   }
   for (const find of FINDS) {
