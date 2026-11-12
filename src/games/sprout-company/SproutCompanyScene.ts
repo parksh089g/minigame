@@ -134,6 +134,7 @@ import {
   specialtyOf,
   starsOf,
   startProject,
+  stuckGoals,
   swapDesks,
   totalReputation,
   train,
@@ -651,7 +652,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
   /** 날이 바뀌었으면 오늘의 목표를 새로 정한다. */
   private rollDay(): void {
     const state = this.state;
-    state.goals = rollGoals(state.goals, dateKeyOf(new Date()), state.office);
+    state.goals = rollGoals(state.goals, dateKeyOf(new Date()), state.office, stuckGoals(state));
   }
 
   private save(): void {

@@ -332,7 +332,8 @@ describe('자회사 안내', () => {
 
 describe('자회사를 세운 뒤의 진행 속도', () => {
   const HOUR = 3600;
-  const options = () => ({ cheerGap: 6, reaction: 1.5, random: seeded(7) });
+  // 사옥에서는 아직 못 낸 게임에 필요한 부서부터 세운다. 사람도 큰 게임을 내려고 그렇게 한다.
+  const options = () => ({ cheerGap: 6, reaction: 1.5, random: seeded(7), eager: true });
 
   /** 자회사를 세울 수 있을 때까지 자동으로 플레이한다. 걸린 시간(초)과 사옥에 닿은 때를 돌려준다. */
   function untilRipe(state: CompanyState, limit: number): { top: number; ripe: number } {
@@ -346,11 +347,13 @@ describe('자회사를 세운 뒤의 진행 속도', () => {
     return { top, ripe: -1 };
   }
 
-  it('첫 회사는 열 시간을 넘겨야 자회사가 되고, 둘째와 셋째 회사는 갈수록 빨리 큰다', () => {
+  it('첫 회사는 예닐곱 시간을 넘겨야 자회사가 되고, 둘째와 셋째 회사는 갈수록 빨리 큰다', () => {
     const state = createCompany('sprout');
     const first = untilRipe(state, 24 * HOUR);
-    expect(first.ripe).toBeGreaterThan(10 * HOUR);
-    expect(first.ripe).toBeLessThan(20 * HOUR);
+    expect(first.ripe).toBeGreaterThan(6 * HOUR);
+    expect(first.ripe).toBeLessThan(10 * HOUR);
+    // 사옥에 와서 자회사를 세우기까지도 한 시간은 넘게 걸린다.
+    expect(first.ripe - first.top).toBeGreaterThan(HOUR);
     // 세울 수 있게 되자마자 세우면 열매는 대여섯 개다.
     const founded = foundBranch(state);
     expect(founded?.fruit).toBeGreaterThanOrEqual(fruitFor(BRANCH.reputation));
@@ -362,7 +365,7 @@ describe('자회사를 세운 뒤의 진행 속도', () => {
     expect(second.top).toBeLessThan(first.top * 0.8);
     expect(second.ripe).toBeLessThan(first.ripe * 0.8);
     // 그래도 몇 시간은 걸려서, 다시 키우는 재미가 남는다.
-    expect(second.ripe).toBeGreaterThan(4 * HOUR);
+    expect(second.ripe).toBeGreaterThan(3 * HOUR);
     foundBranch(state);
     shop(state);
 

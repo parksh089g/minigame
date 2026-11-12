@@ -407,13 +407,17 @@ export interface OfficeDef {
   desks: number;
 }
 
-/** 작은 곳부터 큰 곳 순서. 뒤에 줄을 더하면 단계가 늘어난다. */
+/**
+ * 작은 곳부터 큰 곳 순서. 뒤에 줄을 더하면 단계가 늘어난다.
+ * 평판과 잎사귀가 비슷한 때에 차도록 맞춘 값이다. 잎사귀 쪽이 너무 비싸면 평판을 다 채운 뒤에
+ * 같은 게임만 고쳐 내며 오래 기다리게 되고, 장비를 사는 것이 이사를 늦추는 손해가 된다.
+ */
 export const OFFICES: readonly OfficeDef[] = [
   { name: '옥탑방', reputation: 0, cost: 0, desks: 2 },
-  { name: '작은 사무실', reputation: 30, cost: 250, desks: 4 },
-  { name: '한 층 사무실', reputation: 200, cost: 10000, desks: 6 },
-  { name: '두 층 사무실', reputation: 1000, cost: 150000, desks: 9 },
-  { name: '사옥', reputation: 5000, cost: 6000000, desks: 12 },
+  { name: '작은 사무실', reputation: 20, cost: 250, desks: 4 },
+  { name: '한 층 사무실', reputation: 150, cost: 6000, desks: 6 },
+  { name: '두 층 사무실', reputation: 1200, cost: 100000, desks: 9 },
+  { name: '사옥', reputation: 6000, cost: 2000000, desks: 12 },
 ];
 
 /** 일감함에 한 번에 꺼내 놓는 카드의 수. 카드가 이보다 많은 프로젝트는 남은 것을 쌓아 두었다가 자리가 나면 꺼낸다. */

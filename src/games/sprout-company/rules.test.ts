@@ -1256,36 +1256,40 @@ describe('세이브 읽기', () => {
 });
 
 describe('진행 속도', () => {
-  // 사람은 자동 플레이보다 느리다. 보통으로 하는 사람이 십 분쯤에 작은 사무실, 한 시간쯤에 한 층 사무실,
-  // 서너 시간쯤에 두 층 사무실, 열 시간쯤에 사옥에 닿도록 맞춘다.
-  const play = (cheerGap: number, reaction: number, minutes: number) => {
+  // 사람은 자동 플레이보다 느리다. 보통으로 하는 사람이 오륙 분쯤에 작은 사무실, 사십 분쯤에 한 층 사무실,
+  // 두세 시간쯤에 두 층 사무실, 일곱 시간쯤에 사옥에 닿도록 맞춘다.
+  const play = (cheerGap: number, reaction: number, minutes: number, extra: { thrift?: number; eager?: boolean } = {}) => {
     const state = createCompany('sprout');
-    const report = runBot(state, minutes * 60, { cheerGap, reaction, random: seeded(7) });
+    const report = runBot(state, minutes * 60, { cheerGap, reaction, random: seeded(7), ...extra });
     return { state, report };
   };
   const MINUTE = 60;
   const HOUR = 3600;
 
-  it('부지런히 하면 몇 분 만에 작은 사무실로, 삼사십 분쯤에 한 층 사무실로 간다', () => {
+  it('부지런히 하면 몇 분 만에 작은 사무실로, 삼십 분쯤에 한 층 사무실로 간다', () => {
     const { report } = play(6, 1.5, 60);
     expect(report.officeAt[1]).toBeGreaterThan(3 * MINUTE);
+    expect(report.officeAt[1]).toBeLessThan(8 * MINUTE);
+    expect(report.officeAt[2]).toBeGreaterThan(20 * MINUTE);
+    expect(report.officeAt[2]).toBeLessThan(40 * MINUTE);
+  });
+
+  it('응원하지 않고 느긋하게 해도 한 시간 안에 한 층 사무실에 닿는다', () => {
+    const { report } = play(Infinity, 3, 90);
     expect(report.officeAt[1]).toBeLessThan(10 * MINUTE);
-    expect(report.officeAt[2]).toBeGreaterThan(25 * MINUTE);
     expect(report.officeAt[2]).toBeLessThan(50 * MINUTE);
   });
 
-  it('응원하지 않고 느긋하게 해도 한 시간 남짓이면 한 층 사무실에 닿는다', () => {
-    const { report } = play(Infinity, 3, 90);
-    expect(report.officeAt[1]).toBeLessThan(15 * MINUTE);
-    expect(report.officeAt[2]).toBeLessThan(70 * MINUTE);
-  });
-
-  it('두 층 사무실은 두세 시간쯤에, 사옥은 하루 안에 닿고 자리를 모두 채운다', () => {
+  it('두 층 사무실은 두 시간쯤에, 사옥은 대여섯 시간쯤에 닿고 하루 안에 자리를 모두 채운다', () => {
     const { state, report } = play(6, 1.5, 16 * 60);
     expect(report.officeAt[3]).toBeGreaterThan(1.5 * HOUR);
-    expect(report.officeAt[3]).toBeLessThan(4 * HOUR);
-    expect(report.officeAt[4]).toBeGreaterThan(5 * HOUR);
-    expect(report.officeAt[4]).toBeLessThan(12 * HOUR);
+    expect(report.officeAt[3]).toBeLessThan(3 * HOUR);
+    expect(report.officeAt[4]).toBeGreaterThan(4 * HOUR);
+    expect(report.officeAt[4]).toBeLessThan(7 * HOUR);
+    // 한 사무실에서 보내는 시간은 앞의 사무실보다 길어지되, 가장 긴 곳도 네 시간을 넘기지 않는다.
+    const stays = [1, 2, 3, 4].map((office) => report.officeAt[office] - report.officeAt[office - 1]);
+    for (let index = 1; index < stays.length; index += 1) expect(stays[index]).toBeGreaterThan(stays[index - 1]);
+    expect(Math.max(...stays)).toBeLessThan(4 * HOUR);
     expect(report.allReleasedAt).not.toBeNull();
     expect(staffCount(state)).toBe(OFFICES[OFFICES.length - 1].desks);
     // 가장 큰 게임까지 내려면 부서를 셋은 세워야 한다.
@@ -1293,8 +1297,15 @@ describe('진행 속도', () => {
   }, 60_000);
 
   it('느긋하게 해도 사옥까지 간다', () => {
-    const { report } = play(Infinity, 3, 16 * 60);
-    expect(report.officeAt[3]).toBeLessThan(5 * HOUR);
-    expect(report.officeAt[4]).toBeLessThan(16 * HOUR);
+    const { report } = play(Infinity, 3, 10 * 60);
+    expect(report.officeAt[3]).toBeLessThan(3.5 * HOUR);
+    expect(report.officeAt[4]).toBeLessThan(8.5 * HOUR);
+  }, 60_000);
+
+  it('이사할 잎사귀를 아껴 모으든 장비를 사 가며 모으든 사옥에 닿는 때가 크게 벌어지지 않는다', () => {
+    const spender = play(6, 1.5, 8 * 60).report;
+    const saver = play(6, 1.5, 8 * 60, { thrift: 0.02 }).report;
+    expect(saver.officeAt[4]).toBeLessThan(spender.officeAt[4]);
+    expect(saver.officeAt[4]).toBeGreaterThan(spender.officeAt[4] * 0.65);
   }, 60_000);
 });
