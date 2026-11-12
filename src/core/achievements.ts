@@ -25,6 +25,8 @@ export interface AchievementStats {
   gamesTried: number;
   /** 게임 id → 최고 점수 */
   best: Record<string, number>;
+  /** 게임 id → 그 게임을 한 판 수. 점수가 없는 게임(둘이서 대결)의 업적이 본다. */
+  played: Record<string, number>;
   /** 오늘의 도전을 달성한 횟수 */
   dailyCleared: number;
   /** 오늘의 도전을 가장 길게 이어 간 일수 */
@@ -43,11 +45,16 @@ export interface AchievementSource {
 export function statsOf(save: AchievementSource): AchievementStats {
   const records = Object.entries(save.games);
   const best: Record<string, number> = {};
-  for (const [id, record] of records) best[id] = record.best;
+  const played: Record<string, number> = {};
+  for (const [id, record] of records) {
+    best[id] = record.best;
+    played[id] = record.plays;
+  }
   return {
     totalPlays: records.reduce((sum, [, record]) => sum + record.plays, 0),
     gamesTried: records.filter(([, record]) => record.plays > 0).length,
     best,
+    played,
     dailyCleared: save.daily.totalCleared,
     bestStreak: save.daily.bestStreak,
     cosmeticsOwned: save.cosmetics.owned.length,
@@ -75,6 +82,10 @@ const bestOf =
   (gameId: string) =>
   (stats: AchievementStats): number =>
     stats.best[gameId] ?? 0;
+const playedOf =
+  (gameId: string) =>
+  (stats: AchievementStats): number =>
+    stats.played[gameId] ?? 0;
 const owned = (stats: AchievementStats): number => stats.cosmeticsOwned;
 
 /** 살 수 있는 꾸미기의 수. 꾸미기가 늘면 "모두 모으기"의 목표도 따라 늘어난다. */
@@ -85,6 +96,7 @@ export const ACHIEVEMENTS: readonly Achievement[] = [
   { id: 'play-variety', group: 'play', title: '골고루 맛보기', description: '게임 세 가지 해 보기', goal: 3, reward: 15, measure: (stats) => stats.gamesTried },
   { id: 'play-30', group: 'play', title: '단골손님', description: '모두 합쳐 30판', goal: 30, reward: 30, measure: plays },
   { id: 'play-100', group: 'play', title: '백전노장', description: '모두 합쳐 100판', goal: 100, reward: 80, measure: plays },
+  { id: 'duel-10', group: 'play', title: '단짝 승부', description: '둘이서 대결 열 판', goal: 10, reward: 30, measure: playedOf('duel') },
 
   { id: 'tap-80', group: 'score', title: '번개 손가락', description: '번개 탭 80점 이상', goal: 80, reward: 20, measure: bestOf('lightning-tap') },
   { id: 'tap-140', group: 'score', title: '번개의 달인', description: '번개 탭 140점 이상', goal: 140, reward: 50, measure: bestOf('lightning-tap') },
