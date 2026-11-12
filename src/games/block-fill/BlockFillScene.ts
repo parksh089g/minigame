@@ -636,7 +636,22 @@ export class BlockFillScene extends MiniGameScene {
     });
   }
 
-  private endRun(): void {
+  /** 끝이 정해져 있지 않은 게임이라, 점수가 있으면 일시정지 화면에서 기록하고 끝낼 수 있다. */
+  protected override canFinishEarly(): boolean {
+    return this.playing && this.run.score > 0;
+  }
+
+  protected override finishEarly(): void {
+    this.endRun('여기까지!');
+  }
+
+  /** 한 판이 길어서, 점수가 있는 판을 그만두려 하면 한 번 더 묻는다. */
+  protected override quitWarning(): string | null {
+    return this.playing && this.run.score > 0 ? '지금 점수는 기록되지 않아요' : null;
+  }
+
+  /** 판을 끝낸다. 놓을 곳이 없어서 끝났을 때와 스스로 끝냈을 때 알리는 글이 다르다. */
+  private endRun(notice = '놓을 곳이 없어요'): void {
     if (!this.playing) return;
     this.playing = false;
     this.cancelDrag();
@@ -655,7 +670,7 @@ export class BlockFillScene extends MiniGameScene {
         });
       });
       const { cell, top } = this.layout;
-      const banner = addText(this, GAME_WIDTH / 2, top + (cell * SIZE) / 2, '놓을 곳이 없어요', {
+      const banner = addText(this, GAME_WIDTH / 2, top + (cell * SIZE) / 2, notice, {
         size: FONT_SIZE.large,
         color: LOOK.text.over,
         originX: 0.5,
