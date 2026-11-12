@@ -35,7 +35,13 @@ describe('normalizeSave', () => {
       coins: 12,
       settings: { sound: false, music: false, vibration: true },
       games: { 'lightning-tap': { best: 80, plays: 4, lastPlayedAt: NOW - 1000 } },
-      daily: { lastClearedOn: '2026-11-11', streak: 3, bestStreak: 4, totalCleared: 8 },
+      daily: {
+        lastClearedOn: '2026-11-11',
+        streak: 3,
+        bestStreak: 4,
+        totalCleared: 8,
+        recent: ['2026-11-06', '2026-11-09', '2026-11-10', '2026-11-11'],
+      },
       cosmetics: {
         owned: ['runner-drop'],
         equipped: {
@@ -120,7 +126,8 @@ describe('normalizeSave', () => {
     };
     const save = normalizeSave(old, NOW);
     expect(save.coins).toBe(55);
-    expect(save.daily).toEqual({ ...old.daily, bestStreak: 2 });
+    // 최근에 달성한 날은 이 세이브보다 뒤에 생겼으므로, 이어지고 있는 연속으로 채운다
+    expect(save.daily).toEqual({ ...old.daily, bestStreak: 2, recent: ['2026-11-10', '2026-11-11'] });
     expect(save.cosmetics).toEqual(createCosmetics());
   });
 
@@ -139,7 +146,7 @@ describe('normalizeSave', () => {
     expect(save.games).toEqual(old.games);
     // 배경 음악 설정은 이 세이브보다 뒤에 생겼으므로 켠 채로 읽는다
     expect(save.settings).toEqual({ ...old.settings, music: true });
-    expect(save.daily).toEqual({ lastClearedOn: null, streak: 0, bestStreak: 0, totalCleared: 0 });
+    expect(save.daily).toEqual({ lastClearedOn: null, streak: 0, bestStreak: 0, totalCleared: 0, recent: [] });
   });
 
   it('배경 음악 설정이 생기기 전의 세이브는 음악을 켠 채로 읽고, 끈 것은 그대로 둔다', () => {
@@ -270,6 +277,7 @@ describe('오늘의 도전과 한 판의 결과', () => {
       streak: 1,
       bestStreak: 1,
       totalCleared: 1,
+      recent: ['2026-11-11'],
     });
   });
 
@@ -306,6 +314,7 @@ describe('오늘의 도전과 한 판의 결과', () => {
       streak: 2,
       bestStreak: 2,
       totalCleared: 2,
+      recent: ['2026-11-11', '2026-11-12'],
     });
   });
 
@@ -491,6 +500,7 @@ describe('resetProgress', () => {
       streak: 0,
       bestStreak: 0,
       totalCleared: 0,
+      recent: [],
     });
   });
 });

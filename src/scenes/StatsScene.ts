@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { FONT_SIZE, GAME_WIDTH, SCENE, THEME, THEME_CSS } from '../config';
 import type { BackAware } from '../core/app-events';
+import { dateKeyOf, recentDays } from '../core/daily';
 import { clampPage, layoutPages, pageSlice } from '../core/paging';
 import { sfx } from '../core/sfx';
 import { gameStats, STATS_TEXT, summarize, summaryLines, type GameStat } from '../core/stats';
@@ -9,6 +10,7 @@ import {
   addBackdrop,
   addPanel,
   addText,
+  drawDayDots,
   fadeIn,
   fadeToScene,
   onSwipe,
@@ -24,6 +26,8 @@ const CONTENT_WIDTH = GAME_WIDTH - MARGIN * 2;
 const PAD = 8;
 /** 맨 위의 요약 카드. row는 한 줄의 높이다. */
 const SUMMARY = { top: 46, row: 16, pad: 6 } as const;
+/** 요약 카드의 마지막 줄에 그리는 최근 이레의 동그라미: 반지름과 가운데 사이의 간격 */
+const RECENT_DOT = { radius: 3.5, pitch: 11 } as const;
 /** 게임마다의 줄. icon은 아이콘의 크기, plays는 판 수가 끝나는 자리(오른쪽 끝에서 잰 거리)다. */
 const LIST = { gap: 10, head: 14, row: 20, icon: 14, plays: 62 } as const;
 const BOTTOM_MARGIN = 8;
@@ -90,9 +94,22 @@ export class StatsScene extends Phaser.Scene implements BackAware {
   private addSummary(): number {
     const rows = summaryLines(summarize(GAMES, store.data));
 
-    const height = rows.length * SUMMARY.row + SUMMARY.pad * 2;
+    // 글자로 된 줄들 아래에, 오늘까지 이레 동안 오늘의 도전을 달성한 날을 동그라미로 보여 주는 줄이 하나 더 있다.
+    const height = (rows.length + 1) * SUMMARY.row + SUMMARY.pad * 2;
     addPanel(this, MARGIN, SUMMARY.top, CONTENT_WIDTH, height);
     const right = MARGIN + CONTENT_WIDTH - PAD;
+    const dotsY = SUMMARY.top + SUMMARY.pad + rows.length * SUMMARY.row + 1;
+    addText(this, MARGIN + PAD, dotsY, STATS_TEXT.recent, { color: THEME_CSS.sub });
+    drawDayDots(
+      this.add.graphics(),
+      recentDays(store.data.daily, dateKeyOf(new Date())),
+      right,
+      dotsY + 7,
+      RECENT_DOT.radius,
+      RECENT_DOT.pitch,
+      // 흰 카드 위라서 달성하지 못한 날은 옅은 살구색으로 둔다.
+      THEME.shadow,
+    );
     rows.forEach(([label, value], index) => {
       const y = SUMMARY.top + SUMMARY.pad + index * SUMMARY.row + 1;
       const name = addText(this, MARGIN + PAD, y, label, { color: THEME_CSS.sub });

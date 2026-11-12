@@ -123,6 +123,41 @@ export function addPanel(
   return graphics;
 }
 
+/** 날마다의 달성 여부를 한 줄의 동그라미로 그릴 때의 한 칸 */
+export interface DayDot {
+  cleared: boolean;
+  /** 오늘 칸에는 테를 둘러서 아직 달성할 수 있는 날임을 보여 준다. */
+  today: boolean;
+}
+
+/**
+ * 최근 며칠의 달성 여부를 동그라미 한 줄로 그린다. 오래된 날이 왼쪽이고, 맨 오른쪽 동그라미의 오른쪽 끝이 right다.
+ * 달성한 날은 짙게 채우고 아닌 날은 옅은 색(empty, 바탕에 맞춰 고른다)으로 둔다. 줄의 왼쪽 끝을 돌려준다.
+ */
+export function drawDayDots(
+  graphics: Phaser.GameObjects.Graphics,
+  days: readonly DayDot[],
+  right: number,
+  centerY: number,
+  radius: number,
+  pitch: number,
+  empty: number = THEME.white,
+): number {
+  const left = right - radius * 2 - (days.length - 1) * pitch;
+  days.forEach((day, index) => {
+    const x = left + radius + index * pitch;
+    if (day.today) {
+      graphics.fillStyle(THEME.accent, 1);
+      graphics.fillCircle(x, centerY, radius + 1.4);
+      graphics.fillStyle(THEME.white, 1);
+      graphics.fillCircle(x, centerY, radius + 0.4);
+    }
+    graphics.fillStyle(day.cleared ? THEME.accent : empty, day.cleared ? 1 : 0.85);
+    graphics.fillCircle(x, centerY, day.cleared ? radius : radius - 0.4);
+  });
+  return left - (days.some((day) => day.today) ? 1.4 : 0);
+}
+
 /** 게임 위에 겹쳐 뜨는 화면(일시정지, 결과)의 뒤를 가리는 막. 뒤쪽이 눌리지 않게 입력도 받는다. */
 export function addScrim(scene: Phaser.Scene): Phaser.GameObjects.Rectangle {
   const { width, height } = scene.scale;
