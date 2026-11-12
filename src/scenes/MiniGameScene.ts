@@ -73,8 +73,15 @@ export interface PauseData {
   gameId?: string;
   /** 게임이 일시정지 화면에 덧붙여 보여 주는 것. 제목과 버튼 사이에 자리를 내준다. */
   extra?: PauseExtra;
-  /** 처음에 보여 줄 쪽. 적지 않으면 버튼이 있는 첫 쪽이다. */
-  page?: 'menu' | 'howTo';
+  /**
+   * "그만하기"로 나가면 잃는 것을 알리는 한 줄. 있으면 나가기 전에 이 줄을 보이며 한 번 더 묻는다.
+   * 없으면 묻지 않고 나간다.
+   */
+  quitWarning?: string;
+  /** 지금까지의 점수를 기록하고 판을 끝낼 수 있으면 true. "기록하고 끝내기" 버튼이 생긴다. */
+  canFinish?: boolean;
+  /** 처음에 보여 줄 쪽. 적지 않으면 버튼이 있는 첫 쪽이다. 'quit'은 그만둘지 한 번 더 묻는 쪽이다. */
+  page?: 'menu' | 'howTo' | 'quit';
 }
 
 /** 일시정지 화면에 게임이 덧붙이는 것. 예: 지금까지 고른 강화 */
@@ -182,7 +189,34 @@ export abstract class MiniGameScene extends Phaser.Scene implements BackAware {
       gameId: this.gameId,
       stageLevel: this.stageLevel ?? undefined,
       extra: this.pauseExtra(),
+      quitWarning: this.quitWarning() ?? undefined,
+      canFinish: this.canFinishEarly(),
     } satisfies PauseData);
+  }
+
+  /**
+   * "그만하기"로 나가면 잃는 것을 알리는 한 줄. 일시정지 화면이 이 줄을 보이며 한 번 더 묻는다.
+   * 기본은 묻지 않는다. 한 판이 길어서 실수로 버리면 아까운 게임이, 잃을 것이 있을 때만 글을 돌려준다.
+   */
+  protected quitWarning(): string | null {
+    return null;
+  }
+
+  /**
+   * 지금까지의 점수를 기록하고 판을 끝낼 수 있는지. true면 일시정지 화면에 "기록하고 끝내기"가 생기고,
+   * 누르면 finishEarly()가 불린다. 스스로 끝낼 길이 없는 게임(시간 제한 없이 이어지는 게임)이 바꿔 쓴다.
+   */
+  protected canFinishEarly(): boolean {
+    return false;
+  }
+
+  /** 지금까지의 점수로 판을 끝낸다. canFinishEarly()가 true인 게임이 finishMiniGame()까지 부르도록 바꿔 쓴다. */
+  protected finishEarly(): void {}
+
+  /** 일시정지 화면의 "기록하고 끝내기"가 게임을 다시 움직인 뒤에 부른다. */
+  finishFromPause(): void {
+    if (this.finished || !this.canFinishEarly()) return;
+    this.finishEarly();
   }
 
   /** 일시정지 화면에 덧붙여 보여 줄 것. 없으면 기본 화면 그대로다. */

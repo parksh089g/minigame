@@ -35,7 +35,10 @@ const MASCOT = { above: 46, overlap: 20 } as const;
 const BUTTON_HEIGHT = 30;
 const BUTTON_GAP = 7;
 /** 카드 오른쪽 위의 공유 버튼: 한 변, 카드 모서리에서 떨어진 거리, 공유한 뒤 알림이 떠 있는 시간(ms), 그림을 만들기 시작할 때까지의 여유(ms) */
-const SHARE = { size: 24, margin: 10, noticeMs: 1800, prepareMs: 400 } as const;
+/**
+ * 공유 버튼. prepareMs 뒤에 점수 카드 그림을 만들기 시작하고, 그림이 될 때까지(길어도 waitMs까지) 버튼을 흐리게 둔다.
+ */
+const SHARE = { size: 24, margin: 10, noticeMs: 1800, prepareMs: 150, waitMs: 1500 } as const;
 
 /** 한 판이 끝난 뒤 게임 위에 겹쳐 뜨는 결과 화면. 기록은 게임 씬이 이미 저장해 두었다. */
 export class ResultScene extends Phaser.Scene implements BackAware {
@@ -241,7 +244,11 @@ export class ResultScene extends Phaser.Scene implements BackAware {
     const pageUrl = window.location.href;
 
     // 그림은 미리 만들어 둔다. 누른 그 자리에서 공유 창을 열어야 브라우저가 허락하기 때문이다.
-    // 점수가 올라가는 연출이 버벅이지 않게 조금 뒤에 시작한다. 그 전에 누르면 그림 없이 주소만 보낸다.
+    // 그림이 되기 전에 누르면 그림 없이 주소만 가므로, 그동안은 버튼을 흐리게 두고 누를 수 없게 한다.
+    // 그림을 만들지 못하거나 너무 오래 걸리면 기다리지 않고 버튼을 켠다. 그때는 주소만 보낸다.
+    const ready = (): void => {
+      if (round === this.shareRound && this.scene.isActive()) button.setEnabled(true);
+    };
     const mascot = mascotTexture(store.data.cosmetics.equipped.runner, result.isNewBest ? 'cheer' : 'idle');
     this.time.delayedCall(SHARE.prepareMs, () => {
       void makeShareImage(
@@ -259,11 +266,13 @@ export class ResultScene extends Phaser.Scene implements BackAware {
         shareFileName(data.gameId),
       ).then((file) => {
         if (round === this.shareRound) this.shareImage = file;
-      });
+        ready();
+      }, ready);
     });
+    this.time.delayedCall(SHARE.waitMs, ready);
 
     let busy = false;
-    new PixelButton(this, {
+    const button = new PixelButton(this, {
       x,
       y,
       width: SHARE.size,
@@ -287,6 +296,7 @@ export class ResultScene extends Phaser.Scene implements BackAware {
         });
       },
     });
+    button.setEnabled(false);
   }
 
   /**
@@ -382,7 +392,7 @@ export class ResultScene extends Phaser.Scene implements BackAware {
       }
       label.setText('온라인 랭킹');
       const known = scoreSync.rankOf(gameId);
-      value.setText(known === null ? '확인 중…' : rankLabel(known)).setColor(THEME_CSS.sub);
+      value.setText(known === null ? '확인 중...' : rankLabel(known)).setColor(THEME_CSS.sub);
 
       // 게임이 끝날 때 이미 올리기 시작했다. 여기서는 그 결과를 같이 기다린다.
       const outcome = await syncScores();
