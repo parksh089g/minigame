@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { CSS, GAME_WIDTH } from '../../config';
+import { CSS, FONT_SIZE, GAME_WIDTH } from '../../config';
 import { vibrate } from '../../core/haptics';
 import { homeScene } from '../../core/home';
 import { music } from '../../core/music';
@@ -11,7 +11,7 @@ import { MiniGameScene, type PauseExtra, type ResultStat } from '../../scenes/Mi
 import { registerLanternTextures } from './art';
 import { damageRanking } from './build';
 import { newlyDone } from './challenges';
-import { ENEMIES, LANTERN_GAME_ID, LANTERN_SCENE, STAGES, WEAPONS } from './data';
+import { CHEST, ENEMIES, LANTERN_GAME_ID, LANTERN_SCENE, STAGES, WEAPONS } from './data';
 import { RunEffects } from './effects';
 import { BOSS_BAR_HEIGHT, HP_DANGER, HUD_HEIGHT, RunHud } from './hud';
 import { iconKey } from './icons';
@@ -33,6 +33,7 @@ import {
   ownedWeapons,
   scoreFor,
   seededRandom,
+  upgradeTitle,
   type Upgrade,
 } from './rules';
 import { createRun, runDawned, Sim, type SimEvent } from './sim';
@@ -431,6 +432,23 @@ export class LanternKeeperScene extends MiniGameScene {
           this.effects.shake(180, 0.008);
           this.pickSong();
           break;
+        case 'elite':
+          showBanner(this, this.scale.height * 0.3, '정예 그림자!', CSS.yellow, 1400, DEPTH.banner);
+          board.play('elite', now);
+          this.effects.beat();
+          break;
+        case 'chest': {
+          const p = sim.state.player;
+          const up = event.upgrade;
+          showBanner(this, this.scale.height * 0.3, '보물 상자!', CSS.yellow, 1800, DEPTH.banner);
+          // 무엇이 올랐는지는 그 아래에 한 줄로 알린다.
+          this.showGain(up && 'level' in up ? `${upgradeTitle(up)} ${up.level}레벨` : `불씨 +${CHEST.embers}`);
+          this.view.burst(sim, p.x, p.y, 18);
+          this.effects.flash(0.3, 260);
+          board.play('chest', now);
+          vibrate(20);
+          break;
+        }
         case 'surge':
           showBanner(this, this.scale.height * 0.3, '그림자 밀물!', CSS.orange, 1400, DEPTH.banner);
           board.play('surge', now);
@@ -493,6 +511,20 @@ export class LanternKeeperScene extends MiniGameScene {
     this.beatIn = ratio <= HEARTBEAT.fastBelow ? HEARTBEAT.fast : HEARTBEAT.slow;
     this.board.play('heartbeat', this.time.now);
     this.effects.beat();
+  }
+
+  /** 큰 알림 글자 아래에 뜨는 한 줄. 보물 상자가 무엇을 올려 줬는지 알린다. 길면 화면 폭에 맞춰 줄인다. */
+  private showGain(label: string): void {
+    const line = addText(this, GAME_WIDTH / 2, Math.round(this.scale.height * 0.3) + 30, label, {
+      size: FONT_SIZE.large,
+      color: CSS.white,
+      originX: 0.5,
+      originY: 0.5,
+      shadow: CSS.ink,
+    }).setDepth(DEPTH.banner);
+    const room = GAME_WIDTH - 24;
+    if (line.width > room) line.setScale(room / line.width);
+    this.tweens.add({ targets: line, alpha: 0, delay: 1300, duration: 500, onComplete: () => line.destroy() });
   }
 
   /** 처음 겪는 일이면 그 일의 안내를 띄우고, 봤다고 적어 둔다. 한 번 본 안내는 다시 뜨지 않는다. */
@@ -772,6 +804,7 @@ export class LanternKeeperScene extends MiniGameScene {
         evolved: ownedWeapons(state.weapons).filter((id) => isEvolved(state.weapons[id] ?? 0)),
         seen: state.seen,
         endlessSeconds: summary.endlessSeconds,
+        chests: state.chests ?? 0,
       }),
     );
     const opened = newUnlocks(before.bestSeconds, metaStore.data.bestSeconds);

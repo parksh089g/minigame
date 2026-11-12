@@ -52,6 +52,8 @@ describe('처음 겪는 일의 안내', () => {
       { type: 'blast' },
       { type: 'block' },
       { type: 'vent', x: 0, y: 0 },
+      { type: 'elite', kind: 'prowler' },
+      { type: 'chest', upgrade: null },
     ];
     expect(events.map(tipFor).sort()).toEqual([...TIP_IDS].sort());
   });

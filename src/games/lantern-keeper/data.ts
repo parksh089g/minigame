@@ -45,6 +45,9 @@ export type EnemyKind =
   | 'slag'
   | 'smoker'
   | 'blister'
+  | 'prowler'
+  | 'lurker'
+  | 'stoker'
   | 'giant'
   | 'ram'
   | 'owl'
@@ -108,6 +111,8 @@ export interface EnemyInfo {
   splits?: { into: EnemyKind; count: number };
   shoots?: ShootInfo;
   bursts?: BurstInfo;
+  /** 정예 그림자: 가끔 하나씩 나오는 크고 센 그림자. 쓰러지면 보물 상자를 떨어뜨린다(ELITE). */
+  elite?: boolean;
   boss?: boolean;
   brain?: BossBrain;
 }
@@ -182,6 +187,10 @@ export const ENEMIES: Readonly<Record<EnemyKind, EnemyInfo>> = {
     radius: 6,
     bursts: { trigger: 25, fuse: 0.95, radius: 32, damage: 12, splash: 42 },
   },
+  // 정예 그림자: 스테이지마다 하나. 체력은 다른 그림자처럼 시간이 갈수록 불어난다.
+  prowler: { name: '밤 사냥꾼', hp: 150, speed: 30, damage: 14, xp: 12, radius: 11, elite: true },
+  lurker: { name: '늪 도사리', hp: 140, speed: 62, damage: 14, xp: 12, radius: 11, hops: true, elite: true },
+  stoker: { name: '불티 대장', hp: 175, speed: 25, damage: 16, xp: 12, radius: 12, elite: true },
   // 중간 보스의 체력은 MID_BOSS_TIERS가 정한다. 여기 적힌 값은 첫 번째 것과 같다.
   giant: { name: '어스름 거인', hp: 320, speed: 30, damage: 18, xp: 30, radius: 15, boss: true, brain: 'summon' },
   ram: { name: '뿔그림자', hp: 320, speed: 26, damage: 20, xp: 30, radius: 14, boss: true, brain: 'charge' },
@@ -225,6 +234,8 @@ export interface StageInfo {
   minions: readonly [EnemyKind, EnemyKind];
   /** 2분, 4분, 6분, 8분에 차례로 나오는 중간 보스 */
   midBosses: readonly EnemyKind[];
+  /** 가끔 하나씩 나오는 정예 그림자 */
+  elite: EnemyKind;
   finalBoss: EnemyKind;
   /** 발이 빠져 느려지는 웅덩이가 있는 곳 */
   puddles: boolean;
@@ -249,6 +260,7 @@ export const STAGES: Readonly<Record<StageId, StageInfo>> = {
     surge: ['shade', 'wisp'],
     minions: ['bat', 'wisp'],
     midBosses: ['giant', 'ram', 'owl', 'giant'],
+    elite: 'prowler',
     finalBoss: 'lord',
     puddles: false,
     vents: false,
@@ -268,6 +280,7 @@ export const STAGES: Readonly<Record<StageId, StageInfo>> = {
     surge: ['moth', 'toad'],
     minions: ['moth', 'toad'],
     midBosses: ['owl', 'giant', 'ram', 'owl'],
+    elite: 'lurker',
     finalBoss: 'matron',
     puddles: true,
     vents: false,
@@ -287,6 +300,7 @@ export const STAGES: Readonly<Record<StageId, StageInfo>> = {
     surge: ['soot', 'clinker'],
     minions: ['soot', 'cinder'],
     midBosses: ['ram', 'owl', 'giant', 'ram'],
+    elite: 'stoker',
     finalBoss: 'warden',
     puddles: false,
     vents: true,
@@ -332,6 +346,31 @@ export const POSTS = {
 
 /** 이 시각들에 적이 둥글게 에워싸는 "밀물"이 한 번씩 온다(초). 중간 보스와 겹치지 않게 그 사이에 둔다. */
 export const SURGES: readonly number[] = [180, 300, 420, 540];
+
+/**
+ * 정예 그림자. 정해진 시각마다 스테이지의 정예(STAGES의 elite)가 하나씩 화면 가장자리에서 걸어온다.
+ * 보스는 아니어서 밀리고 느려지지만, 체력의 몫으로 깎는 것(등불 기둥, 불구멍, 불꽃 단지)에는 훨씬 덜 다친다.
+ * 쓰러지면 보물 상자를 떨어뜨린다. 새벽 뒤의 끝없는 밤에는 나오지 않는다.
+ */
+export const ELITE = {
+  /** 나오는 시각(초). 밀물이 지나가고 30초 뒤, 다음 중간 보스가 오기 30초 전이다. */
+  times: [90, 210, 330, 450, 570],
+  /** 켜진 등불 기둥이 한 번 태울 때 잃는 체력의 몫. 빛 속에 열 초쯤 붙잡아 두면 쓰러진다. */
+  burn: 0.04,
+  /** 터진 불구멍에 한 번 델 때 잃는 체력의 몫 */
+  vent: 0.03,
+  /** 불꽃 단지에 잃는 체력의 몫 */
+  blast: 0.5,
+} as const;
+
+/**
+ * 보물 상자. 주우면 가진 무기나 패시브 가운데 하나가 한 단계 오른다(진화는 시키지 않는다).
+ * 더 올릴 것이 없으면 불씨를 준다.
+ */
+export const CHEST = {
+  /** 올릴 것이 없을 때 주는 불씨 */
+  embers: 10,
+} as const;
 
 /**
  * 끝없는 밤: 새벽을 맞은 뒤에도 쓰러질 때까지 이어 가는 판. 새벽까지의 난이도 위에 아래 값이 더 얹힌다.

@@ -25,6 +25,7 @@ const FIND_ART: Readonly<Record<FindId, string>> = {
   heal: LK.heal,
   pull: LK.pull,
   blast: LK.blast,
+  chest: LK.chest,
   post: LK.postLit,
 };
 

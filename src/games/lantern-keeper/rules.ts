@@ -549,6 +549,24 @@ export function upgradeOptions(build: Build, rand: Rand, count = 3, boons?: Leve
 }
 
 /** 밤의 축복 선택지: 여섯 가지 가운데 겹치지 않게 count개. 어느 것이나 같은 확률로 나온다. */
+/**
+ * 보물 상자가 올려 줄 것 하나: 가진 무기나 패시브 가운데 아직 끝까지 올리지 않은 것.
+ * 새 것을 주거나 진화시키지는 않는다. 올릴 것이 없으면 null(상자는 대신 불씨를 준다).
+ */
+export function chestUpgrade(build: Build, rand: Rand): Upgrade | null {
+  const pool: Upgrade[] = [];
+  for (const id of WEAPON_ORDER) {
+    const level = build.weapons[id] ?? 0;
+    if (level > 0 && level < MAX_LEVEL) pool.push({ type: 'weapon', id, level: level + 1 });
+  }
+  for (const id of Object.keys(PASSIVES) as PassiveId[]) {
+    const level = build.passives[id] ?? 0;
+    if (level > 0 && level < MAX_LEVEL) pool.push({ type: 'passive', id, level: level + 1 });
+  }
+  if (pool.length === 0) return null;
+  return pool[Math.min(pool.length - 1, Math.floor(rand() * pool.length))];
+}
+
 export function boonOptions(boons: Levels<BoonId>, rand: Rand, count = 3): Upgrade[] {
   const pool = [...BOON_ORDER];
   const picked: Upgrade[] = [];

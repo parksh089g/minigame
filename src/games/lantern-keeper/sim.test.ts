@@ -3,6 +3,8 @@ import { playRun, steer } from './bot';
 import {
   BOON_ORDER,
   BOON_VALUES,
+  CHEST,
+  ELITE,
   ENDLESS,
   ENEMIES,
   EVOLVE_LEVEL,
@@ -117,6 +119,7 @@ function quietSim(seed = 1, extra: Partial<Parameters<typeof createRun>[0]> = {}
   sim.state.surgeIndex = SURGES.length;
   sim.state.midBosses = MID_BOSS_COUNT;
   sim.state.finalBoss = true;
+  sim.state.elites = ELITE.times.length;
   return sim;
 }
 
@@ -1489,6 +1492,7 @@ describe('안개 늪', () => {
     sim.state.player.hp = 1e9;
     sim.state.midBosses = MID_BOSS_COUNT;
     sim.state.finalBoss = true;
+    sim.state.elites = ELITE.times.length;
     sim.state.t = 200;
     advance(sim, 6);
     const allowed = new Set<EnemyKind>(STAGES.marsh.spawns.map((row) => row.kind));
@@ -1570,6 +1574,7 @@ describe('잿빛 고개', () => {
     sim.state.player.hp = 1e9;
     sim.state.midBosses = MID_BOSS_COUNT;
     sim.state.finalBoss = true;
+    sim.state.elites = ELITE.times.length;
     sim.state.t = 200;
     advance(sim, 6);
     const allowed = new Set<EnemyKind>(STAGES.ridge.spawns.map((row) => row.kind));
@@ -1782,6 +1787,207 @@ describe('잿빛 고개', () => {
     }
     expect(ventAt(sim.state.player.x, sim.state.player.y, seed)).toBeNull();
     expect(sim.state.player.hp).toBe(before);
+  });
+});
+
+describe('정예 그림자와 보물 상자', () => {
+  /** 저절로 나오는 것 가운데 정예만 남긴 조용한 판 */
+  const eliteSim = (extra: Partial<Parameters<typeof createRun>[0]> = {}): Sim => {
+    const sim = quietSim(3, extra);
+    sim.state.player.inv = 1e9;
+    sim.state.postsSpawned = POSTS.times.length;
+    sim.state.elites = 0;
+    return sim;
+  };
+  /** 플레이어 발밑에 보물 상자를 하나 놓고 한 걸음 돌린다. */
+  const openChest = (sim: Sim): SimEvent[] => {
+    const p = sim.state.player;
+    sim.state.gems.push({ x: p.x, y: p.y, value: 0, kind: 'chest', pulled: false });
+    sim.step(STEP, 0, 0);
+    return [...sim.events];
+  };
+  const levels = (sim: Sim): number =>
+    [...Object.values(sim.state.weapons), ...Object.values(sim.state.passives)].reduce((sum, level) => sum + (level ?? 0), 0);
+
+  it('스테이지마다 정예가 하나씩 있고, 보스는 아니다', () => {
+    const kinds = STAGE_ORDER.map((id) => STAGES[id].elite);
+    expect(new Set(kinds).size).toBe(STAGE_ORDER.length);
+    for (const kind of kinds) {
+      expect(ENEMIES[kind].elite).toBe(true);
+      expect(ENEMIES[kind].boss).toBeUndefined();
+      // 그 스테이지의 가장 튼튼한 그림자보다 튼튼하고 크다.
+      const tank = Math.max(...Object.values(ENEMIES).filter((info) => !info.boss && !info.elite).map((info) => info.hp));
+      expect(ENEMIES[kind].hp).toBeGreaterThan(tank * 2);
+    }
+    // 정예만 정예로 적혀 있다.
+    expect(Object.values(ENEMIES).filter((info) => info.elite)).toHaveLength(STAGE_ORDER.length);
+  });
+
+  it('정해진 시각마다 하나씩 화면 가장자리에서 나온다', () => {
+    const sim = eliteSim();
+    sim.state.t = ELITE.times[0] - 0.05;
+    const events = advance(sim, 0.2);
+    expect(events.filter((event) => event.type === 'elite')).toEqual([{ type: 'elite', kind: 'prowler' }]);
+    expect(sim.state.enemies.map((e) => e.kind)).toEqual(['prowler']);
+    expect(sim.state.elites).toBe(1);
+    const [elite] = sim.state.enemies;
+    const p = sim.state.player;
+    // 화면 밖에서 걸어 들어온다.
+    expect(Math.max(Math.abs(elite.x - p.x) - config.viewW / 2, Math.abs(elite.y - p.y) - config.viewH / 2)).toBeGreaterThan(0);
+    // 다음 시각까지는 더 나오지 않는다.
+    sim.state.t = ELITE.times[1] - 5;
+    expect(advance(sim, 2).some((event) => event.type === 'elite')).toBe(false);
+    sim.state.t = ELITE.times[1] - 0.05;
+    expect(advance(sim, 0.2).filter((event) => event.type === 'elite')).toHaveLength(1);
+    // 시각은 밀물과 중간 보스 사이에 있다.
+    for (const time of ELITE.times) {
+      expect(time).toBeLessThan(RUN_SECONDS);
+      for (const surge of SURGES) expect(Math.abs(time - surge)).toBeGreaterThanOrEqual(30);
+      expect(time % MID_BOSS_EVERY).toBeGreaterThanOrEqual(30);
+      expect(MID_BOSS_EVERY - (time % MID_BOSS_EVERY)).toBeGreaterThanOrEqual(30);
+    }
+  });
+
+  it('늦게 나오는 정예일수록 튼튼하다', () => {
+    const hpAt = (index: number): number => {
+      const sim = eliteSim({ stage: 'marsh' });
+      sim.state.elites = index;
+      sim.state.t = ELITE.times[index] - 0.05;
+      advance(sim, 0.2);
+      expect(sim.state.enemies.map((e) => e.kind)).toEqual(['lurker']);
+      return sim.state.enemies[0].maxHp;
+    };
+    const first = hpAt(0);
+    const last = hpAt(ELITE.times.length - 1);
+    expect(first).toBeGreaterThan(ENEMIES.lurker.hp);
+    expect(last).toBeGreaterThan(first * 5);
+  });
+
+  it('쓰러지면 보물 상자를 떨어뜨린다', () => {
+    // 떨어뜨릴 것을 정하는 난수가 무엇이든 상자가 나온다.
+    for (const roll of [0.001, 0.0085, 0.5]) {
+      const sim = new Sim(eliteSim().state, () => roll);
+      sim.state.elites = ELITE.times.length;
+      sim.state.enemies.push(enemy('prowler', 100, 0, 0));
+      sim.step(STEP, 0, 0);
+      expect(sim.state.gems.map((gem) => gem.kind)).toEqual(['xp', 'chest']);
+      expect(sim.state.pendingTickets).toBe(0);
+    }
+  });
+
+  it('상자를 주우면 가진 무기나 패시브 하나가 한 단계 오른다', () => {
+    for (let seed = 1; seed <= 12; seed += 1) {
+      const sim = quietSim(seed);
+      sim.state.weapons = { ember: 2, star: MAX_LEVEL, lance: EVOLVE_LEVEL };
+      sim.state.passives = { wick: 1, coat: MAX_LEVEL };
+      const before = levels(sim);
+      const events = openChest(sim);
+      expect(sim.state.gems).toHaveLength(0);
+      expect(levels(sim)).toBe(before + 1);
+      // 새 것을 주지 않고, 다 올린 것이나 진화한 것은 건드리지 않는다.
+      expect(Object.keys(sim.state.weapons).sort()).toEqual(['ember', 'lance', 'star']);
+      expect(Object.keys(sim.state.passives).sort()).toEqual(['coat', 'wick']);
+      expect(sim.state.weapons.star).toBe(MAX_LEVEL);
+      expect(sim.state.weapons.lance).toBe(EVOLVE_LEVEL);
+      expect(sim.state.passives.coat).toBe(MAX_LEVEL);
+      const raised = sim.state.weapons.ember === 3 ? { type: 'weapon', id: 'ember', level: 3 } : { type: 'passive', id: 'wick', level: 2 };
+      expect(events).toContainEqual({ type: 'chest', upgrade: raised });
+      expect(sim.state.chests).toBe(1);
+      expect(sim.state.seen).toContain('chest');
+      expect(sim.state.pendingLevelUps).toBe(0);
+    }
+  });
+
+  it('여러 번 열면 무기와 패시브가 고루 오른다', () => {
+    const sim = quietSim(5);
+    sim.state.weapons = { ember: 1, star: 1 };
+    sim.state.passives = { wick: 1, coat: 1 };
+    for (let i = 0; i < 16; i += 1) openChest(sim);
+    // 열여섯 번이면 넷이 모두 끝까지 오른다.
+    expect(sim.state.weapons).toEqual({ ember: MAX_LEVEL, star: MAX_LEVEL });
+    expect(sim.state.passives).toEqual({ wick: MAX_LEVEL, coat: MAX_LEVEL });
+    expect(sim.state.chests).toBe(16);
+  });
+
+  it('더 올릴 것이 없으면 불씨를 준다', () => {
+    const sim = quietSim();
+    sim.state.weapons = { ember: MAX_LEVEL, star: EVOLVE_LEVEL };
+    sim.state.passives = {};
+    const events = openChest(sim);
+    expect(events).toContainEqual({ type: 'chest', upgrade: null });
+    expect(sim.state.bonusEmbers).toBe(CHEST.embers);
+    expect(sim.state.weapons).toEqual({ ember: MAX_LEVEL, star: EVOLVE_LEVEL });
+    expect(sim.state.chests).toBe(1);
+  });
+
+  it('상자가 올려 준 뒤에는 뽑아 둔 레벨업 선택지를 다시 맞춘다', () => {
+    const sim = quietSim(2);
+    sim.state.weapons = { ember: 1 };
+    sim.state.passives = {};
+    sim.state.offer = [
+      { type: 'weapon', id: 'ember', level: 2 },
+      { type: 'weapon', id: 'star', level: 1 },
+      { type: 'passive', id: 'wick', level: 1 },
+    ];
+    openChest(sim);
+    expect(sim.state.weapons.ember).toBe(2);
+    sim.state.pendingLevelUps = 1;
+    // 이미 오른 단계를 다시 권하지 않는다.
+    expect(sim.options()).not.toContainEqual({ type: 'weapon', id: 'ember', level: 2 });
+  });
+
+  it('등불 기둥과 불구멍, 불꽃 단지에는 보통 그림자보다 훨씬 덜 다친다', () => {
+    // 불꽃 단지: 보통 그림자는 쓰러지고 정예는 체력의 절반을 잃는다.
+    const sim = eliteSim();
+    sim.state.elites = ELITE.times.length;
+    const elite = enemy('prowler', 60, 0, 1000);
+    const shade = enemy('shade', -60, 0, 1000);
+    sim.state.enemies.push(elite, shade);
+    sim.state.gems.push({ x: 0, y: 0, value: 0, kind: 'blast', pulled: false });
+    sim.step(STEP, 0, 0);
+    expect(shade.hp).toBeLessThanOrEqual(0);
+    expect(elite.hp).toBe(1000 * (1 - ELITE.blast));
+
+    // 등불 기둥: 켜져 있는 내내 빛 속에 있어야 쓰러진다.
+    const lit = eliteSim();
+    lit.state.elites = ELITE.times.length;
+    lit.state.posts = [{ x: 0, y: 30, lit: POSTS.seconds, tick: 0 }];
+    const burned = enemy('stoker', 0, 30, 1000);
+    const plain = enemy('slag', 2, 32, 1000);
+    lit.state.enemies.push(burned, plain);
+    advance(lit, 3);
+    expect(lit.state.enemies).not.toContain(plain);
+    expect(burned.hp).toBeGreaterThan(1000 * 0.6);
+    expect(burned.hp).toBeLessThan(1000);
+    expect(ELITE.burn * (POSTS.seconds / POSTS.tick)).toBeGreaterThanOrEqual(1);
+    expect(ELITE.burn).toBeLessThan(POSTS.burn / 3);
+    expect(ELITE.vent).toBeLessThan(VENT.share / 3);
+  });
+
+  it('끝없는 밤에는 나오지 않는다', () => {
+    const sim = eliteSim();
+    sim.state.t = RUN_SECONDS + 30;
+    sim.state.endless = { at: RUN_SECONDS, kills: 0, bosses: 99, surges: 99, boons: 99 };
+    sim.state.elites = 2;
+    const events = advance(sim, 1);
+    expect(events.some((event) => event.type === 'elite')).toBe(false);
+    expect(sim.state.enemies.filter((e) => ENEMIES[e.kind].elite)).toHaveLength(0);
+  });
+
+  it('정예가 생기기 전에 저장한 판을 이어 해도 지난 시각의 정예가 한꺼번에 나오지 않는다', () => {
+    const old = JSON.parse(JSON.stringify(createRun(config))) as RunState;
+    delete old.elites;
+    delete old.chests;
+    old.t = ELITE.times[2] + 5;
+    old.spawnDebt = -1e6;
+    const sim = newSim(1, old);
+    expect(sim.state.elites).toBe(3);
+    sim.step(STEP, 0, 0);
+    expect(sim.events.some((event) => event.type === 'elite')).toBe(false);
+    // 남은 것은 제때 나온다.
+    sim.state.player.inv = 1e9;
+    sim.state.t = ELITE.times[3] - 0.05;
+    expect(advance(sim, 0.2).filter((event) => event.type === 'elite')).toHaveLength(1);
   });
 });
 
