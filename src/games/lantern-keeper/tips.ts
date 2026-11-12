@@ -17,6 +17,7 @@ export const TIPS = {
   pull: '자석이 빛 조각을 모두 끌어와요',
   blast: '불꽃 단지가 화면의 그림자를 태워요',
   guard: '등갓의 빛막이 피해를 한 번 막아 줘요',
+  vent: '붉어진 불구멍은 그림자도 태워요',
 } as const;
 
 export type TipId = keyof typeof TIPS;
@@ -25,7 +26,7 @@ export const TIP_IDS = Object.keys(TIPS) as TipId[];
 
 /**
  * 이 안내들이 생기기 전부터 하던 사람에게는 띄우지 않는 것: 그때도 있던 일에 대한 안내.
- * 그 뒤에 새로 생긴 것(쏘는 적, 터지는 적, 등불 기둥, 자석, 불꽃 단지, 등갓)은 한 번씩 알려 준다.
+ * 그 뒤에 새로 생긴 것(쏘는 적, 터지는 적, 등불 기둥, 자석, 불꽃 단지, 등갓, 불구멍)은 한 번씩 알려 준다.
  */
 export const OLD_HAND_TIPS: readonly TipId[] = ['gem', 'boss', 'surge', 'heal'];
 
@@ -53,6 +54,8 @@ export function tipFor(event: SimEvent): TipId | null {
       return 'blast';
     case 'block':
       return 'guard';
+    case 'vent':
+      return 'vent';
     default:
       return null;
   }

@@ -52,11 +52,13 @@ import {
   restoreRun,
   RUN_STATE_VERSION,
   Sim,
+  WARDEN_CHARGING,
+  WARDEN_REST,
   type Enemy,
   type RunState,
   type SimEvent,
 } from './sim';
-import { inPuddle, PUDDLE_SLOW, puddleInCell } from './terrain';
+import { inPuddle, PUDDLE_SLOW, puddleInCell, VENT, ventAt, ventClock, ventInCell, ventPhase, type Vent } from './terrain';
 
 const config = { viewW: 240, viewH: 520, meta: {} };
 const STEP = 1 / 60;
@@ -1451,6 +1453,217 @@ describe('안개 늪', () => {
 
     const pace = (ENEMIES.toad.speed * speedScale(RUN_SECONDS) * HOP_SECONDS) / (HOP_SECONDS + HOP_REST);
     expect(pace).toBeLessThan(62);
+  });
+});
+
+describe('잿빛 고개', () => {
+  const seed = 7;
+  /** 출발 지점에서 가까운 불구멍 하나 */
+  const someVent = (): Vent => {
+    for (let cx = 1; cx < 9; cx += 1) {
+      const vent = ventInCell(cx, 0, seed);
+      if (vent) return vent;
+    }
+    throw new Error('불구멍이 없다');
+  };
+  /** 그 불구멍의 박자가 clock초에 와 있는 때의 시각 */
+  const timeAt = (vent: Vent, clock: number): number => VENT.period * 3 - vent.offset + clock;
+
+  it('고개에서는 고개의 적만 나온다', () => {
+    const sim = newSim(4, createRun({ ...config, stage: 'ridge' }));
+    sim.state.weapons = {};
+    sim.state.player.hp = 1e9;
+    sim.state.midBosses = MID_BOSS_COUNT;
+    sim.state.finalBoss = true;
+    sim.state.t = 200;
+    advance(sim, 6);
+    const allowed = new Set<EnemyKind>(STAGES.ridge.spawns.map((row) => row.kind));
+    expect(sim.state.enemies.length).toBeGreaterThan(10);
+    for (const e of sim.state.enemies) expect(allowed.has(e.kind)).toBe(true);
+  });
+
+  it('불구멍은 씨앗이 같으면 늘 같은 자리에 있고, 출발 지점에는 없다', () => {
+    expect(ventInCell(0, 0, seed)).toBeNull();
+    let found = 0;
+    for (let cx = -6; cx <= 6; cx += 1) {
+      for (let cy = -6; cy <= 6; cy += 1) {
+        const vent = ventInCell(cx, cy, seed);
+        expect(ventInCell(cx, cy, seed)).toEqual(vent);
+        if (!vent) continue;
+        found += 1;
+        expect(ventAt(vent.x, vent.y, seed)).toEqual(vent);
+        expect(ventAt(vent.x + vent.rx + 1, vent.y, seed)).toBeNull();
+        expect(vent.offset).toBeGreaterThanOrEqual(0);
+        expect(vent.offset).toBeLessThan(VENT.period);
+      }
+    }
+    expect(found).toBeGreaterThan(169 * 0.35);
+    expect(found).toBeLessThan(169 * 0.7);
+    expect(ventAt(0, 0, seed)).toBeNull();
+  });
+
+  it('불구멍은 달아올랐다가 솟고, 나머지 동안은 잠잠하다. 불구멍마다 박자가 다르다', () => {
+    const vent = someVent();
+    expect(ventClock(vent, timeAt(vent, 0.5))).toBeCloseTo(0.5);
+    expect(ventPhase(vent, timeAt(vent, VENT.warm / 2))).toBe('warm');
+    expect(ventPhase(vent, timeAt(vent, VENT.warm + VENT.erupt / 2))).toBe('erupt');
+    expect(ventPhase(vent, timeAt(vent, VENT.warm + VENT.erupt + 0.1))).toBe('idle');
+    expect(ventPhase(vent, timeAt(vent, VENT.period - 0.1))).toBe('idle');
+    // 솟기 전에 비킬 틈이 넉넉하고, 잠잠한 동안이 가장 길다.
+    expect(VENT.warm).toBeGreaterThanOrEqual(1);
+    expect(VENT.period - VENT.warm - VENT.erupt).toBeGreaterThan(VENT.warm + VENT.erupt);
+    const offsets = new Set<number>();
+    for (let cx = -6; cx <= 6; cx += 1) {
+      for (let cy = -6; cy <= 6; cy += 1) {
+        const other = ventInCell(cx, cy, seed);
+        if (other) offsets.add(other.offset);
+      }
+    }
+    expect(offsets.size).toBeGreaterThan(20);
+  });
+
+  it('불길이 솟는 불구멍 위에 서 있으면 다치고, 잠잠할 때와 다른 스테이지에서는 다치지 않는다', () => {
+    const vent = someVent();
+    const stand = (stage: 'meadow' | 'ridge', clock: number): { lost: number; events: SimEvent[]; sim: Sim } => {
+      const sim = quietSim(1, { stage, seed });
+      sim.state.player.x = vent.x;
+      sim.state.player.y = vent.y;
+      sim.state.t = timeAt(vent, clock);
+      const before = sim.state.player.hp;
+      const events = advance(sim, 0.3);
+      return { lost: before - sim.state.player.hp, events, sim };
+    };
+    const burnt = stand('ridge', VENT.warm + 0.1);
+    expect(burnt.lost).toBe(VENT.damage);
+    expect(burnt.events).toContainEqual({ type: 'hurt' });
+    expect(burnt.sim.isScorching(vent.x, vent.y)).toBe(true);
+    // 달아오르는 동안에는 아직 다치지 않지만, 곧 솟는다는 것은 알 수 있다.
+    const warming = stand('ridge', 0.2);
+    expect(warming.lost).toBe(0);
+    expect(warming.sim.isScorching(vent.x, vent.y)).toBe(true);
+    const calm = stand('ridge', VENT.warm + VENT.erupt + 1);
+    expect(calm.lost).toBe(0);
+    expect(calm.sim.isScorching(vent.x, vent.y)).toBe(false);
+    const meadow = stand('meadow', VENT.warm + 0.1);
+    expect(meadow.lost).toBe(0);
+    expect(meadow.sim.isScorching(vent.x, vent.y)).toBe(false);
+  });
+
+  it('솟기 시작할 때 한 번 알리고, 한 번 솟는 동안 플레이어는 한 번만 덴다', () => {
+    const vent = someVent();
+    const sim = quietSim(1, { stage: 'ridge', seed });
+    sim.state.player.x = vent.x;
+    sim.state.player.y = vent.y;
+    sim.state.t = timeAt(vent, VENT.warm - 0.1);
+    const before = sim.state.player.hp;
+    const events = advance(sim, 0.1 + VENT.erupt + 0.2);
+    expect(events.filter((e) => e.type === 'vent' && e.x === vent.x && e.y === vent.y)).toHaveLength(1);
+    // 무적 시간이 끝나도 같은 불길에 두 번 데지는 않는다.
+    expect(VENT.erupt).toBeGreaterThan(PLAYER_BASE.invulnerable);
+    expect(before - sim.state.player.hp).toBe(VENT.damage);
+    // 다음에 솟을 때는 다시 덴다.
+    sim.state.t = timeAt(vent, VENT.period + VENT.warm + 0.05);
+    advance(sim, 0.2);
+    expect(before - sim.state.player.hp).toBe(VENT.damage * 2);
+  });
+
+  it('불길 위의 그림자는 크게 데고, 보스는 조금만 덴다', () => {
+    const vent = someVent();
+    /** 불길이 솟는 0.6초 동안 불구멍 위에 둔 적들이 잃은 체력 */
+    const scorch = (...foes: Enemy[]): number[] => {
+      const sim = quietSim(1, { stage: 'ridge', seed });
+      // 플레이어가 옆으로 떨어져 있어서, 느린 적은 그동안 불구멍을 벗어나지 못한다.
+      sim.state.player.x = vent.x - 150;
+      sim.state.player.y = vent.y;
+      sim.state.player.hp = 1e9;
+      sim.state.enemies.push(...foes);
+      sim.state.t = timeAt(vent, VENT.warm + 0.01);
+      advance(sim, 0.6);
+      return foes.map((e) => e.maxHp - e.hp);
+    };
+    const [onVent, away] = scorch(enemy('slag', vent.x, vent.y, 100), enemy('slag', vent.x + vent.rx + 40, vent.y, 100));
+    expect(onVent).toBeGreaterThan(1.9 * VENT.share * 100);
+    expect(onVent).toBeLessThan(3.1 * VENT.share * 100);
+    expect(away).toBe(0);
+    // 약한 적도 한 번에 조금은 덴다.
+    const [small] = scorch(enemy('cinder', vent.x, vent.y, 500));
+    expect(small).toBeGreaterThan(1.9 * VENT.share * 500);
+    expect(VENT.floor).toBeGreaterThan(ENEMIES.soot.hp * VENT.share);
+    const giant = enemy('giant', vent.x + 4, vent.y, 2000);
+    const [boss] = scorch(giant);
+    expect(boss).toBeGreaterThanOrEqual(VENT.boss);
+    expect(boss).toBeLessThanOrEqual(3 * VENT.boss);
+    // 튼튼한 그림자도 한 번 솟는 동안 내내 서 있으면 체력의 절반쯤을 잃는다.
+    expect((VENT.erupt / VENT.tick) * VENT.share).toBeGreaterThan(0.45);
+    expect((VENT.erupt / VENT.tick) * VENT.share).toBeLessThan(0.8);
+  });
+
+  it('숯덩이는 쓰러지면 재방울 둘로 쪼개지고, 쪼개져 나온 것은 다시 쪼개지지 않는다', () => {
+    const sim = quietSim(1, { stage: 'ridge', seed });
+    sim.state.player.hp = 1e9;
+    sim.state.enemies.push(enemy('clinker', 100, 0, 0), enemy('slag', 0, 200, 500));
+    sim.step(STEP, 0, 0);
+    expect(sim.state.kills).toBe(1);
+    const kinds = sim.state.enemies.map((e) => e.kind).sort();
+    expect(kinds).toEqual(['cinder', 'cinder', 'slag']);
+    const pieces = sim.state.enemies.filter((e) => e.kind === 'cinder');
+    // 양옆으로 튀어 나온다.
+    expect(pieces[0].kx).toBeCloseTo(-(pieces[1].kx ?? 0), 5);
+    expect(new Set(pieces.map((e) => e.uid)).size).toBe(2);
+    for (const piece of pieces) piece.hp = 0;
+    sim.step(STEP, 0, 0);
+    expect(sim.state.kills).toBe(3);
+    expect(sim.state.enemies.map((e) => e.kind)).toEqual(['slag']);
+    expect(ENEMIES[ENEMIES.clinker.splits!.into].splits).toBeUndefined();
+  });
+
+  it('고개의 문지기는 내달린 다음에 숨을 고르고, 빛을 모아 부채꼴로 쏜다', () => {
+    const sim = quietSim(1, { stage: 'ridge', seed });
+    sim.state.player.hp = 1e9;
+    const warden = enemy('warden', 0, -150, 99999);
+    warden.timer = 0.01;
+    warden.tier = MID_BOSS_COUNT - 1;
+    sim.state.enemies.push(warden);
+    // 먼저 힘을 모았다가 내달린다.
+    sim.step(STEP, 0, 0);
+    expect(sim.events).toContainEqual({ type: 'windup' });
+    expect(warden.mode).toBe(1);
+    const dash = dashOf('warden', warden.tier);
+    expect(advance(sim, dash.windup + 0.05)).toContainEqual({ type: 'dash' });
+    advance(sim, dash.seconds + 0.05);
+    expect(warden.mode).toBe(WARDEN_REST);
+    expect(sim.state.hazards).toHaveLength(0);
+    // 숨을 고른 뒤에 빛을 모으고, 그다음에 쏜다.
+    warden.timer = 0.01;
+    sim.step(STEP, 0, 0);
+    expect(sim.events).toContainEqual({ type: 'charge' });
+    expect(warden.mode).toBe(WARDEN_CHARGING);
+    const before = { x: warden.x, y: warden.y };
+    expect(advance(sim, CHARGE_SECONDS + 0.05)).toContainEqual({ type: 'volley' });
+    expect(sim.state.hazards).toHaveLength(7);
+    // 모으는 동안에는 멈춰 있다.
+    expect(Math.hypot(warden.x - before.x, warden.y - before.y)).toBeLessThan(2);
+    expect(warden.mode).toBe(0);
+    // 그다음은 다시 돌진이고, 부하는 부르지 않는다.
+    warden.timer = 0.01;
+    sim.step(STEP, 0, 0);
+    expect(sim.events).toContainEqual({ type: 'windup' });
+    expect(sim.state.enemies).toHaveLength(1);
+  });
+
+  it('자동 플레이는 달아오른 불구멍 밖으로 걸어 나간다', () => {
+    const vent = someVent();
+    const sim = quietSim(1, { stage: 'ridge', seed });
+    sim.state.player.x = vent.x;
+    sim.state.player.y = vent.y;
+    sim.state.t = timeAt(vent, 0.05);
+    const before = sim.state.player.hp;
+    for (let i = 0; i < Math.round((VENT.warm + VENT.erupt) / STEP); i += 1) {
+      const [x, y] = steer(sim);
+      sim.step(STEP, x, y);
+    }
+    expect(ventAt(sim.state.player.x, sim.state.player.y, seed)).toBeNull();
+    expect(sim.state.player.hp).toBe(before);
   });
 });
 

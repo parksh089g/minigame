@@ -37,7 +37,12 @@ const ROW_WIDTH = GAME_WIDTH - MARGIN * 2;
 const BUY_WIDTH = 62;
 const CARD_GAP = 6;
 const HERO_CARD = { width: (ROW_WIDTH - CARD_GAP * 2) / 3, height: 62 } as const;
-const STAGE_CARD = { width: (ROW_WIDTH - CARD_GAP) / 2, height: 38 } as const;
+/** 스테이지 카드: 위에는 그곳의 바닥과 그림자가 보이는 띠, 아래에는 이름. 한 줄에 스테이지 수만큼 나란히 놓는다. */
+const STAGE_CARD = {
+  width: (ROW_WIDTH - CARD_GAP * (STAGE_ORDER.length - 1)) / STAGE_ORDER.length,
+  height: 38,
+  strip: 16,
+} as const;
 const DETAIL_HEIGHT = 56;
 const UPGRADE_BUTTON_HEIGHT = 24;
 /** 하던 판을 버리고 새로 시작할 때 한 번 더 묻는 말과, 그 물음이 살아 있는 시간 */
@@ -421,23 +426,35 @@ function addStageCards(
         shadow: COLOR.ink,
       });
     };
-    // 그 스테이지의 바닥과 거기 사는 적을 작은 창으로 보여 준다.
-    const swatch = scene.add
-      .tileSprite(x + 7, top + 7, 24, 24, FLOOR_OF[id])
+    // 그 스테이지의 바닥과 거기 사는 그림자 셋을 띠로 보여 준다.
+    const strip = { x: x + 4, y: top + 4, width: Math.floor(STAGE_CARD.width) - 8, height: STAGE_CARD.strip };
+    scene.add
+      .tileSprite(strip.x, strip.y, strip.width, strip.height, FLOOR_OF[id])
       .setOrigin(0, 0)
       .setAlpha(open ? 1 : 0.35);
     const rim = scene.add.graphics();
-    rim.lineStyle(1, COLOR.ink, 1).strokeRect(swatch.x - 0.5, swatch.y - 0.5, 25, 25);
-    const textX = x + 37;
+    rim.lineStyle(1, COLOR.ink, 1).strokeRect(strip.x - 0.5, strip.y - 0.5, strip.width + 1, strip.height + 1);
+    const centerX = x + STAGE_CARD.width / 2;
     if (open) {
-      scene.add.image(swatch.x + 12, swatch.y + 13, LK[stage.spawns[0].kind][0]);
-      addText(scene, textX, top + 12, stage.name, { color: CSS.white, bold: true });
+      const kinds = [...stage.spawns].sort((a, b) => a.from - b.from).slice(0, 3);
+      kinds.forEach((spawn, slot) => {
+        const image = scene.add.image(
+          Math.round(strip.x + ((slot + 1) * strip.width) / (kinds.length + 1)),
+          strip.y + strip.height / 2,
+          LK[spawn.kind][0],
+        );
+        // 띠보다 큰 그림은 띠에 맞춰 줄인다.
+        if (image.height > strip.height - 2) image.setScale((strip.height - 2) / image.height);
+      });
+      addText(scene, centerX, top + 22, stage.name, { color: CSS.white, bold: true, originX: 0.5 });
     } else {
-      scene.add.image(swatch.x + 12, swatch.y + 12, 'icon-lock');
-      addText(scene, textX, top + 5, stage.name, { color: CSS.silver, bold: true });
-      addText(scene, textX, top + 21, `${formatClock(stage.unlockSeconds)} 버티기`, {
+      // 잠긴 곳: 띠에는 자물쇠와 이름, 아래에는 여는 조건
+      scene.add.image(strip.x + 8, strip.y + strip.height / 2, 'icon-lock').setScale(0.75);
+      addText(scene, strip.x + 16, strip.y + 2, stage.name, { color: CSS.silver, size: FONT_SIZE.small });
+      addText(scene, centerX, top + 23, `${formatClock(stage.unlockSeconds)} 버티기`, {
         color: CSS.silver,
         size: FONT_SIZE.small,
+        originX: 0.5,
       });
     }
     refreshers.push(() => draw(false));
