@@ -1367,6 +1367,34 @@ describe('캐릭터', () => {
     expect(STAGES[STAGE_ORDER[0]].unlockSeconds).toBe(0);
   });
 
+  it('준비 화면에 적힌 숫자는 실제 특성과 같다', () => {
+    const percent = (ratio: number): string => `${ratio >= 1 ? '+' : '-'}${Math.round(Math.abs(ratio - 1) * 100)}%`;
+    for (const id of HERO_ORDER) {
+      const { trait, perk, flaw } = HEROES[id];
+      const shown = `${perk} · ${flaw ?? ''}`;
+      if (trait.speed) expect(shown).toContain(`이동 ${percent(trait.speed)}`);
+      if (trait.cooldown) expect(shown).toContain(`재사용 ${percent(trait.cooldown)}`);
+      if (trait.area) expect(shown).toContain(`범위 ${percent(trait.area)}`);
+      if (trait.xp) expect(shown).toContain(`경험치 ${percent(trait.xp)}`);
+      if (trait.maxHp) expect(shown).toContain(`최대 체력 ${trait.maxHp > 0 ? '+' : '-'}${Math.abs(trait.maxHp)}`);
+    }
+  });
+
+  it('번개잡이는 손이 잦아서 같은 무기를 더 자주 쓴다', () => {
+    const shots = (hero: 'keeper' | 'stormer'): number => {
+      const sim = quietSim(1, { hero });
+      sim.state.weapons = { ember: 1 };
+      sim.state.player.hp = 1e9;
+      sim.state.enemies.push(enemy('slag', 60, 0, 1e9));
+      return advance(sim, 30).filter((e) => e.type === 'shoot').length;
+    };
+    const ratio = shots('stormer') / shots('keeper');
+    expect(ratio).toBeGreaterThan(1.1);
+    expect(ratio).toBeLessThan(1.25);
+    // 그 대신 체력이 가장 낮다.
+    expect(HEROES.stormer.trait.maxHp ?? 0).toBeLessThan(HEROES.stargazer.trait.maxHp ?? 0);
+  });
+
   it('번개잡이는 등불지기보다 빨리 걷는다', () => {
     const walk = (hero: 'keeper' | 'stormer'): number => {
       const sim = quietSim(1, { hero });

@@ -122,6 +122,7 @@ body {
   }
 }
 
+/* 자리와 크기는 src/core/toast.ts가 캔버스에 맞춰 다시 정한다. 여기 적은 것은 캔버스를 잴 수 없을 때의 자리다. */
 .toast {
   position: fixed;
   left: 50%;
@@ -130,14 +131,19 @@ body {
   max-width: calc(100vw - 32px);
   padding: 12px 18px;
   border: 0;
-  border-radius: 999px;
+  /* 한 줄일 때는 알약 모양이고, 긴 문구가 두 줄로 넘어가면 둥근 네모가 된다. */
+  border-radius: 23px;
   background: var(--card);
   box-shadow: 0 4px 0 var(--shadow);
   color: var(--ink);
   font-family: inherit;
   font-size: 15px;
   line-height: 1.4;
-  white-space: nowrap;
+  width: max-content;
+  box-sizing: border-box;
+  text-align: center;
+  word-break: keep-all;
+  text-wrap: balance;
   cursor: pointer;
   z-index: 10;
 }
@@ -170,6 +176,9 @@ body {
 .dialog-card {
   width: min(320px, 100%);
   margin: 0 auto;
+  /* 캔버스가 크게 보이는 화면(태블릿)에서는 게임 속 글자와 어울리게 같이 키운다(src/core/stage.ts). */
+  transform: scale(var(--ui-scale, 1));
+  transform-origin: top center;
   padding: 20px 18px 16px;
   border-radius: 22px;
   box-sizing: border-box;

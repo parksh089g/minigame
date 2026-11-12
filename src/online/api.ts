@@ -7,6 +7,7 @@ import {
   type RankBoard,
   type RankedGame,
   type RankRow,
+  type RankSpan,
   type Standings,
   type StashResult,
   type SubmitRequest,
@@ -39,10 +40,20 @@ const isRow = (value: unknown): value is RankRow =>
 
 function asBoard(value: unknown): RankBoard | null {
   if (!isObject(value) || !Array.isArray(value.top) || !value.top.every(isRow)) return null;
+  const week = typeof value.week === 'string' ? { week: value.week } : {};
   const me = value.me;
-  if (me === null || me === undefined) return { top: value.top, me: null };
+  if (me === null || me === undefined) return { top: value.top, me: null, ...week };
   if (!isObject(me) || !isCount(me.rank) || !isCount(me.score) || typeof me.name !== 'string') return null;
-  return { top: value.top, me: { rank: me.rank, score: me.score, name: me.name } };
+  return { top: value.top, me: { rank: me.rank, score: me.score, name: me.name }, ...week };
+}
+
+/**
+ * 이번 주 랭킹으로 온 답인지 확인하며 읽는다.
+ * 주간 랭킹이 생기기 전의 서버는 span을 모르고 전체 랭킹을 돌려주는데, 그 답에는 주가 적혀 있지 않다.
+ */
+function asWeekBoard(value: unknown): RankBoard | null {
+  const board = asBoard(value);
+  return board && board.week !== undefined ? board : null;
 }
 
 function asStandings(value: unknown): Standings | null {
@@ -53,6 +64,11 @@ function asStandings(value: unknown): Standings | null {
     standings[game] = { rank: entry.rank, score: entry.score };
   }
   return standings;
+}
+
+/** 이번 주의 순위로 온 답인지 확인하며 읽는다. 옛 서버의 답(전체 순위)은 받지 않는다. */
+function asWeekStandings(value: unknown): Standings | null {
+  return isObject(value) && value.span === 'week' ? asStandings(value) : null;
 }
 
 function asSubmit(value: unknown): SubmitResult | null {
@@ -110,12 +126,17 @@ export function createApi(
   }
 
   return {
-    /** 한 게임의 랭킹. me를 주면 그 기기의 순위도 같이 온다. */
-    board: (game: RankedGame, me: string | null): Promise<ApiResult<RankBoard>> =>
-      call(`/api/rank/${game}${me ? `?me=${encodeURIComponent(me)}` : ''}`, asBoard),
-    /** 이 기기가 올라 있는 모든 게임의 순위를 한 번에 받는다. */
-    standings: (me: string): Promise<ApiResult<Standings>> =>
-      call(`/api/rank?me=${encodeURIComponent(me)}`, asStandings),
+    /** 한 게임의 랭킹. me를 주면 그 기기의 순위도 같이 온다. span이 week면 이번 주의 랭킹이다. */
+    board: (game: RankedGame, me: string | null, span: RankSpan = 'all'): Promise<ApiResult<RankBoard>> => {
+      const query = [me ? `me=${encodeURIComponent(me)}` : '', span === 'week' ? 'span=week' : ''].filter(Boolean);
+      const path = `/api/rank/${game}${query.length > 0 ? `?${query.join('&')}` : ''}`;
+      return call(path, span === 'week' ? asWeekBoard : asBoard);
+    },
+    /** 이 기기가 올라 있는 모든 게임의 순위를 한 번에 받는다. span이 week면 이번 주의 순위다. */
+    standings: (me: string, span: RankSpan = 'all'): Promise<ApiResult<Standings>> =>
+      span === 'week'
+        ? call(`/api/rank?me=${encodeURIComponent(me)}&span=week`, asWeekStandings)
+        : call(`/api/rank?me=${encodeURIComponent(me)}`, asStandings),
     /** 최고 점수와 닉네임을 올린다. */
     submit: (request: SubmitRequest): Promise<ApiResult<SubmitResult>> =>
       call('/api/rank', asSubmit, 'POST', request),

@@ -496,10 +496,10 @@ export const HEROES: Readonly<Record<HeroId, HeroInfo>> = {
   stormer: {
     name: '번개잡이',
     blurb: '발이 빠르고 손이 잦다',
-    perk: '이동 +12% · 재사용 -10%',
-    flaw: '최대 체력 -25',
+    perk: '이동 +12% · 재사용 -15%',
+    flaw: '최대 체력 -20',
     weapon: 'bolt',
-    trait: { speed: 1.12, cooldown: 0.9, maxHp: -25 },
+    trait: { speed: 1.12, cooldown: 0.85, maxHp: -20 },
     unlockSeconds: 360,
   },
 };

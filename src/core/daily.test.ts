@@ -10,6 +10,8 @@ import {
   dayNumber,
   isCleared,
   normalizeDaily,
+  RECENT_SHOWN,
+  recentDays,
   streakBonus,
   type DailyGame,
   type DailyState,
@@ -20,6 +22,9 @@ const GAMES: DailyGame[] = [
   { id: 'b', targets: [100, 200, 300] },
   { id: 'c', targets: [5, 6, 7] },
 ];
+
+/** 2026-11-20까지 사흘을 이어서 달성했을 때의 recent */
+const RUN_TO_20 = ['2026-11-18', '2026-11-19', '2026-11-20'];
 
 /** 2026-11-01부터 이어지는 날짜들 */
 function days(count: number): string[] {
@@ -103,11 +108,23 @@ describe('연속 달성', () => {
     expect(activeStreak(state, '2026-11-11')).toBe(0);
 
     state = clearDaily(state, '2026-11-11');
-    expect(state).toEqual({ lastClearedOn: '2026-11-11', streak: 1, bestStreak: 1, totalCleared: 1 });
+    expect(state).toEqual({
+      lastClearedOn: '2026-11-11',
+      streak: 1,
+      bestStreak: 1,
+      totalCleared: 1,
+      recent: ['2026-11-11'],
+    });
     expect(isCleared(state, '2026-11-11')).toBe(true);
 
     state = clearDaily(state, '2026-11-12');
-    expect(state).toEqual({ lastClearedOn: '2026-11-12', streak: 2, bestStreak: 2, totalCleared: 2 });
+    expect(state).toEqual({
+      lastClearedOn: '2026-11-12',
+      streak: 2,
+      bestStreak: 2,
+      totalCleared: 2,
+      recent: ['2026-11-11', '2026-11-12'],
+    });
   });
 
   it('같은 날 두 번 달성해도 한 번만 센다', () => {
@@ -116,7 +133,8 @@ describe('연속 달성', () => {
   });
 
   it('다음 날까지는 연속이 살아 있고, 하루를 건너뛰면 끊긴다', () => {
-    const state = { lastClearedOn: '2026-11-11', streak: 4, bestStreak: 6, totalCleared: 9 };
+    const recent = ['2026-11-08', '2026-11-09', '2026-11-10', '2026-11-11'];
+    const state = { lastClearedOn: '2026-11-11', streak: 4, bestStreak: 6, totalCleared: 9, recent };
     expect(activeStreak(state, '2026-11-11')).toBe(4);
     expect(activeStreak(state, '2026-11-12')).toBe(4);
     expect(activeStreak(state, '2026-11-13')).toBe(0);
@@ -126,11 +144,19 @@ describe('연속 달성', () => {
       streak: 1,
       bestStreak: 6,
       totalCleared: 10,
+      // 연속은 끊겼어도 앞서 달성한 날들은 남아 있다.
+      recent: [...recent, '2026-11-13'],
     });
   });
 
   it('가장 긴 연속 기록은 지금의 연속이 넘어설 때만 늘어난다', () => {
-    let state: DailyState = { lastClearedOn: '2026-11-11', streak: 2, bestStreak: 3, totalCleared: 9 };
+    let state: DailyState = {
+      lastClearedOn: '2026-11-11',
+      streak: 2,
+      bestStreak: 3,
+      totalCleared: 9,
+      recent: ['2026-11-10', '2026-11-11'],
+    };
     state = clearDaily(state, '2026-11-12');
     expect([state.streak, state.bestStreak]).toEqual([3, 3]);
     state = clearDaily(state, '2026-11-13');
@@ -138,7 +164,7 @@ describe('연속 달성', () => {
   });
 
   it('기기 시계를 마지막 달성일보다 앞으로 되돌리면 이미 달성한 것으로 친다', () => {
-    const state = { lastClearedOn: '2026-11-20', streak: 3, bestStreak: 3, totalCleared: 3 };
+    const state = { lastClearedOn: '2026-11-20', streak: 3, bestStreak: 3, totalCleared: 3, recent: RUN_TO_20 };
     for (const earlier of ['2026-11-19', '2026-11-11', '2025-12-31']) {
       expect(isCleared(state, earlier)).toBe(true);
       // 다시 달성해도 기록이 바뀌지 않으니 보상도 연속도 늘지 않는다.
@@ -148,7 +174,7 @@ describe('연속 달성', () => {
   });
 
   it('시계를 되돌렸다가 제자리로 돌려놓으면 원래대로 이어진다', () => {
-    const state = { lastClearedOn: '2026-11-20', streak: 3, bestStreak: 3, totalCleared: 3 };
+    const state = { lastClearedOn: '2026-11-20', streak: 3, bestStreak: 3, totalCleared: 3, recent: RUN_TO_20 };
     expect(clearDaily(state, '2026-11-19')).toBe(state);
     expect(isCleared(state, '2026-11-21')).toBe(false);
     expect(clearDaily(state, '2026-11-21')).toEqual({
@@ -156,12 +182,13 @@ describe('연속 달성', () => {
       streak: 4,
       bestStreak: 4,
       totalCleared: 4,
+      recent: [...RUN_TO_20, '2026-11-21'],
     });
   });
 
   it('달성한 적이 없거나 날짜가 잘못됐으면 달성한 것으로 치지 않는다', () => {
     expect(isCleared(createDailyState(), '2026-11-11')).toBe(false);
-    const state = { lastClearedOn: '2026-11-20', streak: 3, bestStreak: 3, totalCleared: 3 };
+    const state = { lastClearedOn: '2026-11-20', streak: 3, bestStreak: 3, totalCleared: 3, recent: RUN_TO_20 };
     expect(isCleared(state, '어제')).toBe(false);
     expect(isCleared(state, '2026-02-30')).toBe(false);
   });
@@ -179,13 +206,20 @@ describe('normalizeDaily', () => {
   });
 
   it('올바른 값은 그대로 두고, 숫자는 정리한다', () => {
-    const good = { lastClearedOn: '2026-11-11', streak: 3, bestStreak: 5, totalCleared: 7 };
+    const good = {
+      lastClearedOn: '2026-11-11',
+      streak: 3,
+      bestStreak: 5,
+      totalCleared: 7,
+      recent: ['2026-11-05', '2026-11-09', '2026-11-10', '2026-11-11'],
+    };
     expect(normalizeDaily(good)).toEqual(good);
     expect(normalizeDaily({ lastClearedOn: '2026-11-11', streak: -2, totalCleared: 'many' })).toEqual({
       lastClearedOn: '2026-11-11',
       streak: 1,
       bestStreak: 1,
       totalCleared: 1,
+      recent: ['2026-11-11'],
     });
   });
 
@@ -195,10 +229,86 @@ describe('normalizeDaily', () => {
       streak: 4,
       bestStreak: 4,
       totalCleared: 6,
+      recent: ['2026-11-08', '2026-11-09', '2026-11-10', '2026-11-11'],
     });
     // 지금의 연속보다 짧게 적혀 있으면 바로잡는다.
     expect(
       normalizeDaily({ lastClearedOn: '2026-11-11', streak: 4, bestStreak: 2, totalCleared: 6 }).bestStreak,
     ).toBe(4);
+  });
+});
+
+describe('최근에 달성한 날', () => {
+  it('recent가 없던 예전 세이브는 지금 이어지는 연속으로 채운다', () => {
+    const state = normalizeDaily({ lastClearedOn: '2026-11-11', streak: 3, bestStreak: 3, totalCleared: 9 });
+    expect(state.recent).toEqual(['2026-11-09', '2026-11-10', '2026-11-11']);
+    // 아주 긴 연속이어도 남겨 두는 날 수는 정해져 있다.
+    const long = normalizeDaily({ lastClearedOn: '2026-11-11', streak: 40, totalCleared: 40 });
+    expect(long.recent).toHaveLength(14);
+    expect(long.recent[0]).toBe('2026-10-29');
+    expect(long.recent.at(-1)).toBe('2026-11-11');
+  });
+
+  it('깨진 값, 겹친 날, 너무 오래된 날, 마지막 달성일보다 뒤의 날은 버린다', () => {
+    const state = normalizeDaily({
+      lastClearedOn: '2026-11-11',
+      streak: 1,
+      totalCleared: 5,
+      recent: ['2026-11-09', '2026-11-09', 7, '어제', '2026-02-30', '2026-10-01', '2026-11-12', '2026-11-07'],
+    });
+    expect(state.recent).toEqual(['2026-11-07', '2026-11-09', '2026-11-11']);
+    expect(normalizeDaily({ lastClearedOn: '2026-11-11', streak: 1, recent: 'x' }).recent).toEqual(['2026-11-11']);
+  });
+
+  it('달성할 때마다 그날이 더해지고, 연속이 끊긴 앞쪽의 날도 남는다', () => {
+    let state = createDailyState();
+    for (const day of ['2026-11-03', '2026-11-04', '2026-11-06', '2026-11-07', '2026-11-08']) {
+      state = clearDaily(state, day);
+    }
+    expect(state.streak).toBe(3);
+    expect(state.recent).toEqual(['2026-11-03', '2026-11-04', '2026-11-06', '2026-11-07', '2026-11-08']);
+    // 두 주가 지나면 오래된 날부터 빠진다.
+    state = clearDaily(state, '2026-11-18');
+    expect(state.recent).toEqual(['2026-11-06', '2026-11-07', '2026-11-08', '2026-11-18']);
+    // 세이브를 거쳐도 그대로다.
+    expect(normalizeDaily(JSON.parse(JSON.stringify(state)))).toEqual(state);
+  });
+
+  it('오늘까지 이레를 오래된 날부터 돌려주고, 달성한 날과 오늘을 표시한다', () => {
+    let state = createDailyState();
+    for (const day of ['2026-11-03', '2026-11-04', '2026-11-06', '2026-11-08']) state = clearDaily(state, day);
+
+    const week = recentDays(state, '2026-11-09');
+    expect(week).toHaveLength(RECENT_SHOWN);
+    expect(week.map((day) => day.dateKey)).toEqual([
+      '2026-11-03',
+      '2026-11-04',
+      '2026-11-05',
+      '2026-11-06',
+      '2026-11-07',
+      '2026-11-08',
+      '2026-11-09',
+    ]);
+    expect(week.map((day) => day.cleared)).toEqual([true, true, false, true, false, true, false]);
+    expect(week.map((day) => day.today)).toEqual([false, false, false, false, false, false, true]);
+
+    // 오늘 달성하면 오늘 칸도 채워진다.
+    expect(recentDays(clearDaily(state, '2026-11-09'), '2026-11-09').at(-1)).toEqual({
+      dateKey: '2026-11-09',
+      cleared: true,
+      today: true,
+    });
+  });
+
+  it('한 번도 달성하지 않았으면 모두 비어 있고, 날짜가 잘못됐으면 빈 배열이다', () => {
+    expect(recentDays(createDailyState(), '2026-11-09').some((day) => day.cleared)).toBe(false);
+    expect(recentDays(createDailyState(), '어제')).toEqual([]);
+  });
+
+  it('시계를 되돌린 날에는 오늘 칸을 카드와 같이 달성한 것으로 보여 준다', () => {
+    const state = clearDaily(createDailyState(), '2026-11-20');
+    const week = recentDays(state, '2026-11-15');
+    expect(week.at(-1)).toEqual({ dateKey: '2026-11-15', cleared: true, today: true });
+    expect(week.slice(0, -1).some((day) => day.cleared)).toBe(false);
   });
 });

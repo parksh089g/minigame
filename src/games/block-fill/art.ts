@@ -4,6 +4,7 @@
  */
 import type Phaser from 'phaser';
 import { THEME, THEME_CSS } from '../../config';
+import { bakeShape } from '../../core/bake';
 import { addHiResCanvas, renderScale } from '../../core/hidpi';
 import { drawPanel } from '../../core/ui';
 import { BOARD_LIP, BOARD_RIM, COLOR_COUNT, MAX_CELL, SIZE, type Layout } from './rules';
@@ -129,10 +130,9 @@ export function registerBlockTextures(scene: Phaser.Scene): void {
 }
 
 /** 판의 테두리와 바닥, 빈칸을 그린다. */
-export function drawBoard(g: Graphics, layout: Layout): void {
+function drawBoard(g: Graphics, layout: Layout): void {
   const { cell, left, top } = layout;
   const size = cell * SIZE;
-  g.clear();
   drawPanel(g, left - BOARD_RIM, top - BOARD_RIM, size + BOARD_RIM * 2, size + BOARD_RIM * 2, {
     fill: LOOK.board.rim,
     shadow: LOOK.board.rimLip,
@@ -147,6 +147,22 @@ export function drawBoard(g: Graphics, layout: Layout): void {
       g.fillRoundedRect(left + col * cell + 1.5, top + row * cell + 1.5, cell - 3, cell - 3, 5);
     }
   }
+}
+
+/**
+ * 판을 한 장의 그림으로 구워서 놓는다. 빈칸이 예순네 개라서 도형으로 두면 프레임마다 다시 쪼개느라 무겁다.
+ * 화면의 길이에 따라 칸의 크기가 달라지므로 들어올 때마다 새로 굽는다.
+ */
+export function addBoard(scene: Phaser.Scene, layout: Layout): Phaser.GameObjects.Image {
+  const key = 'block-fill-board';
+  if (scene.textures.exists(key)) scene.textures.remove(key);
+  const size = layout.cell * SIZE + BOARD_RIM * 2;
+  const left = layout.left - BOARD_RIM;
+  const top = layout.top - BOARD_RIM;
+  bakeShape(scene, key, { width: size, height: size + BOARD_LIP, originX: -left, originY: -top }, (g) =>
+    drawBoard(g, layout),
+  );
+  return scene.add.image(left, top, key).setOrigin(0, 0);
 }
 
 /** 쟁반의 받침을 그린다. 세 자리를 한 장의 둥근 판이 받치고, 자리 사이에 옅은 금을 긋는다. */

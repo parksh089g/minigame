@@ -2,6 +2,8 @@ import Phaser from 'phaser';
 import { TEXTURE } from '../../art/sprites';
 import { GAME_WIDTH, SCENE } from '../../config';
 import { vibrate } from '../../core/haptics';
+import { LENS_ROOM } from '../../core/lens';
+import { PressLens } from '../../core/lens-view';
 import { sfx } from '../../core/sfx';
 import { StartGate } from '../../core/start-gate';
 import { addBackdrop, addText } from '../../core/ui';
@@ -102,7 +104,9 @@ const PAD_FONT_SIZE = 20;
 const TAG_PADDING = 7;
 
 /** 판 위의 줄(strip)은 떠오르는 점수 글자보다 위에 있어서, 맨 윗줄의 점수는 그 뒤로 지나간다. */
-const DEPTH = { board: 5, effect: 20, strip: 25, hud: 30, banner: 40 } as const;
+const DEPTH = { board: 5, effect: 20, strip: 25, lens: 27, hud: 30, banner: 40 } as const;
+/** 칸이 이보다 작은 판(아홉 칸짜리)에서는 든 숫자를 놓을 칸을 손가락 위에 크게 띄워 보여 준다. */
+const LENS_BELOW_CELL = 33;
 
 /** 방향키가 고른 칸을 옮기는 쪽(가로, 세로) */
 const ARROWS: Readonly<Record<string, readonly [dCol: number, dRow: number]>> = {
@@ -133,6 +137,12 @@ export class NumberPuzzleScene extends MiniGameScene {
   private streak = 0;
   /** 방금 틀려서 흔들리고 있는 칸과, 흔들림이 끝나는 때(씬 시계, ms) */
   private shaking: { cell: number; until: number } | null = null;
+  /**
+   * 든 숫자를 놓을 칸을 손가락으로 겨누는 중. 손을 떼면 cell에 놓는다.
+   * 손가락이 빈칸을 벗어나 있으면 cell은 null이고, 그대로 떼면 아무 일도 없다.
+   */
+  private aim: { pointerId: number; cell: number | null } | null = null;
+  private lens!: PressLens;
 
   private layout!: BoardLayout;
   private playArea!: Phaser.Geom.Rectangle;
@@ -195,6 +205,7 @@ export class NumberPuzzleScene extends MiniGameScene {
 
     this.addPauseButton();
     this.hud = new GameHud(this, DEPTH.hud);
+    this.lens = new PressLens(this, DEPTH.lens);
     if (this.stageLevel !== null) this.hud.showStage(this.stageLevel);
     this.drawTime();
 
@@ -251,11 +262,15 @@ export class NumberPuzzleScene extends MiniGameScene {
     this.pads = [];
     this.hints = [];
     this.pointer = null;
+    this.aim = null;
   }
 
   /** 터치, 키보드, 일시정지를 듣는다. 씬이 닫힐 때 모두 거둔다. */
   private listen(): void {
     this.input.on(Phaser.Input.Events.POINTER_DOWN, this.onPointerDown, this);
+    this.input.on(Phaser.Input.Events.POINTER_MOVE, this.onPointerMove, this);
+    this.input.on(Phaser.Input.Events.POINTER_UP, this.onPointerUp, this);
+    this.input.on(Phaser.Input.Events.POINTER_UP_OUTSIDE, this.dropAim, this);
     // 일시정지한 동안 시간 걱정 없이 판을 들여다볼 수 없게 가린다.
     this.events.on(Phaser.Scenes.Events.PAUSE, this.onPause, this);
     this.events.on(Phaser.Scenes.Events.RESUME, this.onResume, this);
@@ -263,6 +278,9 @@ export class NumberPuzzleScene extends MiniGameScene {
     keyboard?.on('keydown', this.onKeyDown, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.input.off(Phaser.Input.Events.POINTER_DOWN, this.onPointerDown, this);
+      this.input.off(Phaser.Input.Events.POINTER_MOVE, this.onPointerMove, this);
+      this.input.off(Phaser.Input.Events.POINTER_UP, this.onPointerUp, this);
+      this.input.off(Phaser.Input.Events.POINTER_UP_OUTSIDE, this.dropAim, this);
       this.events.off(Phaser.Scenes.Events.PAUSE, this.onPause, this);
       this.events.off(Phaser.Scenes.Events.RESUME, this.onResume, this);
       keyboard?.off('keydown', this.onKeyDown, this);
@@ -479,7 +497,62 @@ export class NumberPuzzleScene extends MiniGameScene {
       return;
     }
     const cell = cellAt(this.layout, pointer.worldX, pointer.worldY);
-    if (cell !== null) this.apply(pressCell(this.run.grid, this.selection, cell));
+    if (cell === null) return;
+    // 칸이 작은 판에서 든 숫자를 놓을 때는 손을 뗄 때 놓는다. 그동안 어느 칸인지 크게 보여 준다.
+    if (this.selection.armed !== null && this.run.grid[cell] === 0 && this.layout.cell < LENS_BELOW_CELL) {
+      if (this.aim) return;
+      this.gate.start();
+      this.stopPointing();
+      this.aim = { pointerId: pointer.id, cell };
+      this.showAim();
+      return;
+    }
+    this.apply(pressCell(this.run.grid, this.selection, cell));
+  }
+
+  /** 겨누는 동안 손가락을 옮기면 놓을 칸도 따라간다. 빈칸이 아닌 곳으로 가면 놓지 않는다. */
+  private onPointerMove(pointer: Phaser.Input.Pointer): void {
+    const aim = this.aim;
+    if (!aim || pointer.id !== aim.pointerId) return;
+    const under = cellAt(this.layout, pointer.worldX, pointer.worldY);
+    const cell = under !== null && this.run.grid[under] === 0 ? under : null;
+    if (cell === aim.cell) return;
+    aim.cell = cell;
+    this.showAim();
+  }
+
+  private onPointerUp(pointer: Phaser.Input.Pointer): void {
+    const aim = this.aim;
+    if (!aim || pointer.id !== aim.pointerId) return;
+    this.dropAim();
+    if (aim.cell !== null && this.canPlay) this.apply(pressCell(this.run.grid, this.selection, aim.cell));
+  }
+
+  /** 겨누고 있는 칸 위에 든 숫자를 크게 띄운다. 겨눈 칸이 없으면 거둔다. */
+  private showAim(): void {
+    const cell = this.aim?.cell ?? null;
+    const { armed } = this.selection;
+    if (cell === null || armed === null) {
+      this.lens.hide();
+      return;
+    }
+    const spot = this.cellCenter(cell);
+    this.lens.show({ ...spot, size: this.layout.cell }, HUD_HEIGHT + 2, (content) => {
+      content.add(
+        addText(this, 0, 0, String(armed), {
+          size: Math.round(LENS_ROOM * 0.7),
+          color: LOOK.digit.placed,
+          originX: 0.5,
+          originY: 0.5,
+        }),
+      );
+    });
+  }
+
+  /** 겨누던 것을 그만둔다. 숫자는 놓지 않는다. */
+  private dropAim(): void {
+    this.aim = null;
+    this.lens.hide();
   }
 
   private onKeyDown(event: KeyboardEvent): void {
@@ -708,6 +781,7 @@ export class NumberPuzzleScene extends MiniGameScene {
   }
 
   private onPause(): void {
+    this.dropAim();
     // 단계 모드는 시간을 재지 않으니 가릴 까닭이 없다.
     if (this.playing && this.stageLevel === null) this.boardLayer.setVisible(false);
   }
@@ -723,6 +797,7 @@ export class NumberPuzzleScene extends MiniGameScene {
 
   private endRun(): void {
     this.phase = 'over';
+    this.dropAim();
     this.stopPointing();
     this.selection = NO_SELECTION;
     this.refresh();

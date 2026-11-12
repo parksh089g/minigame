@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { TEXTURE } from '../../art/sprites';
 import { FONT_SIZE, GAME_WIDTH, SCENE, THEME, THEME_CSS } from '../../config';
+import { bakeShape } from '../../core/bake';
 import { vibrate } from '../../core/haptics';
 import { sfx } from '../../core/sfx';
 import { StartGate } from '../../core/start-gate';
@@ -65,7 +66,7 @@ interface GateRow extends RowBase {
 interface WallRow extends RowBase {
   kind: 'wall';
   enemies: number;
-  foes: Phaser.GameObjects.Graphics[];
+  foes: Phaser.GameObjects.Image[];
   badge: CountBadge;
 }
 
@@ -228,7 +229,6 @@ function wallSpots(count: number): { x: number; y: number }[] {
  */
 function drawCreature(graphics: Phaser.GameObjects.Graphics, colors: ShadeColors, hostile: boolean): void {
   const r = CREATURE_RADIUS;
-  graphics.clear();
   if (hostile) {
     graphics.fillStyle(colors.dark, 1);
     graphics.fillTriangle(-r * 0.95, -r * 0.3, -r * 0.2, -r * 0.9, -r * 0.8, -r * 1.35);
@@ -244,6 +244,37 @@ function drawCreature(graphics: Phaser.GameObjects.Graphics, colors: ShadeColors
   graphics.fillStyle(LOOK.eye, 1);
   graphics.fillCircle(-r * 0.38, eyeY, r * 0.19);
   graphics.fillCircle(r * 0.38, eyeY, r * 0.19);
+}
+
+/**
+ * 친구 하나의 그림. 무리와 적으로 수십 마리가 한꺼번에 보이므로 한 장씩 구워서 같이 쓴다.
+ * 이미지의 한가운데가 몸의 한가운데다. 뿔과 아래쪽 두께가 들어가도록 몸보다 넉넉하게 잡는다.
+ */
+function creatureTexture(scene: Phaser.Scene, hostile: boolean): string {
+  const box = { width: 16, height: 20 };
+  return bakeShape(scene, hostile ? 'gate-run-foe' : 'gate-run-buddy', box, (graphics) =>
+    drawCreature(graphics, hostile ? LOOK.foe : LOOK.buddy, hostile),
+  );
+}
+
+/** 길 가운데 점선 한 토막의 그림. 왼쪽 위가 토막의 왼쪽 위에서 반 픽셀 바깥이다. */
+function dashTexture(scene: Phaser.Scene): string {
+  const box = { width: DASH.width + 1, height: DASH.length, originX: 0.5, originY: 0 };
+  return bakeShape(scene, 'gate-run-dash', box, (graphics) => {
+    graphics.fillStyle(LOOK.road.mark, 1);
+    graphics.fillRoundedRect(0, 0, DASH.width, DASH.length, DASH.width / 2);
+  });
+}
+
+/** 길 양쪽 가장자리의 눈금 한 쌍의 그림. 왼쪽 눈금의 왼쪽 위에서 반 픽셀 위가 그림의 왼쪽 위다. */
+function tickTexture(scene: Phaser.Scene): string {
+  const span = ROAD_RIGHT - ROAD_LEFT - TICK.inset * 2;
+  const box = { width: span, height: TICK.height + 1, originX: 0, originY: 0.5 };
+  return bakeShape(scene, 'gate-run-tick', box, (graphics) => {
+    graphics.fillStyle(LOOK.road.mark, 1);
+    graphics.fillRoundedRect(0, 0, TICK.width, TICK.height, TICK.height / 2);
+    graphics.fillRoundedRect(span - TICK.width, 0, TICK.width, TICK.height, TICK.height / 2);
+  });
 }
 
 /** 관문 한 칸을 가운데가 (0, 0)에 오도록 그린다. 아래쪽에 짙은 두께를 둔다. */
@@ -359,9 +390,11 @@ export class GateRunScene extends MiniGameScene {
   private crowdY = 0;
 
   private hud!: GameHud;
-  private marks!: Phaser.GameObjects.Graphics;
+  /** 길 가운데 점선과 가장자리 눈금. 화면에 보일 수 있는 만큼 만들어 두고 자리만 옮긴다. */
+  private dashes: Phaser.GameObjects.Image[] = [];
+  private ticks: Phaser.GameObjects.Image[] = [];
   private crowd!: Phaser.GameObjects.Container;
-  private buddies: Phaser.GameObjects.Graphics[] = [];
+  private buddies: Phaser.GameObjects.Image[] = [];
   private badge!: CountBadge;
   private sparks!: Phaser.GameObjects.Particles.ParticleEmitter;
   private puffs!: Phaser.GameObjects.Particles.ParticleEmitter;
@@ -384,7 +417,7 @@ export class GateRunScene extends MiniGameScene {
 
     addBackdrop(this);
     this.drawRoad();
-    this.marks = this.add.graphics().setDepth(DEPTH.road);
+    this.createMarks();
     this.createCrowd();
     this.sparks = this.createEmitter(LOOK.sparks);
     this.puffs = this.createEmitter(LOOK.puffs);
@@ -453,6 +486,8 @@ export class GateRunScene extends MiniGameScene {
     this.bobTime = 0;
     this.spots = [];
     this.buddies = [];
+    this.dashes = [];
+    this.ticks = [];
   }
 
   // ───────── 입력 ─────────
@@ -546,24 +581,35 @@ export class GateRunScene extends MiniGameScene {
     road.fillRoundedRect(ROAD_LEFT, this.roadTop + 2, width, bottom - this.roadTop, 10);
   }
 
-  /** 가운데 점선과 가장자리 눈금을 흘러내린 거리에 맞춰 다시 그린다. */
+  private createMarks(): void {
+    const count = Math.ceil((this.scale.height - this.roadTop) / DASH.period) + 1;
+    const make = (texture: string): Phaser.GameObjects.Image[] =>
+      Array.from({ length: count }, () =>
+        this.add.image(0, 0, texture).setOrigin(0, 0).setDepth(DEPTH.road).setVisible(false),
+      );
+    this.dashes = make(dashTexture(this));
+    this.ticks = make(tickTexture(this));
+  }
+
+  /** 가운데 점선과 가장자리 눈금을 흘러내린 거리에 맞춰 다시 놓는다. */
   private drawMarks(): void {
-    const g = this.marks;
     const top = this.roadTop + 8;
     const bottom = this.scale.height;
-    g.clear();
-    g.fillStyle(LOOK.road.mark, 1);
-    for (let y = top + (this.distance % DASH.period) - DASH.period; y < bottom; y += DASH.period) {
-      if (y < top) continue;
-      g.fillRoundedRect(ROAD_CENTER - DASH.width / 2, y, DASH.width, DASH.length, DASH.width / 2);
-    }
+    /** 맨 위 자리(first)부터 간격마다 하나씩 놓고, 남는 것은 숨긴다. 길 윗변을 넘는 자리는 건너뛴다. */
+    const place = (marks: Phaser.GameObjects.Image[], x: number, first: number, period: number): void => {
+      let used = 0;
+      for (let y = first; y < bottom && used < marks.length; y += period) {
+        if (y < top) continue;
+        marks[used].setPosition(x, y).setVisible(true);
+        used += 1;
+      }
+      for (let index = used; index < marks.length; index += 1) marks[index].setVisible(false);
+    };
+    const dashTop = top + (this.distance % DASH.period) - DASH.period;
+    place(this.dashes, ROAD_CENTER - DASH.width / 2 - 0.5, dashTop, DASH.period);
     // 눈금은 점선과 반 박자 어긋나게 놓는다.
     const shift = (this.distance + TICK.period / 2) % TICK.period;
-    for (let y = top + shift - TICK.period; y < bottom; y += TICK.period) {
-      if (y < top) continue;
-      g.fillRoundedRect(ROAD_LEFT + TICK.inset, y, TICK.width, TICK.height, TICK.height / 2);
-      g.fillRoundedRect(ROAD_RIGHT - TICK.inset - TICK.width, y, TICK.width, TICK.height, TICK.height / 2);
-    }
+    place(this.ticks, ROAD_LEFT + TICK.inset, top + shift - TICK.period - 0.5, TICK.period);
   }
 
   /** 달리는 동안: 길을 흘려보내고, 무리에 닿은 줄을 처리한다. */
@@ -714,11 +760,7 @@ export class GateRunScene extends MiniGameScene {
   private addWallRow(enemies: number, segment: number, y: number): WallRow {
     const mat = this.add.graphics();
     drawMat(mat);
-    const foes = wallSpots(enemies).map((spot) => {
-      const foe = this.add.graphics().setPosition(spot.x, spot.y);
-      drawCreature(foe, LOOK.foe, true);
-      return foe;
-    });
+    const foes = wallSpots(enemies).map((spot) => this.add.image(spot.x, spot.y, creatureTexture(this, true)));
     const badge = new CountBadge(this, LOOK.foeBadge);
     badge.container.setPosition(ROAD_CENTER, WALL.badgeY);
     badge.set(enemies);
@@ -812,11 +854,9 @@ export class GateRunScene extends MiniGameScene {
   // ───────── 무리 ─────────
 
   private createCrowd(): void {
-    this.buddies = Array.from({ length: CROWD_SHOWN_MAX }, () => {
-      const buddy = this.add.graphics().setVisible(false);
-      drawCreature(buddy, LOOK.buddy, false);
-      return buddy;
-    });
+    this.buddies = Array.from({ length: CROWD_SHOWN_MAX }, () =>
+      this.add.image(0, 0, creatureTexture(this, false)).setVisible(false),
+    );
     this.crowd = this.add.container(this.crowdX, this.crowdY, this.buddies).setDepth(DEPTH.crowd);
     this.badge = new CountBadge(this, LOOK.buddyBadge);
     this.badge.container.setDepth(DEPTH.badge);
