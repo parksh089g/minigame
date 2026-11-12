@@ -6,7 +6,10 @@ import { HiDpiPlugin, pickRenderScale, renderScale, setRenderScale } from './cor
 import { initPwa, isStandalone } from './core/pwa';
 import { initAudioUnlock } from './core/sfx';
 import { store } from './core/store';
+import { BlockFillScene } from './games/block-fill/BlockFillScene';
+import { ChosungQuizScene } from './games/chosung-quiz/ChosungQuizScene';
 import { ColorSortScene } from './games/color-sort/ColorSortScene';
+import { DuelScene } from './games/duel/DuelScene';
 import { GateRunScene } from './games/gate-run/GateRunScene';
 import { JumpRunnerScene } from './games/jump-runner/JumpRunnerScene';
 import { LanternKeeperScene } from './games/lantern-keeper/LanternKeeperScene';
@@ -16,6 +19,7 @@ import { MemoryCardsScene } from './games/memory-cards/MemoryCardsScene';
 import { MergeTilesScene } from './games/merge-tiles/MergeTilesScene';
 import { NumberPuzzleScene } from './games/number-puzzle/NumberPuzzleScene';
 import { ParkingOutScene } from './games/parking-out/ParkingOutScene';
+import { PathLinkScene } from './games/path-link/PathLinkScene';
 import { PinPullScene } from './games/pin-pull/PinPullScene';
 import { ScrewSortScene } from './games/screw-sort/ScrewSortScene';
 import { StackTowerScene } from './games/stack-tower/StackTowerScene';
@@ -97,6 +101,10 @@ async function boot(): Promise<void> {
       TailChaseScene,
       LogicTilesScene,
       NumberPuzzleScene,
+      PathLinkScene,
+      BlockFillScene,
+      ChosungQuizScene,
+      DuelScene,
       LanternKeeperScene,
       PauseScene,
       ResultScene,

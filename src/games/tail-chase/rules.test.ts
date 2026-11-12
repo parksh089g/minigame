@@ -690,7 +690,8 @@ describe('여러 판을 아무렇게나 해 봐도', () => {
     return pool[Math.floor(random() * pool.length)];
   }
 
-  it('규칙이 어긋나는 상태는 나오지 않는다', () => {
+  // 150판을 끝까지 돌리느라 혼자서도 2초쯤 걸린다. 다른 테스트와 함께 돌 때 기본 제한(5초)에 걸리지 않게 넉넉히 준다.
+  it('규칙이 어긋나는 상태는 나오지 않는다', { timeout: 30_000 }, () => {
     let foods = 0;
     let treatsShown = 0;
     let treatsEaten = 0;

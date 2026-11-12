@@ -17,7 +17,7 @@ import {
 import { HUB_GAMES, type MiniGameInfo } from '../games/registry';
 import { failureText, type ApiFailure } from '../online/api';
 import { loadBoard, syncScores } from '../online/online';
-import { isJoined } from '../online/profile';
+import { isJoined, isWaitingToSend } from '../online/profile';
 import { isRankedGame, rankLabel, type RankBoard, type RankRow } from '../online/protocol';
 import { askNickname } from './nickname';
 
@@ -71,6 +71,8 @@ export class RankingScene extends Phaser.Scene {
   private nameButton: PixelButton | null = null;
   /** 불러오기를 시작할 때마다 올린다. 늦게 온 답이 지금 것이 아니면 버린다. */
   private request = 0;
+  /** 마지막으로 내 기록을 올리려다 실패한 까닭. 올라갔거나 올릴 것이 없었으면 null. */
+  private sendFailure: ApiFailure | null = null;
 
   constructor() {
     super(SCENE.ranking);
@@ -90,6 +92,7 @@ export class RankingScene extends Phaser.Scene {
     this.retryButton = null;
     this.nameButton = null;
     this.page = 0;
+    this.sendFailure = null;
     addBackdrop(this);
 
     new PixelButton(this, {
@@ -169,7 +172,12 @@ export class RankingScene extends Phaser.Scene {
     const request = (this.request += 1);
     const gameId = this.shown.id;
     this.show({ kind: 'loading' });
-    if (sync) await syncScores();
+    if (sync) {
+      const outcome = await syncScores();
+      this.sendFailure = outcome.status === 'failed' ? outcome.reason : null;
+      // 올리는 사이에 다른 게임으로 넘겼으면, 방금 알게 된 사정을 지금 보이는 내 기록 칸에 반영한다.
+      if (request !== this.request && this.sys.isActive()) this.drawFoot();
+    }
     if (request !== this.request) return;
     const result = await loadBoard(gameId);
     if (request !== this.request) return;
@@ -303,21 +311,23 @@ export class RankingScene extends Phaser.Scene {
       );
     } else {
       const me = this.view.kind === 'ready' ? this.view.board.me : null;
-      const status =
-        this.view.kind !== 'ready'
-          ? ''
-          : me
-            ? `${rankLabel(me.rank)} · ${me.score}점`
-            : '이 게임은 아직 기록이 없어요';
-      this.footObjects.push(
-        addText(this, MARGIN + 10, middle, online.name, { color: THEME_CSS.accent, originY: 0.5 }),
-        addText(this, RIGHT - 10, middle, status, {
-          size: me ? FONT_SIZE.normal : FONT_SIZE.small,
-          color: me ? THEME_CSS.inkDeep : THEME_CSS.sub,
-          originX: 1,
-          originY: 0.5,
-        }),
-      );
+      const waiting = this.view.kind === 'ready' ? this.waitingNote() : null;
+      // 순위는 올라가 있는 기록의 것이다. 새 기록을 올리지 못했으면 순위 대신 그 사정을 알린다.
+      const rank = me && waiting === null ? `${rankLabel(me.rank)} · ${me.score}점` : null;
+      const status = this.view.kind !== 'ready' ? '' : (rank ?? waiting ?? '이 게임은 아직 기록이 없어요');
+      const name = addText(this, MARGIN + 10, middle, online.name, { color: THEME_CSS.accent, originY: 0.5 });
+      const note = addText(this, RIGHT - 10, middle, status, {
+        size: rank ? FONT_SIZE.normal : FONT_SIZE.small,
+        color: rank ? THEME_CSS.inkDeep : THEME_CSS.sub,
+        align: 'right',
+        lineSpacing: 1,
+        originX: 1,
+        originY: 0.5,
+      });
+      // 닉네임이 길면 오른쪽 글의 자리가 좁다. 넘치면 작은 글씨로 줄이고 두 줄로 접어서 닉네임과 겹치지 않게 한다.
+      const room = RIGHT - 10 - (name.x + name.width + 6);
+      if (note.width > room) note.setFontSize(FONT_SIZE.small).setWordWrapWidth(room, true);
+      this.footObjects.push(name, note);
     }
 
     this.nameButton ??= new PixelButton(this, {
@@ -331,6 +341,17 @@ export class RankingScene extends Phaser.Scene {
     this.nameButton
       .setLabel(joined ? '닉네임 바꾸기' : '닉네임 정하고 참여하기')
       .setStyle(joined ? 'neutral' : 'pink');
+  }
+
+  /**
+   * 지금 보는 게임의 내 기록을 서버에 올리지 못했으면 그 사정을 알리는 문구. 다 올라가 있으면 null.
+   * 올리지 못한 기록은 세이브에 남아 있다가, 다음에 게임을 마치거나 이 화면을 열 때 다시 올라간다.
+   */
+  private waitingNote(): string | null {
+    if (this.sendFailure === null) return null;
+    if (!isWaitingToSend(store.data.online, store.data.games, this.shown.id)) return null;
+    // 같은 인터넷을 쓰는 사람들이 한꺼번에 참여하면 서버가 잠깐 받지 않는다(요청 한도).
+    return this.sendFailure === 'slow' ? '기록은 잠시 뒤에 올라가요' : '기록을 아직 올리지 못했어요';
   }
 
   private async editName(): Promise<void> {

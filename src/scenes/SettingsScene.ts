@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { APP_VERSION, FONT_SIZE, GAME_WIDTH, SCENE, THEME_CSS } from '../config';
+import { APP_BUILD, APP_VERSION, FONT_SIZE, GAME_WIDTH, SCENE, THEME_CSS } from '../config';
 import { exportBundleText, importBundleText } from '../core/bundle';
 import { promptText, showCode } from '../core/dialog';
 import { dateStamp, downloadText, pickTextFile } from '../core/files';
@@ -10,6 +10,7 @@ import { store } from '../core/store';
 import { addBackdrop, addPanel, addText, fadeIn, fadeToScene, PixelButton, whileBlocked } from '../core/ui';
 import { failureText } from '../online/api';
 import { afterImport, createTransferCode, useTransferCode } from '../online/online';
+import { isJoined } from '../online/profile';
 import { cleanCode, CODE_LENGTH, formatCode, TRANSFER_TTL_MS } from '../online/protocol';
 
 const LEFT = 16;
@@ -22,6 +23,9 @@ const RESET_CONFIRM_MS = 3000;
  */
 const TOP = { sound: 44, data: 124, transfer: 214, notice: 266, info: 298 } as const;
 const TRANSFER_MINUTES = Math.round(TRANSFER_TTL_MS / 60000);
+
+/** 기록을 초기화한 뒤에 보여 주는 안내 */
+const RESET_DONE = '기록, 코인, 꾸미기, 업적을 모두 지웠어요.';
 
 /** 저장 공간 보호가 꺼져 있을 때 저장 데이터 버튼 아래에 보여 주는 안내 */
 const BACKUP_HINT = '브라우저가 기록을 지울 수 있어요.\n내보내기로 백업해 두세요.';
@@ -156,7 +160,11 @@ export class SettingsScene extends Phaser.Scene {
       onTap: () => {
         if (this.time.now < this.resetArmedUntil) {
           store.resetProgress();
-          this.scene.restart({ notice: { text: '기록, 코인, 꾸미기, 업적을 모두 지웠어요.', ok: true } });
+          // 이 기기 안의 기록만 지워진다. 랭킹에 참여한 사람에게는 올린 기록이 남아 있다는 것도 알린다.
+          const text = isJoined(store.data.online)
+            ? `${RESET_DONE}\n랭킹 기록은 랭킹 화면에서 뺄 수 있어요.`
+            : RESET_DONE;
+          this.scene.restart({ notice: { text, ok: true } });
           return;
         }
         // 실수로 지우지 않도록 두 번 눌러야 초기화된다.
@@ -299,7 +307,8 @@ export class SettingsScene extends Phaser.Scene {
       if (value === false) this.showBackupHint();
     });
 
-    row(2, '버전', APP_VERSION);
+    // 버전 숫자는 잘 바뀌지 않아서, 어느 빌드인지 알아볼 수 있는 코드를 옆에 붙인다.
+    row(2, '버전', APP_BUILD ? `${APP_VERSION} (${APP_BUILD})` : APP_VERSION);
     addText(this, LEFT, top + 58, '글꼴 주아(Jua)', { size: FONT_SIZE.small, color: THEME_CSS.sub });
   }
 }

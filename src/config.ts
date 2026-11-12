@@ -3,6 +3,19 @@
 export const APP_NAME = '포켓 아케이드';
 export const APP_VERSION = __APP_VERSION__;
 
+/** 파일 주소에서 빌드가 붙인 해시를 꺼낸다: ".../assets/index-CHpDxKHg.js"에서 "CHpDxKHg". 없으면 빈 글자열. */
+export function buildCodeOf(url: string): string {
+  return /-([\w-]{8})\.js$/.exec(url.split(/[?#]/)[0])?.[1] ?? '';
+}
+
+/**
+ * 이 빌드를 가리키는 짧은 코드. 빌드한 파일 이름에 붙는 해시라서, 게임 코드가 바뀐 배포마다 달라진다.
+ * 설정 화면의 버전 옆에 보여서 기기에 새 버전이 깔렸는지 알아볼 수 있다.
+ * 날짜를 따로 적어 넣지 않는 것은, 글만 고친 배포에도 파일이 달라져서 새 버전 안내가 뜨기 때문이다.
+ * 개발 서버와 테스트에서는 빈 글자열이다.
+ */
+export const APP_BUILD = buildCodeOf(import.meta.url);
+
 /** 논리 해상도의 가로는 고정이고, 세로는 기기 화면 비율에 맞춰 정한다. */
 export const GAME_WIDTH = 240;
 export const MIN_GAME_HEIGHT = 400;
@@ -172,4 +185,8 @@ export const SCENE = {
   tailChase: 'TailChase',
   logicTiles: 'LogicTiles',
   numberPuzzle: 'NumberPuzzle',
+  duel: 'Duel',
+  pathLink: 'PathLink',
+  blockFill: 'BlockFill',
+  chosungQuiz: 'ChosungQuiz',
 } as const;

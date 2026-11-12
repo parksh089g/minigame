@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createOnline,
   isJoined,
+  isWaitingToSend,
   normalizeOnline,
   pendingSubmit,
   withName,
@@ -107,6 +108,28 @@ describe('보낼 것 고르기', () => {
 
   it('기록이 하나도 없어도 처음 정한 닉네임은 보낸다', () => {
     expect(pendingSubmit(joined({ sentName: null }), {})).toEqual({ device: ID, name: '등불지기', scores: {} });
+  });
+});
+
+describe('아직 올라가지 않은 게임', () => {
+  const games = { 'stack-tower': { best: 90 }, 'jump-runner': { best: 0 } };
+
+  it('서버에 올라가 있는 것보다 높은 기록이 있는 게임만 해당한다', () => {
+    expect(isWaitingToSend(joined(), games, 'stack-tower')).toBe(true);
+    expect(isWaitingToSend(joined({ sent: { 'stack-tower': 60 } }), games, 'stack-tower')).toBe(true);
+    expect(isWaitingToSend(joined({ sent: { 'stack-tower': 90 } }), games, 'stack-tower')).toBe(false);
+    // 기록이 없는 게임은 올릴 것이 없다.
+    expect(isWaitingToSend(joined(), games, 'jump-runner')).toBe(false);
+    expect(isWaitingToSend(joined(), games, 'color-sort')).toBe(false);
+  });
+
+  it('닉네임만 올라가지 않았을 때는 어느 게임도 해당하지 않는다', () => {
+    const state = joined({ sentName: null, sent: { 'stack-tower': 90 } });
+    expect(isWaitingToSend(state, games, 'stack-tower')).toBe(false);
+  });
+
+  it('랭킹에 참여하지 않았으면 해당하지 않는다', () => {
+    expect(isWaitingToSend(createOnline(), games, 'stack-tower')).toBe(false);
   });
 });
 
