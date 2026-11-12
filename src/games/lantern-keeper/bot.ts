@@ -26,7 +26,7 @@ const HAZARD_AHEAD = 0.25;
 const MIRE_COST = 0.8;
 
 /** 열여섯 방향 가운데, 조금 나아갔을 때 적과 덜 가깝고 빛 조각에 가까워지는 쪽을 고른다. */
-function steer(sim: Sim): [number, number] {
+export function steer(sim: Sim): [number, number] {
   const { player, enemies, gems, hazards } = sim.state;
   const near = enemies.filter(
     (e) => Math.abs(e.x - player.x) < 70 && Math.abs(e.y - player.y) < 70,

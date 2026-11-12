@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ENEMIES,
   EVOLVE_LEVEL,
+  MAX_DEPTH,
   MAX_LEVEL,
   MAX_WEAPONS,
   META,
@@ -10,6 +11,7 @@ import {
   MID_BOSS_EVERY,
   MID_BOSS_TIERS,
   PASSIVES,
+  PLAYER_BASE,
   RUN_SECONDS,
   STAGE_ORDER,
   STAGES,
@@ -22,13 +24,18 @@ import {
 import {
   auraStats,
   boltStats,
+  clampDepth,
+  COIN_CAP,
   coinsFor,
   damageScale,
+  depthName,
+  depthRules,
   embersFor,
   emberStats,
   enemyHp,
   fireflyStats,
   formatClock,
+  formatTimes,
   hpScale,
   isEvolved,
   lanceStats,
@@ -58,11 +65,52 @@ const base = modifiers({}, {});
 const run = (over: Partial<RunSummary> = {}): RunSummary => ({
   seconds: 0,
   kills: 0,
+  // 따로 주지 않으면 쓰러뜨린 것을 모두 센다.
+  countedKills: over.kills ?? 0,
   level: 1,
   bossKills: 0,
   cleared: false,
   bonusEmbers: 0,
+  depth: 0,
   ...over,
+});
+
+describe('깊은 밤의 규칙', () => {
+  it('보통 밤은 아무것도 바꾸지 않는다', () => {
+    for (const value of Object.values(depthRules(0))) expect(value).toBe(1);
+  });
+
+  it('단계가 오를수록 더 어렵고, 점수와 불씨가 더 붙는다', () => {
+    for (let depth = 1; depth <= MAX_DEPTH; depth += 1) {
+      const before = depthRules(depth - 1);
+      const after = depthRules(depth);
+      for (const key of Object.keys(after) as Array<keyof typeof after>) {
+        expect(after[key]).toBeGreaterThan(before[key]);
+      }
+    }
+  });
+
+  it('가장 깊은 밤에서도 가장 빠른 적은 맨몸의 플레이어보다 느리다', () => {
+    const fastest = Math.max(...Object.values(ENEMIES).filter((info) => !info.boss && !info.hops).map((info) => info.speed));
+    expect(fastest * speedScale(RUN_SECONDS) * depthRules(MAX_DEPTH).speed).toBeLessThan(PLAYER_BASE.speed);
+  });
+
+  it('단계는 0부터 가장 깊은 단계까지의 정수로 맞춘다', () => {
+    expect(clampDepth(undefined)).toBe(0);
+    expect(clampDepth('3')).toBe(0);
+    expect(clampDepth(Number.NaN)).toBe(0);
+    expect(clampDepth(-2)).toBe(0);
+    expect(clampDepth(2.9)).toBe(2);
+    expect(clampDepth(999)).toBe(MAX_DEPTH);
+  });
+
+  it('이름과 배율을 사람이 읽는 글로 적는다', () => {
+    expect(depthName(0)).toBe('보통 밤');
+    expect(depthName(3)).toBe('깊은 밤 3');
+    expect(formatTimes(1.5)).toBe('×1.5');
+    expect(formatTimes(2)).toBe('×2');
+    expect(formatTimes(1.25)).toBe('×1.25');
+  });
 });
 
 describe('데이터', () => {
@@ -318,6 +366,23 @@ describe('결과와 보상', () => {
     expect(embersFor(run({ bonusEmbers: 10 }))).toBe(10);
   });
 
+  it('마지막 보스가 나온 뒤에 쓰러뜨린 것은 점수와 불씨를 올리지 않는다', () => {
+    const clear = run({ seconds: 600, kills: 6300, bossKills: 5, cleared: true });
+    // 보스를 남겨 두고 오래 버텨서 처치 수만 늘린 판
+    const stalled = run({ seconds: 600, kills: 21000, countedKills: 6300, bossKills: 5, cleared: true });
+    expect(scoreFor(stalled)).toBe(scoreFor(clear));
+    expect(embersFor(stalled)).toBe(embersFor(clear));
+    expect(embersFor(stalled, 3)).toBe(embersFor(clear, 3));
+  });
+
+  it('깊은 밤에서는 단계의 배율만큼 점수와 불씨가 붙는다', () => {
+    const plain = run({ seconds: 600, kills: 6000, bossKills: 5, cleared: true });
+    const deep = run({ seconds: 600, kills: 6000, bossKills: 5, cleared: true, depth: 2 });
+    expect(scoreFor(deep)).toBe(Math.floor(scoreFor(plain) * depthRules(2).score));
+    expect(embersFor(deep)).toBe(Math.floor(embersFor(plain) * depthRules(2).embers));
+    expect(scoreFor(run({ seconds: 600, kills: 6000, depth: 99 }))).toBe(scoreFor(run({ seconds: 600, kills: 6000, depth: MAX_DEPTH })));
+  });
+
   it('첫 판을 2분쯤 버티면 가장 싼 영구 강화를 하나 살 수 있다', () => {
     const cheapest = Math.min(...META_ORDER.map((id) => metaCost(id, 0) ?? Infinity));
     expect(embersFor(run({ seconds: 150, kills: 250 }))).toBeGreaterThanOrEqual(cheapest);
@@ -336,6 +401,10 @@ describe('결과와 보상', () => {
     expect(coinsFor(0)).toBe(0);
     expect(coinsFor(599)).toBe(9);
     expect(coinsFor(6000)).toBe(100);
+    // 깊은 밤에서 점수가 크게 불어도 코인은 상한에서 멈춘다.
+    expect(coinsFor(8999)).toBe(149);
+    expect(coinsFor(9000)).toBe(COIN_CAP);
+    expect(coinsFor(60000)).toBe(COIN_CAP);
   });
 
   it('시간을 분:초로 적는다', () => {

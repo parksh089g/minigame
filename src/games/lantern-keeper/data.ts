@@ -162,6 +162,12 @@ export const STAGES: Readonly<Record<StageId, StageInfo>> = {
 
 export const STAGE_ORDER: readonly StageId[] = ['meadow', 'marsh'];
 
+/**
+ * 깊은 밤의 가장 깊은 단계. 0은 보통 밤이고, 한 스테이지를 완주할 때마다 그 스테이지의 다음 단계가 열린다.
+ * 단계마다 얼마나 어려워지고 점수와 불씨가 얼마나 붙는지는 rules.ts의 depthRules가 정한다.
+ */
+export const MAX_DEPTH = 8;
+
 /** 이 시각들에 적이 둥글게 에워싸는 "밀물"이 한 번씩 온다(초). 중간 보스와 겹치지 않게 그 사이에 둔다. */
 export const SURGES: readonly number[] = [180, 300, 420, 540];
 
@@ -301,7 +307,18 @@ export const HEROES: Readonly<Record<HeroId, HeroInfo>> = {
 export const HERO_ORDER: readonly HeroId[] = ['keeper', 'stargazer', 'stormer'];
 
 /** 판 밖에서 불씨로 올리는 영구 강화 */
-export type MetaId = 'vigor' | 'swift' | 'might' | 'greed' | 'reach' | 'mend' | 'lucky' | 'second';
+export type MetaId =
+  | 'vigor'
+  | 'swift'
+  | 'might'
+  | 'greed'
+  | 'reach'
+  | 'mend'
+  | 'lucky'
+  | 'second'
+  | 'armor'
+  | 'reroll'
+  | 'headstart';
 
 export interface MetaInfo {
   name: string;
@@ -320,6 +337,10 @@ export const META: Readonly<Record<MetaId, MetaInfo>> = {
   mend: { name: '따뜻한 품', perLevel: '10초마다 체력 +1', maxLevel: 3, baseCost: 14 },
   lucky: { name: '불씨 복', perLevel: '얻는 불씨 +10%', maxLevel: 3, baseCost: 18 },
   second: { name: '되살림 등불', perLevel: '쓰러져도 한 번 일어난다', maxLevel: 1, baseCost: 60 },
+  // 깊은 밤을 내려가는 데 쓰는 것들. 값이 비싸서 완주한 뒤에 모으게 된다.
+  armor: { name: '질긴 가죽', perLevel: '받는 피해 -4%', maxLevel: 5, baseCost: 20 },
+  reroll: { name: '다시 뽑기', perLevel: '레벨업 선택지 다시 뽑기 +1번', maxLevel: 3, baseCost: 40 },
+  headstart: { name: '밝은 출발', perLevel: '시작할 때 강화 하나 더 고르기', maxLevel: 2, baseCost: 50 },
 };
 
 export const META_ORDER: readonly MetaId[] = [
@@ -331,4 +352,7 @@ export const META_ORDER: readonly MetaId[] = [
   'mend',
   'lucky',
   'second',
+  'armor',
+  'reroll',
+  'headstart',
 ];

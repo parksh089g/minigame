@@ -5,6 +5,7 @@
 import {
   ENEMIES,
   EVOLVE_LEVEL,
+  MAX_DEPTH,
   MAX_LEVEL,
   MAX_WEAPONS,
   META,
@@ -110,6 +111,61 @@ export function isUnlocked(item: { unlockSeconds: number }, bestSeconds: number)
   return bestSeconds >= item.unlockSeconds;
 }
 
+// ---------------------------------------------------------------- 깊은 밤
+
+/** 깊은 밤 한 단계의 규칙. 모두 보통 밤(0단계)에 곱하는 배율이다. */
+export interface DepthRules {
+  /** 보통 적의 체력 */
+  hp: number;
+  /** 보스의 체력 */
+  bossHp: number;
+  /** 적과 보스가 닿았을 때, 보스의 빛덩이에 맞았을 때의 피해 */
+  damage: number;
+  /** 보통 적의 이동 속도 */
+  speed: number;
+  /** 1초에 나오는 적의 수 */
+  spawn: number;
+  /** 점수 */
+  score: number;
+  /** 판이 끝나고 받는 불씨 */
+  embers: number;
+}
+
+/** 깊은 밤의 단계로 쓸 수 있는 값(0 ~ MAX_DEPTH의 정수)으로 맞춘다. 엉뚱한 값은 0이 된다. */
+export function clampDepth(depth: unknown): number {
+  if (typeof depth !== 'number' || !Number.isFinite(depth)) return 0;
+  return Math.max(0, Math.min(MAX_DEPTH, Math.floor(depth)));
+}
+
+/**
+ * 깊은 밤 depth단계의 규칙. 0단계는 모두 1이다.
+ * 단계가 오를수록 그림자가 튼튼해지고 아파지고 많아지며, 그만큼 점수와 불씨가 더 붙는다.
+ * 속도는 조금만 올린다. 가장 빠른 적도 걸어서 따돌릴 수 있어야 피하는 재미가 남는다.
+ */
+export function depthRules(depth: number): DepthRules {
+  const d = clampDepth(depth);
+  return {
+    hp: 1 + 0.3 * d,
+    bossHp: 1 + 0.35 * d,
+    damage: 1 + 0.15 * d,
+    speed: 1 + 0.015 * d,
+    spawn: 1 + 0.05 * d,
+    score: 1 + 0.5 * d,
+    embers: 1 + 0.25 * d,
+  };
+}
+
+/** 깊은 밤의 단계 이름. 0단계는 "보통 밤" */
+export function depthName(depth: number): string {
+  const d = clampDepth(depth);
+  return d === 0 ? '보통 밤' : `깊은 밤 ${d}`;
+}
+
+/** 배율을 "×1.5"처럼 적는다. */
+export function formatTimes(value: number): string {
+  return `×${Number(value.toFixed(2))}`;
+}
+
 // ---------------------------------------------------------------- 능력치
 
 export type Levels<K extends string> = Partial<Record<K, number>>;
@@ -124,6 +180,8 @@ export interface Modifiers {
   maxHp: number;
   /** 1초에 저절로 차는 체력 */
   regen: number;
+  /** 받는 피해에 곱하는 값. 1이면 그대로 */
+  taken: number;
 }
 
 /** 캐릭터의 최대 체력이 아무리 깎여도 이보다 낮아지지는 않는다. */
@@ -142,6 +200,7 @@ export function modifiers(passives: Levels<PassiveId>, meta: Levels<MetaId>, tra
     xp: (1 + 0.08 * m('greed')) * (trait.xp ?? 1),
     maxHp: Math.max(MIN_MAX_HP, PLAYER_BASE.maxHp + 20 * p('coat') + 10 * m('vigor') + (trait.maxHp ?? 0)),
     regen: 0.1 * m('mend'),
+    taken: 1 - 0.04 * m('armor'),
   };
 }
 
@@ -410,33 +469,52 @@ export function upgradeDescription(upgrade: Upgrade): string {
 
 export interface RunSummary {
   seconds: number;
+  /** 쓰러뜨린 그림자 전부. 결과 화면에 보여 준다. */
   kills: number;
+  /**
+   * 점수와 불씨에 세는 처치 수: 마지막 보스가 나타나기 전까지 쓰러뜨린 것.
+   * 마지막 보스가 나온 뒤에도 그림자는 계속 몰려오므로, 그 뒤의 처치까지 세면
+   * 보스를 일부러 남겨 두고 끝없이 점수와 불씨를 올릴 수 있다.
+   */
+  countedKills: number;
   level: number;
   bossKills: number;
   cleared: boolean;
   /** 레벨업에서 고른 불씨 주머니 */
   bonusEmbers: number;
-}
-
-/** 허브의 최고 기록에 쓰는 점수 */
-export function scoreFor(run: RunSummary): number {
-  return Math.floor(run.seconds) + run.kills + 150 * run.bossKills + (run.cleared ? 1000 : 0);
+  /** 깊은 밤의 단계. 0이 보통 밤 */
+  depth: number;
 }
 
 /**
- * 판이 끝나고 받는 불씨. 오래 버틸수록, 많이 쓰러뜨릴수록 많다.
- * lucky는 영구 강화 "불씨 복"의 단계로, 한 단계에 10%씩 더 준다.
+ * 허브의 최고 기록과 랭킹에 쓰는 점수. 버틴 시간도 처치 수도 마지막 보스가 나타난 때까지만 센다.
+ * 깊은 밤에서는 단계의 배율이 통째로 곱해진다.
+ */
+export function scoreFor(run: RunSummary): number {
+  const base = Math.floor(run.seconds) + run.countedKills + 150 * run.bossKills + (run.cleared ? 1000 : 0);
+  return Math.floor(base * depthRules(run.depth).score);
+}
+
+/**
+ * 판이 끝나고 받는 불씨. 오래 버틸수록, 많이 쓰러뜨릴수록 많다. 처치는 점수와 같은 수(countedKills)로 센다.
+ * lucky는 영구 강화 "불씨 복"의 단계로, 한 단계에 10%씩 더 준다. 깊은 밤에서는 단계의 배율도 곱해진다.
  */
 export function embersFor(run: RunSummary, lucky = 0): number {
   const minutes = Math.floor(Math.min(run.seconds, RUN_SECONDS) / 60);
   const earned =
-    minutes * 3 + Math.floor(run.kills / 40) + 8 * run.bossKills + (run.cleared ? 40 : 0) + run.bonusEmbers;
-  return Math.floor(earned * (1 + 0.1 * Math.max(0, lucky)));
+    minutes * 3 + Math.floor(run.countedKills / 40) + 8 * run.bossKills + (run.cleared ? 40 : 0) + run.bonusEmbers;
+  return Math.floor(earned * depthRules(run.depth).embers * (1 + 0.1 * Math.max(0, lucky)));
 }
 
-/** 허브 코인. 다른 미니게임과 비슷한 정도가 되게 점수에서 조금만 준다. */
+/** 한 판에 받을 수 있는 허브 코인의 상한. 보통 밤을 완주했을 때 받는 만큼이다. */
+export const COIN_CAP = 150;
+
+/**
+ * 허브 코인. 다른 미니게임과 비슷한 정도가 되게 점수에서 조금만 준다.
+ * 깊은 밤에서는 점수에 배율이 붙지만 코인은 상한에서 멈춰서, 허브의 꾸미기 값이 흔들리지 않는다.
+ */
 export function coinsFor(score: number): number {
-  return Math.floor(score / 60);
+  return Math.min(COIN_CAP, Math.floor(score / 60));
 }
 
 /** level단계에서 다음 단계로 올리는 값. 최대 단계면 null. */

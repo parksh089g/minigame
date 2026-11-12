@@ -78,6 +78,8 @@ export const LOOK = {
   /** 보스의 공격 예고: 돌진할 길, 쏘려고 모으는 빛 */
   threat: COLOR.red,
   threatCore: COLOR.white,
+  /** 화면 밖의 보스를 가리키는 화살표의 테두리. 어두운 바닥에서도 보이도록 밝게 두른다. */
+  pointerEdge: COLOR.white,
 } as const;
 
 /**

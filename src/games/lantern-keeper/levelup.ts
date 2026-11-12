@@ -23,6 +23,8 @@ const TEXT_GAP = 2;
 const HEADER_HEIGHT = 54;
 /** 마지막 카드 아래에 남기는 여백 */
 const BOTTOM_ROOM = 10;
+/** 카드 아래에 붙는 작은 버튼(다시 뽑기) */
+const EXTRA = { width: 136, height: 26, gap: 8 } as const;
 /** 움직이던 손가락으로 엉뚱한 것을 고르지 않도록 잠깐 뒤부터 누를 수 있다. */
 const ARM_DELAY_MS = 380;
 
@@ -79,6 +81,8 @@ export function showChoices(
   onPick: (upgrade: Upgrade) => void,
   /** 화면 위쪽에서 이 높이까지는 HUD가 쓰므로 머리글을 그 아래에 둔다. */
   clearTop = 0,
+  /** 카드 아래에 두는 작은 버튼. 누르면 이 화면이 사라지고 onTap이 불린다(다시 뽑기에 쓴다). */
+  extra?: { label: string; onTap: () => void },
 ): void {
   const { width, height } = scene.scale;
   const parts: Phaser.GameObjects.GameObject[] = [];
@@ -88,7 +92,8 @@ export function showChoices(
     return item;
   };
 
-  const total = options.length * CARD_HEIGHT + (options.length - 1) * CARD_GAP;
+  const cards = options.length * CARD_HEIGHT + (options.length - 1) * CARD_GAP;
+  const total = cards + (extra ? EXTRA.gap + EXTRA.height : 0);
   // 가운데에 두되, 카드가 넷이라 길어져도 머리글이 위쪽 HUD를 덮지 않게 내린다.
   // 화면이 아주 짧을 때는 마지막 카드가 잘리지 않는 데까지만 내린다.
   const centered = Math.round((height - total) / 2) + 14;
@@ -112,6 +117,38 @@ export function showChoices(
   scene.time.delayedCall(ARM_DELAY_MS, () => {
     armed = true;
   });
+
+  if (extra) {
+    const x = Math.round((GAME_WIDTH - EXTRA.width) / 2);
+    const y = top + cards + EXTRA.gap;
+    const frame = keep(scene.add.graphics());
+    const draw = (pressed: boolean): void => {
+      frame.clear();
+      drawPanel(frame, x, y, EXTRA.width, EXTRA.height, {
+        fill: pressed ? COLOR.navy : COLOR.ink,
+        border: pressed ? COLOR.sky : COLOR.slate,
+        shadow: null,
+      });
+    };
+    draw(false);
+    keep(
+      addText(scene, GAME_WIDTH / 2, y + EXTRA.height / 2, extra.label, {
+        color: CSS.cyan,
+        originX: 0.5,
+        originY: 0.5,
+      }),
+    );
+    keep(
+      addTapZone(scene, x, y, EXTRA.width, EXTRA.height, (pressed) => draw(pressed && armed), () => {
+        if (!armed || picked) return;
+        picked = true;
+        sfx.click();
+        vibrate(8);
+        for (const part of parts) part.destroy();
+        extra.onTap();
+      }),
+    );
+  }
 
   options.forEach((upgrade, index) => {
     const y = top + index * (CARD_HEIGHT + CARD_GAP);

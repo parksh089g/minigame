@@ -43,6 +43,8 @@ const HURT_FLASH = 0.25;
 /** 캐릭터 아래의 작은 체력 막대 */
 const MINI = { width: 18, height: 3, below: 11 } as const;
 const BOSS_BAR_WIDTH = 120;
+/** HUD 아래로 보스의 이름과 체력 막대가 차지하는 높이. 싸움터에 띄우는 표시는 이 아래에 둔다. */
+export const BOSS_BAR_HEIGHT = 26;
 
 const hpColor = (ratio: number): number =>
   ratio <= HP_DANGER ? COLOR.red : ratio <= HP_WARN ? COLOR.yellow : COLOR.green;

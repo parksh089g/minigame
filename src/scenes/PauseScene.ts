@@ -6,6 +6,8 @@ import type { PauseData } from './MiniGameScene';
 
 const PANEL_WIDTH = 176;
 const PANEL_HEIGHT = 168;
+/** 게임이 덧붙이는 내용의 좌우 여백과, 그 아래 버튼까지의 간격 */
+const EXTRA = { pad: 12, gap: 8 } as const;
 
 /** 게임 위에 겹쳐 뜨는 일시정지 화면. 뒤의 게임 씬은 멈춘 채로 보인다. */
 export class PauseScene extends Phaser.Scene implements BackAware {
@@ -30,21 +32,27 @@ export class PauseScene extends Phaser.Scene implements BackAware {
     this.input.enabled = true;
     this.gameKey = data.sceneKey;
     const { height } = this.scale;
-    const left = Math.round((GAME_WIDTH - PANEL_WIDTH) / 2);
-    const top = Math.round((height - PANEL_HEIGHT) / 2);
-    const buttonX = left + 16;
+    // 게임이 덧붙이는 내용(예: 지금 빌드)이 있으면 제목과 버튼 사이에 자리를 내주고, 카드를 그만큼 키운다.
+    const extra = data.extra;
+    const lift = extra ? extra.height + EXTRA.gap : 0;
+    const panelWidth = Math.min(GAME_WIDTH - 8, Math.max(PANEL_WIDTH, extra?.width ?? 0));
+    const panelHeight = PANEL_HEIGHT + lift;
+    const left = Math.round((GAME_WIDTH - panelWidth) / 2);
+    const top = Math.max(2, Math.round((height - panelHeight) / 2));
     const buttonWidth = PANEL_WIDTH - 32;
+    const buttonX = Math.round((GAME_WIDTH - buttonWidth) / 2);
 
     addScrim(this);
-    addPanel(this, left, top, PANEL_WIDTH, PANEL_HEIGHT, { radius: 18, depth: 4 });
+    addPanel(this, left, top, panelWidth, panelHeight, { radius: 18, depth: 4 });
     addText(this, GAME_WIDTH / 2, top + 14, '일시정지', {
       size: FONT_SIZE.large,
       originX: 0.5,
     });
+    if (extra) extra.draw(this, left + EXTRA.pad, top + 50, panelWidth - EXTRA.pad * 2);
 
     new PixelButton(this, {
       x: buttonX,
-      y: top + 54,
+      y: top + 54 + lift,
       width: buttonWidth,
       height: 30,
       label: '계속하기',
@@ -56,7 +64,7 @@ export class PauseScene extends Phaser.Scene implements BackAware {
     });
     new PixelButton(this, {
       x: buttonX,
-      y: top + 91,
+      y: top + 91 + lift,
       width: buttonWidth,
       height: 30,
       label: '처음부터 다시',
@@ -65,7 +73,7 @@ export class PauseScene extends Phaser.Scene implements BackAware {
     });
     new PixelButton(this, {
       x: buttonX,
-      y: top + 128,
+      y: top + 128 + lift,
       width: buttonWidth,
       height: 30,
       label: '그만하기',

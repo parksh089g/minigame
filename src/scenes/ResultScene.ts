@@ -12,7 +12,7 @@ import type { DailyOutcome } from '../core/save';
 import { loadBoard, scoreSync, syncScores } from '../online/online';
 import { isJoined } from '../online/profile';
 import { isRankedGame, rankLabel } from '../online/protocol';
-import type { ResultData } from './MiniGameScene';
+import type { ResultData, ResultStrip } from './MiniGameScene';
 import { askNickname } from './nickname';
 import type { RankingData } from './RankingScene';
 
@@ -20,6 +20,8 @@ const PANEL_WIDTH = 204;
 const STAT_ROW = 16;
 /** 오늘의 도전 결과나 새로 달성한 업적을 알리는 줄의 높이 */
 const EXTRA_ROW = 24;
+/** 기록 아래에 덧붙는 아이콘 한 줄: 작은 설명 글씨의 높이와 아이콘 줄의 높이, 아이콘과 글자 사이, 칸 사이(넓을 때와 좁을 때) */
+const STRIP = { caption: 13, row: 20, icon: 18, gap: 2, between: 12, tight: 2 } as const;
 /** 캐릭터가 카드 위로 올라와 보이는 높이와 카드에 걸치는 높이 */
 const MASCOT = { above: 46, overlap: 20 } as const;
 const BUTTON_HEIGHT = 30;
@@ -55,10 +57,17 @@ export class ResultScene extends Phaser.Scene implements BackAware {
     // 점수를 낸 적이 있으면 온라인 랭킹 줄을 둔다. 닉네임을 정하기 전에는 참여를 권하는 줄이 된다.
     const ranked = result.best > 0 && isRankedGame(data.gameId);
     const extraRows = (daily ? 1 : 0) + (achieved.length > 0 ? 1 : 0) + (ranked ? 1 : 0);
-    const statsHeight = stats.length > 0 ? stats.length * STAT_ROW + 12 : 0;
-    const cardHeight = 106 + statsHeight + 28 + extraRows * EXTRA_ROW + 6;
     const buttonsHeight = 12 + BUTTON_HEIGHT * 2 + BUTTON_GAP + 3;
-    // 알릴 것이 많은 판에 화면까지 짧으면 다 들어가지 않는다. 그때는 카드 위의 캐릭터를 뺀다.
+    const strip = data.strip && data.strip.chips.length > 0 ? data.strip : undefined;
+    const sizeWith = (withStrip: boolean): { statsHeight: number; cardHeight: number } => {
+      const inner = stats.length * STAT_ROW + (withStrip ? STRIP.caption + STRIP.row : 0);
+      const statsHeight = inner > 0 ? inner + 12 : 0;
+      return { statsHeight, cardHeight: 106 + statsHeight + 28 + extraRows * EXTRA_ROW + 6 };
+    };
+    // 알릴 것이 많은 판에 화면까지 짧으면 다 들어가지 않는다. 그때는 카드 위의 캐릭터를 먼저 빼고,
+    // 그래도 넘치면 아이콘 줄을 뺀다.
+    const showStrip = strip !== undefined && sizeWith(true).cardHeight + buttonsHeight + 4 <= height;
+    const { statsHeight, cardHeight } = sizeWith(showStrip);
     const showMascot = MASCOT.above + cardHeight + buttonsHeight + 4 <= height;
     const above = showMascot ? MASCOT.above : 0;
     const total = above + cardHeight + buttonsHeight;
@@ -136,7 +145,7 @@ export class ResultScene extends Phaser.Scene implements BackAware {
     }
 
     let y = top + 106;
-    if (stats.length > 0) {
+    if (statsHeight > 0) {
       addPanel(this, innerLeft - 6, y, innerRight - innerLeft + 12, statsHeight - 4, {
         fill: THEME.bg,
         shadow: null,
@@ -147,6 +156,10 @@ export class ResultScene extends Phaser.Scene implements BackAware {
         addText(this, innerLeft + 2, y, label, { color: THEME_CSS.sub });
         addText(this, innerRight - 2, y, value, { originX: 1 });
         y += STAT_ROW;
+      }
+      if (strip && showStrip) {
+        this.addStrip(strip, innerLeft + 2, y, innerRight - innerLeft - 4);
+        y += STRIP.caption + STRIP.row;
       }
       y += 7;
     }
@@ -190,6 +203,28 @@ export class ResultScene extends Phaser.Scene implements BackAware {
       height: BUTTON_HEIGHT,
       label: '다른 게임 고르기',
       onTap: () => this.leave(),
+    });
+  }
+
+  /**
+   * 기록 아래의 아이콘 한 줄: 작은 설명 글씨 아래에 아이콘과 글자를 왼쪽부터 늘어놓는다.
+   * 칸이 많아 width를 넘을 것 같으면 칸 사이를 좁힌다.
+   */
+  private addStrip(strip: ResultStrip, left: number, top: number, width: number): void {
+    addText(this, left, top + 1, strip.caption, { size: FONT_SIZE.small, color: THEME_CSS.sub });
+    const middle = top + STRIP.caption + STRIP.row / 2;
+    const labels = strip.chips.map((chip) => addText(this, 0, middle, chip.label, { originY: 0.5 }));
+    const used = labels.reduce((sum, label) => sum + STRIP.icon + STRIP.gap + Math.ceil(label.width), 0);
+    const room = labels.length > 1 ? Math.floor((width - used) / (labels.length - 1)) : 0;
+    const between = Math.max(STRIP.tight, Math.min(STRIP.between, room));
+    let x = left;
+    strip.chips.forEach((chip, index) => {
+      if (this.textures.exists(chip.texture)) {
+        this.add.image(Math.round(x + STRIP.icon / 2), Math.round(middle), chip.texture);
+      }
+      const label = labels[index];
+      label.setX(Math.round(x + STRIP.icon + STRIP.gap));
+      x += STRIP.icon + STRIP.gap + Math.ceil(label.width) + between;
     });
   }
 

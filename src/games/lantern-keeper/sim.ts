@@ -5,6 +5,8 @@
 import {
   ENEMIES,
   HEROES,
+  MAX_LEVEL,
+  MAX_WEAPONS,
   MID_BOSS_COUNT,
   MID_BOSS_EVERY,
   PLAYER_BASE,
@@ -21,7 +23,9 @@ import {
 import {
   auraStats,
   boltStats,
+  clampDepth,
   damageScale,
+  depthRules,
   EMBER_BONUS,
   emberStats,
   enemyHp,
@@ -35,6 +39,7 @@ import {
   minionKind,
   modifiers,
   oilStats,
+  ownedWeapons,
   pickSpawnKind,
   spawnPerSecond,
   speedScale,
@@ -42,6 +47,7 @@ import {
   ticketOptions,
   upgradeOptions,
   xpToNext,
+  type DepthRules,
   type Levels,
   type Modifiers,
   type Rand,
@@ -157,6 +163,8 @@ export interface RunState {
   meta: Levels<MetaId>;
   hero: HeroId;
   stage: StageId;
+  /** 깊은 밤의 단계. 없으면 보통 밤(0)이다. 깊은 밤이 생기기 전에 저장한 판에는 없다. */
+  depth?: number;
   /** 지형을 정하는 씨앗. 같은 값이면 웅덩이가 같은 자리에 있다. */
   seed: number;
   player: {
@@ -188,6 +196,11 @@ export interface RunState {
   midBosses: number;
   finalBoss: boolean;
   kills: number;
+  /**
+   * 마지막 보스가 나타난 순간까지 쓰러뜨린 수. 그 전에는 없다.
+   * 점수와 불씨에는 여기까지만 센다(rules.ts의 RunSummary.countedKills).
+   */
+  killsBeforeBoss?: number;
   bossKills: number;
   bonusEmbers: number;
   /** 아직 고르지 않은 레벨업 횟수. 0보다 크면 시뮬레이션이 멈춘다. */
@@ -196,6 +209,15 @@ export interface RunState {
   pendingTickets: number;
   /** 쓰러졌을 때 다시 일어날 수 있는 남은 횟수 */
   revives: number;
+  /** 레벨업 선택지를 다시 뽑을 수 있는 남은 횟수. 없으면 0이다. 다시 뽑기가 생기기 전에 저장한 판에는 없다. */
+  rerolls?: number;
+  /** 무기마다 지금까지 준 피해. 결과 화면과 일시정지 화면에서 비중으로 보여 준다. 이것이 생기기 전에 저장한 판에는 없다. */
+  dealt?: Levels<WeaponId>;
+  /**
+   * 지금 보여 주고 있는 레벨업 선택지. 고르면 지워진다.
+   * 판과 함께 저장해서, 고르다가 나갔다 들어와도 같은 선택지가 나온다(나갔다 들어오는 것으로 공짜로 다시 뽑지 못한다).
+   */
+  offer?: Upgrade[];
   nextUid: number;
   over: null | 'dead' | 'cleared';
 }
@@ -246,6 +268,8 @@ export interface RunConfig {
   hero?: HeroId;
   /** 안 주면 밤의 풀밭 */
   stage?: StageId;
+  /** 깊은 밤의 단계. 안 주면 보통 밤(0) */
+  depth?: number;
   /** 지형 씨앗. 안 주면 1 */
   seed?: number;
 }
@@ -276,6 +300,8 @@ const REVIVE = { hp: 0.5, invulnerable: 2.5, radius: 64, damage: 40 } as const;
 export function createRun(config: RunConfig): RunState {
   const hero = config.hero ?? 'keeper';
   const mods = modifiers({}, config.meta, HEROES[hero].trait);
+  // "밝은 출발"을 샀으면 그만큼 레벨이 오른 채로 시작해서, 첫 걸음을 떼기 전에 강화를 고른다.
+  const headstart = Math.max(0, Math.floor(config.meta.headstart ?? 0));
   return {
     version: RUN_STATE_VERSION,
     t: 0,
@@ -284,8 +310,19 @@ export function createRun(config: RunConfig): RunState {
     meta: { ...config.meta },
     hero,
     stage: config.stage ?? 'meadow',
+    depth: clampDepth(config.depth),
     seed: config.seed ?? 1,
-    player: { x: 0, y: 0, hp: mods.maxHp, inv: 0, face: 1, moving: false, wading: false, level: 1, xp: 0 },
+    player: {
+      x: 0,
+      y: 0,
+      hp: mods.maxHp,
+      inv: 0,
+      face: 1,
+      moving: false,
+      wading: false,
+      level: 1 + headstart,
+      xp: 0,
+    },
     weapons: { [HEROES[hero].weapon]: 1 },
     passives: {},
     enemies: [],
@@ -303,9 +340,11 @@ export function createRun(config: RunConfig): RunState {
     kills: 0,
     bossKills: 0,
     bonusEmbers: 0,
-    pendingLevelUps: 0,
+    pendingLevelUps: headstart,
     pendingTickets: 0,
     revives: config.meta.second ? 1 : 0,
+    rerolls: Math.max(0, Math.floor(config.meta.reroll ?? 0)),
+    dealt: {},
     nextUid: 1,
     over: null,
   };
@@ -360,6 +399,8 @@ export class Sim {
   /** step()을 부를 때마다 비워지고 그 사이에 일어난 일이 쌓인다. */
   readonly events: SimEvent[] = [];
   mods: Modifiers;
+  /** 이 판의 깊은 밤 규칙 */
+  readonly depth: DepthRules;
 
   private readonly heads = new Int32Array(BUCKETS);
   private next = new Int32Array(512);
@@ -369,6 +410,10 @@ export class Sim {
     private readonly rand: Rand,
   ) {
     this.mods = this.computeMods();
+    this.depth = depthRules(state.depth ?? 0);
+    // 무기별 피해량은 없어도 되는 항목이다. 예전 저장이나 엉뚱한 값이면 비워서 시작한다.
+    const dealt: unknown = state.dealt;
+    if (typeof dealt !== 'object' || dealt === null || Array.isArray(dealt)) state.dealt = {};
   }
 
   private computeMods(): Modifiers {
@@ -389,15 +434,50 @@ export class Sim {
     return Math.min(this.state.t, RUN_SECONDS);
   }
 
-  /** 레벨업 선택지를 뽑는다. */
+  /** 레벨업 선택지. 한 번 뽑으면 고르거나 다시 뽑을 때까지 같은 것이 나온다. */
   options(): Upgrade[] {
+    const s = this.state;
+    if (!Array.isArray(s.offer) || !this.fits(s.offer)) s.offer = this.draw();
+    return s.offer;
+  }
+
+  private draw(): Upgrade[] {
     return upgradeOptions({ weapons: this.state.weapons, passives: this.state.passives }, this.rand);
+  }
+
+  /** 뽑아 둔 선택지가 지금 가진 것과 맞는지. 그사이에 강화권을 썼거나 저장된 값이 엉뚱하면 맞지 않는다. */
+  private fits(offer: readonly Upgrade[]): boolean {
+    const s = this.state;
+    if (offer.length === 0) return false;
+    const full = ownedWeapons(s.weapons).length >= MAX_WEAPONS;
+    return offer.every((upgrade) => {
+      if (upgrade.type === 'weapon') {
+        const level = s.weapons[upgrade.id] ?? 0;
+        return upgrade.level === level + 1 && upgrade.level <= MAX_LEVEL && (level > 0 || !full);
+      }
+      if (upgrade.type === 'passive') return upgrade.level === (s.passives[upgrade.id] ?? 0) + 1 && upgrade.level <= MAX_LEVEL;
+      return upgrade.type === 'heal' || upgrade.type === 'embers';
+    });
+  }
+
+  /** 레벨업 선택지를 다시 뽑을 수 있는 남은 횟수 */
+  get rerolls(): number {
+    return Math.max(0, this.state.rerolls ?? 0);
+  }
+
+  /** 다시 뽑기를 한 번 써서 레벨업 선택지를 새로 뽑는다. 남은 횟수가 없으면 null */
+  reroll(): Upgrade[] | null {
+    if (this.rerolls <= 0) return null;
+    this.state.rerolls = this.rerolls - 1;
+    this.state.offer = this.draw();
+    return this.state.offer;
   }
 
   /** 레벨업에서 고른 강화를 반영한다. */
   applyUpgrade(upgrade: Upgrade): void {
     const s = this.state;
     if (s.pendingLevelUps > 0) s.pendingLevelUps -= 1;
+    delete s.offer;
     this.grant(upgrade);
   }
 
@@ -440,10 +520,12 @@ export class Sim {
     return {
       seconds: Math.min(s.t, RUN_SECONDS),
       kills: s.kills,
+      countedKills: s.killsBeforeBoss ?? s.kills,
       level: s.player.level,
       bossKills: s.bossKills,
       cleared: s.over === 'cleared',
       bonusEmbers: s.bonusEmbers,
+      depth: clampDepth(s.depth),
     };
   }
 
@@ -503,7 +585,7 @@ export class Sim {
   private hurt(amount: number): boolean {
     const s = this.state;
     const p = s.player;
-    p.hp -= amount;
+    p.hp -= amount * this.mods.taken;
     p.inv = PLAYER_BASE.invulnerable;
     this.events.push({ type: 'hurt' });
     if (p.hp > 0) return false;
@@ -515,7 +597,7 @@ export class Sim {
       for (const e of s.enemies) {
         if (e.hp <= 0) continue;
         const reach = REVIVE.radius + ENEMIES[e.kind].radius;
-        if ((e.x - p.x) ** 2 + (e.y - p.y) ** 2 < reach * reach) this.damage(e, REVIVE.damage);
+        if ((e.x - p.x) ** 2 + (e.y - p.y) ** 2 < reach * reach) this.damage(e, REVIVE.damage, null);
       }
       s.hazards.length = 0;
       this.events.push({ type: 'revive' });
@@ -530,7 +612,7 @@ export class Sim {
 
   private makeEnemy(kind: EnemyKind, x: number, y: number): Enemy {
     const s = this.state;
-    const hp = enemyHp(kind, this.clock);
+    const hp = Math.round(enemyHp(kind, this.clock) * (ENEMIES[kind].boss ? this.depth.bossHp : this.depth.hp));
     const enemy: Enemy = {
       uid: s.nextUid,
       kind,
@@ -571,7 +653,7 @@ export class Sim {
     const s = this.state;
     const t = this.clock;
 
-    s.spawnDebt += spawnPerSecond(t) * dt;
+    s.spawnDebt += spawnPerSecond(t) * this.depth.spawn * dt;
     const limit = maxAlive(t);
     while (s.spawnDebt >= 1) {
       if (s.enemies.length >= limit) {
@@ -602,12 +684,14 @@ export class Sim {
     if (s.midBosses < MID_BOSS_COUNT && s.t >= (s.midBosses + 1) * MID_BOSS_EVERY) {
       const boss = this.spawnBoss(midBossKind(s.stage, s.midBosses));
       boss.tier = s.midBosses;
-      boss.hp = midBossTier(boss.tier).hp;
+      boss.hp = Math.round(midBossTier(boss.tier).hp * this.depth.bossHp);
       boss.maxHp = boss.hp;
       s.midBosses += 1;
     }
     if (!s.finalBoss && s.t >= RUN_SECONDS) {
       s.finalBoss = true;
+      // 이 뒤의 처치는 점수와 불씨에 세지 않는다. 보스를 남겨 두고 버텨도 얻는 것이 없다.
+      s.killsBeforeBoss = s.kills;
       // 마지막 보스는 가장 센 중간 보스와 같은 단계로 부하를 부른다.
       this.spawnBoss(STAGES[s.stage].finalBoss).tier = MID_BOSS_COUNT - 1;
     }
@@ -649,8 +733,8 @@ export class Sim {
     // buildGrid 뒤에 생긴 적은 격자에 없으므로 그때의 수까지만 이웃으로 본다.
     const gridCount = enemies.length;
     const recycle = Math.max(s.viewW, s.viewH) * 0.5 + 90;
-    const fast = speedScale(this.clock);
-    const hard = damageScale(this.clock);
+    const fast = speedScale(this.clock) * this.depth.speed;
+    const hard = damageScale(this.clock) * this.depth.damage;
 
     for (let i = 0; i < gridCount; i += 1) {
       const e = enemies[i];
@@ -813,7 +897,7 @@ export class Sim {
       const px = p.x - e.x;
       const py = p.y - e.y;
       if (p.inv <= 0 && px * px + py * py < reach * reach) {
-        if (this.hurt(info.boss ? info.damage : Math.round(info.damage * hard))) return;
+        if (this.hurt(Math.round(info.damage * (info.boss ? this.depth.damage : hard)))) return;
       }
     }
   }
@@ -831,7 +915,7 @@ export class Sim {
         vy: Math.sin(a) * HAZARD.speed,
         life: HAZARD.life,
         radius: HAZARD.radius,
-        damage,
+        damage: Math.round(damage * this.depth.damage),
       });
     }
     this.events.push({ type: 'volley' });
@@ -869,7 +953,15 @@ export class Sim {
 
   // ------------------------------------------------------------ 무기
 
-  private damage(enemy: Enemy, amount: number, flash = 0.09): void {
+  /**
+   * 적에게 피해를 준다. by는 그 피해를 준 무기로, 무기별 피해량(state.dealt)에 쌓인다.
+   * 남은 체력보다 많이 준 피해는 세지 않아서, 약한 적을 한 방에 잡는 무기가 부풀려지지 않는다.
+   */
+  private damage(enemy: Enemy, amount: number, by: WeaponId | null, flash = 0.09): void {
+    if (by) {
+      const dealt = (this.state.dealt ??= {});
+      dealt[by] = (dealt[by] ?? 0) + Math.min(amount, Math.max(0, enemy.hp));
+    }
     enemy.hp -= amount;
     enemy.flash = flash;
   }
@@ -937,7 +1029,7 @@ export class Sim {
           const reach = stats.radius + ENEMIES[e.kind].radius;
           if ((e.x - p.x) ** 2 + (e.y - p.y) ** 2 < reach * reach) {
             // 고리 안의 적이 한꺼번에 번쩍여 화면을 가리지 않게 짧게만 깜빡인다.
-            this.damage(e, stats.damage, 0.04);
+            this.damage(e, stats.damage, 'aura', 0.04);
             this.chill(e, stats.slow);
           }
         }
@@ -955,7 +1047,7 @@ export class Sim {
           if (e.hp <= 0 || e.fireflyCd > 0) continue;
           const reach = FIREFLY_RADIUS + ENEMIES[e.kind].radius;
           if ((e.x - fx) ** 2 + (e.y - fy) ** 2 < reach * reach) {
-            this.damage(e, stats.damage);
+            this.damage(e, stats.damage, 'firefly');
             e.fireflyCd = stats.rehit;
           }
         }
@@ -1079,7 +1171,7 @@ export class Sim {
             }
             if (!target) break;
             struck.push(target);
-            this.damage(target, stats.damage);
+            this.damage(target, stats.damage, 'bolt');
             points.push(target.x, target.y);
             fromX = target.x;
             fromY = target.y;
@@ -1115,7 +1207,7 @@ export class Sim {
             const dx = e.x - shot.x;
             const dy = e.y - shot.y;
             if (dx * dx + dy * dy >= reach * reach) continue;
-            this.damage(e, shot.damage);
+            this.damage(e, shot.damage, shot.look === 'ember' || shot.look === 'emberEvo' ? 'ember' : 'lance');
             // 맞은 적은 살짝 밀려난다.
             if (!ENEMIES[e.kind].boss) {
               const speed = Math.hypot(shot.vx, shot.vy) || 1;
@@ -1153,7 +1245,7 @@ export class Sim {
         if (e.hp <= 0) continue;
         const reach = strike.radius + ENEMIES[e.kind].radius;
         if ((e.x - strike.x) ** 2 + (e.y - strike.y) ** 2 < reach * reach) {
-          this.damage(e, strike.damage);
+          this.damage(e, strike.damage, 'star');
         }
       }
       this.events.push({ type: 'strike', x: strike.x, y: strike.y, radius: strike.radius });
@@ -1173,7 +1265,7 @@ export class Sim {
           if (e.hp <= 0) continue;
           const reach = fire.radius + ENEMIES[e.kind].radius;
           if ((e.x - fire.x) ** 2 + (e.y - fire.y) ** 2 < reach * reach) {
-            this.damage(e, fire.damage, 0.04);
+            this.damage(e, fire.damage, 'oil', 0.04);
             this.chill(e, fire.slow);
           }
         }
