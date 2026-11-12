@@ -14,7 +14,7 @@ import { iconKey } from './icons';
 import { Joystick } from './joystick';
 import { levelUpHeader, showChoices, TICKET_HEADER } from './levelup';
 import { buildLobby, type LobbyPage } from './lobby';
-import { applyRun, metaStore, newDepth, newUnlocks } from './meta';
+import { applyRun, learnTip, metaStore, newDepth, newUnlocks } from './meta';
 import { pauseInfo } from './pauseinfo';
 import {
   depthName,
@@ -27,8 +27,9 @@ import {
   scoreFor,
   type Upgrade,
 } from './rules';
-import { createRun, Sim } from './sim';
+import { createRun, Sim, type SimEvent } from './sim';
 import { SoundBoard, type Note } from './sound';
+import { TIP_IDS, tipFor, TIPS, type TipId } from './tips';
 import { RunView } from './view';
 
 /** 씬을 시작할 때 넘기는 값. 없으면 준비 화면부터 연다. */
@@ -55,6 +56,8 @@ const TICKET_DELAY_MS = 550;
 const HEARTBEAT = { slow: 1.05, fast: 0.72, fastBelow: 0.15 } as const;
 /** 판이 끝난 뒤 결과 화면이 뜨기까지 끝나는 장면을 보여 주는 시간(ms) */
 const ENDING_MS = { cleared: 2100, dead: 1800 } as const;
+/** 화면 아래의 한 줄 안내가 떠 있는 시간(초)과, 그 끝에서 흐려지는 시간(초) */
+const TIP = { seconds: 4, fade: 0.5 } as const;
 /**
  * 화면 전체 연출(fx)은 싸움 화면보다 위, 조작 표시보다 아래.
  * HUD는 선택 화면(panel)보다 위에 있어서, 고르는 동안에도 체력과 든 무기가 보인다.
@@ -91,6 +94,12 @@ export class LanternKeeperScene extends MiniGameScene {
   private hint?: Phaser.GameObjects.Text;
   /** 새로 시작한 판이고 첫 안내를 아직 보여 주지 않았다 */
   private fresh = false;
+  /** 지금 떠 있는 한 줄 안내와 남은 시간(초), 그 뒤에 이어서 띄울 안내 */
+  private tip?: Phaser.GameObjects.Text;
+  private tipLeft = 0;
+  private readonly tipQueue: string[] = [];
+  /** 아직 한 번도 보지 않은 안내. 비어 있으면 일어난 일을 살펴보지 않는다. */
+  private readonly unseen = new Set<TipId>();
 
   constructor() {
     super(LANTERN_SCENE);
@@ -111,6 +120,10 @@ export class LanternKeeperScene extends MiniGameScene {
     this.beatIn = 0;
     this.hint = undefined;
     this.fresh = false;
+    this.tip = undefined;
+    this.tipLeft = 0;
+    this.tipQueue.length = 0;
+    this.unseen.clear();
 
     void metaStore.load().then(() => {
       // 불러오는 사이에 씬을 떠났으면 아무것도 하지 않는다.
@@ -168,6 +181,7 @@ export class LanternKeeperScene extends MiniGameScene {
         });
     if (!saved) metaStore.setRun(null);
     this.sim = new Sim(state, Math.random);
+    for (const id of TIP_IDS) if (!metaStore.data.tips.includes(id)) this.unseen.add(id);
 
     this.view = new RunView(this, centerY, this.sim, { top: HUD_HEIGHT, bar: BOSS_BAR_HEIGHT });
     this.effects = new RunEffects(this, DEPTH.fx, HUD_HEIGHT);
@@ -227,6 +241,7 @@ export class LanternKeeperScene extends MiniGameScene {
     this.pending += frame;
     this.stick.update();
     if (this.hint && (this.stick.x !== 0 || this.stick.y !== 0)) this.fadeHint();
+    this.tickTip(frame);
 
     const sim = this.sim;
     while (this.pending >= STEP && this.phase === 'run') {
@@ -255,6 +270,7 @@ export class LanternKeeperScene extends MiniGameScene {
     const board = this.board;
     const now = this.time.now;
     for (const event of sim.events) {
+      if (this.unseen.size > 0) this.offerTip(event);
       switch (event.type) {
         case 'kill':
           this.view.burst(sim, event.x, event.y, event.boss ? 40 : 4);
@@ -301,8 +317,6 @@ export class LanternKeeperScene extends MiniGameScene {
         case 'post':
           this.view.beacon(sim, event.x, event.y);
           board.play('post', now);
-          // 이 판의 첫 기둥이면 쓰는 법을 한 줄로 알려 준다.
-          if (event.first) this.showTip('등불 기둥에 닿으면 빛이 그림자를 태워요');
           break;
         case 'light':
           this.view.burst(sim, event.x, event.y, 16);
@@ -367,6 +381,7 @@ export class LanternKeeperScene extends MiniGameScene {
         case 'levelup':
         case 'ticket':
         case 'shoot':
+        case 'swell':
           break;
       }
     }
@@ -388,16 +403,45 @@ export class LanternKeeperScene extends MiniGameScene {
     this.effects.beat();
   }
 
-  /** 화면 아래쪽에 한 줄 안내를 잠깐 띄운다. 움직이는 법 안내가 아직 떠 있으면 그 자리를 넘겨받는다. */
-  private showTip(label: string): void {
+  /** 처음 겪는 일이면 그 일의 안내를 띄우고, 봤다고 적어 둔다. 한 번 본 안내는 다시 뜨지 않는다. */
+  private offerTip(event: SimEvent): void {
+    const id = tipFor(event);
+    if (!id || !this.unseen.has(id)) return;
+    this.unseen.delete(id);
+    metaStore.set(learnTip(metaStore.data, id));
+    this.tipQueue.push(TIPS[id]);
+  }
+
+  /**
+   * 화면 아래쪽의 한 줄 안내를 차례로 띄운다. 하나가 사라진 뒤에 다음 것이 뜬다.
+   * 판이 흐르는 동안에만 시간이 가므로, 강화를 고르는 화면에 가려진 채로 사라지지 않는다.
+   */
+  private tickTip(frame: number): void {
+    if (this.tip) {
+      this.tipLeft -= frame;
+      this.tip.setAlpha(Math.max(0, Math.min(1, this.tipLeft / TIP.fade)));
+      if (this.tipLeft > 0) return;
+      this.tip.destroy();
+      this.tip = undefined;
+    }
+    const label = this.tipQueue.shift();
+    if (label === undefined) return;
+    // 움직이는 법 안내가 아직 떠 있으면 그 자리를 넘겨받는다.
     this.hint?.destroy();
     this.hint = undefined;
-    const tip = addText(this, GAME_WIDTH / 2, this.scale.height - 54, label, {
+    this.tip = addText(this, GAME_WIDTH / 2, this.scale.height - 54, label, {
       color: CSS.white,
       originX: 0.5,
       shadow: CSS.ink,
     }).setDepth(DEPTH.banner);
-    this.tweens.add({ targets: tip, alpha: 0, delay: 3600, duration: 500, onComplete: () => tip.destroy() });
+    this.tipLeft = TIP.seconds;
+  }
+
+  /** 떠 있는 안내와 기다리는 안내를 모두 치운다. */
+  private clearTips(): void {
+    this.tip?.destroy();
+    this.tip = undefined;
+    this.tipQueue.length = 0;
   }
 
   private fadeHint(): void {
@@ -538,6 +582,7 @@ export class LanternKeeperScene extends MiniGameScene {
     this.phase = 'over';
     this.stick.enabled = false;
     this.stick.reset();
+    this.clearTips();
 
     const summary = this.sim.summary();
     const embers = embersFor(summary, metaStore.data.upgrades.lucky);
@@ -557,6 +602,7 @@ export class LanternKeeperScene extends MiniGameScene {
         bossKills: summary.bossKills,
         level: summary.level,
         evolved: ownedWeapons(state.weapons).filter((id) => isEvolved(state.weapons[id] ?? 0)),
+        seen: state.seen,
       }),
     );
     const opened = newUnlocks(before.bestSeconds, metaStore.data.bestSeconds);

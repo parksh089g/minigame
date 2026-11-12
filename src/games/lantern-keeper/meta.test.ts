@@ -16,6 +16,7 @@ import {
   type RunResult,
 } from './meta';
 import { embersFor, isUnlocked, metaCost, type RunSummary } from './rules';
+import { OLD_HAND_TIPS } from './tips';
 
 /** 한 판의 결과. 따로 주지 않은 것은 등불지기로 밤의 풀밭에서 아무것도 못 하고 쓰러진 판이다. */
 const result = (over: Partial<RunResult> = {}): RunResult => ({
@@ -228,7 +229,13 @@ describe('캐릭터와 스테이지 고르기', () => {
 
   it('예전에 저장한 값은 불씨와 강화를 그대로 두고 기본 선택을 채운다', () => {
     const old = { version: 1, embers: 40, upgrades: { vigor: 2 }, runs: 3, clears: 0, bestSeconds: 200 };
-    expect(normalizeMeta(old)).toEqual({ ...createDefaultMeta(), ...old, version: createDefaultMeta().version });
+    expect(normalizeMeta(old)).toEqual({
+      ...createDefaultMeta(),
+      ...old,
+      version: createDefaultMeta().version,
+      // 안내가 생기기 전부터 하던 사람이므로, 그때도 있던 일의 안내는 본 것으로 친다.
+      tips: OLD_HAND_TIPS,
+    });
   });
 });
 
