@@ -17,6 +17,7 @@ import {
   MID_BOSS_EVERY,
   MID_BOSS_TIERS,
   PLAYER_BASE,
+  POSTS,
   RUN_SECONDS,
   STAGE_ORDER,
   STAGES,
@@ -714,6 +715,116 @@ describe('쫓아오기만 하지 않는 적', () => {
       const total = rows.reduce((sum, row) => sum + row.weight, 0);
       expect((shooters[0].weight + bursters[0].weight) / total).toBeLessThan(0.15);
     }
+  });
+});
+
+describe('등불 기둥', () => {
+  /** 플레이어 바로 옆에 켜지 않은 기둥 하나만 서 있는 조용한 판. 때가 되어 저절로 나오는 기둥은 없다. */
+  const besidePost = (): Sim => {
+    const sim = quietSim();
+    sim.state.player.hp = 1e9;
+    sim.state.postsSpawned = POSTS.times.length;
+    sim.state.posts = [{ x: 8, y: 0, lit: 0, tick: 0 }];
+    return sim;
+  };
+
+  it('정해진 시각마다 플레이어 가까이에 하나씩 나타난다', () => {
+    const sim = quietSim();
+    sim.state.t = POSTS.times[0] - 0.05;
+    const appeared = advance(sim, 0.2);
+    expect(sim.state.posts).toHaveLength(1);
+    const [post] = sim.state.posts!;
+    expect(appeared).toContainEqual({ type: 'post', x: post.x, y: post.y, first: true });
+    const distance = Math.hypot(post.x - sim.state.player.x, post.y - sim.state.player.y);
+    // 화면 안에 보이지만, 걸어가야 닿는 거리다.
+    expect(distance).toBeGreaterThanOrEqual(POSTS.near);
+    expect(distance).toBeLessThanOrEqual(POSTS.far);
+    expect(distance).toBeLessThan(config.viewW / 2);
+    expect(post.lit).toBe(0);
+    // 다음 시각이 되기 전에는 더 나오지 않는다.
+    expect(advance(sim, 5)).not.toContainEqual(expect.objectContaining({ type: 'post' }));
+    sim.state.t = POSTS.times[1] - 0.05;
+    expect(advance(sim, 0.2)).toContainEqual(expect.objectContaining({ type: 'post', first: false }));
+    expect(sim.state.posts).toHaveLength(2);
+  });
+
+  it('닿으면 불이 켜지고, 켜져 있는 동안 둘레의 그림자를 태우고 느리게 한다', () => {
+    const sim = besidePost();
+    const inside = enemy('brute', 30, 0, 1000);
+    const outside = enemy('brute', 8, 130, 1000);
+    sim.state.enemies.push(inside, outside);
+    sim.step(STEP, 0, 0);
+    expect(sim.events).toContainEqual({ type: 'light', x: 8, y: 0 });
+    expect(sim.state.posts![0].lit).toBeGreaterThan(POSTS.seconds - 0.1);
+    advance(sim, 1);
+    expect(inside.hp).toBeLessThanOrEqual(1000 * (1 - 2 * POSTS.burn));
+    expect(inside.slow).toBeGreaterThan(0);
+    expect(inside.slowTo).toBeLessThanOrEqual(POSTS.slow);
+    expect(outside.hp).toBe(1000);
+    expect(outside.slow).toBeLessThanOrEqual(0);
+    // 무기가 한 일이 아니므로 무기별 피해에는 들어가지 않는다.
+    expect(sim.state.dealt).toEqual({});
+  });
+
+  it('빛 속의 보통 그림자는 체력이 얼마든 3초 안에 쓰러지고, 보스는 조금만 잃는다', () => {
+    const sim = besidePost();
+    const tough = enemy('brute', 24, 0, 50000);
+    const boss = enemy('giant', 30, 12, 10000);
+    sim.state.enemies.push(tough, boss);
+    advance(sim, 3);
+    expect(sim.state.kills).toBe(1);
+    expect(sim.state.enemies).toEqual([boss]);
+    // 다 타면 기둥이 사라진다. 보스는 끝까지 빛 속에 있어도 열에 하나쯤만 잃는다.
+    const events = advance(sim, POSTS.seconds - 2.9);
+    expect(events).toContainEqual({ type: 'dim', x: 8, y: 0 });
+    expect(sim.state.posts).toHaveLength(0);
+    expect(boss.hp).toBeLessThan(10000);
+    expect(boss.hp).toBeGreaterThan(10000 * 0.88);
+  });
+
+  it('켜지 않은 기둥은 아껴 둘 수 있고, 너무 쌓이면 가장 오래된 것부터 사라진다', () => {
+    const sim = quietSim();
+    sim.state.postsSpawned = 1;
+    sim.state.posts = [1000, 2000, 3000].map((x) => ({ x, y: 0, lit: 0, tick: 0 }));
+    // 오래 두어도 꺼지거나 사라지지 않는다.
+    sim.state.t = POSTS.times[0] + 1;
+    advance(sim, 20);
+    expect(sim.state.posts!.map((post) => post.x)).toEqual([1000, 2000, 3000]);
+    sim.state.t = POSTS.times[1] - 0.05;
+    advance(sim, 0.2);
+    expect(sim.state.posts).toHaveLength(POSTS.keep);
+    expect(sim.state.posts!.map((post) => post.x).slice(0, 2)).toEqual([2000, 3000]);
+    // 걸어가서 닿으면 그때 켜진다.
+    const saved = sim.state.posts![2];
+    sim.state.player.x = saved.x;
+    sim.state.player.y = saved.y;
+    sim.step(STEP, 0, 0);
+    expect(saved.lit).toBeGreaterThan(0);
+  });
+
+  it('기둥이 생기기 전에 저장한 판을 이어 해도 지난 시각의 기둥이 한꺼번에 나오지 않는다', () => {
+    const old = JSON.parse(JSON.stringify(createRun(config))) as RunState;
+    delete old.posts;
+    delete old.postsSpawned;
+    old.t = POSTS.times[2] + 5;
+    const sim = newSim(1, old);
+    expect(sim.state.posts).toEqual([]);
+    expect(sim.state.postsSpawned).toBe(3);
+    sim.step(STEP, 0, 0);
+    expect(sim.events).not.toContainEqual(expect.objectContaining({ type: 'post' }));
+    // 켜진 기둥은 저장했다가 이어 해도 남은 시간이 그대로다.
+    sim.state.posts = [{ x: 500, y: 0, lit: 7, tick: 0.2 }];
+    const resumed = newSim(2, JSON.parse(JSON.stringify(sim.state)) as RunState);
+    expect(resumed.state.posts).toEqual([{ x: 500, y: 0, lit: 7, tick: 0.2 }]);
+  });
+
+  it('기둥은 밀물이 오기 전에 나와서 밀물에 대비할 수 있다', () => {
+    for (const surge of SURGES) {
+      const before = POSTS.times.filter((time) => time < surge && surge - time <= 40);
+      expect(before, `밀물 ${surge}초`).toHaveLength(1);
+    }
+    expect(POSTS.times[0]).toBeLessThan(60);
+    expect(POSTS.times[POSTS.times.length - 1]).toBeLessThan(RUN_SECONDS);
   });
 });
 

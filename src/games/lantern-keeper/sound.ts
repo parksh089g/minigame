@@ -33,6 +33,9 @@ export type SoundId =
   | 'block'
   | 'spit'
   | 'burst'
+  | 'post'
+  | 'light'
+  | 'dim'
   | 'levelUp'
   | 'ticket'
   | 'evolve'
@@ -106,6 +109,19 @@ export const SOUNDS: Readonly<Record<SoundId, readonly Note[]>> = {
     { f: 300, to: 70, d: 0.16, type: 'sawtooth', v: 0.26 },
     { f: 620, to: 240, d: 0.1, type: 'triangle', v: 0.16 },
   ],
+  // 등불 기둥이 나타났다: 멀리서 종이 두 번 울린다.
+  post: [
+    { f: 988, d: 0.14, type: 'triangle', v: 0.22 },
+    { f: 1319, d: 0.24, type: 'triangle', v: 0.2, at: 0.14 },
+  ],
+  // 기둥에 불이 붙는다: 훅 하고 타오른 뒤 밝은 화음
+  light: [
+    { f: 196, to: 784, d: 0.22, type: 'sawtooth', v: 0.2 },
+    { f: 784, d: 0.3, type: 'triangle', v: 0.26, at: 0.18 },
+    { f: 1175, d: 0.3, type: 'triangle', v: 0.2, at: 0.18 },
+  ],
+  // 기둥이 다 탔다: 조용히 꺼진다.
+  dim: [{ f: 523, to: 196, d: 0.3, type: 'triangle', v: 0.18 }],
   levelUp: [
     ...run([523, 659, 784, 1047], 0.06, 0.1, { v: 0.26 }),
     { f: 1319, d: 0.22, v: 0.24, at: 0.24 },

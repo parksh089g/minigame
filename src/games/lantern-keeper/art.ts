@@ -38,6 +38,9 @@ export const LK = {
   heal: 'lk-heal',
   pull: 'lk-pull',
   blast: 'lk-blast',
+  /** 등불 기둥: 켜기 전과 켜진 뒤 */
+  post: 'lk-post',
+  postLit: 'lk-post-lit',
   heart: 'lk-heart',
   ember: 'lk-ember',
   emberEvo: 'lk-ember-evo',
@@ -88,6 +91,11 @@ export const LOOK = {
   pointerEdge: COLOR.white,
   /** 등갓의 빛막 */
   guard: COLOR.cyan,
+  /** 등불 기둥의 빛 */
+  postLight: COLOR.yellow,
+  postEdge: COLOR.orange,
+  /** 등불 기둥을 가리키는 화살표의 테두리 */
+  postPointerEdge: COLOR.ink,
 } as const;
 
 /**
@@ -245,6 +253,26 @@ const BLAST: Rows = [
   '.03332220.',
   '..000000..',
 ];
+
+/** 등불 기둥의 기둥과 받침. 위에 등을 얹어 한 장을 만든다. */
+const POST_POLE: Rows = [
+  '...0e0...',
+  '...0d0...',
+  '...0e0...',
+  '...0d0...',
+  '...0e0...',
+  '...0d0...',
+  '...0e0...',
+  '..00e00..',
+  '.0eeeee0.',
+  '.0000000.',
+];
+
+/** 켜기 전의 등: 불씨만 남아 있다. */
+const POST: Rows = ['...000...', '..0ddd0..', '.0df3fd0.', '.0d343d0.', '.0df3fd0.', '..0ddd0..', ...POST_POLE];
+
+/** 켜진 등 */
+const POST_LIT: Rows = ['...000...', '..03330..', '.034c430.', '.04ccc40.', '.034c430.', '..03330..', ...POST_POLE];
 
 /** HUD의 체력 표시 옆에 놓는 하트. 테두리는 withOutline이 두른다. */
 const HEART: Rows = [
@@ -716,6 +744,8 @@ export function registerLanternTextures(scene: Phaser.Scene): void {
   add(LK.heal, drawRows(HEAL));
   add(LK.pull, drawRows(PULL));
   add(LK.blast, drawRows(BLAST));
+  add(LK.post, drawRows(POST));
+  add(LK.postLit, drawRows(POST_LIT));
   add(LK.heart, drawRows(withOutline(HEART)));
   add(LK.floor, drawFloor());
   add(LK.floorMarsh, drawMarshFloor());

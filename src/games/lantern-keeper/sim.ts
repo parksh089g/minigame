@@ -11,6 +11,7 @@ import {
   MID_BOSS_COUNT,
   MID_BOSS_EVERY,
   PLAYER_BASE,
+  POSTS,
   RUN_SECONDS,
   STAGES,
   SURGES,
@@ -90,6 +91,16 @@ export interface Enemy {
   tier: number;
   vx: number;
   vy: number;
+}
+
+/** 등불 기둥. 닿으면 불이 켜지고, 켜져 있는 동안 둘레의 그림자를 태운다. */
+export interface Post {
+  x: number;
+  y: number;
+  /** 불이 꺼질 때까지 남은 시간(초). 0이면 아직 켜지 않았다. */
+  lit: number;
+  /** 다음에 둘레를 태울 때까지(초) */
+  tick: number;
 }
 
 /** 날아가는 것의 생김새. 화면에서 그림을 고를 때 쓴다. */
@@ -200,6 +211,10 @@ export interface RunState {
   strikes: Strike[];
   fires: Fire[];
   hazards: Hazard[];
+  /** 싸움터에 서 있는 등불 기둥. 기둥이 생기기 전에 저장한 판에는 없다. */
+  posts?: Post[];
+  /** 지금까지 나타난 등불 기둥의 수. POSTS.times의 몇 번째까지 나왔는지를 가리킨다. */
+  postsSpawned?: number;
   cd: { ember: number; aura: number; star: number; lance: number; oil: number; bolt: number };
   fireflyAngle: number;
   spawnDebt: number;
@@ -263,6 +278,12 @@ export type SimEvent =
   | { type: 'spit' }
   /** 터지는 적이 (x, y)에서 터졌다 */
   | { type: 'burst'; x: number; y: number; radius: number }
+  /** 등불 기둥이 (x, y)에 나타났다. first는 이 판의 첫 기둥인지 */
+  | { type: 'post'; x: number; y: number; first: boolean }
+  /** 등불 기둥에 불이 켜졌다 */
+  | { type: 'light'; x: number; y: number }
+  /** 등불 기둥이 다 타서 사라졌다 */
+  | { type: 'dim'; x: number; y: number }
   | { type: 'levelup' }
   | { type: 'shoot' }
   | { type: 'strike'; x: number; y: number; radius: number }
@@ -366,6 +387,8 @@ export function createRun(config: RunConfig): RunState {
     strikes: [],
     fires: [],
     hazards: [],
+    posts: [],
+    postsSpawned: 0,
     cd: { ember: 0.6, aura: 0, star: 1, lance: 0.8, oil: 0.5, bolt: 0.7 },
     fireflyAngle: 0,
     spawnDebt: 0,
@@ -449,6 +472,11 @@ export class Sim {
     // 무기별 피해량은 없어도 되는 항목이다. 예전 저장이나 엉뚱한 값이면 비워서 시작한다.
     const dealt: unknown = state.dealt;
     if (typeof dealt !== 'object' || dealt === null || Array.isArray(dealt)) state.dealt = {};
+    // 등불 기둥이 생기기 전에 저장한 판: 이미 지난 시각의 기둥이 한꺼번에 나타나지 않게, 지난 것은 나온 것으로 친다.
+    if (!Array.isArray(state.posts)) state.posts = [];
+    if (typeof state.postsSpawned !== 'number') {
+      state.postsSpawned = POSTS.times.filter((time) => time <= state.t).length;
+    }
   }
 
   private computeMods(): Modifiers {
@@ -589,6 +617,7 @@ export class Sim {
     this.moveShots(dt);
     this.landStrikes(dt);
     this.burnFires(dt);
+    this.tendPosts(dt);
     this.reap();
     this.moveGems(dt);
   }
@@ -943,7 +972,8 @@ export class Sim {
               vy: dirY * SPIT.speed,
               life: SPIT.life,
               radius: SPIT.radius,
-              damage: Math.round(shot.damage * hard),
+              // 예고가 있는 공격은 보스의 것처럼 시간이 지나도 세지지 않고, 깊은 밤의 단계만 따른다.
+              damage: Math.round(shot.damage * this.depth.damage),
             });
             this.events.push({ type: 'spit' });
           }
@@ -964,7 +994,7 @@ export class Sim {
           speed = 0;
           e.timer -= dt;
           if (e.timer <= 0) {
-            if (this.burst(e, burst, hard)) return;
+            if (this.burst(e, burst)) return;
             continue;
           }
         } else if (distance < burst.trigger) {
@@ -1016,8 +1046,9 @@ export class Sim {
   /**
    * 부풀던 적이 터진다. 둘레 안의 플레이어가 다치고, 둘레 안의 다른 그림자도 함께 다친다.
    * 터진 적은 여느 적처럼 쓰러진 것으로 친다. 판이 끝났으면 true.
+   * 피해는 쏘는 적의 방울처럼 시간이 지나도 세지지 않고, 깊은 밤의 단계만 따른다.
    */
-  private burst(source: Enemy, burst: BurstInfo, hard: number): boolean {
+  private burst(source: Enemy, burst: BurstInfo): boolean {
     const s = this.state;
     const p = s.player;
     source.hp = 0;
@@ -1029,7 +1060,7 @@ export class Sim {
     }
     const reach = burst.radius + PLAYER_BASE.radius;
     if (p.inv <= 0 && (p.x - source.x) ** 2 + (p.y - source.y) ** 2 < reach * reach) {
-      return this.hurt(Math.round(burst.damage * hard));
+      return this.hurt(Math.round(burst.damage * this.depth.damage));
     }
     return false;
   }
@@ -1408,6 +1439,70 @@ export class Sim {
       }
     }
     s.fires.length = kept;
+  }
+
+  // ------------------------------------------------------------ 등불 기둥
+
+  /** 때가 되면 등불 기둥을 세우고, 플레이어가 닿은 기둥을 켜고, 켜진 기둥의 둘레를 태운다. */
+  private tendPosts(dt: number): void {
+    const s = this.state;
+    const p = s.player;
+    const posts = (s.posts ??= []);
+    let spawned = s.postsSpawned ?? 0;
+    while (spawned < POSTS.times.length && s.t >= POSTS.times[spawned]) {
+      const angle = this.rand() * Math.PI * 2;
+      const distance = POSTS.near + this.rand() * (POSTS.far - POSTS.near);
+      // 켜지 않은 기둥이 너무 쌓이지 않게, 가장 오래된 것부터 치운다.
+      if (posts.filter((post) => post.lit <= 0).length >= POSTS.keep) {
+        posts.splice(
+          posts.findIndex((post) => post.lit <= 0),
+          1,
+        );
+      }
+      const post: Post = { x: p.x + Math.cos(angle) * distance, y: p.y + Math.sin(angle) * distance, lit: 0, tick: 0 };
+      posts.push(post);
+      spawned += 1;
+      this.events.push({ type: 'post', x: post.x, y: post.y, first: spawned === 1 });
+    }
+    s.postsSpawned = spawned;
+
+    const touch = POSTS.touch + PLAYER_BASE.radius;
+    let kept = 0;
+    for (const post of posts) {
+      if (post.lit <= 0) {
+        if ((p.x - post.x) ** 2 + (p.y - post.y) ** 2 < touch * touch) {
+          post.lit = POSTS.seconds;
+          post.tick = 0;
+          this.events.push({ type: 'light', x: post.x, y: post.y });
+        }
+      } else {
+        post.lit -= dt;
+        if (post.lit <= 0) {
+          this.events.push({ type: 'dim', x: post.x, y: post.y });
+          continue;
+        }
+        post.tick -= dt;
+        if (post.tick <= 0) {
+          post.tick += POSTS.tick;
+          this.scorch(post);
+        }
+      }
+      posts[kept] = post;
+      kept += 1;
+    }
+    posts.length = kept;
+  }
+
+  /** 켜진 기둥의 빛이 둘레 안의 그림자를 한 번 태운다. 체력의 몫으로 깎아서 언제 켜도 쓸모가 같다. */
+  private scorch(post: Post): void {
+    for (const e of this.state.enemies) {
+      if (e.hp <= 0) continue;
+      const info = ENEMIES[e.kind];
+      const reach = POSTS.radius + info.radius;
+      if ((e.x - post.x) ** 2 + (e.y - post.y) ** 2 >= reach * reach) continue;
+      this.damage(e, Math.max(1, e.maxHp * (info.boss ? POSTS.bossBurn : POSTS.burn)), null);
+      if (!info.boss) this.chill(e, POSTS.slow);
+    }
   }
 
   // ------------------------------------------------------------ 정리와 보상
