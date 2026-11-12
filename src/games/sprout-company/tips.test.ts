@@ -59,6 +59,10 @@ describe('처음 안내', () => {
     state.leaves = 1_000_000;
     expect(drain(state)).toEqual(['train', 'lead']);
 
+    // 사장인 새싹이의 단짝이 들어왔는데 옆자리가 아니면 자리 바꾸기를 알려 준다.
+    state.desks[3].staff = 'drop';
+    expect(drain(state)).toEqual(['buddy']);
+
     advance(state, state.rushIn + 0.01, () => 0.5);
     expect(drain(state)).toEqual(['rush']);
 

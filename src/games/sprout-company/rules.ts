@@ -6,6 +6,8 @@
 import {
   AWAY,
   BRANCH,
+  BUDDIES,
+  BUDDY,
   CANDIDATE_COUNT,
   CHEER_BOOST,
   CHEER_SECONDS,
@@ -268,6 +270,62 @@ export function legacyBonus(state: CompanyState, key: EffectKey): number {
   return sum;
 }
 
+// ───────── 자리와 단짝 ─────────
+
+/** 책상이 count개일 때 한 줄에 놓는 수. 화면도 이대로 놓는다. */
+export function deskColumns(count: number): number {
+  return count <= 4 ? 2 : count <= 9 ? 3 : 4;
+}
+
+/** 이 친구의 단짝. 없으면 null */
+export function buddyOf(id: StaffId): StaffId | null {
+  for (const [a, b] of BUDDIES) {
+    if (a === id) return b;
+    if (b === id) return a;
+  }
+  return null;
+}
+
+/** 이 책상의 옆자리: 같은 줄의 바로 왼쪽과 오른쪽 책상의 번호 */
+export function neighbors(state: CompanyState, index: number): number[] {
+  const count = state.desks.length;
+  if (!Number.isInteger(index) || index < 0 || index >= count) return [];
+  const columns = deskColumns(count);
+  const column = index % columns;
+  const near: number[] = [];
+  if (column > 0) near.push(index - 1);
+  if (column < columns - 1 && index + 1 < count) near.push(index + 1);
+  return near;
+}
+
+/** 이 책상의 친구가 단짝과 옆자리에 앉아 있는가 */
+export function hasBuddy(state: CompanyState, index: number): boolean {
+  const staff = state.desks[index]?.staff;
+  const buddy = staff ? buddyOf(staff) : null;
+  return buddy !== null && neighbors(state, index).some((near) => state.desks[near].staff === buddy);
+}
+
+/** 단짝이 둘 다 회사에 있는데 옆자리가 아닌 짝이 있는가 */
+export function hasLonelyBuddy(state: CompanyState): boolean {
+  return state.desks.some((desk, index) => {
+    const buddy = desk.staff ? buddyOf(desk.staff) : null;
+    return buddy !== null && !hasBuddy(state, index) && state.desks.some((other) => other.staff === buddy);
+  });
+}
+
+/**
+ * 두 책상의 자리를 맞바꾼다. 친구가 하던 일, 레벨, 부서, 그 자리의 컴퓨터까지 함께 옮겨 간다.
+ * 한쪽이 빈 자리면 그리로 옮겨 앉는 것이 된다.
+ */
+export function swapDesks(state: CompanyState, a: number, b: number): boolean {
+  const first = state.desks[a];
+  const second = state.desks[b];
+  if (!first || !second || a === b || (!first.staff && !second.staff)) return false;
+  state.desks[a] = second;
+  state.desks[b] = first;
+  return true;
+}
+
 /** 사장은 특기 없이 모든 업무를 고르게 한다. */
 export function specialtyOf(state: CompanyState, staff: StaffId): TaskKind | null {
   return staff === state.boss ? null : STAFF[staff].specialty;
@@ -283,7 +341,8 @@ export function baseSpeed(state: CompanyState, index: number): number {
     gearBonus(desk.gear, 'desk', 'workSpeed') +
     gearBonus(state.gear, 'company', 'workSpeed') +
     (trait.key === 'workSpeed' ? trait.amount : 0) +
-    desk.level * LEVEL_SPEED;
+    desk.level * LEVEL_SPEED +
+    (hasBuddy(state, index) ? BUDDY.speed : 0);
   return own * (1 + legacyBonus(state, 'workSpeed'));
 }
 
@@ -534,11 +593,16 @@ export function bestCardFor(state: CompanyState, index: number): number {
   return best;
 }
 
+/** 응원 한 번이 이어지는 시간(초) */
+export function cheerSeconds(state: CompanyState): number {
+  return CHEER_SECONDS * (1 + companyBonus(state, 'cheer'));
+}
+
 /** 일하는 책상을 응원한다. 잠깐 빨라진다. */
 export function cheer(state: CompanyState, index: number): boolean {
   const desk = state.desks[index];
   if (!desk?.task) return false;
-  desk.cheer = CHEER_SECONDS;
+  desk.cheer = cheerSeconds(state);
   bumpGoals(state.goals, 'cheer');
   return true;
 }
@@ -792,6 +856,11 @@ export interface Away {
   releases: Release[];
 }
 
+/** 닫아 둔 동안 출시작이 버는 몫. 열어 둔 때를 1로 친다. */
+export function awayRate(state: CompanyState): number {
+  return AWAY.rate * (1 + companyBonus(state, 'away'));
+}
+
 /**
  * 닫아 둔 seconds초를 한꺼번에 흘린다. 출시작은 평소의 일부만 벌고, 맡겨 둔 업무는 그대로 진행된다
  * (팀장이 있으면 남은 카드도 맡기고, 예약해 둔 게임이 있으면 다 만든 게임을 출시하고 이어서 만든다).
@@ -804,7 +873,7 @@ export function catchUp(state: CompanyState, seconds: number): Away | null {
   const fixed = (): number => 0.5;
   if (state.rush) dropRush(state, fixed);
   if (state.offer) declineRush(state, fixed);
-  const leaves = incomePerSecond(state) * counted * AWAY.rate;
+  const leaves = incomePerSecond(state) * counted * awayRate(state);
   state.leaves += leaves;
   let tasks = 0;
   const releases: Release[] = [];
@@ -1243,7 +1312,7 @@ export function normalizeCompany(raw: unknown): CompanyState | null {
         desk.level = toCount(entry.level, TRAINING.maxLevel);
         desk.gear = normalizeLevels(entry.gear, 'desk');
         desk.task = normalizeTask(entry.task);
-        desk.cheer = desk.task ? toNumber(entry.cheer, 0, CHEER_SECONDS) : 0;
+        desk.cheer = desk.task ? toNumber(entry.cheer, 0, cheerSeconds(state)) : 0;
         if (isDepartmentId(entry.dept)) {
           const count = members[entry.dept] ?? 0;
           if (count < departmentSeats(departmentLevel(state, entry.dept))) {

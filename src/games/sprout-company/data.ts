@@ -31,8 +31,10 @@ export const TASKS: Readonly<Record<TaskKind, { name: string }>> = {
  * - bonus: 출시할 때 한 번 받는 잎사귀
  * - ease: 업무 카드 한 장에 드는 일을 줄인다 (0.03이면 3% 적게)
  * - reputation: 출시로 얻는 평판
+ * - away: 닫아 둔 동안 쌓이는 수익
+ * - cheer: 응원이 이어지는 시간
  */
-export const EFFECT_KEYS = ['workSpeed', 'income', 'bonus', 'ease', 'reputation'] as const;
+export const EFFECT_KEYS = ['workSpeed', 'income', 'bonus', 'ease', 'reputation', 'away', 'cheer'] as const;
 export type EffectKey = (typeof EFFECT_KEYS)[number];
 
 /** amount는 한 레벨(또는 한 사람)마다 더해지는 비율이다. 0.1이면 10%. */
@@ -75,6 +77,20 @@ export const STAFF_ORDER = Object.keys(STAFF) as StaffId[];
 
 /** 회사를 세울 때 사장 옆자리에 앉는 첫 직원. 사장과 같은 친구면 그다음 친구가 앉는다. */
 export const FIRST_HIRES: readonly StaffId[] = ['chick', 'duck'];
+
+/**
+ * 단짝: 둘이 옆자리(같은 줄의 바로 옆 책상)에 앉으면 둘 다 일이 speed만큼 빨라진다.
+ * 한 친구는 한 짝에만 든다. 자리는 직원 창의 자리 바꾸기에서 옮긴다.
+ */
+export const BUDDIES: readonly (readonly [StaffId, StaffId])[] = [
+  ['sprout', 'drop'],
+  ['duck', 'chick'],
+  ['dog', 'cat'],
+  ['ghost', 'bear'],
+  ['rabbit', 'fox'],
+  ['frog', 'penguin'],
+];
+export const BUDDY = { speed: 0.2 } as const;
 
 /** 채용할 때 한 번에 보여 주는 지원자의 수 */
 export const CANDIDATE_COUNT = 3;
@@ -132,6 +148,7 @@ export const TIPS = {
   play: '수익을 누르면 낸 게임을 할 수 있어요',
   train: '직원 창에서 교육하면 그 친구가 빨라져요',
   lead: '팀장을 두면 카드를 알아서 맡겨 줘요',
+  buddy: '단짝을 옆자리에 앉히면 더 빨라져요',
   rush: '급한 의뢰를 제때 끝내면 잎사귀를 받아요',
   backlog: '큰 게임은 맡기는 대로 다음 카드가 나와요',
   dept: '사무실 버튼에서 부서를 세울 수 있어요',
@@ -273,6 +290,46 @@ export const EQUIPMENT = {
     baseCost: 60000,
     growth: 1.8,
     effect: { key: 'income', amount: 0.1 },
+    unlockOffice: 3,
+  },
+  plant: {
+    name: '화분',
+    description: '응원이 25% 더 오래가요',
+    scope: 'company',
+    maxLevel: 4,
+    baseCost: 80,
+    growth: 4,
+    effect: { key: 'cheer', amount: 0.25 },
+    unlockOffice: 0,
+  },
+  chair: {
+    name: '편한 의자',
+    description: '모든 직원의 일 속도 +6%',
+    scope: 'company',
+    maxLevel: 10,
+    baseCost: 6000,
+    growth: 2.2,
+    effect: { key: 'workSpeed', amount: 0.06 },
+    unlockOffice: 2,
+  },
+  printer: {
+    name: '복합기',
+    description: '출시할 때 받는 잎사귀 +10%',
+    scope: 'company',
+    maxLevel: 10,
+    baseCost: 9000,
+    growth: 2.2,
+    effect: { key: 'bonus', amount: 0.1 },
+    unlockOffice: 2,
+  },
+  meeting: {
+    name: '회의실',
+    description: '닫아 둔 동안의 수익 +20%',
+    scope: 'company',
+    maxLevel: 10,
+    baseCost: 120000,
+    growth: 2.4,
+    effect: { key: 'away', amount: 0.2 },
     unlockOffice: 3,
   },
 } as const satisfies Record<string, EquipmentDef>;
