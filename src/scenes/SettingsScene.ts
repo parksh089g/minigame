@@ -314,7 +314,7 @@ export class SettingsScene extends Phaser.Scene {
   }
 
   private async makeCode(): Promise<void> {
-    this.showNotice('코드를 만드는 중…', true);
+    this.showNotice('코드를 만드는 중...', true);
     await whileBlocked(this, async () => {
       const result = await createTransferCode();
       if (!result.ok) {
@@ -348,7 +348,7 @@ export class SettingsScene extends Phaser.Scene {
         },
       });
       if (answer.action !== 'confirm') return null;
-      this.showNotice('기록을 불러오는 중…', true);
+      this.showNotice('기록을 불러오는 중...', true);
       const result = await useTransferCode(answer.value);
       if (result.ok) return { text: '기록을 불러왔어요.', ok: true };
       const text =

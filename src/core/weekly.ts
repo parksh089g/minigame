@@ -413,6 +413,23 @@ export function claimableMissions(state: WeeklyState, week: WeekContext): Weekly
   );
 }
 
+/**
+ * 지난 주에 다 채우고도 보상을 받지 않은 미션. 지금 따지는 주(weekKey)가 기록의 주보다 뒤일 때만 있다.
+ * 주가 바뀌면 기록이 지워지므로, 그 전에 이 미션들의 보상을 넣어 주는 데 쓴다(save.ts의 settleLastWeek).
+ */
+export function unclaimedFromLastWeek(
+  state: WeeklyState,
+  weekKey: string,
+  games: readonly WeeklyGame[],
+): WeeklyMission[] {
+  if (state.weekKey === null || state.weekKey >= weekKey) return [];
+  const past: WeekContext = {
+    weekKey: state.weekKey,
+    missions: missionsFor(state.weekKey, games, state.pick),
+  };
+  return claimableMissions(state, past);
+}
+
 export type ClaimMissionResult =
   | { ok: true; state: WeeklyState; mission: WeeklyMission }
   | { ok: false; reason: 'unknown' | 'incomplete' | 'claimed' };

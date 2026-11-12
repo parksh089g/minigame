@@ -12,7 +12,7 @@ import type {
   StashResult,
   SubmitResult,
 } from '../src/online/protocol';
-import { BoardService, type BoardApi, type Limited, type Scores, type WeekEntry } from './service';
+import { BoardService, type BoardApi, type DayEntry, type Limited, type Scores, type WeekEntry } from './service';
 
 /** 이 객체는 다른 자원을 쓰지 않는다. */
 type NoBindings = Record<string, never>;
@@ -29,6 +29,10 @@ export class ArcadeBoard extends DurableObject<NoBindings> implements BoardApi {
     return this.service.board(ip, game, device, span);
   }
 
+  daily(ip: string, game: RankedGame, device: string | null): Limited<RankBoard> {
+    return this.service.daily(ip, game, device);
+  }
+
   standings(ip: string, device: string, span: RankSpan): Limited<Standings> {
     return this.service.standings(ip, device, span);
   }
@@ -39,8 +43,9 @@ export class ArcadeBoard extends DurableObject<NoBindings> implements BoardApi {
     name: string,
     scores: Scores,
     weekly: WeekEntry | null,
+    daily: DayEntry | null,
   ): Limited<SubmitResult> {
-    return this.service.submit(ip, device, name, scores, weekly);
+    return this.service.submit(ip, device, name, scores, weekly, daily);
   }
 
   forget(ip: string, device: string): Limited<true> {

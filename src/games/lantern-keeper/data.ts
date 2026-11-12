@@ -333,6 +333,25 @@ export const POSTS = {
 /** 이 시각들에 적이 둥글게 에워싸는 "밀물"이 한 번씩 온다(초). 중간 보스와 겹치지 않게 그 사이에 둔다. */
 export const SURGES: readonly number[] = [180, 300, 420, 540];
 
+/**
+ * 끝없는 밤: 새벽을 맞은 뒤에도 쓰러질 때까지 이어 가는 판. 새벽까지의 난이도 위에 아래 값이 더 얹힌다.
+ * 그림자가 분마다 곱으로 튼튼해져서, 아무리 센 빌드도 언젠가는 밀린다.
+ */
+export const ENDLESS = {
+  /** 1분마다 그림자와 보스의 체력에 곱해지는 값 */
+  hp: 1.6,
+  /** 1분마다 받는 피해에 더해지는 비율 */
+  damage: 0.25,
+  /** 1분마다 그림자의 빠르기에 더해지는 비율과 그 상한. 오래 끌면 걸어서는 따돌릴 수 없게 된다. */
+  speed: 0.04,
+  maxSpeed: 0.6,
+  /** 보스가 나오는 간격(초). 중간 보스 세 가지가 차례로 돌아가며 나온다. */
+  bossEvery: 90,
+  /** 밀물의 간격(초)과, 한 번에 에워싸는 수. 첫 밀물은 간격의 절반이 지났을 때 온다. */
+  surgeEvery: 60,
+  surgeCount: 42,
+} as const;
+
 export type WeaponId = 'ember' | 'aura' | 'firefly' | 'star' | 'lance' | 'oil' | 'bolt' | 'bell' | 'moon';
 export type PassiveId = 'wick' | 'hourglass' | 'boots' | 'magnet' | 'coat' | 'lens' | 'hood' | 'herb' | 'flint';
 

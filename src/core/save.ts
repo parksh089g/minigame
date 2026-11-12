@@ -40,8 +40,10 @@ import {
   normalizeWeekly,
   pickedGame,
   recordWeeklyPlay,
+  unclaimedFromLastWeek,
   weeklyFor,
   type WeekContext,
+  type WeeklyGame,
   type WeeklyMission,
   type WeeklyState,
 } from './weekly';
@@ -422,6 +424,40 @@ export function claimAchievement(
       updatedAt: now,
     },
     achievement: result.achievement,
+  };
+}
+
+export interface WeekSettlement {
+  save: SaveData;
+  /** 보상을 넣어 준 지난주의 미션 */
+  missions: WeeklyMission[];
+  /** 넣어 준 코인의 합 */
+  coins: number;
+}
+
+/**
+ * 주가 바뀌었을 때, 지난주에 다 채우고도 받지 않은 미션의 보상을 넣어 준 새 세이브를 돌려준다.
+ * 넣어 준 뒤에는 주간 기록을 새 주(weekKey)의 빈 기록으로 바꿔서 두 번 주지 않는다.
+ * 넣어 줄 것이 없으면 받은 세이브 그대로다.
+ */
+export function settleLastWeek(
+  save: SaveData,
+  weekKey: string,
+  games: readonly WeeklyGame[],
+  now: number = Date.now(),
+): WeekSettlement {
+  const missions = unclaimedFromLastWeek(save.weekly, weekKey, games);
+  if (missions.length === 0) return { save, missions, coins: 0 };
+  const coins = missions.reduce((sum, mission) => sum + mission.reward, 0);
+  return {
+    save: {
+      ...save,
+      coins: save.coins + coins,
+      weekly: { ...createWeekly(), weekKey },
+      updatedAt: now,
+    },
+    missions,
+    coins,
   };
 }
 

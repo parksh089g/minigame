@@ -7,6 +7,47 @@
 import Phaser from 'phaser';
 import { addHiResCanvas, renderScale } from './hidpi';
 
+/** bakedPanel이 받는 카드의 모습. ui.ts의 drawPanel이 받는 것 가운데 쓰는 것만 추렸다. */
+export interface BakedPanelLook {
+  fill: number;
+  /** 아래에 깔리는 그림자 색. 없으면 그림자를 그리지 않는다. */
+  shadow?: number;
+  radius: number;
+  /** 그림자가 아래로 비어져 나오는 두께 */
+  depth: number;
+  /** 카드 위에 덧그리는 것(예: 구석의 점). 카드의 왼쪽 위가 원점이다. tag는 덧그린 것마다 다른 이름이어야 한다. */
+  extra?: { tag: string; draw: (graphics: Phaser.GameObjects.Graphics) => void };
+}
+
+/**
+ * 둥근 카드 한 장을 그림으로 구워 두고 그 텍스처의 이름을 돌려준다. 크기와 모습이 같으면 같은 그림을 다시 쓴다.
+ * 그림의 크기는 width × (height + depth)이고, 이미지를 (0, 0) 원점으로 놓으면 drawPanel로 그린 것과 같은 자리에 온다.
+ * 같은 카드가 수십 장 놓이는 화면(단계 칸, 게임 카드)에서 Graphics 대신 쓴다.
+ */
+export function bakedPanel(scene: Phaser.Scene, width: number, height: number, look: BakedPanelLook): string {
+  const key = [
+    'panel',
+    width.toFixed(2),
+    height.toFixed(2),
+    look.fill.toString(16),
+    look.shadow === undefined ? 'flat' : look.shadow.toString(16),
+    look.radius,
+    look.depth,
+    look.extra?.tag ?? '',
+  ].join(':');
+  const depth = look.shadow === undefined ? 0 : look.depth;
+  return bakeShape(scene, key, { width, height: height + depth, originX: 0, originY: 0 }, (graphics) => {
+    const radius = Math.min(look.radius, width / 2, height / 2);
+    if (look.shadow !== undefined && depth > 0) {
+      graphics.fillStyle(look.shadow, 1);
+      graphics.fillRoundedRect(0, depth, width, height, radius);
+    }
+    graphics.fillStyle(look.fill, 1);
+    graphics.fillRoundedRect(0, 0, width, height, radius);
+    look.extra?.draw(graphics);
+  });
+}
+
 export interface BakeBox {
   /** 그림의 크기(논리 픽셀) */
   width: number;

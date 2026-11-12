@@ -3,6 +3,7 @@
  * 상태(RunState)가 평범한 데이터라서 그대로 저장했다가 이어서 할 수 있다.
  */
 import {
+  ENDLESS,
   ENEMIES,
   FLINT,
   HEROES,
@@ -33,6 +34,8 @@ import {
   depthRules,
   EMBER_BONUS,
   emberStats,
+  endlessBossKind,
+  endlessScale,
   enemyHp,
   fireflyStats,
   HEAL_AMOUNT,
@@ -312,6 +315,19 @@ export interface RunState {
    */
   offer?: Upgrade[];
   nextUid: number;
+  /**
+   * 새벽을 맞았을 때 끝없는 밤으로 이어 갈 수 있는 판인지. 이 값이 없으면 새벽에서 판이 끝난다
+   * (끝없는 밤이 생기기 전에 저장한 판도 그렇다).
+   */
+  endlessOpen?: boolean;
+  /** 새벽을 맞았고, 여기서 마칠지 끝없는 밤으로 이어 갈지 아직 고르지 않았다. 고를 때까지 시뮬레이션이 멈춘다. */
+  pendingDawn?: boolean;
+  /**
+   * 끝없는 밤: 새벽을 맞은 뒤에 이어 가기로 했을 때만 있다.
+   * at은 들어선 때(초), kills는 그때까지 쓰러뜨린 수, bosses와 surges는 그 뒤로 나온 보스와 밀물의 수.
+   */
+  endless?: { at: number; kills: number; bosses: number; surges: number };
+  /** 새벽을 맞고 마쳤으면 cleared. 끝없는 밤에서 쓰러졌으면 dead지만 새벽을 맞은 것은 그대로다(RunSummary.cleared). */
   over: null | 'dead' | 'cleared';
 }
 
@@ -398,7 +414,12 @@ export interface RunConfig {
   seed?: number;
   /** 오늘의 판이면 그날(daily.ts의 dayIndexOf) */
   daily?: number;
+  /** 새벽을 맞았을 때 끝없는 밤으로 이어 갈지 물을지. 안 주면 새벽에서 판이 끝난다. */
+  endless?: boolean;
 }
+
+/** 끝없는 밤이 얹는 난이도가 없을 때의 값 */
+const NO_ENDLESS = { hp: 1, damage: 1, speed: 1 } as const;
 
 const CELL = 20;
 const BUCKETS = 4096;
@@ -467,6 +488,7 @@ export function createRun(config: RunConfig): RunState {
     depth: clampDepth(config.depth),
     seed: config.seed ?? 1,
     ...(config.daily !== undefined ? { daily: config.daily } : {}),
+    ...(config.endless ? { endlessOpen: true } : {}),
     player: {
       x: 0,
       y: 0,
@@ -508,6 +530,11 @@ export function createRun(config: RunConfig): RunState {
     nextUid: 1,
     over: null,
   };
+}
+
+/** 새벽을 맞은 판인지: 마칠지 이어 갈지 고르는 중이거나 끝없는 밤으로 이어 간 판. 버리면 새벽을 맞은 기록이 사라진다. */
+export function runDawned(run: RunState | null | undefined): boolean {
+  return Boolean(run && (run.pendingDawn === true || run.endless !== undefined));
 }
 
 /** 저장해 둔 판이 이어서 할 수 있는 모양인지 대강 확인한다. */
@@ -561,6 +588,8 @@ export class Sim {
   mods: Modifiers;
   /** 이 판의 깊은 밤 규칙 */
   readonly depth: DepthRules;
+  /** 끝없는 밤이 지금 얹는 난이도. 걸음마다 새로 셈한다. */
+  private late: { hp: number; damage: number; speed: number } = NO_ENDLESS;
 
   private readonly heads = new Int32Array(BUCKETS);
   private next = new Int32Array(512);
@@ -611,9 +640,49 @@ export class Sim {
     return PLAYER_BASE.magnet * this.mods.magnet;
   }
 
-  /** 난이도를 정하는 시각. 마지막 보스가 나온 뒤에는 더 어려워지지 않는다. */
+  /** 난이도를 정하는 시각. 마지막 보스가 나온 뒤에는 더 어려워지지 않는다(끝없는 밤의 난이도는 late가 따로 얹는다). */
   private get clock(): number {
     return Math.min(this.state.t, RUN_SECONDS);
+  }
+
+  /** 받는 피해에 곱하는 값: 깊은 밤의 것에 끝없는 밤의 것을 곱한다. */
+  private get harm(): number {
+    return this.depth.damage * this.late.damage;
+  }
+
+  /** 새벽을 맞은 판인지. 마칠지 고르는 중이거나 끝없는 밤으로 이어 간 판도 그렇다. */
+  get dawned(): boolean {
+    const s = this.state;
+    return s.over === 'cleared' || s.pendingDawn === true || s.endless !== undefined;
+  }
+
+  /** 끝없는 밤에서 버틴 시간(초). 끝없는 밤이 아니면 0 */
+  get endlessSeconds(): number {
+    const s = this.state;
+    return s.endless ? Math.max(0, s.t - s.endless.at) : 0;
+  }
+
+  /**
+   * 새벽을 맞은 판을 그 자리에서 마친다. 끝없는 밤이었으면 지금까지 버틴 것으로 끝난다.
+   * 하던 판을 두고 새 판을 시작할 때 쓴다. 새벽을 맞지 않은 판에는 아무 일도 하지 않는다.
+   */
+  settle(): void {
+    const s = this.state;
+    if (s.over || !this.dawned) return;
+    s.pendingDawn = false;
+    s.over = 'cleared';
+  }
+
+  /**
+   * 새벽에서 고른 것을 적용한다. goOn이면 끝없는 밤으로 이어 가고, 아니면 여기서 판을 마친다.
+   * 고를 것이 없을 때는 아무 일도 하지 않는다.
+   */
+  chooseDawn(goOn: boolean): void {
+    const s = this.state;
+    if (!s.pendingDawn) return;
+    s.pendingDawn = false;
+    if (goOn) s.endless = { at: s.t, kills: s.kills, bosses: 0, surges: 0 };
+    else s.over = 'cleared';
   }
 
   /** 레벨업 선택지. 한 번 뽑으면 고르거나 다시 뽑을 때까지 같은 것이 나온다. */
@@ -703,13 +772,15 @@ export class Sim {
 
   summary(): RunSummary {
     const s = this.state;
+    const endlessSeconds = this.endlessSeconds;
     return {
-      seconds: Math.min(s.t, RUN_SECONDS),
+      seconds: Math.min(s.t, RUN_SECONDS) + endlessSeconds,
+      endlessSeconds,
       kills: s.kills,
-      countedKills: s.killsBeforeBoss ?? s.kills,
+      countedKills: (s.killsBeforeBoss ?? s.endless?.kills ?? s.kills) + (s.endless ? s.kills - s.endless.kills : 0),
       level: s.player.level,
       bossKills: s.bossKills,
-      cleared: s.over === 'cleared',
+      cleared: this.dawned,
       bonusEmbers: s.bonusEmbers,
       depth: clampDepth(s.depth),
     };
@@ -717,14 +788,15 @@ export class Sim {
 
   /**
    * dt초만큼 진행한다. moveX, moveY는 길이가 1 이하인 이동 방향.
-   * 레벨업이나 강화권 선택을 기다리는 중이거나 판이 끝났으면 아무 일도 하지 않는다.
+   * 레벨업이나 강화권, 새벽의 선택을 기다리는 중이거나 판이 끝났으면 아무 일도 하지 않는다.
    */
   step(dt: number, moveX: number, moveY: number): void {
     this.events.length = 0;
     const s = this.state;
-    if (s.over || s.pendingLevelUps > 0 || s.pendingTickets > 0) return;
+    if (s.over || s.pendingDawn || s.pendingLevelUps > 0 || s.pendingTickets > 0) return;
 
     s.t += dt;
+    this.late = s.endless ? endlessScale(s.t - s.endless.at) : NO_ENDLESS;
     this.movePlayer(dt, moveX, moveY);
     this.spawn(dt);
     this.buildGrid();
@@ -779,7 +851,7 @@ export class Sim {
     // 한 번 솟는 동안에는 한 번만 덴다. 빛막이가 막아 줬을 때도 마찬가지다.
     if (under && p.inv <= 0 && !((p.scorch ?? 0) > 0) && ventPhase(under, s.t) === 'erupt') {
       p.scorch = VENT.erupt;
-      if (this.hurt(Math.round(VENT.damage * this.depth.damage))) return;
+      if (this.hurt(Math.round(VENT.damage * this.harm))) return;
     }
     // 그림자는 tick마다 덴다.
     if (Math.floor(s.t / VENT.tick) === Math.floor((s.t - dt) / VENT.tick)) return;
@@ -827,6 +899,8 @@ export class Sim {
   private hurt(amount: number): boolean {
     const s = this.state;
     const p = s.player;
+    // 마지막 보스가 쓰러진 바로 그 순간에는 더 다치지 않는다. 새벽이 먼저다.
+    if (s.pendingDawn) return false;
     // 등갓의 빛막이 서 있으면 이번 피해는 막고, 빛막은 다시 생길 때까지 사라진다.
     if (this.guardReady) {
       p.guard = this.mods.guard;
@@ -861,7 +935,9 @@ export class Sim {
 
   private makeEnemy(kind: EnemyKind, x: number, y: number): Enemy {
     const s = this.state;
-    const hp = Math.round(enemyHp(kind, this.clock) * (ENEMIES[kind].boss ? this.depth.bossHp : this.depth.hp));
+    const hp = Math.round(
+      enemyHp(kind, this.clock) * (ENEMIES[kind].boss ? this.depth.bossHp : this.depth.hp) * this.late.hp,
+    );
     const enemy: Enemy = {
       uid: s.nextUid,
       kind,
@@ -928,16 +1004,23 @@ export class Sim {
     // 밀물: 화면 가장자리를 따라 둥글게 에워싼다.
     if (s.surgeIndex < SURGES.length && s.t >= SURGES[s.surgeIndex]) {
       s.surgeIndex += 1;
-      const count = 18 + 6 * s.surgeIndex;
-      const kind = STAGES[s.stage].surge[s.surgeIndex >= 3 ? 1 : 0];
-      const rx = s.viewW / 2 + SPAWN_MARGIN;
-      const ry = s.viewH / 2 + SPAWN_MARGIN;
-      const offset = this.rand() * Math.PI * 2;
-      for (let i = 0; i < count; i += 1) {
-        const angle = offset + (i / count) * Math.PI * 2;
-        this.makeEnemy(kind, s.player.x + Math.cos(angle) * rx, s.player.y + Math.sin(angle) * ry);
+      this.surge(STAGES[s.stage].surge[s.surgeIndex >= 3 ? 1 : 0], 18 + 6 * s.surgeIndex);
+    }
+
+    if (s.endless) {
+      // 끝없는 밤: 밀물과 보스가 정해진 간격으로 끝없이 온다. 체력은 그때의 난이도(late)를 따른다.
+      const since = s.t - s.endless.at;
+      if (since >= (s.endless.surges + 0.5) * ENDLESS.surgeEvery) {
+        s.endless.surges += 1;
+        this.surge(STAGES[s.stage].surge[1], ENDLESS.surgeCount);
       }
-      this.events.push({ type: 'surge' });
+      if (since >= (s.endless.bosses + 1) * ENDLESS.bossEvery) {
+        const boss = this.spawnBoss(endlessBossKind(s.stage, s.endless.bosses));
+        boss.tier = MID_BOSS_COUNT - 1;
+        boss.hp = Math.round(midBossTier(boss.tier).hp * this.depth.bossHp * this.late.hp);
+        boss.maxHp = boss.hp;
+        s.endless.bosses += 1;
+      }
     }
 
     // 중간 보스: 정해진 간격마다 하나씩, 나올 때마다 더 강하게
@@ -955,6 +1038,19 @@ export class Sim {
       // 마지막 보스는 가장 센 중간 보스와 같은 단계로 부하를 부른다.
       this.spawnBoss(STAGES[s.stage].finalBoss).tier = MID_BOSS_COUNT - 1;
     }
+  }
+
+  /** 밀물: kind count마리가 화면 가장자리를 따라 둥글게 에워싼다. */
+  private surge(kind: EnemyKind, count: number): void {
+    const s = this.state;
+    const rx = s.viewW / 2 + SPAWN_MARGIN;
+    const ry = s.viewH / 2 + SPAWN_MARGIN;
+    const offset = this.rand() * Math.PI * 2;
+    for (let i = 0; i < count; i += 1) {
+      const angle = offset + (i / count) * Math.PI * 2;
+      this.makeEnemy(kind, s.player.x + Math.cos(angle) * rx, s.player.y + Math.sin(angle) * ry);
+    }
+    this.events.push({ type: 'surge' });
   }
 
   /** 쏘는 적이 싸움터에 이미 정해진 수만큼 있는지. 그렇다면 더 내보내지 않는다. */
@@ -1004,8 +1100,8 @@ export class Sim {
     // buildGrid 뒤에 생긴 적은 격자에 없으므로 그때의 수까지만 이웃으로 본다.
     const gridCount = enemies.length;
     const recycle = Math.max(s.viewW, s.viewH) * 0.5 + 90;
-    const fast = speedScale(this.clock) * this.depth.speed;
-    const hard = damageScale(this.clock) * this.depth.damage;
+    const fast = speedScale(this.clock) * this.depth.speed * this.late.speed;
+    const hard = damageScale(this.clock) * this.harm;
 
     for (let i = 0; i < gridCount; i += 1) {
       const e = enemies[i];
@@ -1177,7 +1273,7 @@ export class Sim {
               life: SPIT.life,
               radius: SPIT.radius,
               // 예고가 있는 공격은 보스의 것처럼 시간이 지나도 세지지 않고, 깊은 밤의 단계만 따른다.
-              damage: Math.round(shot.damage * this.depth.damage),
+              damage: Math.round(shot.damage * this.harm),
             });
             this.events.push({ type: 'spit' });
           }
@@ -1243,7 +1339,7 @@ export class Sim {
       const px = p.x - e.x;
       const py = p.y - e.y;
       if (p.inv <= 0 && px * px + py * py < reach * reach) {
-        if (this.hurt(Math.round(info.damage * (info.boss ? this.depth.damage : hard)))) return;
+        if (this.hurt(Math.round(info.damage * (info.boss ? this.harm : hard)))) return;
       }
     }
   }
@@ -1265,7 +1361,7 @@ export class Sim {
     }
     const reach = burst.radius + PLAYER_BASE.radius;
     if (p.inv <= 0 && (p.x - source.x) ** 2 + (p.y - source.y) ** 2 < reach * reach) {
-      return this.hurt(Math.round(burst.damage * this.depth.damage));
+      return this.hurt(Math.round(burst.damage * this.harm));
     }
     return false;
   }
@@ -1283,7 +1379,7 @@ export class Sim {
         vy: Math.sin(a) * HAZARD.speed,
         life: HAZARD.life,
         radius: HAZARD.radius,
-        damage: Math.round(damage * this.depth.damage),
+        damage: Math.round(damage * this.harm),
       });
     }
     this.events.push({ type: 'volley' });
@@ -1926,8 +2022,10 @@ export class Sim {
       if (info.boss) {
         s.bossKills += 1;
         this.dropGem(e.x + 8, e.y, HEAL_DROP_VALUE * 2, 'heal');
-        if (e.kind === STAGES[s.stage].finalBoss) {
-          s.over = 'cleared';
+        if (e.kind === STAGES[s.stage].finalBoss && !s.endless) {
+          // 새벽. 끝없는 밤으로 이어 갈 수 있는 판이면 마칠지 이어 갈지 고를 때까지 멈춘다.
+          if (s.endlessOpen) s.pendingDawn = true;
+          else s.over = 'cleared';
         } else {
           // 중간 보스를 잡으면 무기 강화권을 한 장 받는다.
           s.pendingTickets += 1;

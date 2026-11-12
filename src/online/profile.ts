@@ -5,8 +5,10 @@
 import {
   cleanName,
   cleanScore,
+  hasDailyBoard,
   hasWeeklyBoard,
   isDeviceId,
+  isRankDay,
   isRankedGame,
   isRankWeek,
   RANKED_GAMES,
@@ -26,6 +28,19 @@ export interface WeekBests {
   sent: Record<string, number>;
 }
 
+/**
+ * 오늘의 랭킹에 올릴 기록: 그날의 판(등불지기의 오늘의 판)에서 낸 점수. 날이 바뀌면 통째로 새로 시작한다.
+ * 이번 주의 기록처럼, 닉네임을 정하기 전에 낸 점수도 적어 둔다.
+ */
+export interface DayBests {
+  /** 이 기록이 속한 날(protocol.ts의 rankDayOf) */
+  key: number;
+  /** 게임 id → 그날의 판에서 낸 가장 높은 점수 */
+  bests: Record<string, number>;
+  /** 게임 id → 그중 서버에 올린 점수. 서버가 받지 않은 것(날이 이미 바뀐 경우)도 다시 보내지 않게 여기에 적는다. */
+  sent: Record<string, number>;
+}
+
 export interface OnlineState {
   /** 랭킹에서 이 세이브의 줄을 가리키는 무작위 id. 닉네임을 처음 정할 때 만든다. */
   id: string | null;
@@ -37,10 +52,12 @@ export interface OnlineState {
   sent: Record<string, number>;
   /** 이번 주 랭킹에 올릴 기록. 주간 랭킹이 생긴 뒤로 랭킹이 있는 게임을 한 판도 하지 않았으면 null. */
   week: WeekBests | null;
+  /** 오늘의 랭킹에 올릴 기록. 오늘의 랭킹이 생긴 뒤로 오늘의 판을 한 판도 하지 않았으면 null. */
+  day: DayBests | null;
 }
 
 export function createOnline(): OnlineState {
-  return { id: null, name: null, sentName: null, sent: {}, week: null };
+  return { id: null, name: null, sentName: null, sent: {}, week: null, day: null };
 }
 
 /** 게임 id → 점수로 된 묶음에서 랭킹에 올릴 수 있는 것만 고른다. */
@@ -67,6 +84,18 @@ function normalizeWeek(raw: unknown, joined: boolean): WeekBests | null {
   return { key: data.key, bests: readWeekScores(data.bests), sent: joined ? readWeekScores(data.sent) : {} };
 }
 
+/** 오늘의 랭킹이 있는 게임의 점수만 남긴다. */
+function readDayScores(raw: unknown): Record<string, number> {
+  return Object.fromEntries(Object.entries(readScores(raw)).filter(([game]) => hasDailyBoard(game)));
+}
+
+function normalizeDay(raw: unknown, joined: boolean): DayBests | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const data = raw as Record<string, unknown>;
+  if (!isRankDay(data.key)) return null;
+  return { key: data.key, bests: readDayScores(data.bests), sent: joined ? readDayScores(data.sent) : {} };
+}
+
 /** 저장소나 가져온 파일에서 읽은 값을 믿을 수 있는 모양으로 맞춘다. */
 export function normalizeOnline(raw: unknown): OnlineState {
   const state = createOnline();
@@ -74,6 +103,7 @@ export function normalizeOnline(raw: unknown): OnlineState {
   const data = raw as Record<string, unknown>;
   const name = isDeviceId(data.id) ? cleanName(data.name) : null;
   state.week = normalizeWeek(data.week, name !== null);
+  state.day = normalizeDay(data.day, name !== null);
   if (!isDeviceId(data.id)) return state;
   state.id = data.id;
   state.name = name;
@@ -98,10 +128,14 @@ export function withName(state: OnlineState, name: string, newId: string): Onlin
 
 /**
  * 랭킹에서 빠진다. 닉네임과 올린 기록 표시를 지운다. 다시 참여하면 새 id로 시작한다.
- * 이번 주에 낸 점수는 남겨 둔다. 최고 기록처럼, 다시 참여하면 새 id로 다시 올라간다.
+ * 이번 주와 오늘 낸 점수는 남겨 둔다. 최고 기록처럼, 다시 참여하면 새 id로 다시 올라간다.
  */
 export function withoutName(state: OnlineState): OnlineState {
-  return { ...createOnline(), week: state.week ? { ...state.week, sent: {} } : null };
+  return {
+    ...createOnline(),
+    week: state.week ? { ...state.week, sent: {} } : null,
+    day: state.day ? { ...state.day, sent: {} } : null,
+  };
 }
 
 /**
@@ -119,6 +153,21 @@ export function withWeekScore(state: OnlineState, game: string, rawScore: number
   };
 }
 
+/**
+ * 방금 끝난 오늘의 판의 점수를 그날(day)의 기록에 적는다. 적어 둔 것이 다른 날의 것이면 버리고 새로 시작한다.
+ * 오늘의 랭킹이 없는 게임과 올릴 수 없는 점수(0점)는 적지 않는다.
+ */
+export function withDayScore(state: OnlineState, game: string, rawScore: number, day: number): OnlineState {
+  const score = cleanScore(rawScore);
+  if (!hasDailyBoard(game) || score === null || !isRankDay(day)) return state;
+  const current = state.day?.key === day ? state.day : { key: day, bests: {}, sent: {} };
+  if (score <= (current.bests[game] ?? 0) && current === state.day) return state;
+  return {
+    ...state,
+    day: { ...current, bests: { ...current.bests, [game]: Math.max(score, current.bests[game] ?? 0) } },
+  };
+}
+
 /** 게임 id → 최고 점수 */
 export type Bests = Readonly<Record<string, { best: number } | undefined>>;
 
@@ -133,15 +182,28 @@ function pendingWeek(state: OnlineState, week: string | null): Record<string, nu
   return scores;
 }
 
+/** 오늘(day)의 판에서 낸 점수 가운데 아직 올리지 않은 것. 적어 둔 것이 다른 날의 것이면 비어 있다. */
+function pendingDay(state: OnlineState, day: number | null): Record<string, number> {
+  const scores: Record<string, number> = {};
+  if (day === null || state.day?.key !== day) return scores;
+  for (const game of RANKED_GAMES) {
+    const best = state.day.bests[game] ?? 0;
+    if (best > (state.day.sent[game] ?? 0)) scores[game] = best;
+  }
+  return scores;
+}
+
 /**
  * 서버에 보내야 할 것. 보낼 것이 없거나 랭킹에 참여하지 않았으면 null.
  * 서버에 올라가 있는 것보다 높아진 최고 점수와, 바뀐 닉네임을 보낸다.
  * week(지금의 랭킹 주)를 주면 그 주에 낸 점수 가운데 올리지 않은 것도 같이 보낸다.
+ * day(지금의 랭킹 날)를 주면 그날의 판에서 낸 점수 가운데 올리지 않은 것도 같이 보낸다.
  */
 export function pendingSubmit(
   state: OnlineState,
   games: Bests,
   week: string | null = null,
+  day: number | null = null,
 ): SubmitRequest | null {
   if (!isJoined(state)) return null;
   const scores: Record<string, number> = {};
@@ -151,9 +213,12 @@ export function pendingSubmit(
   }
   const weekScores = pendingWeek(state, week);
   const hasWeek = week !== null && Object.keys(weekScores).length > 0;
-  if (Object.keys(scores).length === 0 && !hasWeek && state.sentName === state.name) return null;
+  const dayScores = pendingDay(state, day);
+  const hasDay = day !== null && Object.keys(dayScores).length > 0;
+  if (Object.keys(scores).length === 0 && !hasWeek && !hasDay && state.sentName === state.name) return null;
   const request: SubmitRequest = { device: state.id, name: state.name, scores };
   if (hasWeek) request.weekly = { week, scores: weekScores };
+  if (hasDay) request.daily = { day, scores: dayScores };
   return request;
 }
 
@@ -165,6 +230,16 @@ export function isWaitingToSend(state: OnlineState, games: Bests, game: string):
 /** 이 게임에서 이번 주(week)에 낸 점수가 서버에 아직 올라가지 않았는지. 랭킹에 참여하지 않았으면 false다. */
 export function isWaitingToSendWeek(state: OnlineState, game: string, week: string): boolean {
   return isJoined(state) && pendingWeek(state, week)[game] !== undefined;
+}
+
+/** 이 게임의 오늘(day)의 판 점수가 서버에 아직 올라가지 않았는지. 랭킹에 참여하지 않았으면 false다. */
+export function isWaitingToSendDay(state: OnlineState, game: string, day: number): boolean {
+  return isJoined(state) && pendingDay(state, day)[game] !== undefined;
+}
+
+/** 이 게임의 오늘(day)의 판에서 낸 가장 높은 점수. 없으면 0. */
+export function dayBestOf(state: OnlineState, game: string, day: number): number {
+  return state.day?.key === day ? (state.day.bests[game] ?? 0) : 0;
 }
 
 /** 이 게임에서 이번 주(week)에 낸 가장 높은 점수. 없으면 0. */
@@ -197,5 +272,14 @@ export function withSent(
     }
     week = { ...week, sent: weekSent };
   }
-  return { ...state, sentName: request.name, sent, week };
+  // 오늘의 점수도 마찬가지다.
+  let day = state.day;
+  if (day && request.daily && day.key === request.daily.day) {
+    const daySent = { ...day.sent };
+    for (const [game, score] of Object.entries(request.daily.scores)) {
+      daySent[game] = Math.max(daySent[game] ?? 0, score);
+    }
+    day = { ...day, sent: daySent };
+  }
+  return { ...state, sentName: request.name, sent, week, day };
 }

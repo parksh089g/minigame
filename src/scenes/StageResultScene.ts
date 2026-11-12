@@ -124,7 +124,7 @@ export class StageResultScene extends Phaser.Scene implements BackAware {
     const band = this.add.graphics();
     band.fillStyle(fill, 1);
     band.fillRoundedRect(left + 10, y, PANEL_WIDTH - 20, EXTRA_ROW - 4, 8);
-    addText(this, GAME_WIDTH / 2, y + (EXTRA_ROW - 4) / 2, onTap ? `${label}  ›` : label, {
+    addText(this, GAME_WIDTH / 2, y + (EXTRA_ROW - 4) / 2, onTap ? `${label}  >` : label, {
       color,
       originX: 0.5,
       originY: 0.5,

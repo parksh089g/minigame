@@ -3,6 +3,7 @@
  * Cloudflare에 기대지 않아서 테스트에서 그대로 돌려 볼 수 있다. 실제 서버에서는 board.ts의 Durable Object가 이것을 들고 있다.
  */
 import {
+  rankDayOf,
   rankWeekOf,
   type RankBoard,
   type RankedGame,
@@ -26,6 +27,12 @@ export interface WeekEntry {
   scores: Scores;
 }
 
+/** 앱이 오늘의 랭킹에 올리겠다고 보낸 것. 어느 날의 점수인지는 앱이 적어 보내고, 서버가 자기 시각의 날과 견준다. */
+export interface DayEntry {
+  day: number;
+  scores: Scores;
+}
+
 /**
  * api.ts가 부르는 모양. 실제 서버에서는 Durable Object를 거쳐서 답이 Promise로 온다.
  * ip는 요청을 세는 데만 쓰고 저장하지 않는다.
@@ -37,6 +44,8 @@ export interface BoardApi {
     device: string | null,
     span: RankSpan,
   ): Limited<RankBoard> | Promise<Limited<RankBoard>>;
+  /** 한 게임의 오늘의 랭킹. 오늘이 어느 날인지는 서버가 정해서 답에 적는다. */
+  daily(ip: string, game: RankedGame, device: string | null): Limited<RankBoard> | Promise<Limited<RankBoard>>;
   standings(ip: string, device: string, span: RankSpan): Limited<Standings> | Promise<Limited<Standings>>;
   submit(
     ip: string,
@@ -44,6 +53,7 @@ export interface BoardApi {
     name: string,
     scores: Scores,
     weekly: WeekEntry | null,
+    daily: DayEntry | null,
   ): Limited<SubmitResult> | Promise<Limited<SubmitResult>>;
   forget(ip: string, device: string): Limited<true> | Promise<Limited<true>>;
   stash(ip: string, bundle: string): Limited<StashResult | null> | Promise<Limited<StashResult | null>>;
@@ -76,6 +86,12 @@ export class BoardService implements BoardApi {
     return this.db.board(game, device, this.weekFor(span));
   }
 
+  /** 서버의 시각으로 본 오늘의 랭킹. 랭킹 보기와 같은 한도로 센다. */
+  daily(ip: string, game: RankedGame, device: string | null): Limited<RankBoard> {
+    if (!this.allow('read', ip)) return TOO_FAST;
+    return this.db.dayBoard(game, device, rankDayOf(this.now()));
+  }
+
   /** 한 기기의 모든 게임 순위. 랭킹 보기와 같은 한도로 센다. */
   standings(ip: string, device: string, span: RankSpan = 'all'): Limited<Standings> {
     if (!this.allow('read', ip)) return TOO_FAST;
@@ -88,6 +104,7 @@ export class BoardService implements BoardApi {
     name: string,
     scores: Scores,
     weekly: WeekEntry | null = null,
+    daily: DayEntry | null = null,
   ): Limited<SubmitResult> {
     if (!this.allow('submit', ip)) return TOO_FAST;
     // 처음 보는 기기는 따로 센다. 이미 올라 있는 기기가 점수를 고치는 것은 막지 않는다.
@@ -95,7 +112,9 @@ export class BoardService implements BoardApi {
     const now = this.now();
     // 이번 주의 점수만 받는다. 앱의 시계가 틀렸거나 주가 바뀐 뒤에 온 지난 주의 점수는 버린다.
     const thisWeek = weekly && weekly.week === rankWeekOf(now) ? weekly : null;
-    return this.db.submit(device, name, scores, now, thisWeek);
+    // 오늘의 점수도 마찬가지로, 서버가 보는 오늘의 것만 받는다.
+    const today = daily && daily.day === rankDayOf(now) ? daily : null;
+    return this.db.submit(device, name, scores, now, thisWeek, today);
   }
 
   forget(ip: string, device: string): Limited<true> {

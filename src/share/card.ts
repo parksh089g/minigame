@@ -61,8 +61,37 @@ function font(size: number): string {
 function pill(c: Ctx, x: number, y: number, width: number, height: number, radius: number, color: string): void {
   c.fillStyle = color;
   c.beginPath();
-  c.roundRect(x, y, width, height, radius);
+  roundedPath(c, x, y, width, height, radius);
   c.fill();
+}
+
+/**
+ * 모서리가 둥근 사각형의 길을 놓는다. 캔버스의 roundRect는 iOS 15 이하의 사파리에 없어서,
+ * 없을 때는 모서리마다 호를 이어 직접 그린다. 그러지 않으면 그 기기에서는 카드를 만들지 못해 그림 없이 공유된다.
+ */
+export function roundedPath(
+  c: Pick<Ctx, 'moveTo' | 'lineTo' | 'arcTo' | 'closePath'> & { roundRect?: Ctx['roundRect'] },
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+): void {
+  if (typeof c.roundRect === 'function') {
+    c.roundRect(x, y, width, height, radius);
+    return;
+  }
+  const r = Math.max(0, Math.min(radius, width / 2, height / 2));
+  c.moveTo(x + r, y);
+  c.lineTo(x + width - r, y);
+  c.arcTo(x + width, y, x + width, y + r, r);
+  c.lineTo(x + width, y + height - r);
+  c.arcTo(x + width, y + height, x + width - r, y + height, r);
+  c.lineTo(x + r, y + height);
+  c.arcTo(x, y + height, x, y + height - r, r);
+  c.lineTo(x, y + r);
+  c.arcTo(x, y, x + r, y, r);
+  c.closePath();
 }
 
 /** text가 maxWidth에 들어가는 가장 큰 글자 크기(size 이하)를 고른다. */

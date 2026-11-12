@@ -104,6 +104,8 @@ export interface RankBoard {
   me: { rank: number; score: number; name: string } | null;
   /** 이번 주 랭킹일 때만 온다: 서버가 보는 이번 주(rankWeekOf). 전체 랭킹에는 없다. */
   week?: string;
+  /** 오늘의 랭킹일 때만 온다: 서버가 보는 오늘(rankDayOf) */
+  day?: number;
 }
 
 /**
@@ -161,6 +163,39 @@ export function isRankWeek(value: unknown): value is string {
 }
 
 /**
+ * 그 시각이 며칠째인지(한국 시각, 1970년 1월 1일이 0). 한국 시각으로 0시에 하루가 넘어간다.
+ * 오늘의 랭킹은 이 날마다 새로 시작한다. 주간 랭킹처럼 어느 날인지는 서버가 정하고,
+ * 앱도 같은 함수로 셈해서 보내지만 서버의 날과 다르면 서버는 받지 않는다.
+ */
+export function rankDayOf(now: number): number {
+  return Math.floor((now + RANK_ZONE_MS) / DAY_MS);
+}
+
+/** 그 날(rankDayOf)이 시작된 때(ms): 한국 시각으로 그날 0시. 하루를 더하면 다음 날이 시작되는 때다. */
+export function rankDayStart(day: number): number {
+  return day * DAY_MS - RANK_ZONE_MS;
+}
+
+/** 랭킹의 날처럼 생겼는지(0보다 큰 정수). 실제로 오늘인지는 서버의 오늘과 견주어 가린다. */
+export function isRankDay(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 && value < 1_000_000;
+}
+
+/**
+ * 오늘의 랭킹이 있는 게임: 날마다 누구나 같은 조건으로 겨루는 판(등불지기의 오늘의 판)이 있는 게임이다.
+ * 그 판에서 낸 점수만 올라가고, 날이 바뀌면 비운다.
+ */
+const DAILY_BOARD: readonly string[] = ['lantern-keeper'] satisfies readonly RankedGame[];
+
+/** 이 게임에 오늘의 랭킹이 있는지. 랭킹이 없는 게임이면 false다. */
+export function hasDailyBoard(game: unknown): game is RankedGame {
+  return isRankedGame(game) && DAILY_BOARD.includes(game);
+}
+
+/** 오늘의 랭킹이 있는 게임들. RANKED_GAMES의 차례 그대로다. */
+export const DAILY_GAMES: readonly RankedGame[] = RANKED_GAMES.filter(hasDailyBoard);
+
+/**
  * 한 기기가 올라 있는 게임마다의 순위와 점수(게임 id → 기록). 올라 있지 않은 게임은 들어 있지 않다.
  * rank가 RANK_SCAN보다 크면 그 밖이라는 뜻이다.
  */
@@ -174,6 +209,14 @@ export interface WeekScores {
   scores: Record<string, number>;
 }
 
+/** 하루 동안 오늘의 판에서 낸 점수 묶음 */
+export interface DayScores {
+  /** 이 점수를 낸 날(rankDayOf) */
+  day: number;
+  /** 게임 id → 그날의 판에서 낸 가장 높은 점수 */
+  scores: Record<string, number>;
+}
+
 export interface SubmitRequest {
   device: string;
   name: string;
@@ -181,6 +224,8 @@ export interface SubmitRequest {
   scores: Record<string, number>;
   /** 이번 주 랭킹에 올릴 점수. 올릴 것이 없으면 보내지 않는다. 서버의 이번 주와 다른 주의 것은 서버가 버린다. */
   weekly?: WeekScores;
+  /** 오늘의 랭킹에 올릴 점수. 올릴 것이 없으면 보내지 않는다. 서버의 오늘과 다른 날의 것은 서버가 버린다. */
+  daily?: DayScores;
 }
 
 export interface SubmitResult {

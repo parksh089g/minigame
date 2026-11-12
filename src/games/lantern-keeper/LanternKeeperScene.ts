@@ -5,6 +5,7 @@ import { homeScene } from '../../core/home';
 import { music } from '../../core/music';
 import { sfx, tone } from '../../core/sfx';
 import { addText, fadeToScene } from '../../core/ui';
+import { noteDayScore } from '../../online/online';
 import { showBanner } from '../../scenes/GameHud';
 import { MiniGameScene, type PauseExtra, type ResultStat } from '../../scenes/MiniGameScene';
 import { registerLanternTextures } from './art';
@@ -16,8 +17,9 @@ import { BOSS_BAR_HEIGHT, HP_DANGER, HUD_HEIGHT, RunHud } from './hud';
 import { iconKey } from './icons';
 import { Joystick } from './joystick';
 import { levelUpHeader, showChoices, TICKET_HEADER } from './levelup';
-import { buildLobby, type LobbyPage } from './lobby';
+import { buildLobby, parentPage, type LobbyPage } from './lobby';
 import { DAILY_REWARD, dailyPlan, dailyToday, dayIndexOf } from './daily';
+import { showDawnChoice } from './dawn';
 import { applyRun, learnTip, metaStore, newDepth, newUnlocks } from './meta';
 import { BOSS_SONG, FINAL_SONG, LOBBY_SONG, STAGE_SONGS } from './music';
 import { pauseInfo } from './pauseinfo';
@@ -33,15 +35,15 @@ import {
   seededRandom,
   type Upgrade,
 } from './rules';
-import { createRun, Sim, type SimEvent } from './sim';
+import { createRun, runDawned, Sim, type SimEvent } from './sim';
 import { SoundBoard, type Note } from './sound';
 import { TIP_IDS, tipFor, TIPS, type TipId } from './tips';
 import { RunView } from './view';
 
 /** 씬을 시작할 때 넘기는 값. 없으면 준비 화면부터 연다. */
 interface StartData {
-  /** daily는 오늘의 판을 새로 시작한다. */
-  mode?: 'new' | 'resume' | 'daily';
+  /** daily는 오늘의 판을 새로 시작한다. settle은 저장해 둔 판을 그 자리에서 마치고 결과를 받는다. */
+  mode?: 'new' | 'resume' | 'daily' | 'settle';
   /** 준비 화면의 어느 쪽을 열지 */
   page?: LobbyPage;
   /** 그 쪽의 목록이 여러 묶음으로 나뉘었을 때 보일 묶음(0부터) */
@@ -59,6 +61,8 @@ const PLAYER_DROP = 18;
 const SAVE_EVERY = 20;
 /** 중간 보스가 쓰러지는 모습을 보여 준 뒤에 강화권 화면을 연다(ms). */
 const TICKET_DELAY_MS = 550;
+/** 마지막 보스를 쓰러뜨린 뒤 새벽의 선택이 뜨기까지(ms) */
+const DAWN_DELAY_MS = 900;
 /** 체력이 위험할 때 심장 소리가 뛰는 간격(초). 거의 다 닳으면 더 빨라진다. */
 const HEARTBEAT = { slow: 1.05, fast: 0.72, fastBelow: 0.15 } as const;
 /** 판이 끝난 뒤 결과 화면이 뜨기까지 끝나는 장면을 보여 주는 시간(ms) */
@@ -147,6 +151,7 @@ export class LanternKeeperScene extends MiniGameScene {
       if (mode === 'new') this.startRun(false);
       else if (mode === 'daily') this.startRun(false, true);
       else if (mode === 'resume' && metaStore.run) this.startRun(true);
+      else if (mode === 'settle' && runDawned(metaStore.run)) this.startRun(true, false, true);
       else this.openLobby(page, list);
     });
   }
@@ -176,14 +181,22 @@ export class LanternKeeperScene extends MiniGameScene {
     );
   }
 
+  /**
+   * 새벽을 맞은 판(끝없는 밤 포함)을 저장해 둔 채로 새 판을 시작하려 하면, 버리지 않고 그 판을 마쳐서 결과부터 받는다.
+   * 그냥 버리면 새벽을 맞은 기록과 점수가 사라지기 때문이다.
+   */
   private restartWith(mode: StartData['mode']): void {
-    fadeToScene(this, this.scene.key, { mode } satisfies StartData);
+    const settle = (mode === 'new' || mode === 'daily') && runDawned(metaStore.run);
+    fadeToScene(this, this.scene.key, { mode: settle ? 'settle' : mode } satisfies StartData);
   }
 
   // ------------------------------------------------------------ 한 판
 
-  /** daily면 오늘의 판: 캐릭터와 스테이지, 씨앗이 그날로 정해지고 영구 강화 없이 시작한다. */
-  private startRun(resume: boolean, daily = false): void {
+  /**
+   * daily면 오늘의 판: 캐릭터와 스테이지, 씨앗이 그날로 정해지고 영구 강화 없이 시작한다.
+   * settle이면 저장해 둔 판을 이어서 하지 않고 그 자리에서 마친다.
+   */
+  private startRun(resume: boolean, daily = false, settle = false): void {
     const { height } = this.scale;
     const centerY = Math.round(height / 2) + PLAYER_DROP;
     // 캐릭터가 아래로 내려간 만큼 위쪽이 더 넓게 보이므로, 그 넓은 쪽에 맞춰 적이 화면 밖에서 나오게 한다.
@@ -194,9 +207,19 @@ export class LanternKeeperScene extends MiniGameScene {
     const state = saved
       ? { ...structuredClone(saved), ...view }
       : plan
-        ? createRun({ ...view, meta: {}, hero: plan.hero, stage: plan.stage, depth: 0, seed: plan.seed, daily: plan.day })
+        ? createRun({
+            ...view,
+            meta: {},
+            hero: plan.hero,
+            stage: plan.stage,
+            depth: 0,
+            seed: plan.seed,
+            daily: plan.day,
+            endless: true,
+          })
         : createRun({
             ...view,
+            endless: true,
             meta: metaStore.data.upgrades,
             hero: metaStore.data.hero,
             stage: metaStore.data.stage,
@@ -228,13 +251,19 @@ export class LanternKeeperScene extends MiniGameScene {
     }
 
     this.playing = true;
-    this.openNext();
+    if (settle) {
+      this.sim.settle();
+      this.endRun();
+    } else {
+      this.openNext();
+    }
   }
 
-  /** 기다리는 선택이 있으면 그 화면을 열고, 없으면 판을 이어 간다. 강화권이 레벨업보다 먼저다. */
+  /** 기다리는 선택이 있으면 그 화면을 열고, 없으면 판을 이어 간다. 새벽의 선택이 가장 먼저고, 강화권이 레벨업보다 먼저다. */
   private openNext(delayTicket = false): void {
     const s = this.sim.state;
-    if (s.pendingTickets > 0) this.openTicket(delayTicket);
+    if (s.pendingDawn) this.openDawn(delayTicket);
+    else if (s.pendingTickets > 0) this.openTicket(delayTicket);
     else if (s.pendingLevelUps > 0) this.openLevelUp();
     else this.resumeRun();
   }
@@ -281,7 +310,7 @@ export class LanternKeeperScene extends MiniGameScene {
       sim.step(STEP, this.stick.x, this.stick.y);
       this.handleEvents();
       if (sim.state.over) break;
-      if (sim.state.pendingTickets > 0 || sim.state.pendingLevelUps > 0) this.openNext(true);
+      if (sim.state.pendingDawn || sim.state.pendingTickets > 0 || sim.state.pendingLevelUps > 0) this.openNext(true);
     }
 
     this.view.sync(sim, this.seconds, frame);
@@ -308,7 +337,7 @@ export class LanternKeeperScene extends MiniGameScene {
           this.view.burst(sim, event.x, event.y, event.boss ? 40 : 4);
           if (event.boss) {
             // 마지막 보스를 쓰러뜨렸으면 밝은 소리는 뒤따르는 새벽 소리가 맡는다.
-            board.play(sim.state.over === 'cleared' ? 'bossFall' : 'bossKill', now);
+            board.play(sim.state.over === 'cleared' || sim.state.pendingDawn ? 'bossFall' : 'bossKill', now);
             this.effects.flash(0.45, 320);
             vibrate([30, 40, 30]);
             this.effects.shake(260, 0.018);
@@ -441,7 +470,9 @@ export class LanternKeeperScene extends MiniGameScene {
     const s = this.sim.state;
     if (s.over) return;
     const boss = s.enemies.find((enemy) => ENEMIES[enemy.kind].boss && enemy.hp > 0);
-    if (!boss) music.play(STAGE_SONGS[s.stage], { resume: true });
+    // 끝없는 밤에서는 마지막 보스의 곡이 줄곧 흐른다.
+    if (s.endless) music.play(FINAL_SONG);
+    else if (!boss) music.play(STAGE_SONGS[s.stage], { resume: true });
     else music.play(boss.kind === STAGES[s.stage].finalBoss ? FINAL_SONG : BOSS_SONG);
   }
 
@@ -546,6 +577,40 @@ export class LanternKeeperScene extends MiniGameScene {
     );
   }
 
+  /**
+   * 새벽: 여기서 마칠지, 끝없는 밤으로 이어 갈지 고른다.
+   * 고르기 전에 저장해 두므로, 이 화면에서 앱을 닫아도 다음에 같은 선택이 다시 나온다.
+   */
+  private openDawn(delayed: boolean): void {
+    this.phase = 'choosing';
+    music.hush(true);
+    this.stick.enabled = false;
+    this.stick.reset();
+    this.drawHud();
+    this.saveRun();
+    const show = (): void => {
+      // 기다리는 사이에 씬을 떠났으면 열지 않는다.
+      if (!this.sys.isActive() || this.phase !== 'choosing') return;
+      this.board.play('clear', this.time.now, 0.3);
+      vibrate([20, 40, 20, 40, 60]);
+      showDawnChoice(this, DEPTH.panel, scoreFor(this.sim.summary()), (goOn) => {
+        this.sim.chooseDawn(goOn);
+        if (!goOn) {
+          this.endRun();
+          return;
+        }
+        showBanner(this, this.scale.height * 0.3, '끝없는 밤', CSS.sky, 1800, DEPTH.banner);
+        this.board.play('boss', this.time.now);
+        this.pickSong();
+        this.saveRun();
+        this.openNext();
+      });
+    };
+    // 마지막 보스가 쓰러지는 모습을 보고 나서 연다.
+    if (delayed) this.time.delayedCall(DAWN_DELAY_MS, show);
+    else show();
+  }
+
   /** 무기 강화권: 가진 무기 가운데 하나를 골라 한 레벨 올린다. */
   private openTicket(delayed: boolean): void {
     this.phase = 'choosing';
@@ -615,13 +680,14 @@ export class LanternKeeperScene extends MiniGameScene {
     if (!this.sim.state.over) metaStore.setRun(this.sim.state);
   }
 
-  /** 뒤로 가기: 준비 화면에서는 한 걸음 뒤로(강화나 도전 과제 쪽 → 고르는 쪽 → 허브), 판 중에는 일시정지 */
+  /** 뒤로 가기: 준비 화면에서는 한 걸음 뒤로(오늘의 랭킹 → 오늘의 판 → 고르는 쪽 → 허브), 판 중에는 일시정지 */
   override onBackRequest(): void {
     if (this.phase !== 'lobby') {
       super.onBackRequest();
       return;
     }
-    if (this.lobbyPage !== 'main') this.scene.restart({ page: 'main' } satisfies StartData);
+    const parent = parentPage(this.lobbyPage);
+    if (parent !== null) this.scene.restart({ page: parent } satisfies StartData);
     else fadeToScene(this, homeScene());
   }
 
@@ -654,6 +720,8 @@ export class LanternKeeperScene extends MiniGameScene {
     // 오늘 시작한 오늘의 판만 그날의 기록에 남는다. 날이 넘어간 뒤에 이어서 끝낸 판은 보통 판으로 친다.
     const today = dayIndexOf(new Date());
     const daily = state.daily === today ? { day: today, score: scoreFor(summary) } : undefined;
+    // 오늘의 랭킹에 올릴 기록으로 적어 둔다. 아래에서 판을 마칠 때 다른 기록과 함께 서버에 올라간다.
+    if (daily) noteDayScore(LANTERN_GAME_ID, daily.score, daily.day);
     metaStore.setRun(null);
     metaStore.set(
       applyRun(before, {
@@ -669,6 +737,7 @@ export class LanternKeeperScene extends MiniGameScene {
         level: summary.level,
         evolved: ownedWeapons(state.weapons).filter((id) => isEvolved(state.weapons[id] ?? 0)),
         seen: state.seen,
+        endlessSeconds: summary.endlessSeconds,
       }),
     );
     const opened = newUnlocks(before.bestSeconds, metaStore.data.bestSeconds);
@@ -677,9 +746,11 @@ export class LanternKeeperScene extends MiniGameScene {
     if (deeper) opened.push(deeper);
 
     // 끝나는 장면: 새벽이 오면 어둠이 걷히며 남은 그림자가 흩어지고, 쓰러지면 등불이 꺼지듯 어두워진다.
-    const ending = summary.cleared ? ENDING_MS.cleared : ENDING_MS.dead;
+    // 끝없는 밤에서 쓰러졌으면 새벽을 맞은 기록은 남지만 장면은 등불이 꺼지는 쪽이다.
+    const fell = state.over === 'dead';
+    const ending = fell ? ENDING_MS.dead : ENDING_MS.cleared;
     const now = this.time.now;
-    if (summary.cleared) {
+    if (!fell) {
       this.view.dawn(this.sim, ending * 0.6);
       this.effects.dawn(ending * 0.6);
       this.board.play('clear', now, 0.3);
@@ -693,8 +764,8 @@ export class LanternKeeperScene extends MiniGameScene {
     showBanner(
       this,
       this.scale.height * 0.32,
-      summary.cleared ? '새벽이 왔다!' : '등불이 꺼졌다',
-      summary.cleared ? CSS.yellow : CSS.silver,
+      fell ? '등불이 꺼졌다' : '새벽이 왔다!',
+      fell ? CSS.silver : CSS.yellow,
       // 결과 화면이 뜰 때까지 남아 있게 한다.
       ending * 1.6,
       DEPTH.banner,
@@ -708,6 +779,10 @@ export class LanternKeeperScene extends MiniGameScene {
       ['레벨', String(summary.level)],
       ['얻은 불씨', `+${embers + (firstDaily ? DAILY_REWARD : 0)}`],
     ];
+    // 끝없는 밤으로 이어 갔으면 버틴 시간을 새벽 뒤로 얼마나 더 버텼는지로 적는다.
+    if (state.endless) {
+      stats[0] = ['버틴 시간', `새벽 + ${formatClock(summary.endlessSeconds)}`];
+    }
     // 오늘의 판: 오늘 처음이면 보너스와 이어 온 날 수를, 아니면 오늘의 최고 기록과 견준 결과를 보여 준다.
     if (daily) {
       const now = metaStore.data.daily;

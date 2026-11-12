@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   createOnline,
+  dayBestOf,
   isJoined,
   isWaitingToSend,
+  isWaitingToSendDay,
   normalizeOnline,
   pendingSubmit,
   isWaitingToSendWeek,
   weekBestOf,
+  withDayScore,
   withName,
   withoutName,
   withSent,
@@ -26,6 +29,7 @@ const joined = (extra: Partial<OnlineState> = {}): OnlineState => ({
   sentName: '등불지기',
   sent: {},
   week: null,
+  day: null,
   ...extra,
 });
 
@@ -49,6 +53,7 @@ describe('저장된 값 읽기', () => {
       sentName: null,
       sent: {},
       week: null,
+      day: null,
     });
   });
 
@@ -62,7 +67,7 @@ describe('참여와 닉네임', () => {
   it('닉네임을 처음 정하면 새 id로 참여한다', () => {
     const state = withName(createOnline(), '등불지기', ID);
     expect(isJoined(state)).toBe(true);
-    expect(state).toEqual({ id: ID, name: '등불지기', sentName: null, sent: {}, week: null });
+    expect(state).toEqual({ id: ID, name: '등불지기', sentName: null, sent: {}, week: null, day: null });
   });
 
   it('닉네임을 바꿔도 id와 올린 기록 표시는 그대로다', () => {
@@ -73,6 +78,7 @@ describe('참여와 닉네임', () => {
       sentName: '등불지기',
       sent: { 'stack-tower': 90 },
       week: null,
+      day: null,
     });
   });
 
@@ -101,7 +107,7 @@ describe('보낼 것 고르기', () => {
 
   it('참여하지 않았으면 아무것도 보내지 않는다', () => {
     expect(pendingSubmit(createOnline(), games)).toBeNull();
-    expect(pendingSubmit({ id: ID, name: null, sentName: null, sent: {}, week: null }, games)).toBeNull();
+    expect(pendingSubmit({ id: ID, name: null, sentName: null, sent: {}, week: null, day: null }, games)).toBeNull();
   });
 
   it('아직 올리지 않은 최고 점수를 모두 보낸다. 0점과 모르는 게임은 빼고', () => {
@@ -309,5 +315,107 @@ describe('이번 주에 낸 점수', () => {
       ...createOnline(),
       week: { key: WEEK, bests: { 'stack-tower': 55 }, sent: {} },
     });
+  });
+});
+
+describe('오늘의 판에서 낸 점수', () => {
+  /** 랭킹의 날(한국 시각으로 며칠째인지) */
+  const DAY = 20_770;
+  const GAME = 'lantern-keeper';
+
+  it('오늘의 판 점수를 그날의 기록으로 적는다. 닉네임이 없어도 적는다', () => {
+    const state = withDayScore(createOnline(), GAME, 700, DAY);
+    expect(state.day).toEqual({ key: DAY, bests: { [GAME]: 700 }, sent: {} });
+    expect(dayBestOf(state, GAME, DAY)).toBe(700);
+    expect(dayBestOf(state, GAME, DAY + 1)).toBe(0);
+    expect(isJoined(state)).toBe(false);
+  });
+
+  it('같은 날에는 더 높은 점수만 남기고, 날이 바뀌면 지난 날의 것은 버린다', () => {
+    let state = withDayScore(joined(), GAME, 700, DAY);
+    expect(withDayScore(state, GAME, 300, DAY)).toBe(state);
+    state = withDayScore(state, GAME, 950, DAY);
+    expect(state.day?.bests).toEqual({ [GAME]: 950 });
+    const sent = { ...state, day: { key: DAY, bests: { [GAME]: 950 }, sent: { [GAME]: 950 } } };
+    expect(withDayScore(sent, GAME, 100, DAY + 1).day).toEqual({ key: DAY + 1, bests: { [GAME]: 100 }, sent: {} });
+  });
+
+  it('오늘의 판이 없는 게임과 0점, 이상한 날은 적지 않는다', () => {
+    const state = joined();
+    expect(withDayScore(state, 'stack-tower', 50, DAY)).toBe(state);
+    expect(withDayScore(state, 'not-a-game', 50, DAY)).toBe(state);
+    expect(withDayScore(state, GAME, 0, DAY)).toBe(state);
+    expect(withDayScore(state, GAME, 50, 1.5)).toBe(state);
+  });
+
+  it('아직 올리지 않은 오늘의 점수를 최고 점수, 이번 주의 점수와 함께 보낸다', () => {
+    const state = joined({
+      week: { key: WEEK, bests: { 'stack-tower': 55 }, sent: {} },
+      day: { key: DAY, bests: { [GAME]: 700 }, sent: {} },
+    });
+    expect(pendingSubmit(state, { 'stack-tower': { best: 90 } }, WEEK, DAY)).toEqual({
+      device: ID,
+      name: '등불지기',
+      scores: { 'stack-tower': 90 },
+      weekly: { week: WEEK, scores: { 'stack-tower': 55 } },
+      daily: { day: DAY, scores: { [GAME]: 700 } },
+    });
+    expect(isWaitingToSendDay(state, GAME, DAY)).toBe(true);
+  });
+
+  it('다른 것은 그대로여도 오늘의 점수가 있으면 보낸다', () => {
+    const state = joined({ day: { key: DAY, bests: { [GAME]: 700 }, sent: { [GAME]: 400 } } });
+    expect(pendingSubmit(state, {}, WEEK, DAY)).toEqual({
+      device: ID,
+      name: '등불지기',
+      scores: {},
+      daily: { day: DAY, scores: { [GAME]: 700 } },
+    });
+  });
+
+  it('적어 둔 것이 지난 날의 것이거나 참여하지 않았으면 보내지 않는다', () => {
+    const state = joined({ day: { key: DAY, bests: { [GAME]: 700 }, sent: {} } });
+    expect(pendingSubmit(state, {}, WEEK, DAY + 1)).toBeNull();
+    expect(isWaitingToSendDay(state, GAME, DAY + 1)).toBe(false);
+    // 날을 알려 주지 않으면(옛 방식) 오늘의 점수는 따지지 않는다.
+    expect(pendingSubmit(state, {}, WEEK)).toBeNull();
+    const guest = withDayScore(createOnline(), GAME, 700, DAY);
+    expect(pendingSubmit(guest, {}, WEEK, DAY)).toBeNull();
+    expect(isWaitingToSendDay(guest, GAME, DAY)).toBe(false);
+  });
+
+  it('서버가 답하면 보낸 것으로 적어서 다시 보내지 않는다', () => {
+    const state = joined({ day: { key: DAY, bests: { [GAME]: 700 }, sent: {} } });
+    const request = pendingSubmit(state, {}, WEEK, DAY);
+    if (!request) throw new Error('보낼 것이 있어야 한다');
+    const after = withSent(state, request, {});
+    expect(after.day?.sent).toEqual({ [GAME]: 700 });
+    expect(pendingSubmit(after, {}, WEEK, DAY)).toBeNull();
+    // 보내는 사이에 날이 바뀌었으면 새 날의 기록은 건드리지 않는다.
+    const moved = withDayScore(state, GAME, 200, DAY + 1);
+    expect(withSent(moved, request, {}).day).toEqual({ key: DAY + 1, bests: { [GAME]: 200 }, sent: {} });
+  });
+
+  it('랭킹에서 빠져도 오늘 낸 점수는 남는다. 다시 참여하면 다시 올라간다', () => {
+    const state = joined({ day: { key: DAY, bests: { [GAME]: 700 }, sent: { [GAME]: 700 } } });
+    const left = withoutName(state);
+    expect(left.day).toEqual({ key: DAY, bests: { [GAME]: 700 }, sent: {} });
+    const back = withName(left, '새이름', OTHER_ID);
+    expect(pendingSubmit(back, {}, WEEK, DAY)?.daily).toEqual({ day: DAY, scores: { [GAME]: 700 } });
+  });
+
+  it('저장된 오늘의 기록을 읽는다. 이상한 값은 버린다', () => {
+    const day = { key: DAY, bests: { [GAME]: 700, nope: 3, 'stack-tower': 40 }, sent: { [GAME]: 400 } };
+    expect(normalizeOnline({ ...joined(), day }).day).toEqual({
+      key: DAY,
+      bests: { [GAME]: 700 },
+      sent: { [GAME]: 400 },
+    });
+    expect(normalizeOnline({ ...joined(), day: { key: '오늘', bests: {} } }).day).toBeNull();
+    expect(normalizeOnline({ ...joined(), day: 'x' }).day).toBeNull();
+    // 닉네임이 없는 세이브에서는 점수만 읽고, 올렸다는 표시는 버린다.
+    expect(normalizeOnline({ day }).day).toEqual({ key: DAY, bests: { [GAME]: 700 }, sent: {} });
+    // 오늘의 랭킹이 생기기 전의 세이브에는 이 값이 없다.
+    expect(normalizeOnline({ ...joined() }).day).toBeNull();
   });
 });

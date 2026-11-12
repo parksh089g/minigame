@@ -1,8 +1,10 @@
 /**
  * 오늘의 판: 날마다 누구나 같은 조건(캐릭터, 스테이지, 씨앗, 영구 강화 없음)으로 하는 한 판.
  * 몇 번이든 다시 할 수 있고, 그날의 가장 좋은 기록이 남는다. 그날 처음 마친 판에는 불씨가 더 붙는다.
+ * 그날의 점수는 오늘의 랭킹(online/)에 올라가서 다른 사람과 겨룬다.
  * 화면에 의존하지 않는 순수한 값과 함수만 둔다.
  */
+import { rankDayOf, rankDayStart } from '../../online/protocol';
 import { HERO_ORDER, STAGE_ORDER, type HeroId, type StageId } from './data';
 
 /** 그날 처음 마친 오늘의 판에 더 주는 불씨 */
@@ -10,15 +12,28 @@ export const DAILY_REWARD = 30;
 
 const DAY_MS = 86_400_000;
 
-/** 그 시각이 기기의 시간대에서 며칠째인지(1970년 1월 1일이 0). 자정에 하루가 넘어간다. */
+/**
+ * 그 시각이 며칠째인지(1970년 1월 1일이 0). 오늘의 랭킹과 같은 날을 쓴다:
+ * 누구나 같은 날에 같은 판을 하도록, 기기가 어느 나라에 있든 한국 시각으로 0시에 하루가 넘어간다.
+ */
 export function dayIndexOf(date: Date): number {
-  return Math.floor((date.getTime() - date.getTimezoneOffset() * 60_000) / DAY_MS);
+  return rankDayOf(date.getTime());
 }
 
 /** 날짜를 "11월 12일" 꼴로 */
 export function dayLabel(day: number): string {
   const date = new Date(day * DAY_MS);
   return `${date.getUTCMonth() + 1}월 ${date.getUTCDate()}일`;
+}
+
+/**
+ * 그날(day)이 끝나고 새 날의 판과 랭킹이 시작되는 때를 이 기기의 시각으로 적는다. 한국에서는 "0시"다.
+ * 다른 나라에서는 다른 시각으로 보인다(날은 어디서나 한국 시각으로 바뀐다).
+ */
+export function dayResetLabel(day: number): string {
+  const reset = new Date(rankDayStart(day + 1));
+  const minutes = reset.getMinutes();
+  return `${reset.getHours()}시${minutes > 0 ? ` ${minutes}분` : ''}`;
 }
 
 /** "종소리" → "종소리로", "불씨탄" → "불씨탄으로". 받침이 없거나 ㄹ이면 "로"가 붙는다. */

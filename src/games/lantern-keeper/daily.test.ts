@@ -7,25 +7,41 @@ import {
   dailyToday,
   dayIndexOf,
   dayLabel,
+  dayResetLabel,
   normalizeDaily,
   withRo,
 } from './daily';
+import { rankDayOf } from '../../online/protocol';
 import { HERO_ORDER, STAGE_ORDER, WEAPON_ORDER, WEAPONS } from './data';
 
 describe('오늘의 판: 날짜', () => {
-  it('기기의 시간대에서 자정에 하루가 넘어간다', () => {
-    const late = new Date(2026, 10, 12, 23, 59, 59);
-    const next = new Date(2026, 10, 13, 0, 0, 0);
-    const noon = new Date(2026, 10, 12, 12, 0, 0);
-    expect(dayIndexOf(late)).toBe(dayIndexOf(noon));
-    expect(dayIndexOf(next)).toBe(dayIndexOf(noon) + 1);
+  /** 한국 시각으로 적은 때 */
+  const kst = (text: string): Date => new Date(`${text}+09:00`);
+
+  it('한국 시각으로 0시에 하루가 넘어간다. 오늘의 랭킹의 날과 같다', () => {
+    const noon = kst('2026-11-12T12:00:00');
+    expect(dayIndexOf(kst('2026-11-12T23:59:59'))).toBe(dayIndexOf(noon));
+    expect(dayIndexOf(kst('2026-11-13T00:00:00'))).toBe(dayIndexOf(noon) + 1);
     // 달과 해가 넘어가도 하루씩 는다.
-    expect(dayIndexOf(new Date(2027, 0, 1, 0, 0, 1))).toBe(dayIndexOf(new Date(2026, 11, 31, 23, 0, 0)) + 1);
+    expect(dayIndexOf(kst('2027-01-01T00:00:01'))).toBe(dayIndexOf(kst('2026-12-31T23:00:00')) + 1);
+    expect(dayIndexOf(noon)).toBe(rankDayOf(noon.getTime()));
+  });
+
+  it('기기가 어느 나라에 있든 같은 순간에는 같은 날이라, 모두가 같은 판을 한다', () => {
+    // 협정 세계시로는 아직 11일 오후지만 한국은 12일 새벽이다.
+    expect(dayIndexOf(new Date('2026-11-11T15:00:00Z'))).toBe(dayIndexOf(kst('2026-11-12T12:00:00')));
+  });
+
+  it('새 날이 시작되는 때를 이 기기의 시각으로 적는다', () => {
+    const day = dayIndexOf(kst('2026-11-12T12:00:00'));
+    const reset = kst('2026-11-13T00:00:00');
+    expect(dayResetLabel(day)).toBe(`${reset.getHours()}시${reset.getMinutes() > 0 ? ` ${reset.getMinutes()}분` : ''}`);
+    expect(dayResetLabel(day)).toMatch(/^\d{1,2}시( \d{1,2}분)?$/);
   });
 
   it('날짜를 달과 날로 적는다', () => {
-    expect(dayLabel(dayIndexOf(new Date(2026, 10, 12, 9, 0, 0)))).toBe('11월 12일');
-    expect(dayLabel(dayIndexOf(new Date(2027, 0, 1, 0, 0, 1)))).toBe('1월 1일');
+    expect(dayLabel(dayIndexOf(kst('2026-11-12T09:00:00')))).toBe('11월 12일');
+    expect(dayLabel(dayIndexOf(kst('2027-01-01T00:00:01')))).toBe('1월 1일');
   });
 });
 
