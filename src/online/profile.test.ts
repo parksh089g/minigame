@@ -220,6 +220,8 @@ describe('이번 주에 낸 점수', () => {
   it('랭킹이 없는 게임과 0점은 적지 않는다', () => {
     const state = joined();
     expect(withWeekScore(state, 'not-a-game', 50, WEEK)).toBe(state);
+    // 평판이 계속 쌓이는 새싹 컴퍼니는 전체 랭킹에만 오른다.
+    expect(withWeekScore(state, 'sprout-company', 50, WEEK)).toBe(state);
     expect(withWeekScore(state, 'stack-tower', 0, WEEK)).toBe(state);
     expect(withWeekScore(state, 'stack-tower', Number.NaN, WEEK)).toBe(state);
   });
@@ -287,7 +289,11 @@ describe('이번 주에 낸 점수', () => {
   });
 
   it('저장된 이번 주의 기록을 읽는다. 이상한 값은 버린다', () => {
-    const week = { key: WEEK, bests: { 'stack-tower': 55, nope: 3, 'gate-run': -1 }, sent: { 'stack-tower': 40 } };
+    const week = {
+      key: WEEK,
+      bests: { 'stack-tower': 55, nope: 3, 'gate-run': -1, 'sprout-company': 900 },
+      sent: { 'stack-tower': 40 },
+    };
     expect(normalizeOnline({ ...joined(), week }).week).toEqual({
       key: WEEK,
       bests: { 'stack-tower': 55 },

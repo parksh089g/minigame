@@ -405,6 +405,20 @@ describe('주간 랭킹 요청', () => {
     expect(all.body).toEqual({ mine: { 'stack-tower': { rank: 1, score: 90 } } });
   });
 
+  it('점수가 계속 쌓이는 게임(새싹 컴퍼니)은 주간 랭킹에 올리지 않는다. 요청은 받아들인다', async () => {
+    const { call } = server();
+    const posted = await call('POST', '/api/rank', {
+      device: device(1),
+      name: '등불지기',
+      scores: { 'sprout-company': 400 },
+      weekly: { week: WEEK, scores: { 'sprout-company': 400, 'stack-tower': 30 } },
+    });
+    expect(posted.status).toBe(200);
+    expect((await call('GET', '/api/rank/sprout-company?span=week')).body.top).toEqual([]);
+    expect((await call('GET', '/api/rank/sprout-company')).body.top).toHaveLength(1);
+    expect((await call('GET', '/api/rank/stack-tower?span=week')).body.top).toHaveLength(1);
+  });
+
   it('맞지 않는 값은 받지 않는다', async () => {
     const { call } = server();
     const base = { device: device(1), name: '등불지기', scores: {} };

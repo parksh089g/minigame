@@ -23,6 +23,7 @@ import { failureText, type ApiFailure } from '../online/api';
 import { knownRank, loadBoard, loadStandings, syncScores } from '../online/online';
 import { isJoined, isWaitingToSend, isWaitingToSendWeek } from '../online/profile';
 import {
+  hasWeeklyBoard,
   isRankedGame,
   RANK_SCAN,
   rankLabel,
@@ -352,6 +353,13 @@ export class RankingScene extends Phaser.Scene implements BackAware {
     const request = (this.request += 1);
     const gameId = this.shown.id;
     const span = this.span;
+    if (this.weekless) {
+      // 서버에 묻지 않는다. 목록 자리에는 주간 랭킹이 없다는 안내가 나온다.
+      this.show({ kind: 'ready', board: { top: [], me: null } });
+      // 화면을 열면서 올리기로 한 기록은 그대로 올린다.
+      if (sync) void syncScores();
+      return;
+    }
     this.show({ kind: 'loading' });
     if (sync) {
       const outcome = await syncScores();
@@ -415,9 +423,17 @@ export class RankingScene extends Phaser.Scene implements BackAware {
     );
   }
 
+  /**
+   * 이번 주 랭킹을 보는데 지금 고른 게임에는 주간 랭킹이 없는지.
+   * 점수가 계속 쌓이는 게임(새싹 컴퍼니의 평판)은 이번 주에 낸 기록을 따로 가릴 수 없어서 전체 랭킹만 있다.
+   */
+  private get weekless(): boolean {
+    return this.span === 'week' && !hasWeeklyBoard(this.shown.id);
+  }
+
   /** 이번 주 랭킹을 볼 때 목록 위에 비워 두는 높이. 언제 새로 시작하는지를 거기에 적는다. */
   private get weekNoteRoom(): number {
-    return this.span === 'week' && !this.choosing ? WEEK_NOTE_HEIGHT : 0;
+    return this.span === 'week' && !this.choosing && !this.weekless ? WEEK_NOTE_HEIGHT : 0;
   }
 
   private drawList(): void {
@@ -428,6 +444,10 @@ export class RankingScene extends Phaser.Scene implements BackAware {
       return;
     }
     const view = this.view;
+    if (this.weekless) {
+      this.addNote('기록이 계속 쌓이는 게임이라\n이번 주 랭킹이 따로 없어요.\n전체에서 볼 수 있어요.');
+      return;
+    }
     if (this.span === 'week') {
       const note = addText(
         this,
@@ -598,7 +618,11 @@ export class RankingScene extends Phaser.Scene implements BackAware {
       // 이어지는 성장 게임은 점수가 아니라 평판이다.
       const score = me ? (this.shown.ongoing ? `평판 ${me.score}` : `${me.score}점`) : '';
       const rank = me && waiting === null ? `${rankLabel(me.rank)} · ${score}` : null;
-      const none = this.span === 'week' ? '이번 주에는 아직 기록이 없어요' : '이 게임은 아직 기록이 없어요';
+      const none = this.weekless
+        ? '이번 주 랭킹이 없는 게임이에요'
+        : this.span === 'week'
+          ? '이번 주에는 아직 기록이 없어요'
+          : '이 게임은 아직 기록이 없어요';
       const status = this.view.kind !== 'ready' ? '' : (rank ?? waiting ?? none);
       const name = addText(this, MARGIN + 10, middle, online.name, { color: THEME_CSS.accent, originY: 0.5 });
       const note = addText(this, RIGHT - 10, middle, status, {

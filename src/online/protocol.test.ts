@@ -10,6 +10,7 @@ import {
   deviceIdFrom,
   formatCode,
   isDeviceId,
+  hasWeeklyBoard,
   isRankedGame,
   isRankSpan,
   isRankWeek,
@@ -194,6 +195,16 @@ describe('랭킹 주', () => {
     expect(rankWeekStart(start)).toBe(start);
     expect(rankWeekStart(start - 1)).toBe(start - RANK_WEEK_MS);
     expect(rankWeekStart(start + RANK_WEEK_MS)).toBe(start + RANK_WEEK_MS);
+  });
+
+  it('점수가 계속 쌓이는 게임(이어지는 성장 게임)에만 주간 랭킹이 없다', () => {
+    for (const game of GAMES.filter((entry) => isRankedGame(entry.id))) {
+      expect(hasWeeklyBoard(game.id), game.id).toBe(game.ongoing !== true);
+    }
+    expect(hasWeeklyBoard('stack-tower')).toBe(true);
+    expect(hasWeeklyBoard('sprout-company')).toBe(false);
+    expect(hasWeeklyBoard('nope')).toBe(false);
+    expect(hasWeeklyBoard(undefined)).toBe(false);
   });
 
   it('주의 이름과 범위의 모양을 가린다', () => {

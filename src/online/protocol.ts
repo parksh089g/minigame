@@ -106,6 +106,18 @@ export interface RankBoard {
   week?: string;
 }
 
+/**
+ * 주간 랭킹이 없는 게임. 점수가 판마다 새로 나지 않고 계속 쌓이는 게임(새싹 컴퍼니의 평판)은
+ * 이번 주에 낸 기록을 따로 가릴 수 없어서, 주간 랭킹에 올리면 오래 한 사람이 늘 위에 선다.
+ * games/registry.ts에서 ongoing인 게임과 같아야 한다(protocol.test.ts가 확인한다).
+ */
+const NO_WEEKLY_BOARD: readonly string[] = ['sprout-company'] satisfies readonly RankedGame[];
+
+/** 이 게임에 주간 랭킹이 있는지. 랭킹이 없는 게임이면 false다. */
+export function hasWeeklyBoard(game: unknown): game is RankedGame {
+  return isRankedGame(game) && !NO_WEEKLY_BOARD.includes(game);
+}
+
 /** 랭킹의 범위. all은 지금까지의 최고 기록, week는 이번 주에 낸 기록만 겨룬다. */
 export const RANK_SPANS = ['all', 'week'] as const;
 export type RankSpan = (typeof RANK_SPANS)[number];

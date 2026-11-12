@@ -6,6 +6,7 @@ import {
   cleanCode,
   cleanName,
   cleanScore,
+  hasWeeklyBoard,
   isDeviceId,
   isRankedGame,
   isRankSpan,
@@ -83,7 +84,10 @@ function readWeekly(raw: unknown): WeekEntry | null | 'invalid' {
   if (raw === undefined || raw === null) return null;
   if (!isObject(raw) || !isRankWeek(raw.week)) return 'invalid';
   const scores = readScores(raw.scores ?? {});
-  return scores === null ? 'invalid' : { week: raw.week, scores };
+  if (scores === null) return 'invalid';
+  // 주간 랭킹이 없는 게임(점수가 계속 쌓이는 게임)의 점수는 받지 않고 흘려보낸다.
+  for (const game of RANKED_GAMES) if (!hasWeeklyBoard(game)) delete scores[game];
+  return { week: raw.week, scores };
 }
 
 /** 주소에 적힌 랭킹의 범위. 적지 않았으면 전체 랭킹이고, 모르는 값이면 null. */

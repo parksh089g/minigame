@@ -5,6 +5,7 @@
 import {
   cleanName,
   cleanScore,
+  hasWeeklyBoard,
   isDeviceId,
   isRankedGame,
   isRankWeek,
@@ -53,12 +54,17 @@ function readScores(raw: unknown): Record<string, number> {
   return scores;
 }
 
+/** 주간 랭킹이 있는 게임의 점수만 남긴다. */
+function readWeekScores(raw: unknown): Record<string, number> {
+  return Object.fromEntries(Object.entries(readScores(raw)).filter(([game]) => hasWeeklyBoard(game)));
+}
+
 /** joined가 아니면(닉네임이 없으면) 올린 것이 있을 수 없으므로 sent는 비운다. */
 function normalizeWeek(raw: unknown, joined: boolean): WeekBests | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const data = raw as Record<string, unknown>;
   if (!isRankWeek(data.key)) return null;
-  return { key: data.key, bests: readScores(data.bests), sent: joined ? readScores(data.sent) : {} };
+  return { key: data.key, bests: readWeekScores(data.bests), sent: joined ? readWeekScores(data.sent) : {} };
 }
 
 /** 저장소나 가져온 파일에서 읽은 값을 믿을 수 있는 모양으로 맞춘다. */
@@ -100,11 +106,11 @@ export function withoutName(state: OnlineState): OnlineState {
 
 /**
  * 방금 끝난 판의 점수를 이번 주(week)의 기록에 적는다. 적어 둔 것이 다른 주의 것이면 버리고 새로 시작한다.
- * 랭킹이 없는 게임이나 올릴 수 없는 점수(0점)는 적지 않는다.
+ * 랭킹이 없는 게임, 주간 랭킹이 없는 게임(점수가 계속 쌓이는 새싹 컴퍼니), 올릴 수 없는 점수(0점)는 적지 않는다.
  */
 export function withWeekScore(state: OnlineState, game: string, rawScore: number, week: string): OnlineState {
   const score = cleanScore(rawScore);
-  if (!isRankedGame(game) || score === null) return state;
+  if (!hasWeeklyBoard(game) || score === null) return state;
   const current = state.week?.key === week ? state.week : { key: week, bests: {}, sent: {} };
   if (score <= (current.bests[game] ?? 0) && current === state.week) return state;
   return {
