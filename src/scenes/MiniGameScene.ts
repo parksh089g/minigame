@@ -36,8 +36,12 @@ export interface ResultStrip {
 
 export interface PauseData {
   sceneKey: string;
+  /** registry.ts에 등록한 게임 id. 그 게임의 방법(games/how-to.ts)이 있으면 "방법 보기" 버튼이 생긴다. */
+  gameId?: string;
   /** 게임이 일시정지 화면에 덧붙여 보여 주는 것. 제목과 버튼 사이에 자리를 내준다. */
   extra?: PauseExtra;
+  /** 처음에 보여 줄 쪽. 적지 않으면 버튼이 있는 첫 쪽이다. */
+  page?: 'menu' | 'howTo';
 }
 
 /** 일시정지 화면에 게임이 덧붙이는 것. 예: 지금까지 고른 강화 */
@@ -101,7 +105,11 @@ export abstract class MiniGameScene extends Phaser.Scene implements BackAware {
   protected pauseGame(): void {
     if (this.finished || !this.scene.isActive()) return;
     this.scene.pause();
-    this.scene.launch(SCENE.pause, { sceneKey: this.scene.key, extra: this.pauseExtra() } satisfies PauseData);
+    this.scene.launch(SCENE.pause, {
+      sceneKey: this.scene.key,
+      gameId: this.gameId,
+      extra: this.pauseExtra(),
+    } satisfies PauseData);
   }
 
   /** 일시정지 화면에 덧붙여 보여 줄 것. 없으면 기본 화면 그대로다. */
