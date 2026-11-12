@@ -39,6 +39,24 @@ describe('서버 부르기', () => {
     expect(calls[1].path).toBe('/api/rank/stack-tower');
   });
 
+  it('모든 게임의 내 순위를 한 번에 받아 온다', async () => {
+    const mine = { 'stack-tower': { rank: 2, score: 70 }, 'merge-tiles': { rank: 501, score: 4 } };
+    const { api, calls } = fakeServer(() => json({ mine }));
+    expect(await api.standings(ID)).toEqual({ ok: true, data: mine });
+    expect(calls[0]).toEqual({ path: `/api/rank?me=${ID}`, method: 'GET', body: undefined });
+
+    const empty = fakeServer(() => json({ mine: {} }));
+    expect(await empty.api.standings(ID)).toEqual({ ok: true, data: {} });
+    // 이 응답을 모르는 예전 서버는 "찾을 수 없음"으로 답한다.
+    const old = fakeServer(() => json({ error: 'notfound' }, 404));
+    expect(await old.api.standings(ID)).toEqual({ ok: false, reason: 'notfound' });
+    // 모양이 틀린 답은 쓰지 않는다.
+    for (const body of [{}, { mine: null }, { mine: { 'stack-tower': { rank: 'x', score: 1 } } }, { mine: { a: 3 } }]) {
+      const broken = fakeServer(() => json(body));
+      expect(await broken.api.standings(ID)).toEqual({ ok: false, reason: 'offline' });
+    }
+  });
+
   it('점수 올리기, 기록 지우기, 세이브 맡기기와 꺼내기를 알맞은 곳으로 보낸다', async () => {
     const { api, calls } = fakeServer((call) => {
       if (call.method === 'DELETE') return json({ ok: true });

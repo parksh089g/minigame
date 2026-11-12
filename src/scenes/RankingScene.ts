@@ -20,9 +20,9 @@ import {
 } from '../core/ui';
 import { HUB_GAMES, lastPlayedGame, type MiniGameInfo } from '../games/registry';
 import { failureText, type ApiFailure } from '../online/api';
-import { loadBoard, syncScores } from '../online/online';
+import { loadBoard, loadStandings, scoreSync, syncScores } from '../online/online';
 import { isJoined, isWaitingToSend } from '../online/profile';
-import { isRankedGame, rankLabel, type RankBoard, type RankRow } from '../online/protocol';
+import { isRankedGame, RANK_SCAN, rankLabel, type RankBoard, type RankRow } from '../online/protocol';
 import { askNickname } from './nickname';
 
 const MARGIN = 12;
@@ -32,6 +32,8 @@ const RIGHT = GAME_WIDTH - MARGIN;
 const PICKER = { top: 44, height: 26, button: 34 } as const;
 /** 게임을 고르는 격자. 허브처럼 한 줄에 세 개씩, 아이콘 아래에 이름을 둔다. */
 const CHOOSER = { columns: 3, height: 33, gap: 2, icon: 16 } as const;
+/** 격자의 아이콘 오른쪽에 적는 내 순위. gap은 아이콘과의 사이, medal은 1, 2, 3등 동그라미의 반지름이다. */
+const BADGE = { gap: 3, medal: 7 } as const;
 /** 게임 이름 옆의 작은 세모. 누르면 격자가 펼쳐진다는 표시다. */
 const CARET = { width: 7, height: 4, gap: 5 } as const;
 /** 목록 카드의 위쪽 끝과 안쪽 여백 */
@@ -248,6 +250,12 @@ export class RankingScene extends Phaser.Scene implements BackAware {
     // 지금 보던 게임이 있는 쪽을 펼친다.
     const page = pageOfIndex(this.gameIndex, this.layout.perPage);
     if (page !== this.page) this.showPage(page);
+    void this.refreshStandings();
+  }
+
+  /** 격자에 적을 내 순위를 모든 게임에 대해 한 번에 불러온다. 새로 알게 된 것이 있으면 격자를 다시 그린다. */
+  private async refreshStandings(): Promise<void> {
+    if ((await loadStandings()) && this.sys.isActive() && this.choosing) this.drawList();
   }
 
   /** 뒤로 가기를 누르면 펼쳐 둔 격자부터 접고, 접혀 있으면 허브로 돌아간다. */
@@ -396,6 +404,33 @@ export class RankingScene extends Phaser.Scene implements BackAware {
       this.pickGame(index);
     });
     this.listObjects.push(frame, icon, title, zone);
+
+    // 랭킹에 올라 있는 게임은 아이콘 옆에 내 순위를 적는다. 게임을 하나씩 넘겨 보지 않아도 한눈에 보인다.
+    const rank = isJoined(store.data.online) ? scoreSync.rankOf(game.id) : null;
+    if (rank !== null) this.addBadge(rank, icon.x + CHOOSER.icon / 2 + BADGE.gap, icon.y, x + width - 2);
+  }
+
+  /** (left, middle)에서 오른쪽으로 순위를 적는다. right를 넘지 않게 글자를 줄인다. */
+  private addBadge(rank: number, left: number, middle: number, right: number): void {
+    if (rank <= MEDALS.length) {
+      const medal = this.add.graphics().fillStyle(MEDALS[rank - 1], 1);
+      medal.fillCircle(left + BADGE.medal, middle, BADGE.medal);
+      const number = addText(this, left + BADGE.medal, middle, String(rank), {
+        size: FONT_SIZE.small,
+        color: THEME_CSS.inkDeep,
+        originX: 0.5,
+        originY: 0.5,
+      });
+      this.listObjects.push(medal, number);
+      return;
+    }
+    const label = addText(this, left, middle, rank > RANK_SCAN ? `${RANK_SCAN}+` : `${rank}위`, {
+      size: FONT_SIZE.small,
+      color: THEME_CSS.sub,
+      originY: 0.5,
+    });
+    label.setScale(Math.min(1, (right - left) / label.width));
+    this.listObjects.push(label);
   }
 
   private addRow(row: RankRow, y: number): void {
