@@ -23,10 +23,12 @@ export interface LanternStats {
   heroes: HeroId[];
   /** 완주해 본 스테이지 */
   stages: StageId[];
+  /** 오늘의 판을 한 날 수 */
+  dailyDays: number;
 }
 
 export function createStats(): LanternStats {
-  return { kills: 0, bossKills: 0, bestLevel: 0, bestEvolved: 0, deepest: 0, evolved: [], heroes: [], stages: [] };
+  return { kills: 0, bossKills: 0, bestLevel: 0, bestEvolved: 0, deepest: 0, evolved: [], heroes: [], stages: [], dailyDays: 0 };
 }
 
 const count = (value: unknown): number =>
@@ -50,6 +52,7 @@ export function normalizeStats(raw: unknown): LanternStats {
   stats.evolved = known(data.evolved, WEAPON_ORDER);
   stats.heroes = known(data.heroes, HERO_ORDER);
   stats.stages = known(data.stages, STAGE_ORDER);
+  stats.dailyDays = count(data.dailyDays);
   return stats;
 }
 
@@ -65,6 +68,8 @@ export interface RunFeats {
   level: number;
   /** 판이 끝났을 때 진화해 있던 무기 */
   evolved: readonly WeaponId[];
+  /** 그날 처음 마친 오늘의 판인지 */
+  dailyFirst?: boolean;
 }
 
 const withItem = <T extends string>(list: readonly T[], item: T, order: readonly T[]): T[] =>
@@ -82,6 +87,7 @@ export function addRun(stats: LanternStats, run: RunFeats): LanternStats {
     evolved,
     heroes: run.cleared ? withItem(stats.heroes, run.hero, HERO_ORDER) : stats.heroes,
     stages: run.cleared ? withItem(stats.stages, run.stage, STAGE_ORDER) : stats.stages,
+    dailyDays: stats.dailyDays + (run.dailyFirst ? 1 : 0),
   };
 }
 
@@ -126,6 +132,7 @@ export const CHALLENGES: readonly Challenge[] = [
   { id: 'dawn-10', title: '새벽 단골', description: '새벽을 열 번 맞기', goal: 10, reward: 80, measure: (s) => s.clears },
   { id: 'heroes-all', title: '모두의 새벽', description: '세 캐릭터로 새벽 맞기', goal: 3, reward: 100, measure: (s) => s.stats.heroes.length },
   { id: 'heroes-every', title: '넷의 새벽', description: '네 캐릭터 모두로 새벽 맞기', goal: HERO_ORDER.length, reward: 120, measure: (s) => s.stats.heroes.length },
+  { id: 'daily-7', title: '일곱 밤의 약속', description: '오늘의 판을 일곱 날 하기', goal: 7, reward: 100, measure: (s) => s.stats.dailyDays },
   { id: 'evolve-all', title: '무기 수집가', description: '무기 아홉 가지 모두 진화', goal: WEAPON_ORDER.length, reward: 150, measure: (s) => s.stats.evolved.length },
   { id: 'deep-3', title: '칠흑 속의 등불', description: '깊은 밤 3에서 새벽 맞기', goal: 1, reward: 150, measure: clearedDepth(3) },
   { id: 'kills-100k', title: '밤을 쓸어 낸 자', description: '그림자 10만 마리 쓰러뜨리기', goal: 100_000, reward: 200, measure: (s) => s.stats.kills },
