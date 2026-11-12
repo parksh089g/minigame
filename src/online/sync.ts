@@ -6,7 +6,7 @@
 import type { SaveData } from '../core/save';
 import type { ApiFailure, ApiResult } from './api';
 import { pendingSubmit, withSent } from './profile';
-import type { SubmitRequest, SubmitResult } from './protocol';
+import { rankWeekOf, type SubmitRequest, type SubmitResult } from './protocol';
 
 export type SyncOutcome =
   /** 랭킹에 참여하지 않아서 아무것도 보내지 않았다 */
@@ -23,6 +23,8 @@ export interface SyncDeps {
   /** 세이브를 고치고 저장한다 */
   write(mutate: (save: SaveData) => void): void;
   submit(request: SubmitRequest): Promise<ApiResult<SubmitResult>>;
+  /** 지금 시각(ms). 이번 주가 어느 주인지 셈하는 데 쓴다. 주지 않으면 기기의 시계를 본다. */
+  now?(): number;
 }
 
 export class ScoreSync {
@@ -59,7 +61,8 @@ export class ScoreSync {
   private async send(): Promise<SyncOutcome> {
     const before = this.deps.read();
     if (before.online.name === null) return { status: 'off' };
-    const request = pendingSubmit(before.online, before.games);
+    const week = rankWeekOf(this.deps.now?.() ?? Date.now());
+    const request = pendingSubmit(before.online, before.games, week);
     if (!request) return { status: 'idle' };
 
     const result = await this.deps.submit(request);

@@ -102,6 +102,7 @@ export const STATS_TEXT = {
   mostPlayed: '가장 많이 한 게임',
   noPlays: '아직 없어요',
   daily: '오늘의 도전 달성',
+  recent: '도전 최근 7일',
   columnGame: '게임',
   columnPlays: '판 수',
   columnBest: '최고 점수',

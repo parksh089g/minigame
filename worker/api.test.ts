@@ -317,3 +317,135 @@ describe('모든 게임의 내 순위 요청', () => {
     expect((await call('GET', `/api/rank?me=${device(1)}`)).status).toBe(200);
   });
 });
+
+describe('주간 랭킹 요청', () => {
+  /** 시험 서버의 시계(2027년 1월 15일 금요일)가 속한 주 */
+  const WEEK = '2027-01-11';
+  const DAY = 24 * 60 * 60 * 1000;
+
+  it('이번 주의 점수를 같이 올리고, 이번 주 랭킹에서 본다', async () => {
+    const { call } = server();
+    const posted = await call('POST', '/api/rank', {
+      device: device(1),
+      name: '등불지기',
+      scores: { 'lantern-keeper': 1200 },
+      weekly: { week: WEEK, scores: { 'lantern-keeper': 800 } },
+    });
+    expect(posted.status).toBe(200);
+    expect(posted.body).toEqual({ bests: { 'lantern-keeper': 1200 }, ranks: { 'lantern-keeper': 1 } });
+
+    const week = await call('GET', `/api/rank/lantern-keeper?me=${device(1)}&span=week`);
+    expect(week.status).toBe(200);
+    expect(week.body).toEqual({
+      top: [{ rank: 1, name: '등불지기', score: 800, mine: true }],
+      me: { rank: 1, score: 800, name: '등불지기' },
+      week: WEEK,
+    });
+    const all = await call('GET', '/api/rank/lantern-keeper?span=all');
+    expect(all.body).toEqual({ top: [{ rank: 1, name: '등불지기', score: 1200, mine: false }], me: null });
+  });
+
+  it('서버의 이번 주와 다른 주의 점수는 버린다. 요청은 받아들인다', async () => {
+    const { call } = server();
+    const posted = await call('POST', '/api/rank', {
+      device: device(1),
+      name: '등불지기',
+      scores: { 'stack-tower': 30 },
+      weekly: { week: '2027-01-04', scores: { 'stack-tower': 30 } },
+    });
+    expect(posted.status).toBe(200);
+    expect((await call('GET', '/api/rank/stack-tower?span=week')).body).toEqual({ top: [], me: null, week: WEEK });
+    expect((await call('GET', '/api/rank/stack-tower')).body.top).toHaveLength(1);
+  });
+
+  it('월요일 0시(한국 시각)에 새 주가 시작된다', async () => {
+    const { call, wait } = server();
+    const submit = (week: string) =>
+      call('POST', '/api/rank', {
+        device: device(1),
+        name: '등불지기',
+        scores: {},
+        weekly: { week, scores: { 'stack-tower': 30 } },
+      });
+    await submit(WEEK);
+    // 금요일 17시(한국 시각)에서 사흘 뒤는 월요일 17시다.
+    wait(3 * DAY);
+    const next = await call('GET', `/api/rank/stack-tower?me=${device(1)}&span=week`);
+    expect(next.body).toEqual({ top: [], me: null, week: '2027-01-18' });
+    // 지난 주의 이름으로 늦게 온 점수는 새 주에 들어가지 않는다.
+    await submit(WEEK);
+    expect((await call('GET', '/api/rank/stack-tower?span=week')).body.top).toEqual([]);
+    await submit('2027-01-18');
+    expect((await call('GET', '/api/rank/stack-tower?span=week')).body.top).toHaveLength(1);
+  });
+
+  it('주간 랭킹을 모르는 옛 앱처럼 보내지 않아도 된다', async () => {
+    const { call } = server();
+    const posted = await call('POST', '/api/rank', {
+      device: device(1),
+      name: '등불지기',
+      scores: { 'stack-tower': 30 },
+    });
+    expect(posted.status).toBe(200);
+    expect((await call('GET', '/api/rank/stack-tower?span=week')).body.top).toEqual([]);
+  });
+
+  it('이번 주의 내 순위를 한 번에 받는다', async () => {
+    const { call } = server();
+    await call('POST', '/api/rank', {
+      device: device(1),
+      name: '등불지기',
+      scores: { 'stack-tower': 90 },
+      weekly: { week: WEEK, scores: { 'stack-tower': 30 } },
+    });
+    const mine = await call('GET', `/api/rank?me=${device(1)}&span=week`);
+    expect(mine.status).toBe(200);
+    expect(mine.body).toEqual({ mine: { 'stack-tower': { rank: 1, score: 30 } }, span: 'week' });
+    const all = await call('GET', `/api/rank?me=${device(1)}`);
+    expect(all.body).toEqual({ mine: { 'stack-tower': { rank: 1, score: 90 } } });
+  });
+
+  it('점수가 계속 쌓이는 게임(새싹 컴퍼니)은 주간 랭킹에 올리지 않는다. 요청은 받아들인다', async () => {
+    const { call } = server();
+    const posted = await call('POST', '/api/rank', {
+      device: device(1),
+      name: '등불지기',
+      scores: { 'sprout-company': 400 },
+      weekly: { week: WEEK, scores: { 'sprout-company': 400, 'stack-tower': 30 } },
+    });
+    expect(posted.status).toBe(200);
+    expect((await call('GET', '/api/rank/sprout-company?span=week')).body.top).toEqual([]);
+    expect((await call('GET', '/api/rank/sprout-company')).body.top).toHaveLength(1);
+    expect((await call('GET', '/api/rank/stack-tower?span=week')).body.top).toHaveLength(1);
+  });
+
+  it('맞지 않는 값은 받지 않는다', async () => {
+    const { call } = server();
+    const base = { device: device(1), name: '등불지기', scores: {} };
+    for (const weekly of [
+      'x',
+      [],
+      { scores: { 'stack-tower': 3 } },
+      { week: '이번 주', scores: {} },
+      { week: WEEK, scores: { nope: 3 } },
+      { week: WEEK, scores: { 'stack-tower': -1 } },
+      { week: WEEK, scores: 'x' },
+    ]) {
+      expect((await call('POST', '/api/rank', { ...base, weekly })).status).toBe(400);
+    }
+    expect((await call('GET', '/api/rank/stack-tower?span=month')).status).toBe(400);
+    expect((await call('GET', `/api/rank?me=${device(1)}&span=month`)).status).toBe(400);
+  });
+
+  it('기록을 지우면 주간 랭킹에서도 빠진다', async () => {
+    const { call } = server();
+    await call('POST', '/api/rank', {
+      device: device(1),
+      name: '등불지기',
+      scores: { 'stack-tower': 90 },
+      weekly: { week: WEEK, scores: { 'stack-tower': 30 } },
+    });
+    expect((await call('DELETE', '/api/rank', { device: device(1) })).status).toBe(200);
+    expect((await call('GET', '/api/rank/stack-tower?span=week')).body.top).toEqual([]);
+  });
+});

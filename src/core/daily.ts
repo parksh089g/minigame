@@ -30,7 +30,17 @@ export interface DailyState {
   bestStreak: number;
   /** 지금까지 달성한 횟수 */
   totalCleared: number;
+  /**
+   * 최근에 달성한 날짜들(오래된 것부터). 마지막 달성일에서 RECENT_KEPT일 안의 것만 남긴다.
+   * 허브와 통계 화면에서 최근 며칠을 칸으로 보여 줄 때 쓴다. 연속이 끊긴 앞쪽의 날도 여기에는 남아 있다.
+   */
+  recent: readonly string[];
 }
+
+/** recent에 남겨 두는 날 수. 화면에는 RECENT_SHOWN일만 보이지만 넉넉하게 둔다. */
+const RECENT_KEPT = 14;
+/** 화면에 칸으로 보여 주는 날 수(오늘까지) */
+export const RECENT_SHOWN = 7;
 
 /** 목표가 어려울수록 보상이 크다. 목표 단계(쉬움부터)에 맞춰 쓴다. */
 export const DAILY_REWARDS = [15, 25, 40] as const;
@@ -106,7 +116,28 @@ export function challengeFor(dateKey: string, games: readonly DailyGame[]): Dail
 }
 
 export function createDailyState(): DailyState {
-  return { lastClearedOn: null, streak: 0, bestStreak: 0, totalCleared: 0 };
+  return { lastClearedOn: null, streak: 0, bestStreak: 0, totalCleared: 0, recent: [] };
+}
+
+/** last에서 거꾸로 length일 동안 하루도 빠지지 않은 날짜들(오래된 것부터) */
+function runEndingAt(last: number, length: number): string[] {
+  const days = Math.min(RECENT_KEPT, Math.max(1, length));
+  return Array.from({ length: days }, (_, index) => dateKeyOfDay(last - (days - 1 - index)));
+}
+
+/**
+ * 저장돼 있던 recent를 다듬는다: 올바른 날짜만, 마지막 달성일에서 RECENT_KEPT일 안의 것만, 겹치지 않게, 오래된 것부터.
+ * 지금 이어지고 있는 연속(마지막 달성일까지의 streak일)은 언제나 들어 있다. recent가 없던 옛 세이브는 그것만으로 채워진다.
+ */
+function normalizeRecent(raw: unknown, last: number, streak: number): string[] {
+  const days = new Set(runEndingAt(last, streak).map((key) => dayNumber(key) ?? last));
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      const day = typeof item === 'string' ? dayNumber(item) : null;
+      if (day !== null && day <= last && day > last - RECENT_KEPT) days.add(day);
+    }
+  }
+  return [...days].sort((a, b) => a - b).map(dateKeyOfDay);
 }
 
 /** 저장소에서 읽은 값을 안전한 DailyState로 바꾼다. */
@@ -128,6 +159,7 @@ export function normalizeDaily(raw: unknown): DailyState {
     streak,
     bestStreak: Math.max(streak, count(value.bestStreak)),
     totalCleared: Math.max(1, count(value.totalCleared)),
+    recent: normalizeRecent(value.recent, dayNumber(lastClearedOn) ?? 0, streak),
   };
 }
 
@@ -161,14 +193,40 @@ export function activeStreak(state: DailyState, dateKey: string): number {
  * 이미 달성했거나 마지막 달성일보다 이른 날짜면 그대로다.
  */
 export function clearDaily(state: DailyState, dateKey: string): DailyState {
-  if (isCleared(state, dateKey) || dayNumber(dateKey) === null) return state;
+  const day = dayNumber(dateKey);
+  if (isCleared(state, dateKey) || day === null) return state;
   const streak = activeStreak(state, dateKey) + 1;
   return {
     lastClearedOn: dateKey,
     streak,
     bestStreak: Math.max(state.bestStreak, streak),
     totalCleared: state.totalCleared + 1,
+    recent: normalizeRecent([...state.recent, dateKey], day, streak),
   };
+}
+
+/** 최근 며칠 가운데 하루: 그날 도전을 달성했는지 */
+export interface RecentDay {
+  dateKey: string;
+  cleared: boolean;
+  /** 오늘인지. 오늘은 아직 달성할 수 있는 날이라서 화면에서 따로 표시한다. */
+  today: boolean;
+}
+
+/**
+ * dateKey(오늘)까지 최근 count일의 달성 여부를 오래된 날부터 돌려준다.
+ * 오늘 칸은 허브의 카드와 같은 기준(isCleared)으로 판단한다. 날짜가 잘못됐으면 빈 배열.
+ */
+export function recentDays(state: DailyState, dateKey: string, count = RECENT_SHOWN): RecentDay[] {
+  const today = dayNumber(dateKey);
+  if (today === null) return [];
+  const cleared = new Set(state.recent);
+  const length = Math.max(0, Math.floor(count));
+  return Array.from({ length }, (_, index) => {
+    const key = dateKeyOfDay(today - (length - 1 - index));
+    const isToday = key === dateKey;
+    return { dateKey: key, cleared: isToday ? isCleared(state, dateKey) : cleared.has(key), today: isToday };
+  });
 }
 
 /** 연속 달성 보너스 코인. 이틀째부터 하루에 5개씩 늘어 25개까지. */

@@ -31,13 +31,18 @@ export interface CosmeticItem {
   price: number;
 }
 
-/** 살 수 있는 것 전부. 자리마다 첫 번째가 기본(무료)이다. */
+/**
+ * 살 수 있는 것 전부. 자리마다 첫 번째가 기본(무료)이다.
+ * 상점은 한 자리에 여섯 개까지 한 화면에 놓는다(가장 짧은 화면 기준). 더 늘리려면 상점에 쪽 넘기기가 있어야 한다.
+ */
 export const CATALOG: readonly CosmeticItem[] = [
   // id는 픽셀 디자인 시절에 정한 것이라 이름과 다를 수 있다(backdrop-night는 지금 크림색이다).
   { id: 'backdrop-night', slot: 'backdrop', name: '복숭아 크림', price: 0 },
   { id: 'backdrop-forest', slot: 'backdrop', name: '민트 숲', price: 40 },
   { id: 'backdrop-sunset', slot: 'backdrop', name: '살구 노을', price: 100 },
   { id: 'backdrop-galaxy', slot: 'backdrop', name: '라벤더 별밤', price: 180 },
+  { id: 'backdrop-ocean', slot: 'backdrop', name: '하늘 구름', price: 260 },
+  { id: 'backdrop-blossom', slot: 'backdrop', name: '벚꽃 길', price: 360 },
 
   { id: 'runner-sprout', slot: 'runner', name: '새싹이', price: 0 },
   { id: 'runner-drop', slot: 'runner', name: '물방울', price: 40 },
@@ -50,11 +55,15 @@ export const CATALOG: readonly CosmeticItem[] = [
   { id: 'cardback-green', slot: 'cardBack', name: '풀빛 물방울', price: 40 },
   { id: 'cardback-red', slot: 'cardBack', name: '딸기 바둑판', price: 100 },
   { id: 'cardback-gold', slot: 'cardBack', name: '황금 줄무늬', price: 180 },
+  { id: 'cardback-lavender', slot: 'cardBack', name: '라벤더 물방울', price: 260 },
+  { id: 'cardback-peach', slot: 'cardBack', name: '복숭아 바둑판', price: 360 },
 
   { id: 'orb-blue', slot: 'orb', name: '하늘 구슬', price: 0 },
   { id: 'orb-green', slot: 'orb', name: '풀빛 구슬', price: 40 },
   { id: 'orb-red', slot: 'orb', name: '딸기 구슬', price: 100 },
   { id: 'orb-moon', slot: 'orb', name: '달빛 구슬', price: 180 },
+  { id: 'orb-grape', slot: 'orb', name: '포도 구슬', price: 260 },
+  { id: 'orb-ocean', slot: 'orb', name: '바다 구슬', price: 360 },
 ];
 
 /** 세이브에 남기는 꾸미기 상태 */

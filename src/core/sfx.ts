@@ -3,6 +3,10 @@
  * 파일이 없으니 오프라인에서도 그대로 동작하고 용량도 들지 않는다.
  */
 import { store } from './store';
+import { volumeGain } from './volume';
+
+/** 효과음 전체의 크기(크기 설정이 보통일 때) */
+const VOLUME = 0.22;
 
 type AudioContextCtor = typeof AudioContext;
 
@@ -18,7 +22,7 @@ function getContext(): AudioContext | null {
   try {
     context = new Ctor();
     master = context.createGain();
-    master.gain.value = 0.22;
+    master.gain.value = VOLUME;
     master.connect(context.destination);
   } catch {
     context = null;
@@ -64,6 +68,8 @@ export function tone(frequency: number, duration: number, options: ToneOptions =
   if (!store.data.settings.sound) return;
   const ctx = getContext();
   if (!ctx || !master || ctx.state !== 'running') return;
+  // 설정에서 고른 크기를 따른다. 이미 울리고 있는 소리도 같이 바뀌지만 효과음은 짧아서 티가 나지 않는다.
+  master.gain.value = VOLUME * volumeGain(store.data.volume.sound);
 
   const start = ctx.currentTime + (options.delay ?? 0);
   const end = start + duration;
