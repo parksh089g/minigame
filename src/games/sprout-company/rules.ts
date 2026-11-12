@@ -20,6 +20,7 @@ import {
   LEVEL_SPEED,
   OFFICES,
   OLD_HAND_TIPS,
+  PLAY_STARS,
   PROJECT_ORDER,
   PROJECTS,
   QUEUE,
@@ -128,6 +129,8 @@ export interface CompanyState {
   released: Partial<Record<ProjectId, number>>;
   /** 모든 출시와 업데이트의 수 */
   releases: number;
+  /** 프로젝트 id → 그 게임을 직접 해서 딴 별의 수. 딴 별은 줄지 않는다. */
+  stars: Partial<Record<ProjectId, number>>;
   /** 지금 와 있는 지원자. 채용 화면을 처음 열 때 정하고, 뽑을 때까지 바뀌지 않는다. */
   candidates: StaffId[] | null;
   /** 팀장의 단계. 0이면 팀장이 없다. */
@@ -177,6 +180,7 @@ export function createCompany(boss: StaffId, now = 0): CompanyState {
     rushIn: RUSH.every[0],
     released: {},
     releases: 0,
+    stars: {},
     candidates: null,
     lead: 0,
     leadWait: 0,
@@ -306,10 +310,37 @@ function baseIncome(id: ProjectId, version: number): number {
   return def.income * (1 + UPDATE_SCALE.income * (version - 1));
 }
 
+/** 그 게임을 직접 해서 딴 별의 수 */
+export function starsOf(state: CompanyState, id: ProjectId): number {
+  return state.stars[id] ?? 0;
+}
+
+/**
+ * 직접 해서 딴 별을 적는다. 별은 줄지 않으므로 지금보다 많은 것만 받아들인다.
+ * 별이 는 게임의 id를 돌려준다.
+ */
+export function setStars(state: CompanyState, stars: Partial<Record<ProjectId, number>>): ProjectId[] {
+  const risen: ProjectId[] = [];
+  for (const id of PROJECT_ORDER) {
+    const next = Math.min(PLAY_STARS.count, Math.floor(stars[id] ?? 0));
+    if (next > starsOf(state, id)) {
+      state.stars[id] = next;
+      risen.push(id);
+    }
+  }
+  return risen;
+}
+
+/** 출시작 하나가 초마다 버는 잎사귀. 딴 별과 회사 보너스까지 넣은 것이다. 아직 내지 않은 게임은 0 */
+export function gameIncome(state: CompanyState, id: ProjectId): number {
+  const starred = baseIncome(id, versionOf(state, id)) * (1 + PLAY_STARS.income * starsOf(state, id));
+  return starred * (1 + companyBonus(state, 'income'));
+}
+
 /** 출시작이 모두 합쳐 초마다 버는 잎사귀 */
 export function incomePerSecond(state: CompanyState): number {
   let sum = 0;
-  for (const id of PROJECT_ORDER) sum += baseIncome(id, versionOf(state, id));
+  for (const id of PROJECT_ORDER) sum += baseIncome(id, versionOf(state, id)) * (1 + PLAY_STARS.income * starsOf(state, id));
   return sum * (1 + companyBonus(state, 'income'));
 }
 
@@ -1080,6 +1111,10 @@ export function normalizeCompany(raw: unknown): CompanyState | null {
   for (const id of PROJECT_ORDER) {
     const version = isObject(raw.released) ? toCount(raw.released[id]) : 0;
     if (version > 0) state.released[id] = version;
+  }
+  for (const id of PROJECT_ORDER) {
+    const stars = isObject(raw.stars) ? toCount(raw.stars[id], PLAY_STARS.count) : 0;
+    if (stars > 0) state.stars[id] = stars;
   }
   const total = PROJECT_ORDER.reduce((sum, id) => sum + versionOf(state, id), 0);
   state.releases = Math.max(total, toCount(raw.releases));

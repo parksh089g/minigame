@@ -5,6 +5,7 @@ import { APP_NAME, APP_VERSION, FONT_SIZE, GAME_WIDTH, SCENE, THEME, THEME_CSS }
 import { claimable, statsOf } from '../core/achievements';
 import { activeStreak, dateKeyOf, isCleared, recentDays, streakBonus } from '../core/daily';
 import { vibrate } from '../core/haptics';
+import { setHome } from '../core/home';
 import { installTip } from '../core/install';
 import { currentPlatform, showInstallGuide } from '../core/install-guide';
 import { clampPage, layoutPages, pageSlice, type PageLayout } from '../core/paging';
@@ -125,6 +126,8 @@ export class HubScene extends Phaser.Scene {
 
   create(): void {
     const { height } = this.scale;
+    // 허브에서 하러 가는 게임은 끝나면 허브로 돌아온다.
+    setHome(null);
     this.backdrop = addBackdrop(this);
 
     this.addHeader();

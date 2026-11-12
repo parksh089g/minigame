@@ -5,6 +5,7 @@ import { paintArt } from '../art/vector';
 import { FONT_SIZE, GAME_WIDTH, SCENE, THEME, THEME_CSS } from '../config';
 import type { BackAware } from '../core/app-events';
 import { vibrate } from '../core/haptics';
+import { homeLabel, homeScene } from '../core/home';
 import { sfx } from '../core/sfx';
 import { store } from '../core/store';
 import { addPanel, addScrim, addTapZone, addText, fadeToScene, PixelButton } from '../core/ui';
@@ -56,7 +57,8 @@ export class ResultScene extends Phaser.Scene implements BackAware {
 
   private leave(): void {
     this.scene.stop(this.gameKey);
-    fadeToScene(this, SCENE.hub);
+    // 보통은 허브로, 다른 화면에서 하러 온 게임이면 그 화면으로 돌아간다.
+    fadeToScene(this, homeScene());
   }
 
   create(data: ResultData): void {
@@ -222,7 +224,7 @@ export class ResultScene extends Phaser.Scene implements BackAware {
       y: buttonY + BUTTON_HEIGHT + BUTTON_GAP,
       width: PANEL_WIDTH,
       height: BUTTON_HEIGHT,
-      label: '다른 게임 고르기',
+      label: homeLabel('다른 게임 고르기'),
       onTap: () => this.leave(),
     });
   }

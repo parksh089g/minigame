@@ -53,7 +53,8 @@ describe('처음 안내', () => {
 
     state.releases = 3;
     state.goals = createGoals('2026-11-12', 1);
-    expect(drain(state)).toEqual(['update', 'goals']);
+    // 게임을 몇 개 내고 나면, 낸 게임을 직접 할 수 있다는 것도 알려 준다.
+    expect(drain(state)).toEqual(['update', 'goals', 'play']);
 
     state.leaves = 1_000_000;
     expect(drain(state)).toEqual(['train', 'lead']);
