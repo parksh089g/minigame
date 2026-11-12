@@ -18,7 +18,7 @@ import { makeShareImage } from '../../share/card';
 import { displayHost, shareFileName, shareNotice, shareTitle, shareUrl } from '../../share/link';
 import { sendShare } from '../../share/send';
 import { getGame, thisWeek } from '../registry';
-import { COMPUTER_SIZE, computerTexture, registerCompanyTextures, SC, TASK_COLORS, taskTexture } from './art';
+import { COMPUTER_SIZE, computerTexture, departmentLook, registerCompanyTextures, SC, TASK_COLORS, taskTexture } from './art';
 import {
   AWAY,
   BRANCH,
@@ -53,6 +53,7 @@ import {
   type DecorDef,
   type DecorId,
   type DecorSlot,
+  type DepartmentDef,
   type DepartmentId,
   type Effect,
   type EquipmentDef,
@@ -217,6 +218,7 @@ type PanelKind =
   | 'office'
   | 'goals'
   | 'dept'
+  | 'depts'
   | 'games'
   | 'branch'
   | 'found'
@@ -351,6 +353,13 @@ function effectText(effect: Effect, level = 1, everyone = false): string {
   if (effect.key === 'rest') return `쉬는 속도 +${percent}%`;
   if (effect.key === 'stamina') return `기운이 ${percent}% 더 오래가요`;
   return `출시 보너스 +${percent}%`;
+}
+
+/** 돕는 부서의 몫을 좁은 줄에 맞게 짧게 적는다. count는 단계 × 사람 수다. */
+function supportText(effect: Effect, count: number): string {
+  const percent = Math.round(effect.amount * count * 100);
+  if (effect.key === 'away') return `닫은 동안 수익 +${percent}%`;
+  return effectText(effect, count);
 }
 
 /** 배수를 적는다: 2배, 2.6배 */
@@ -1002,7 +1011,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
       const badge = this.add.graphics();
       badge.fillStyle(THEME.white, 1).fillCircle(x + 11, y + 11, 8);
       // 부서에 든 친구는 그 부서의 색으로 테를 두른다.
-      if (desk.dept) badge.lineStyle(2, TASK_COLORS[DEPARTMENTS[desk.dept].kind].deep, 1).strokeCircle(x + 11, y + 11, 8.5);
+      if (desk.dept) badge.lineStyle(2, departmentLook(desk.dept).deep, 1).strokeCircle(x + 11, y + 11, 8.5);
       room.add(badge);
       room.add(
         this.add
@@ -1525,6 +1534,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     else if (kind === 'office') this.buildOfficePanel(panel);
     else if (kind === 'goals') this.buildGoalsPanel(panel);
     else if (kind === 'dept') this.buildDeptPanel(panel);
+    else if (kind === 'depts') this.buildDeptsPanel(panel);
     else if (kind === 'games') this.buildGamesPanel(panel);
     else if (kind === 'branch') this.buildBranchPanel(panel);
     else if (kind === 'found') this.buildFoundPanel(panel);
@@ -1540,9 +1550,10 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     this.panelKind = null;
   }
 
-  /** 닫기를 눌렀을 때. 부서 창과 자회사 창은 사무실 창에서 열었으니 그리로 돌아간다. */
+  /** 닫기를 눌렀을 때. 사무실 창에서 연 창은 사무실 창으로, 부서 하나의 창은 부서 목록으로 돌아간다. */
   private dismissPanel(): void {
-    if (this.panelKind === 'dept' || this.panelKind === 'branch' || this.panelKind === 'decor') this.openPanel('office');
+    if (this.panelKind === 'depts' || this.panelKind === 'branch' || this.panelKind === 'decor') this.openPanel('office');
+    else if (this.panelKind === 'dept') this.openPanel('depts');
     else if (this.panelKind === 'found') this.openPanel('branch');
     else if (this.panelKind === 'seats') this.openPanel('staff');
     else this.closePanel();
@@ -1596,6 +1607,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     const departments = DEPARTMENT_ORDER.map(
       (id) => `${departmentLevel(state, id)}${departmentBlock(state, id) ?? ''}${departmentMembers(state, id).length}`,
     );
+    if (kind === 'depts') return `${page}|${departments.join(',')}`;
     return `${state.office}|${moveBlock(state) ?? ''}|${branch}|${departments.join(',')}|${this.canPower()}`;
   }
 
@@ -2106,7 +2118,8 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     const officeRows = OFFICES.length - first;
     // 가장 큰 사무실에 왔거나 자회사를 세운 적이 있으면 자회사 줄이 하나 더 붙는다.
     const branchOpen = state.office === OFFICES.length - 1 || state.branches > 0;
-    const deptRows = deptOpen ? DEPARTMENT_ORDER.length : 0;
+    // 부서는 한 줄로 묶어 두고, 눌러서 부서 목록을 연다.
+    const deptRows = deptOpen ? 1 : 0;
     const rowCount = officeRows + deptRows + (branchOpen ? 1 : 0);
     const { left, top, width } = this.panelFrame(panel, '사무실', rowCount * rowHeight + 20 + 34);
     OFFICES.forEach((office, index) => {
@@ -2163,11 +2176,9 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
       );
     });
     if (deptOpen) {
-      DEPARTMENT_ORDER.forEach((id, index) => {
-        const y = top + (officeRows + index) * rowHeight;
-        this.rowLine(panel, left, y, width);
-        this.buildDeptRow(panel, id, y + rowHeight / 2, left, width);
-      });
+      const y = top + officeRows * rowHeight;
+      this.rowLine(panel, left, y, width);
+      this.buildDeptsRow(panel, y + rowHeight / 2, left, width);
     }
     if (branchOpen) {
       const y = top + (officeRows + deptRows) * rowHeight;
@@ -2175,7 +2186,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
       this.buildBranchRow(panel, y + rowHeight / 2, left, width);
     }
     const note = deptOpen
-      ? '부서원은 그 부서의 일을 더 빨리 해요'
+      ? '부서를 세워 직원을 묶어요'
       : state.office + 1 < OFFICES.length
         ? '평판은 게임을 출시하면 올라요'
         : '가장 큰 사무실에 왔어요';
@@ -2340,29 +2351,75 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
 
   /** 부서의 그림: 그 부서가 맡는 업무의 카드 그림을 그 색의 동그라미에 넣는다. */
   private deptIcon(panel: Container, x: number, y: number, id: DepartmentId, dim = false): void {
-    const kind = DEPARTMENTS[id].kind;
-    const colors = TASK_COLORS[kind];
-    panel.add(this.add.graphics().fillStyle(colors.deep, 1).fillCircle(x, y + 1.5, 12).fillStyle(colors.face, 1).fillCircle(x, y, 12).setAlpha(dim ? 0.5 : 1));
-    panel.add(this.add.image(x, y, taskTexture(kind)).setDisplaySize(14, 14).setAlpha(dim ? 0.5 : 1));
+    const look = departmentLook(id);
+    panel.add(this.add.graphics().fillStyle(look.deep, 1).fillCircle(x, y + 1.5, 12).fillStyle(look.face, 1).fillCircle(x, y, 12).setAlpha(dim ? 0.5 : 1));
+    panel.add(this.add.image(x, y, look.texture).setDisplaySize(14, 14).setAlpha(dim ? 0.5 : 1));
   }
 
-  /** 사무실 창의 부서 한 줄. 아직 없는 부서는 여기서 세우고, 세운 부서는 눌러서 부서 창을 연다. */
+  /** 부서가 하는 일을 한 줄로 적는다: 일하는 부서는 그 업무의 속도, 돕는 부서는 회사에 보태는 몫 */
+  private deptGain(id: DepartmentId, level: number, members: number): string {
+    const def: DepartmentDef = DEPARTMENTS[id];
+    if (def.effect) return supportText(def.effect, level * members);
+    return `${def.kind ? TASKS[def.kind].name : ''} 일 +${Math.round(departmentBoost(level) * 100)}%`;
+  }
+
+  /** 사무실 창의 부서 한 줄. 눌러서 부서 목록을 연다. */
+  private buildDeptsRow(panel: Container, middle: number, left: number, width: number): void {
+    const state = this.state;
+    const founded = DEPARTMENT_ORDER.filter((id) => departmentLevel(state, id) > 0);
+    // 세운 부서 가운데 셋까지의 그림을 겹쳐서 보여 준다. 아직 없으면 첫 부서의 그림을 흐리게 둔다.
+    const shown = founded.length > 0 ? founded.slice(0, 3) : [DEPARTMENT_ORDER[0]];
+    const icons = this.add.graphics();
+    panel.add(icons);
+    shown.forEach((id, index) => {
+      const look = departmentLook(id);
+      const x = left + 24 + (index - (shown.length - 1) / 2) * 9;
+      icons.fillStyle(THEME.white, 1).fillCircle(x, middle, 8.5).fillStyle(look.face, founded.length > 0 ? 1 : 0.5).fillCircle(x, middle, 7.5);
+    });
+    const name = addText(this, left + 42, middle - 15, '부서', { color: THEME_CSS.inkDeep });
+    panel.add(name);
+    if (founded.length > 0) {
+      panel.add(addText(this, name.x + name.width + 4, middle - 13, `${founded.length}곳`, { size: FONT_SIZE.small, color: THEME_CSS.lilacDeep }));
+    }
+    const members = state.desks.filter((desk) => desk.staff && desk.dept).length;
+    const rest = DEPARTMENT_ORDER.length - founded.length;
+    const detail =
+      founded.length === 0 ? '일하는 부서 넷, 돕는 부서 셋' : rest > 0 ? `부서원 ${members}명  아직 없는 부서 ${rest}곳` : `부서원 ${members}명`;
+    this.rowDetail(panel, left + 42, middle, left + width - 70, detail);
+    // 세우거나 올릴 수 있는 부서가 있으면 버튼의 색으로 알린다.
+    const canGrow = DEPARTMENT_ORDER.some((id) => departmentBlock(state, id) === null);
+    this.button(panel, left + width - 66, middle - 13, 56, 26, '열기', canGrow ? 'green' : 'neutral', () => {
+      this.pages.depts = 0;
+      this.openPanel('depts');
+    });
+  }
+
+  /** 부서 목록 창: 일하는 부서와 돕는 부서를 차례로 적는다. */
+  private buildDeptsPanel(panel: Container): void {
+    const bottom = this.listPanel(panel, 'depts', '부서', DEPARTMENT_ORDER, 42, 18, (id, middle, left, width) =>
+      this.buildDeptRow(panel, id, middle, left, width),
+    );
+    panel.add(
+      addText(this, W / 2, bottom + 3, '한 사람은 한 부서에만 들 수 있어요', { size: FONT_SIZE.small, color: THEME_CSS.faint, originX: 0.5 }),
+    );
+  }
+
+  /** 부서 목록의 한 줄. 아직 없는 부서는 여기서 세우고, 세운 부서는 눌러서 부서 창을 연다. */
   private buildDeptRow(panel: Container, id: DepartmentId, middle: number, left: number, width: number): void {
     const state = this.state;
-    const def = DEPARTMENTS[id];
+    const def: DepartmentDef = DEPARTMENTS[id];
     const level = departmentLevel(state, id);
-    const task = TASKS[def.kind].name;
     this.deptIcon(panel, left + 24, middle, id, level === 0);
     const name = addText(this, left + 42, middle - 15, def.name, { color: THEME_CSS.inkDeep });
     panel.add(name);
     if (level > 0) {
       panel.add(addText(this, name.x + name.width + 4, middle - 13, `${level}단계`, { size: FONT_SIZE.small, color: THEME_CSS.lilacDeep }));
     }
-    const percent = Math.round(departmentBoost(Math.max(1, level)) * 100);
-    const detail =
-      level > 0
-        ? `부서원 ${departmentMembers(state, id).length}/${departmentSeats(level)}명  ${task} 일 +${percent}%`
-        : `세우면 부서원의 ${task} 일 +${percent}%`;
+    const count = departmentMembers(state, id).length;
+    let detail: string;
+    if (level > 0) detail = `부서원 ${count}/${departmentSeats(level)}명  ${this.deptGain(id, level, count)}`;
+    else if (def.effect) detail = `세우면 한 명마다 ${supportText(def.effect, 1)}`;
+    else detail = `세우면 부서원의 ${this.deptGain(id, 1, 1)}`;
     this.rowDetail(panel, left + 42, middle, left + width - 70, detail);
     if (level === 0) {
       this.costButton(panel, left + width - 66, middle - 13, departmentCost(0), departmentBlock(state, id) === null, () => {
@@ -2372,6 +2429,12 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
         this.save();
         this.buildRoom();
         this.pill(`새 부서 ${def.name}`, 1600).setDepth(DEPTH.banner);
+        // 모두 다른 부서에 들어 있어서 아무도 들지 못했으면, 누구를 넣을지 바로 고르게 한다.
+        if (departmentMembers(state, id).length === 0) {
+          this.deptShown = id;
+          this.pages.dept = 0;
+          this.openPanel('dept');
+        }
         this.refreshNow();
       });
       return;
@@ -2388,22 +2451,28 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
   private buildDeptPanel(panel: Container): void {
     const state = this.state;
     const id = this.deptShown;
-    const def = DEPARTMENTS[id];
+    const def: DepartmentDef = DEPARTMENTS[id];
     const kind = def.kind;
-    const task = TASKS[kind].name;
+    const effect = def.effect;
     const level = departmentLevel(state, id);
     const seats = departmentSeats(level);
     const team = 1 + departmentBoost(level);
     /** 이 부서에 들었을 때 이 친구가 부서의 업무를 하는 배수 */
     const fitOf = (staff: StaffId): number => (specialtyOf(state, staff) === kind ? SPECIALTY_BOOST : 1) * team;
+    /** 이 친구가 이 부서에 들면 얻는 것: 일하는 부서는 그 업무의 배수, 돕는 부서는 한 명이 회사에 보태는 몫(무엇의 몫인지는 위에 적혀 있다) */
+    const gainOf = (staff: StaffId): string =>
+      effect ? `+${Math.round(effect.amount * level * 100)}%` : `${kind ? TASKS[kind].name : ''} 일 ${timesText(fitOf(staff))}`;
     const rows: number[] = [];
     state.desks.forEach((desk, index) => {
       if (desk.staff) rows.push(index);
     });
-    // 부서원이 먼저, 그다음은 이 부서의 일을 잘할 친구부터 적는다.
+    // 부서원이 먼저다. 그다음은 일하는 부서면 이 부서의 일을 잘할 친구부터,
+    // 돕는 부서면 아직 부서가 없는 친구와 특기가 없는 사장부터 적는다.
     const rank = (index: number): number => {
       const desk = state.desks[index];
-      return (desk.dept === id ? 100 : 0) + fitOf(desk.staff as StaffId);
+      const staff = desk.staff as StaffId;
+      const fit = effect ? (desk.dept === null ? 2 : 0) + (specialtyOf(state, staff) === null ? 1 : 0) : fitOf(staff);
+      return (desk.dept === id ? 100 : 0) + fit;
     };
     rows.sort((a, b) => rank(b) - rank(a) || a - b);
 
@@ -2412,7 +2481,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
       draw: (top: number, left: number, width: number): void => {
         const count = departmentMembers(state, id).length;
         this.deptIcon(panel, left + 24, top + 18, id);
-        const summary = addText(this, left + 42, top + 3, `부서원 ${count}/${seats}명  ${task} 일 +${Math.round((team - 1) * 100)}%`, {
+        const summary = addText(this, left + 42, top + 3, `부서원 ${count}/${seats}명  ${this.deptGain(id, level, count)}`, {
           color: THEME_CSS.inkDeep,
         });
         panel.add(summary.setScale(Math.min(1, (width - 42 - 72) / summary.width)));
@@ -2423,7 +2492,8 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
           return;
         }
         const more = departmentSeats(level + 1) > seats ? `, 자리 ${departmentSeats(level + 1)}` : '';
-        this.rowDetail(panel, left + 42, top + 18, left + width - 70, `다음 단계: +${Math.round(departmentBoost(level + 1) * 100)}%${more}`);
+        const next = effect ? `한 명마다 +${Math.round(effect.amount * (level + 1) * 100)}%` : `+${Math.round(departmentBoost(level + 1) * 100)}%`;
+        this.rowDetail(panel, left + 42, top + 18, left + width - 70, `다음 단계: ${next}${more}`);
         this.costButton(panel, left + width - 66, top + 5, departmentCost(level), block === null, () => {
           if (!upgradeDepartment(state, id)) return;
           this.play('upgrade');
@@ -2452,7 +2522,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
         panel.add(
           this.add.image(name.x + name.width + 9, middle - 7, specialty ? taskTexture(specialty) : 'icon-star').setDisplaySize(11, 11),
         );
-        const times = `${task} 일 ${timesText(fitOf(staff))}`;
+        const times = gainOf(staff);
         const detail = member ? `부서원  ${times}` : desk.dept ? `지금 ${DEPARTMENTS[desk.dept].name}  옮기면 ${times}` : `넣으면 ${times}`;
         this.rowDetail(panel, left + 40, middle - 1, left + width - 62, detail);
         const change = (done: boolean): void => {
@@ -2475,9 +2545,8 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
       },
       header,
     );
-    panel.add(
-      addText(this, W / 2, bottom + 3, '한 사람은 한 부서에만 들 수 있어요', { size: FONT_SIZE.small, color: THEME_CSS.faint, originX: 0.5 }),
-    );
+    const note = effect ? '부서원이 많을수록 회사에 더 보태요' : '한 사람은 한 부서에만 들 수 있어요';
+    panel.add(addText(this, W / 2, bottom + 3, note, { size: FONT_SIZE.small, color: THEME_CSS.faint, originX: 0.5 }));
   }
 
   // ───────── 자회사 ─────────

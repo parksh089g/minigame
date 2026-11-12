@@ -45,6 +45,7 @@ import {
   type DecorDef,
   type DecorId,
   type DecorSlot,
+  type DepartmentDef,
   type DepartmentId,
   type EffectKey,
   type EquipmentDef,
@@ -252,16 +253,20 @@ function gearBonus(levels: Levels, scope: EquipmentDef['scope'], key: EffectKey)
 
 /**
  * 회사 전체에 걸리는 보너스의 합. 0.3이면 +30%.
- * 회사 장비와, 직원의 성격 가운데 수익과 출시 보너스가 여기 든다. 속도를 올리는 성격은 그 직원 것이라 빠진다.
+ * 회사 장비와, 직원의 성격 가운데 수익과 출시 보너스, 그리고 돕는 부서의 몫이 여기 든다.
+ * 속도를 올리는 성격은 그 직원 것이라 빠진다.
  */
 export function companyBonus(state: CompanyState, key: EffectKey): number {
   let sum = gearBonus(state.gear, 'company', key);
-  if (key !== 'workSpeed') {
-    for (const desk of state.desks) {
-      if (!desk.staff) continue;
+  for (const desk of state.desks) {
+    if (!desk.staff) continue;
+    if (key !== 'workSpeed') {
       const trait = (STAFF[desk.staff] as StaffDef).trait;
       if (trait.key === key) sum += trait.amount;
     }
+    // 돕는 부서에 든 친구는 부서의 단계만큼 회사에 보탠다.
+    const effect = desk.dept ? (DEPARTMENTS[desk.dept] as DepartmentDef).effect : undefined;
+    if (effect?.key === key) sum += effect.amount * departmentLevel(state, desk.dept as DepartmentId);
   }
   return sum;
 }
@@ -1080,7 +1085,22 @@ export function departmentCount(state: CompanyState): number {
   return DEPARTMENT_ORDER.reduce((count, id) => count + (departmentLevel(state, id) > 0 ? 1 : 0), 0);
 }
 
-/** 그 단계의 부서가 부서원에게 주는 속도. 0.6이면 그 부서의 업무를 60% 더 빨리 한다. */
+/** 돕는 부서인가: 맡는 업무가 없고, 부서원의 수만큼 회사 전체를 돕는다. */
+export function isSupport(id: DepartmentId): boolean {
+  return (DEPARTMENTS[id] as DepartmentDef).effect !== undefined;
+}
+
+/** 돕는 부서의 부서원 한 명이 그 단계에서 회사에 보태는 몫. 일하는 부서는 0 */
+export function supportShare(id: DepartmentId, level: number): number {
+  return ((DEPARTMENTS[id] as DepartmentDef).effect?.amount ?? 0) * Math.max(0, level);
+}
+
+/** 돕는 부서가 지금 회사에 보태는 몫: 한 명의 몫 × 부서원의 수 */
+export function supportBonus(state: CompanyState, id: DepartmentId): number {
+  return supportShare(id, departmentLevel(state, id)) * departmentMembers(state, id).length;
+}
+
+/** 일하는 부서의 그 단계가 부서원에게 주는 속도. 0.6이면 그 부서의 업무를 60% 더 빨리 한다. */
 export function departmentBoost(level: number): number {
   return DEPARTMENT.boost * Math.max(0, level);
 }
@@ -1113,18 +1133,30 @@ export function departmentBlock(state: CompanyState, id: DepartmentId): LeadBloc
   return null;
 }
 
-/** 빈 자리를, 아직 부서가 없고 특기가 이 부서의 업무인 친구로 채운다. */
+/**
+ * 빈 자리를 아직 부서가 없는 친구로 채운다.
+ * 일하는 부서에는 특기가 그 업무인 친구만 든다. 돕는 부서에는 누구나 들되, 특기가 없는 사장이 먼저 든다.
+ */
 function fillDepartment(state: CompanyState, id: DepartmentId): void {
   let free = departmentSeats(departmentLevel(state, id)) - departmentMembers(state, id).length;
-  for (const desk of state.desks) {
-    if (free <= 0) return;
-    if (!desk.staff || desk.dept !== null || specialtyOf(state, desk.staff) !== DEPARTMENTS[id].kind) continue;
-    desk.dept = id;
-    free -= 1;
+  const kind = (DEPARTMENTS[id] as DepartmentDef).kind;
+  const take = (fits: (staff: StaffId) => boolean): void => {
+    for (const desk of state.desks) {
+      if (free <= 0) return;
+      if (!desk.staff || desk.dept !== null || !fits(desk.staff)) continue;
+      desk.dept = id;
+      free -= 1;
+    }
+  };
+  if (kind !== null) {
+    take((staff) => specialtyOf(state, staff) === kind);
+    return;
   }
+  take((staff) => specialtyOf(state, staff) === null);
+  take(() => true);
 }
 
-/** 부서를 세우거나 한 단계 올린다. 새로 난 자리에는 특기가 맞는 친구가 알아서 든다. */
+/** 부서를 세우거나 한 단계 올린다. 새로 난 자리에는 아직 부서가 없는 친구가 알아서 든다(fillDepartment). */
 export function upgradeDepartment(state: CompanyState, id: DepartmentId): boolean {
   if (departmentBlock(state, id) !== null) return false;
   const level = departmentLevel(state, id);
