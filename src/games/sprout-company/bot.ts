@@ -46,6 +46,10 @@ export interface BotOptions {
   reaction: number;
   /** 0 이상 1 미만의 수를 주는 함수. 지원자를 정할 때 쓴다. */
   random: () => number;
+  /** 이사나 채용을 앞두고 모으는 동안, 그 값의 이만큼보다 싼 것만 산다. 적지 않으면 0.2. 0이면 아무것도 사지 않고 모은다. */
+  thrift?: number;
+  /** true면 아직 못 낸 게임에 필요한 부서부터 세운다. 아니면 다른 것과 같이 싼 것부터 산다. */
+  eager?: boolean;
 }
 
 export interface BotReport {
@@ -78,9 +82,19 @@ function pickProject(state: CompanyState): ProjectId {
   return best;
 }
 
-function spend(state: CompanyState, random: () => number): void {
+function spend(state: CompanyState, options: BotOptions): void {
+  const random = options.random;
+  const thrift = options.thrift ?? 0.2;
   for (let guard = 0; guard < 50; guard += 1) {
     if (moveOffice(state)) continue;
+    if (options.eager && availableProjects(state).some((id) => departmentsMissing(state, id) > 0)) {
+      const unbuilt = DEPARTMENT_ORDER.find((id) => departmentLevel(state, id) === 0);
+      if (unbuilt && departmentBlock(state, unbuilt) === null) {
+        upgradeDepartment(state, unbuilt);
+        continue;
+      }
+      if (unbuilt && departmentBlock(state, unbuilt) === 'poor') return;
+    }
     const candidate = candidatesFor(state, random)[0];
     if (candidate && hireBlock(state, candidate) === null) {
       hire(state, candidate);
@@ -111,7 +125,7 @@ function spend(state: CompanyState, random: () => number): void {
       if (departmentBlock(state, id) === null) offer(departmentCost(departmentLevel(state, id)), () => upgradeDepartment(state, id));
     }
     const chosen = pick as { cost: number; buy: () => void } | null;
-    if (!chosen || (reserve > 0 && chosen.cost > reserve * 0.2)) return;
+    if (!chosen || (reserve > 0 && chosen.cost > reserve * thrift)) return;
     chosen.buy();
   }
 }
@@ -161,7 +175,7 @@ export function runBot(state: CompanyState, seconds: number, options: BotOptions
         }
       }
     }
-    spend(state, options.random);
+    spend(state, options);
     if (report.officeAt[state.office] === undefined) report.officeAt[state.office] = time;
     if (
       report.allReleasedAt === null &&

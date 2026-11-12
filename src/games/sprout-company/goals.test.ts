@@ -17,7 +17,7 @@ import {
   takeReleaseCoin,
   type GoalDef,
 } from './goals';
-import { OFFICES, RUSH, TRAINING } from './data';
+import { EQUIPMENT, EQUIPMENT_ORDER, OFFICES, RUSH, TRAINING } from './data';
 import {
   acceptRush,
   advance,
@@ -29,6 +29,7 @@ import {
   normalizeCompany,
   release,
   startProject,
+  stuckGoals,
   train,
   type CompanyState,
 } from './rules';
@@ -78,6 +79,17 @@ describe('오늘의 목표 정하기', () => {
     }
   });
 
+  it('빼 달라고 한 목표는 나오지 않고, 그래도 셋이 나온다', () => {
+    for (const day of days()) {
+      const kinds = goalsFor(day, OFFICES.length - 1, ['train', 'upgrade']).map((goal) => goal.kind);
+      expect(kinds).toHaveLength(GOAL_COUNT);
+      expect(kinds).not.toContain('train');
+      expect(kinds).not.toContain('upgrade');
+    }
+    const rolled = rollGoals(createGoals(DAY, 1), '2026-11-13', OFFICES.length - 1, ['train']);
+    expect(rolled.list.map((goal) => goal.kind)).not.toContain('train');
+  });
+
   it('목표를 한 줄로 적는다', () => {
     expect(goalText({ kind: 'release', target: 3 })).toBe('게임 3번 출시하기');
     for (const kind of GOAL_KINDS) expect(goalText({ kind, target: 2 })).toContain('2');
@@ -125,6 +137,44 @@ describe('오늘의 목표 채우기', () => {
     for (let index = 0; index < RELEASE_COINS_PER_DAY + 10; index += 1) coins += takeReleaseCoin(goals);
     expect(coins).toBe(RELEASE_COINS_PER_DAY);
     expect(takeReleaseCoin(rollGoals(goals, '2026-11-13', 0))).toBe(1);
+  });
+});
+
+describe('채울 수 없는 목표', () => {
+  const most = (kind: 'train' | 'upgrade'): number => Math.max(...GOALS[kind].targets);
+
+  it('새 회사에는 없다', () => {
+    expect(stuckGoals(createCompany('sprout'))).toEqual([]);
+  });
+
+  it('교육이 목표만큼 남지 않으면 교육 목표를 뺀다', () => {
+    const state = createCompany('sprout');
+    for (const desk of state.desks) desk.level = TRAINING.maxLevel;
+    expect(stuckGoals(state)).toEqual(['train']);
+    // 한 친구가 목표의 수보다 하나 적게 남았으면 아직 채울 수 없다.
+    state.desks[0].level = TRAINING.maxLevel - (most('train') - 1);
+    expect(stuckGoals(state)).toEqual(['train']);
+    state.desks[0].level = TRAINING.maxLevel - most('train');
+    expect(stuckGoals(state)).toEqual([]);
+  });
+
+  it('장비를 거의 다 올렸으면 장비 목표를 뺀다', () => {
+    const state = createCompany('sprout');
+    const fill = (): void => {
+      for (const id of EQUIPMENT_ORDER) {
+        if (EQUIPMENT[id].scope === 'company') state.gear[id] = EQUIPMENT[id].maxLevel;
+        else for (const desk of state.desks) desk.gear[id] = EQUIPMENT[id].maxLevel;
+      }
+    };
+    fill();
+    expect(stuckGoals(state)).toEqual(['upgrade']);
+    state.desks[0].gear.computer = EQUIPMENT.computer.maxLevel - most('upgrade');
+    expect(stuckGoals(state)).toEqual([]);
+    // 아직 열리지 않은 장비는 세지 않는다. 옥탑방에서는 컴퓨터와 화분뿐이다.
+    fill();
+    state.gear.coffee = 0;
+    expect(EQUIPMENT.coffee.unlockOffice).toBeGreaterThan(state.office);
+    expect(stuckGoals(state)).toEqual(['upgrade']);
   });
 });
 
