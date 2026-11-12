@@ -1,12 +1,12 @@
 /**
- * 일시정지 화면에 덧붙이는 "지금 빌드": 든 무기와 패시브의 이름과 레벨, 무기마다 준 피해의 비중.
+ * 일시정지 화면에 덧붙이는 "지금 빌드": 든 무기와 패시브의 이름과 레벨, 무기마다 준 피해의 비중, 끝없는 밤에서 받은 밤의 축복.
  * 플레이 중에는 HUD의 작은 아이콘으로만 보이던 것을, 멈춘 김에 이름과 숫자로 확인할 수 있다.
  */
 import type Phaser from 'phaser';
 import { FONT_SIZE, GAME_WIDTH, THEME, THEME_CSS } from '../../config';
 import { addText } from '../../core/ui';
 import type { PauseExtra } from '../../scenes/MiniGameScene';
-import { levelLabel, passiveRows, percent, weaponRows, type PassiveRow, type WeaponRow } from './build';
+import { boonRows, levelLabel, passiveRows, percent, weaponRows, type PassiveRow, type WeaponRow } from './build';
 import { MAX_WEAPONS } from './data';
 import { iconKey } from './icons';
 import type { RunState } from './sim';
@@ -25,9 +25,18 @@ export function pauseInfo(state: RunState): PauseExtra {
   const weapons = weaponRows(state.weapons, state.dealt);
   const passives = passiveRows(state.passives);
   const passiveLines = Math.max(1, Math.ceil(passives.length / 2));
+  // 끝없는 밤에서 받은 밤의 축복이 있으면 패시브 아래에 한 칸 더 보여 준다.
+  const boons = boonRows(state.boons);
+  const boonLines = Math.ceil(boons.length / 2);
   return {
     width: CARD_WIDTH,
-    height: HEAD + weapons.length * ROW + SECTION_GAP + HEAD + passiveLines * ROW,
+    height:
+      HEAD +
+      weapons.length * ROW +
+      SECTION_GAP +
+      HEAD +
+      passiveLines * ROW +
+      (boons.length > 0 ? SECTION_GAP + HEAD + boonLines * ROW : 0),
     draw: (scene, left, top, width) => {
       let y = top;
       addText(scene, left, y, `무기 ${weapons.length}/${MAX_WEAPONS}`, { size: FONT_SIZE.small, color: THEME_CSS.sub });
@@ -41,18 +50,25 @@ export function pauseInfo(state: RunState): PauseExtra {
       y += SECTION_GAP;
       addText(scene, left, y, '패시브', { size: FONT_SIZE.small, color: THEME_CSS.sub });
       y += HEAD;
+      const column = Math.floor((width - COLUMN_GAP) / 2);
       if (passives.length === 0) {
         addText(scene, left + 2, y + ROW / 2, '아직 없어요', {
           size: FONT_SIZE.small,
           color: THEME_CSS.faint,
           originY: 0.5,
         });
-        return;
       }
-      const column = Math.floor((width - COLUMN_GAP) / 2);
       passives.forEach((row, index) => {
         const x = left + (index % 2) * (column + COLUMN_GAP);
         drawPassive(scene, row, x, y + Math.floor(index / 2) * ROW, column);
+      });
+      if (boons.length === 0) return;
+      y += passiveLines * ROW + SECTION_GAP;
+      addText(scene, left, y, '밤의 축복', { size: FONT_SIZE.small, color: THEME_CSS.sub });
+      y += HEAD;
+      boons.forEach((row, index) => {
+        const x = left + (index % 2) * (column + COLUMN_GAP);
+        drawPassive(scene, { ...row, label: `×${row.level}` }, x, y + Math.floor(index / 2) * ROW, column);
       });
     },
   };
@@ -90,11 +106,18 @@ function drawWeapon(
   addText(scene, left + width, middle, percent(row.share), { size: FONT_SIZE.small, originX: 1, originY: 0.5 });
 }
 
-function drawPassive(scene: Phaser.Scene, row: PassiveRow, left: number, top: number, width: number): void {
+/** 아이콘, 이름, 그리고 오른쪽 끝의 레벨. label을 주면 레벨 대신 그 글을 적는다(밤의 축복의 받은 횟수). */
+function drawPassive(
+  scene: Phaser.Scene,
+  row: Pick<PassiveRow, 'icon' | 'name' | 'level'> & { label?: string },
+  left: number,
+  top: number,
+  width: number,
+): void {
   const middle = top + ROW / 2;
   drawIcon(scene, iconKey(row.icon), left, middle);
   addText(scene, left + AT.name, middle, row.name, { size: FONT_SIZE.small, originY: 0.5 });
-  addText(scene, left + width, middle, levelLabel(row), {
+  addText(scene, left + width, middle, row.label ?? levelLabel(row), {
     size: FONT_SIZE.small,
     color: THEME_CSS.sub,
     originX: 1,

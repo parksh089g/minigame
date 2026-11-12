@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { MAX_SCORE } from '../../online/protocol';
 import {
+  BOON_ORDER,
+  BOON_VALUES,
+  BOONS,
   ENDLESS,
   ENEMIES,
   EVOLVE_LEVEL,
@@ -29,6 +32,8 @@ import {
   auraStats,
   bellStats,
   boltStats,
+  boonLevel,
+  boonOptions,
   clampDepth,
   COIN_CAP,
   coinsFor,
@@ -473,16 +478,61 @@ describe('결과와 보상', () => {
     expect(endlessScale(-5)).toEqual({ hp: 1, damage: 1, speed: 1 });
     const one = endlessScale(60);
     expect(one.hp).toBeCloseTo(ENDLESS.hp);
-    expect(one.damage).toBeCloseTo(1 + ENDLESS.damage);
+    expect(one.damage).toBeCloseTo(ENDLESS.damage);
     expect(one.speed).toBeCloseTo(1 + ENDLESS.speed);
     const five = endlessScale(300);
     expect(five.hp).toBeCloseTo(ENDLESS.hp ** 5);
     expect(five.hp).toBeGreaterThan(one.hp);
+    // 받는 피해도 곱으로 자란다.
+    expect(five.damage).toBeCloseTo(ENDLESS.damage ** 5);
     // 빠르기는 끝없이 오르지 않는다.
     expect(endlessScale(6000).speed).toBeCloseTo(1 + ENDLESS.maxSpeed);
     for (const id of STAGE_ORDER) {
       expect(STAGES[id].midBosses).toContain(endlessBossKind(id, 7));
     }
+  });
+
+  it('밤의 축복은 받은 횟수만큼 겹친다', () => {
+    const none = modifiers({}, {});
+    expect(modifiers({}, {}, {}, {})).toEqual(none);
+    const once = modifiers({}, {}, {}, { blaze: 1, haste: 1, bulwark: 1, ward: 1, bloom: 1, breath: 1 });
+    expect(once.damage).toBeCloseTo(none.damage * (1 + BOON_VALUES.blaze));
+    expect(once.cooldown).toBeCloseTo(none.cooldown * BOON_VALUES.haste);
+    expect(once.maxHp).toBe(none.maxHp + BOON_VALUES.bulwark);
+    expect(once.taken).toBeCloseTo(none.taken * BOON_VALUES.ward);
+    expect(once.area).toBeCloseTo(none.area * (1 + BOON_VALUES.bloom));
+    expect(once.regen).toBeCloseTo(none.regen + BOON_VALUES.breath);
+    const thrice = modifiers({ wick: 2 }, { might: 3 }, {}, { blaze: 3, ward: 3 });
+    expect(thrice.damage).toBeCloseTo(modifiers({ wick: 2 }, { might: 3 }).damage * (1 + 3 * BOON_VALUES.blaze));
+    expect(thrice.taken).toBeCloseTo(BOON_VALUES.ward ** 3);
+    // 엉뚱한 값은 받지 않은 것으로 본다.
+    expect(boonLevel({ blaze: -2 }, 'blaze')).toBe(0);
+    expect(boonLevel({ blaze: Number.NaN }, 'blaze')).toBe(0);
+    expect(boonLevel(undefined, 'ward')).toBe(0);
+    expect(boonLevel({ ward: 2.9 }, 'ward')).toBe(2);
+  });
+
+  it('밤의 축복 선택지는 겹치지 않고, 설명의 숫자가 실제 값과 맞는다', () => {
+    const rand = seededRandom(5);
+    for (let i = 0; i < 30; i += 1) {
+      const options = boonOptions({ blaze: 2 }, rand);
+      expect(options).toHaveLength(3);
+      const ids = options.map((u) => (u.type === 'boon' ? u.id : ''));
+      expect(new Set(ids).size).toBe(3);
+      for (const upgrade of options) {
+        if (upgrade.type !== 'boon') throw new Error('축복이 아닌 것이 나왔다');
+        expect(upgrade.level).toBe(upgrade.id === 'blaze' ? 3 : 1);
+        expect(upgradeTitle(upgrade)).toBe(BOONS[upgrade.id].name);
+        expect(upgradeDescription(upgrade)).toBe(BOONS[upgrade.id].description);
+      }
+    }
+    expect(boonOptions({}, rand, 99)).toHaveLength(BOON_ORDER.length);
+    expect(BOONS.blaze.description).toContain(`${Math.round(BOON_VALUES.blaze * 100)}%`);
+    expect(BOONS.haste.description).toContain(`${Math.round((1 - BOON_VALUES.haste) * 100)}%`);
+    expect(BOONS.bulwark.description).toContain(`+${BOON_VALUES.bulwark}`);
+    expect(BOONS.ward.description).toContain(`${Math.round((1 - BOON_VALUES.ward) * 100)}%`);
+    expect(BOONS.bloom.description).toContain(`${Math.round(BOON_VALUES.bloom * 100)}%`);
+    expect(BOONS.breath.description).toContain(String(BOON_VALUES.breath));
   });
 
   it('깊은 밤에서는 단계의 배율만큼 점수와 불씨가 붙는다', () => {

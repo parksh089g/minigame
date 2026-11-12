@@ -16,7 +16,7 @@ import { RunEffects } from './effects';
 import { BOSS_BAR_HEIGHT, HP_DANGER, HUD_HEIGHT, RunHud } from './hud';
 import { iconKey } from './icons';
 import { Joystick } from './joystick';
-import { levelUpHeader, showChoices, TICKET_HEADER } from './levelup';
+import { BOON_HEADER, levelUpHeader, showChoices, TICKET_HEADER } from './levelup';
 import { buildLobby, parentPage, type LobbyPage } from './lobby';
 import { DAILY_REWARD, dailyPlan, dailyToday, dayIndexOf } from './daily';
 import { showDawnChoice } from './dawn';
@@ -263,6 +263,7 @@ export class LanternKeeperScene extends MiniGameScene {
   private openNext(delayTicket = false): void {
     const s = this.sim.state;
     if (s.pendingDawn) this.openDawn(delayTicket);
+    else if (this.sim.pendingBoons > 0) this.openBoon(delayTicket);
     else if (s.pendingTickets > 0) this.openTicket(delayTicket);
     else if (s.pendingLevelUps > 0) this.openLevelUp();
     else this.resumeRun();
@@ -310,7 +311,9 @@ export class LanternKeeperScene extends MiniGameScene {
       sim.step(STEP, this.stick.x, this.stick.y);
       this.handleEvents();
       if (sim.state.over) break;
-      if (sim.state.pendingDawn || sim.state.pendingTickets > 0 || sim.state.pendingLevelUps > 0) this.openNext(true);
+      if (sim.state.pendingDawn || sim.pendingBoons > 0 || sim.state.pendingTickets > 0 || sim.state.pendingLevelUps > 0) {
+        this.openNext(true);
+      }
     }
 
     this.view.sync(sim, this.seconds, frame);
@@ -603,11 +606,40 @@ export class LanternKeeperScene extends MiniGameScene {
         this.board.play('boss', this.time.now);
         this.pickSong();
         this.saveRun();
-        this.openNext();
+        // 들어서는 자리에서 밤의 축복을 하나 고른다. 알림이 잠깐 보이도록 조금 뒤에 연다.
+        this.openNext(true);
       });
     };
     // 마지막 보스가 쓰러지는 모습을 보고 나서 연다.
     if (delayed) this.time.delayedCall(DAWN_DELAY_MS, show);
+    else show();
+  }
+
+  /** 밤의 축복: 끝없는 밤에서 그림자가 세질 때마다 셋 가운데 하나를 고른다. */
+  private openBoon(delayed: boolean): void {
+    this.phase = 'choosing';
+    music.hush(true);
+    this.stick.enabled = false;
+    this.stick.reset();
+    this.drawHud();
+    const show = (): void => {
+      // 기다리는 사이에 씬을 떠났으면 열지 않는다.
+      if (!this.sys.isActive() || this.phase !== 'choosing') return;
+      this.board.play('ticket', this.time.now);
+      vibrate(15);
+      showChoices(
+        this,
+        BOON_HEADER,
+        this.sim.boonChoices(),
+        DEPTH.panel,
+        (upgrade) => {
+          this.sim.takeBoon(upgrade);
+          this.afterPick(upgrade);
+        },
+        HUD_HEIGHT,
+      );
+    };
+    if (delayed) this.time.delayedCall(TICKET_DELAY_MS, show);
     else show();
   }
 
@@ -623,10 +655,12 @@ export class LanternKeeperScene extends MiniGameScene {
       if (!this.sys.isActive() || this.phase !== 'choosing') return;
       this.board.play('ticket', this.time.now);
       vibrate(15);
+      // 끝없는 밤에서 더 올릴 무기가 없으면 강화권으로 밤의 축복을 고른다.
+      const choices = this.sim.ticketChoices();
       showChoices(
         this,
-        TICKET_HEADER,
-        this.sim.ticketChoices(),
+        choices.every((upgrade) => upgrade.type === 'boon') ? BOON_HEADER : TICKET_HEADER,
+        choices,
         DEPTH.panel,
         (upgrade) => {
           this.sim.useTicket(upgrade);
@@ -669,7 +703,7 @@ export class LanternKeeperScene extends MiniGameScene {
     this.drawHud();
     const s = this.sim.state;
     // 고를 것이 남아 있지 않을 때만 저장한다. 다음 화면은 곧바로 연다.
-    if (s.pendingTickets === 0 && s.pendingLevelUps === 0) this.saveRun();
+    if (this.sim.pendingBoons === 0 && s.pendingTickets === 0 && s.pendingLevelUps === 0) this.saveRun();
     this.openNext();
   }
 

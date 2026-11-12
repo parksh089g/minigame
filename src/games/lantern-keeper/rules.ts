@@ -4,6 +4,9 @@
  */
 import { MAX_SCORE } from '../../online/protocol';
 import {
+  BOON_ORDER,
+  BOON_VALUES,
+  BOONS,
   ENDLESS,
   ENEMIES,
   EVOLVE_LEVEL,
@@ -22,6 +25,7 @@ import {
   STAGES,
   WEAPON_ORDER,
   WEAPONS,
+  type BoonId,
   type EnemyKind,
   type HeroTrait,
   type MetaId,
@@ -104,7 +108,7 @@ export function endlessScale(seconds: number): { hp: number; damage: number; spe
   const minutes = Math.max(0, Number.isFinite(seconds) ? seconds : 0) / 60;
   return {
     hp: ENDLESS.hp ** minutes,
-    damage: 1 + ENDLESS.damage * minutes,
+    damage: ENDLESS.damage ** minutes,
     speed: 1 + Math.min(ENDLESS.maxSpeed, ENDLESS.speed * minutes),
   };
 }
@@ -214,23 +218,38 @@ export interface Modifiers {
   spark: number;
 }
 
+/** 이 축복을 몇 번 받았는지. 저장된 값이 엉뚱하면 0으로 본다. */
+export function boonLevel(boons: Levels<BoonId> | undefined, id: BoonId): number {
+  const value = boons?.[id];
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+}
+
 /** 캐릭터의 최대 체력이 아무리 깎여도 이보다 낮아지지는 않는다. */
 const MIN_MAX_HP = 40;
 
 /** 판 안의 패시브, 판 밖의 영구 강화, 캐릭터의 고유 특성을 합친 배율 */
-export function modifiers(passives: Levels<PassiveId>, meta: Levels<MetaId>, trait: HeroTrait = {}): Modifiers {
+export function modifiers(
+  passives: Levels<PassiveId>,
+  meta: Levels<MetaId>,
+  trait: HeroTrait = {},
+  /** 끝없는 밤에서 받은 밤의 축복. 없으면 아무것도 얹지 않는다. */
+  boons: Levels<BoonId> = {},
+): Modifiers {
   const p = (id: PassiveId): number => passives[id] ?? 0;
   const m = (id: MetaId): number => meta[id] ?? 0;
+  const b = (id: BoonId): number => boonLevel(boons, id);
   return {
-    damage: (1 + 0.1 * p('wick')) * (1 + 0.05 * m('might')),
-    cooldown: 0.93 ** p('hourglass') * (trait.cooldown ?? 1),
+    damage: (1 + 0.1 * p('wick')) * (1 + 0.05 * m('might')) * (1 + BOON_VALUES.blaze * b('blaze')),
+    cooldown: 0.93 ** p('hourglass') * (trait.cooldown ?? 1) * BOON_VALUES.haste ** b('haste'),
     speed: (1 + 0.08 * p('boots')) * (1 + 0.04 * m('swift')) * (trait.speed ?? 1),
     magnet: (1 + 0.3 * p('magnet')) * (1 + 0.15 * m('reach')),
-    area: (1 + 0.1 * p('lens')) * (trait.area ?? 1),
+    area: (1 + 0.1 * p('lens')) * (trait.area ?? 1) * (1 + BOON_VALUES.bloom * b('bloom')),
     xp: (1 + 0.08 * m('greed')) * (trait.xp ?? 1),
-    maxHp: Math.max(MIN_MAX_HP, PLAYER_BASE.maxHp + 20 * p('coat') + 10 * m('vigor') + (trait.maxHp ?? 0)),
-    regen: 0.1 * m('mend') + HERB_REGEN * p('herb'),
-    taken: (1 - 0.04 * m('armor')) * (trait.taken ?? 1),
+    maxHp:
+      Math.max(MIN_MAX_HP, PLAYER_BASE.maxHp + 20 * p('coat') + 10 * m('vigor') + (trait.maxHp ?? 0)) +
+      BOON_VALUES.bulwark * b('bulwark'),
+    regen: 0.1 * m('mend') + HERB_REGEN * p('herb') + BOON_VALUES.breath * b('breath'),
+    taken: (1 - 0.04 * m('armor')) * (trait.taken ?? 1) * BOON_VALUES.ward ** b('ward'),
     guard: guardSeconds(p('hood')),
     spark: sparkChance(p('flint')),
   };
@@ -443,6 +462,8 @@ export function moonStats(level: number, mods: Modifiers): MoonStats {
 export type Upgrade =
   | { type: 'weapon'; id: WeaponId; level: number }
   | { type: 'passive'; id: PassiveId; level: number }
+  /** 밤의 축복. level은 고르면 되는, 이 축복을 받은 횟수다. */
+  | { type: 'boon'; id: BoonId; level: number }
   | { type: 'heal' }
   | { type: 'embers' };
 
@@ -484,8 +505,9 @@ export function ownedPassives(passives: Levels<PassiveId>): PassiveId[] {
  * 무기 칸이 다 찼으면 새 무기는 나오지 않는다. 모두 최대 레벨이면 회복과 불씨를 준다.
  * 레벨업으로는 MAX_LEVEL까지만 올릴 수 있다. 그다음 단계인 진화는 무기 강화권으로만 한다.
  * upgrade.level은 고르면 올라갈 레벨(처음 얻는 것이면 1).
+ * boons를 주면(끝없는 밤) 빈자리를 회복과 불씨 대신 밤의 축복이 채운다.
  */
-export function upgradeOptions(build: Build, rand: Rand, count = 3): Upgrade[] {
+export function upgradeOptions(build: Build, rand: Rand, count = 3, boons?: Levels<BoonId>): Upgrade[] {
   const pool: Upgrade[] = [];
   const full = ownedWeapons(build.weapons).length >= MAX_WEAPONS;
   for (const id of WEAPON_ORDER) {
@@ -520,8 +542,21 @@ export function upgradeOptions(build: Build, rand: Rand, count = 3): Upgrade[] {
     picked.push(pool[index]);
     pool.splice(index, 1);
   }
+  if (boons && picked.length < count) picked.push(...boonOptions(boons, rand, count - picked.length));
   if (picked.length < count) picked.push({ type: 'heal' });
   if (picked.length < count) picked.push({ type: 'embers' });
+  return picked;
+}
+
+/** 밤의 축복 선택지: 여섯 가지 가운데 겹치지 않게 count개. 어느 것이나 같은 확률로 나온다. */
+export function boonOptions(boons: Levels<BoonId>, rand: Rand, count = 3): Upgrade[] {
+  const pool = [...BOON_ORDER];
+  const picked: Upgrade[] = [];
+  while (picked.length < count && pool.length > 0) {
+    const index = Math.min(pool.length - 1, Math.floor(rand() * pool.length));
+    const [id] = pool.splice(index, 1);
+    picked.push({ type: 'boon', id, level: boonLevel(boons, id) + 1 });
+  }
   return picked;
 }
 
@@ -545,6 +580,8 @@ export function upgradeTitle(upgrade: Upgrade): string {
       return weaponName(upgrade.id, upgrade.level);
     case 'passive':
       return PASSIVES[upgrade.id].name;
+    case 'boon':
+      return BOONS[upgrade.id].name;
     case 'heal':
       return '따뜻한 차';
     case 'embers':
@@ -566,6 +603,8 @@ export function upgradeDescription(upgrade: Upgrade): string {
         return `쓰러진 그림자가 ${Math.round(sparkChance(upgrade.level) * 100)}% 확률로 터진다`;
       }
       return PASSIVES[upgrade.id].perLevel;
+    case 'boon':
+      return BOONS[upgrade.id].description;
     case 'heal':
       return `체력 ${HEAL_AMOUNT} 회복`;
     case 'embers':
