@@ -143,7 +143,7 @@ body {
 }
 
 /*
- * 글자를 입력받는 작은 창(src/core/dialog.ts). 닉네임과 옮기기 코드에 쓴다.
+ * 글자를 입력받는 작은 창(src/core/dialog.ts). 닉네임, 옮기기 코드, 홈 화면에 추가하는 방법에 쓴다.
  * 자판이 올라와도 가려지지 않게 화면 위쪽에 놓는다.
  */
 .dialog {
@@ -238,6 +238,42 @@ body {
   letter-spacing: 0.1em;
   -webkit-user-select: text;
   user-select: text;
+}
+
+/* 차례대로 할 일(홈 화면에 추가하는 방법). 번호는 분홍 동그라미 안에 넣는다. */
+.dialog-steps {
+  margin: 0 0 14px;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+  text-align: left;
+}
+
+.dialog-step {
+  position: relative;
+  margin: 0 0 8px;
+  padding: 9px 10px 9px 40px;
+  border-radius: 14px;
+  background: var(--bg);
+  font-size: 15px;
+  line-height: 1.45;
+  word-break: keep-all;
+  counter-increment: step;
+}
+
+.dialog-step::before {
+  content: counter(step);
+  position: absolute;
+  left: 10px;
+  top: 9px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #ff9fb5;
+  color: #4a3545;
+  font-size: 14px;
+  line-height: 22px;
+  text-align: center;
 }
 
 .dialog-buttons {
