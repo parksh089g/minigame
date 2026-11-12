@@ -536,6 +536,21 @@ const ICONS: Record<string, Art> = {
       roundRect(c, 13, 11.500, 1.600, 12, 0.800, 'rgba(255, 255, 255, 0.7)');
     },
   },
+  /** 퍼즐 단계 모드: 한 칸씩 높아지는 계단과 꼭대기의 깃발 */
+  'icon-stages': {
+    width: 32,
+    height: 32,
+    draw(c) {
+      roundRect(c, 3, 21, 9.500, 9, 2.500, '#7fd3ae');
+      roundRect(c, 3, 21, 9.500, 4, 2, '#9be3c9');
+      roundRect(c, 11.500, 15, 9.500, 15, 2.500, '#7dbef2');
+      roundRect(c, 11.500, 15, 9.500, 4, 2, '#9dd6ff');
+      roundRect(c, 20, 9, 9.500, 21, 2.500, '#a996ee');
+      roundRect(c, 20, 9, 9.500, 4, 2, '#c9bcf8');
+      roundRect(c, 23.600, 1.500, 1.800, 9, 0.900, '#b5a3ab');
+      softPath(c, 'M25.400 2.300l5 2.300-5 2.300z', '#ff9fb5', 1.200);
+    },
+  },
   /** 관문 달리기: 더하기가 적힌 관문 */
   'icon-gate': {
     width: 32,

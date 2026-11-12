@@ -11,6 +11,7 @@
  * 곧 "더 둘 수가 없을 때"만 끝난다. 쟁반이 가득 차도 상자에 넣을 나사가 보이면 계속할 수 있고,
  * 그동안 상자가 없는 나사는 눌러도 풀리지 않는다.
  */
+import { difficultyOf } from '../../core/stages';
 
 // ───────── 작업대 ─────────
 
@@ -879,4 +880,17 @@ export function buildFromSpec(spec: StageSpec, random: () => number, candidates 
 /** stage번째(1부터) 단계를 만든다. */
 export function buildStage(stage: number, random: () => number): Stage {
   return buildFromSpec(stageSpec(stage), random);
+}
+
+// ───────── 단계 모드 ─────────
+
+/**
+ * 단계 모드가 거치는 난이도의 수. 나사와 판은 여덟째 난이도에서 다 커지고, 그 뒤로는 함정이 더 깊어진다.
+ * 그보다 뒤의 난이도는 꼼꼼히 풀어도 운에 기대는 단계가 섞여서 쓰지 않는다.
+ */
+export const LEVEL_STEPS = 12;
+
+/** 단계 모드의 level(1부터)번째 단계가 쓰는 난이도. stageSpec과 buildStage의 stage로 넘긴다. */
+export function levelStage(level: number): number {
+  return difficultyOf(level, LEVEL_STEPS);
 }

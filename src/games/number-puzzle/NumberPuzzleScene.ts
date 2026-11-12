@@ -5,8 +5,8 @@ import { vibrate } from '../../core/haptics';
 import { sfx } from '../../core/sfx';
 import { StartGate } from '../../core/start-gate';
 import { addBackdrop, addText } from '../../core/ui';
-import { floatText, GameHud, HUD_HEIGHT, showBanner } from '../../scenes/GameHud';
-import { MiniGameScene } from '../../scenes/MiniGameScene';
+import { GameHud, HUD_HEIGHT, showBanner } from '../../scenes/GameHud';
+import { MiniGameScene, type ResultStat } from '../../scenes/MiniGameScene';
 import {
   digitSize,
   drawBoard,
@@ -33,6 +33,7 @@ import {
   HINT_ROOM,
   isDigitDone,
   isOver,
+  levelRun,
   moveCursor,
   newRun,
   nextStage,
@@ -194,18 +195,23 @@ export class NumberPuzzleScene extends MiniGameScene {
 
     this.addPauseButton();
     this.hud = new GameHud(this, DEPTH.hud);
+    if (this.stageLevel !== null) this.hud.showStage(this.stageLevel);
     this.drawTime();
 
     this.listen();
     this.deal();
-    this.showHints();
-    this.pointOutBlank();
+    // 도움말은 판 위에 자리가 있는 첫 판에서만 적는다. 단계 모드의 뒤 단계는 큰 판으로 시작한다.
+    if (this.run.stage === 1) {
+      this.showHints();
+      this.pointOutBlank();
+    }
     sfx.go();
     this.playing = true;
   }
 
   override update(_time: number, deltaMs: number): void {
-    if (!this.playing || this.phase !== 'idle') return;
+    // 단계 모드에서는 시간이 흐르지 않는다.
+    if (!this.playing || this.phase !== 'idle' || this.stageLevel !== null) return;
     // 탭이 가려졌다 돌아와도 시간이 한꺼번에 흐르지 않게 한 프레임의 길이를 제한한다.
     const dt = Math.min(deltaMs, 100) / 1000;
     if (this.grace > 0) {
@@ -232,7 +238,8 @@ export class NumberPuzzleScene extends MiniGameScene {
   }
 
   private resetState(): void {
-    this.run = newRun(Math.random);
+    this.run =
+      this.stageLevel === null ? newRun(Math.random) : levelRun(this.stageLevel, this.levelRandom());
     this.selection = NO_SELECTION;
     this.phase = 'dealing';
     this.grace = 0;
@@ -276,8 +283,11 @@ export class NumberPuzzleScene extends MiniGameScene {
     this.buildBoard();
     this.buildPad();
     this.refresh();
-    this.hud.setSide(`${stage}판`, stage > 1);
-    if (stage > 1) sfx.pop();
+    // 단계 모드는 한 단계가 판 하나라서 몇째 판인지 적지 않는다.
+    if (this.stageLevel === null) {
+      this.hud.setSide(`${stage}판`, stage > 1);
+      if (stage > 1) sfx.pop();
+    }
 
     this.phase = 'dealing';
     this.tweens.add({
@@ -551,7 +561,7 @@ export class NumberPuzzleScene extends MiniGameScene {
     this.hud.setScore(score);
     const { x } = this.cellCenter(cell);
     const top = cellArea(this.layout, cell).y + 3;
-    floatText(this, x, top, `+${outcome.points}`, LOOK.text.points, this.playArea, DEPTH.effect);
+    this.floatPoints(x, top, outcome.points, LOOK.text.points, this.playArea, DEPTH.effect);
     this.fadeHints(0);
     // 다 채운 판은 고른 표시 없이 깨끗하게 보여 준다.
     if (outcome.cleared) this.selection = NO_SELECTION;
@@ -638,6 +648,10 @@ export class NumberPuzzleScene extends MiniGameScene {
     // 다음 판이 나올 때까지 시간이 멈춘다.
     this.phase = 'cleared';
     this.drawTime();
+    if (this.stageLevel !== null) {
+      this.clearStage();
+      return;
+    }
 
     this.time.delayedCall(CLEAR_BANNER_MS, () => {
       sfx.gold();
@@ -649,6 +663,26 @@ export class NumberPuzzleScene extends MiniGameScene {
       this.run = nextStage(this.run, Math.random);
       this.deal();
     });
+  }
+
+  /** 단계 모드에서 판을 다 채웠다: 축하하고 단계 결과 화면으로 넘어간다. */
+  private clearStage(): void {
+    this.stopPointing();
+    this.selection = NO_SELECTION;
+    this.time.delayedCall(CLEAR_BANNER_MS, () => {
+      sfx.gold();
+      vibrate([15, 30, 15]);
+      this.confetti.explode(18, GAME_WIDTH / 2, this.boardCenterY);
+      showBanner(this, this.boardCenterY, '클리어!', LOOK.text.clear, 900, DEPTH.banner);
+    });
+    this.finishStage(true, this.stageStats(), CLEAR_BANNER_MS + 1000);
+  }
+
+  private stageStats(): ResultStat[] {
+    return [
+      ['채운 칸', `${this.run.cellsFilled}칸`],
+      ['틀린 횟수', `${this.run.mistakes}번`],
+    ];
   }
 
   /** 다 채운 판 한가운데에 "클리어!"와, 그 아래에 받은 점수와 돌려받은 시간을 띄운다. */
@@ -674,13 +708,14 @@ export class NumberPuzzleScene extends MiniGameScene {
   }
 
   private onPause(): void {
-    if (this.playing) this.boardLayer.setVisible(false);
+    // 단계 모드는 시간을 재지 않으니 가릴 까닭이 없다.
+    if (this.playing && this.stageLevel === null) this.boardLayer.setVisible(false);
   }
 
   private onResume(): void {
     this.boardLayer.setVisible(true);
     // 판을 고르던 중이 아니거나 아직 첫 조작 전이면 시간이 흐르고 있지 않았으니 여유도 필요 없다.
-    if (!this.playing || this.phase !== 'idle' || !this.gate.open) return;
+    if (!this.playing || this.phase !== 'idle' || !this.gate.open || this.stageLevel !== null) return;
     this.grace = RESUME_GRACE_SECONDS;
     const ms = RESUME_GRACE_SECONDS * 1000;
     showBanner(this, this.boardCenterY, '준비!', LOOK.text.ready, ms, DEPTH.banner);
@@ -691,6 +726,11 @@ export class NumberPuzzleScene extends MiniGameScene {
     this.stopPointing();
     this.selection = NO_SELECTION;
     this.refresh();
+    if (this.stageLevel !== null) {
+      showBanner(this, this.boardCenterY, '기회 끝!', LOOK.text.over, 900, DEPTH.banner);
+      this.finishStage(false, this.stageStats());
+      return;
+    }
     showBanner(this, this.boardCenterY, '끝!', LOOK.text.over, 900, DEPTH.banner);
     this.finishMiniGame(this.run.score, [
       ['깬 판', `${this.run.puzzlesCleared}판`],
