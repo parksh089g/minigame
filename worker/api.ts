@@ -34,8 +34,17 @@ const fail = (error: ApiError): Response => json({ error }, STATUS[error]);
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-/** 본문을 JSON 객체로 읽는다. 너무 크거나 객체가 아니면 null. */
+/**
+ * 본문이 JSON이라고 밝힌 요청인지.
+ * 다른 사이트의 페이지는 이 표시를 붙인 요청을 방문자 모르게 보낼 수 없다. 브라우저가 서버에 먼저 허락을 묻는데, 이 서버는 허락하지 않는다.
+ * 그래서 남의 페이지에 심은 코드가 방문자들의 주소로 옮기기 코드 자리를 채우거나 요청 한도를 피해 가는 일을 막아 준다.
+ */
+const sentAsJson = (request: Request): boolean =>
+  (request.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase() === 'application/json';
+
+/** 본문을 JSON 객체로 읽는다. JSON이라고 밝히지 않았거나, 너무 크거나, 객체가 아니면 null. */
 async function readBody(request: Request): Promise<Record<string, unknown> | null> {
+  if (!sentAsJson(request)) return null;
   const declared = Number(request.headers.get('content-length') ?? 0);
   if (declared > MAX_BODY_CHARS * 4) return null;
   try {
