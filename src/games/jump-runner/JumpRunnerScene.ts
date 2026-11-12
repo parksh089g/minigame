@@ -4,6 +4,7 @@ import { TEXTURE, type SpriteKey } from '../../art/sprites';
 import { GAME_WIDTH, SCENE, THEME, THEME_CSS } from '../../config';
 import { vibrate } from '../../core/haptics';
 import { sfx } from '../../core/sfx';
+import { StartGate } from '../../core/start-gate';
 import { store } from '../../core/store';
 import { addBackdrop, addText } from '../../core/ui';
 import { floatText, GameHud, HUD_HEIGHT, showBanner } from '../../scenes/GameHud';
@@ -101,6 +102,8 @@ export class JumpRunnerScene extends MiniGameScene {
   private nextMilestone = MILESTONE_METERS;
   /** 0보다 크면 잠깐 멈춰 있는 중 */
   private grace = 0;
+  /** 처음 화면을 누르거나 잠깐 기다릴 때까지 달리지 않는다. 처음 하는 사람이 설명을 읽을 틈이다. */
+  private readonly gate = new StartGate();
   private pressed = false;
   private held = false;
 
@@ -184,9 +187,14 @@ export class JumpRunnerScene extends MiniGameScene {
     this.showHint();
     this.spawnAhead();
     this.draw();
+    // 달리기는 첫 터치와 함께(또는 잠깐 기다린 뒤) 시작한다. setOff()를 본다.
+    this.playing = true;
+  }
+
+  /** 서 있던 캐릭터가 달리기 시작한다. */
+  private setOff(): void {
     showBanner(this, this.playArea.centerY, '출발!', THEME_CSS.good, 600, DEPTH.banner);
     sfx.go();
-    this.playing = true;
   }
 
   override update(_time: number, deltaMs: number): void {
@@ -197,6 +205,10 @@ export class JumpRunnerScene extends MiniGameScene {
     if (this.grace > 0) {
       this.grace -= remaining;
       this.pressed = false;
+      return;
+    }
+    if (!this.gate.open) {
+      if (this.gate.wait(remaining)) this.setOff();
       return;
     }
 
@@ -222,6 +234,7 @@ export class JumpRunnerScene extends MiniGameScene {
     this.shownScore = -1;
     this.nextMilestone = MILESTONE_METERS;
     this.grace = 0;
+    this.gate.reset();
     this.pressed = false;
     this.held = false;
   }
@@ -231,6 +244,8 @@ export class JumpRunnerScene extends MiniGameScene {
   private bindInput(): void {
     const press = (): void => {
       if (!this.playing) return;
+      // 첫 터치는 출발 신호이면서 첫 점프다.
+      if (this.gate.start()) this.setOff();
       this.pressed = true;
       this.held = true;
     };
@@ -265,7 +280,8 @@ export class JumpRunnerScene extends MiniGameScene {
     // 멈춰 있는 동안 손을 뗐을 수 있으니 누름 상태를 지운다.
     this.pressed = false;
     this.held = false;
-    if (!this.playing) return;
+    // 아직 출발하지 않았으면 숨 고를 시간도 필요 없다.
+    if (!this.playing || !this.gate.open) return;
     // 돌아오자마자 부딪히지 않도록 잠깐 숨을 고를 시간을 준다.
     this.grace = RESUME_GRACE_SECONDS;
     showBanner(this, this.playArea.centerY, '준비!', THEME_CSS.accent, RESUME_GRACE_SECONDS * 1000, DEPTH.banner);

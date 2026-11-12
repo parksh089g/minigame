@@ -3,6 +3,7 @@ import { TEXTURE } from '../../art/sprites';
 import { GAME_WIDTH, MAX_GAME_HEIGHT, MIN_GAME_HEIGHT, SCENE } from '../../config';
 import { vibrate } from '../../core/haptics';
 import { sfx } from '../../core/sfx';
+import { StartGate } from '../../core/start-gate';
 import { addBackdrop, addText } from '../../core/ui';
 import { floatText, GameHud, HUD_HEIGHT, showBanner } from '../../scenes/GameHud';
 import { MiniGameScene } from '../../scenes/MiniGameScene';
@@ -219,6 +220,8 @@ export class PinPullScene extends MiniGameScene {
   private timeLeft = 0;
   /** 0보다 크면 시간이 잠깐 멈춰 있는 중 */
   private grace = 0;
+  /** 첫 핀을 뽑거나 잠깐 기다릴 때까지 첫 단계의 시간을 세워 둔다. 처음 하는 사람이 설명을 읽을 틈이다. */
+  private readonly gate = new StartGate();
   private lastTickSecond = 0;
   /** 이번 판(런)에서 괴물을 본 적이 있는지. 처음 볼 때 한 번 알려 준다. */
   private monsterSeen = false;
@@ -291,6 +294,10 @@ export class PinPullScene extends MiniGameScene {
       this.grace -= dt;
       return;
     }
+    if (!this.gate.open) {
+      this.gate.wait(dt);
+      return;
+    }
 
     this.timeLeft = Math.max(0, this.timeLeft - dt);
     this.hud.setTime(this.timeLeft, this.timeLimit);
@@ -320,6 +327,7 @@ export class PinPullScene extends MiniGameScene {
     this.timeLimit = 0;
     this.timeLeft = 0;
     this.grace = 0;
+    this.gate.reset();
     this.lastTickSecond = 0;
     this.monsterSeen = false;
     this.monsterView = null;
@@ -406,7 +414,8 @@ export class PinPullScene extends MiniGameScene {
 
   private onResume(): void {
     this.board.setVisible(true);
-    if (this.playing) this.grace = RESUME_GRACE_SECONDS;
+    // 아직 시간이 가지 않고 있었으면 숨 고를 시간도 필요 없다.
+    if (this.playing && this.gate.open) this.grace = RESUME_GRACE_SECONDS;
   }
 
   // ───────── 도움말 ─────────
@@ -657,6 +666,7 @@ export class PinPullScene extends MiniGameScene {
     const result = pull(before, target.pin);
     if (!result.pulled) return;
 
+    this.gate.start();
     this.state = result.state;
     this.pulls += 1;
     this.phase = 'busy';

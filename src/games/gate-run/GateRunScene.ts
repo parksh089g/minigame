@@ -3,6 +3,7 @@ import { TEXTURE } from '../../art/sprites';
 import { FONT_SIZE, GAME_WIDTH, SCENE, THEME, THEME_CSS } from '../../config';
 import { vibrate } from '../../core/haptics';
 import { sfx } from '../../core/sfx';
+import { StartGate } from '../../core/start-gate';
 import { addBackdrop, addText } from '../../core/ui';
 import { floatText, GameHud, HUD_HEIGHT, showBanner } from '../../scenes/GameHud';
 import { MiniGameScene } from '../../scenes/MiniGameScene';
@@ -349,6 +350,8 @@ export class GateRunScene extends MiniGameScene {
   private frontier = 0;
   /** 0보다 크면 잠깐 멈춰 있는 중 */
   private grace = 0;
+  /** 처음 화면을 누르거나 잠깐 기다릴 때까지 달리지 않는다. 처음 하는 사람이 설명을 읽을 틈이다. */
+  private readonly gate = new StartGate();
   private bobTime = 0;
   /** 화면에 그려 둔 무리의 자리 */
   private spots: { x: number; y: number }[] = [];
@@ -399,9 +402,14 @@ export class GateRunScene extends MiniGameScene {
     this.showHint();
     this.spawnRows();
     this.drawMarks();
+    // 달리기는 첫 터치와 함께(또는 잠깐 기다린 뒤) 시작한다. setOff()를 본다.
+    this.playing = true;
+  }
+
+  /** 서 있던 무리가 달리기 시작한다. */
+  private setOff(): void {
     showBanner(this, this.roadTop + 62, '출발!', LOOK.text.start, 600, DEPTH.banner);
     sfx.go();
-    this.playing = true;
   }
 
   override update(_time: number, deltaMs: number): void {
@@ -416,6 +424,11 @@ export class GateRunScene extends MiniGameScene {
     this.crowdX = steer(this.crowdX, this.targetX, dt);
     this.bobTime += dt;
     this.placeCrowd();
+    // 출발하기 전에도 무리는 손가락을 따라 좌우로 움직인다. 길만 흐르지 않는다.
+    if (!this.gate.open) {
+      if (this.gate.wait(dt)) this.setOff();
+      return;
+    }
 
     this.rows = this.rows.filter((row) => !row.done);
     if (this.phase === 'clash') this.advanceClash(dt);
@@ -436,6 +449,7 @@ export class GateRunScene extends MiniGameScene {
     this.distance = 0;
     this.frontier = 0;
     this.grace = 0;
+    this.gate.reset();
     this.bobTime = 0;
     this.spots = [];
     this.buddies = [];
@@ -455,6 +469,7 @@ export class GateRunScene extends MiniGameScene {
       if (pointer.worldY < HUD_HEIGHT) return;
       this.dragId = pointer.id;
       follow(pointer);
+      if (this.playing && this.gate.start()) this.setOff();
     });
     this.input.on(Phaser.Input.Events.POINTER_MOVE, (pointer: Phaser.Input.Pointer) => {
       if (pointer.id === this.dragId && pointer.isDown) follow(pointer);
@@ -467,9 +482,11 @@ export class GateRunScene extends MiniGameScene {
     if (keyboard) {
       const goLeft = (): void => {
         this.targetX = laneCenter('left');
+        if (this.playing && this.gate.start()) this.setOff();
       };
       const goRight = (): void => {
         this.targetX = laneCenter('right');
+        if (this.playing && this.gate.start()) this.setOff();
       };
       keyboard.on('keydown-LEFT', goLeft);
       keyboard.on('keydown-RIGHT', goRight);
@@ -483,7 +500,8 @@ export class GateRunScene extends MiniGameScene {
   private onResume(): void {
     // 멈춰 있는 동안 손을 뗐을 수 있으니 끌던 손가락은 잊는다.
     this.dragId = -1;
-    if (!this.playing) return;
+    // 아직 출발하지 않았으면 숨 고를 시간도 필요 없다.
+    if (!this.playing || !this.gate.open) return;
     // 돌아오자마자 관문을 지나쳐 버리지 않도록 잠깐 멈춰서 길을 다시 보게 한다.
     this.grace = RESUME_GRACE_SECONDS;
     showBanner(this, this.roadTop + 62, '준비!', LOOK.text.ready, RESUME_GRACE_SECONDS * 1000, DEPTH.banner);

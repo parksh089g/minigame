@@ -50,8 +50,12 @@ const TILE = {
   starX: TILE_WIDTH - 10,
   starY: 10,
   starSize: 12,
-  /** 별을 누르는 자리의 한 변. 그림보다 넉넉하게 잡는다. */
-  starTouch: 24,
+  /**
+   * 별을 누르는 자리. 카드의 오른쪽 위 모서리를 통째로 쓴다: 왼쪽은 아이콘 그림의 끝에서,
+   * 오른쪽과 위는 옆 카드와의 틈 절반까지, 아래는 아이콘 바탕의 아래쪽 가까이까지다.
+   * 별에서 조금 벗어나 눌러도 게임이 시작되지 않게 그림보다 훨씬 넉넉하게 잡았다.
+   */
+  starZone: { left: TILE_WIDTH - 24, top: -TILE_GAP / 2, width: 24 + TILE_GAP / 2, height: 33 },
 } as const;
 const DAILY_TOP = 78;
 const DAILY_HEIGHT = 40;
@@ -430,14 +434,13 @@ export class HubScene extends Phaser.Scene {
       .image(TILE.starX, TILE.starY, favorite ? 'icon-star' : 'icon-star-empty')
       .setDisplaySize(TILE.starSize, TILE.starSize);
     card.add(star);
-    const half = TILE.starTouch / 2;
     // 카드 전체를 덮는 누름 영역보다 나중에 만들어서, 별 자리를 누르면 이쪽이 먼저 받는다.
     const zone = addTapZone(
       this,
-      x + TILE.starX - half,
-      y + TILE.starY - half,
-      TILE.starTouch,
-      TILE.starTouch,
+      x + TILE.starZone.left,
+      y + TILE.starZone.top,
+      TILE.starZone.width,
+      TILE.starZone.height,
       (pressed) => star.setDisplaySize(TILE.starSize + (pressed ? 3 : 0), TILE.starSize + (pressed ? 3 : 0)),
       () => {
         const added = store.toggleFavorite(game.id);

@@ -1,12 +1,16 @@
 import Phaser from 'phaser';
 import { FONT_SIZE, GAME_WIDTH, SCENE, THEME, THEME_CSS } from '../config';
-import { clampPage, layoutPages, pageSlice, type PageLayout } from '../core/paging';
+import type { BackAware } from '../core/app-events';
+import { clampPage, layoutPages, pageOfIndex, pageSlice, type PageLayout } from '../core/paging';
+import { getRecord } from '../core/save';
 import { sfx } from '../core/sfx';
 import { store } from '../core/store';
 import {
   addBackdrop,
   addPanel,
+  addTapZone,
   addText,
+  drawPanel,
   fadeIn,
   fadeToScene,
   onSwipe,
@@ -14,7 +18,7 @@ import {
   PAGER_HEIGHT,
   PixelButton,
 } from '../core/ui';
-import { HUB_GAMES, type MiniGameInfo } from '../games/registry';
+import { HUB_GAMES, lastPlayedGame, type MiniGameInfo } from '../games/registry';
 import { failureText, type ApiFailure } from '../online/api';
 import { loadBoard, syncScores } from '../online/online';
 import { isJoined, isWaitingToSend } from '../online/profile';
@@ -26,6 +30,10 @@ const CONTENT_WIDTH = GAME_WIDTH - MARGIN * 2;
 const RIGHT = GAME_WIDTH - MARGIN;
 /** 게임을 고르는 줄 */
 const PICKER = { top: 44, height: 26, button: 34 } as const;
+/** 게임을 고르는 격자. 허브처럼 한 줄에 세 개씩, 아이콘 아래에 이름을 둔다. */
+const CHOOSER = { columns: 3, height: 33, gap: 2, icon: 16 } as const;
+/** 게임 이름 옆의 작은 세모. 누르면 격자가 펼쳐진다는 표시다. */
+const CARET = { width: 7, height: 4, gap: 5 } as const;
 /** 목록 카드의 위쪽 끝과 안쪽 여백 */
 const LIST = { top: 80, pad: 6, row: 19 } as const;
 /** 화면 아래의 내 기록 칸과 닉네임 버튼 */
@@ -37,6 +45,10 @@ const MEDALS = [THEME.gold, THEME.sky, THEME.pink] as const;
 const RANKED: readonly MiniGameInfo[] = HUB_GAMES.filter(
   (game) => game.sceneKey !== null && isRankedGame(game.id),
 );
+
+/** 화살표 버튼 사이에서 게임 이름이 차지하는 자리 */
+const TITLE_LEFT = MARGIN + PICKER.button + 6;
+const TITLE_WIDTH = CONTENT_WIDTH - (PICKER.button + 6) * 2;
 
 /** 마지막으로 보던 게임. 다시 들어와도 같은 게임이 보인다. */
 let lastGameId: string | null = null;
@@ -52,8 +64,10 @@ type View =
   | { kind: 'ready'; board: RankBoard };
 
 /** 게임별 온라인 랭킹을 보고, 닉네임을 정해 참여하는 화면. 인터넷이 없으면 안내만 보인다. */
-export class RankingScene extends Phaser.Scene {
+export class RankingScene extends Phaser.Scene implements BackAware {
   private gameIndex = 0;
+  /** 목록 자리에 랭킹 대신 게임을 고르는 격자를 펼쳐 놓았는지 */
+  private choosing = false;
   private view: View = { kind: 'loading' };
   private page = 0;
   private layout: PageLayout = { perPage: 1, pages: 1 };
@@ -63,6 +77,9 @@ export class RankingScene extends Phaser.Scene {
   private footTop = 0;
   private gameIcon!: Phaser.GameObjects.Image;
   private gameTitle!: Phaser.GameObjects.Text;
+  /** 게임 이름을 감싸는 알약 모양 바탕과, 이름 옆의 세모 */
+  private titleFrame!: Phaser.GameObjects.Graphics;
+  private titleCaret!: Phaser.GameObjects.Graphics;
   private pager!: Pager;
   /** 목록과 내 기록 칸을 이루는 것들. 내용이 바뀌면 지우고 다시 만든다. */
   private listObjects: Phaser.GameObjects.GameObject[] = [];
@@ -85,8 +102,16 @@ export class RankingScene extends Phaser.Scene {
 
   create(data: RankingData = {}): void {
     const { height } = this.scale;
-    const wanted = data.gameId ?? lastGameId;
+    // 따로 정해 주지 않았으면 보던 게임을, 처음 들어왔으면 가장 최근에 한 게임을 먼저 보여 준다.
+    const wanted =
+      data.gameId ??
+      lastGameId ??
+      lastPlayedGame(
+        RANKED.map((game) => game.id),
+        (id) => getRecord(store.data, id).lastPlayedAt,
+      );
     this.gameIndex = Math.max(0, RANKED.findIndex((game) => game.id === wanted));
+    this.choosing = false;
     this.listObjects = [];
     this.footObjects = [];
     this.retryButton = null;
@@ -142,27 +167,93 @@ export class RankingScene extends Phaser.Scene {
       onTap: () => this.changeGame(1),
     });
     const centerY = PICKER.top + PICKER.height / 2;
+    // 가운데의 게임 이름을 누르면 모든 게임이 격자로 펼쳐진다. 화살표로 하나씩 넘기지 않아도 된다.
+    this.titleFrame = this.add.graphics();
+    addTapZone(
+      this,
+      TITLE_LEFT,
+      PICKER.top,
+      TITLE_WIDTH,
+      PICKER.height,
+      (pressed) => this.drawTitleFrame(pressed),
+      () => {
+        sfx.click();
+        this.setChoosing(!this.choosing);
+      },
+    );
     this.gameIcon = this.add.image(0, centerY, this.shown.icon).setDisplaySize(18, 18);
     this.gameTitle = addText(this, 0, centerY, '', { color: THEME_CSS.inkDeep, originY: 0.5 });
+    this.titleCaret = this.add.graphics();
+  }
+
+  private drawTitleFrame(pressed = false): void {
+    this.titleFrame.clear();
+    drawPanel(this.titleFrame, TITLE_LEFT, PICKER.top, TITLE_WIDTH, PICKER.height, {
+      fill: this.choosing ? THEME.butterSoft : THEME.dim,
+      shadow: null,
+      radius: PICKER.height / 2,
+    });
+    this.titleFrame.setAlpha(pressed ? 0.6 : 1);
   }
 
   private showGame(): void {
     lastGameId = this.shown.id;
     this.gameIcon.setTexture(this.shown.icon).setDisplaySize(18, 18);
     this.gameTitle.setText(this.shown.title);
-    // 아이콘과 이름을 한 덩어리로 가운데에 놓는다.
-    const width = 18 + 6 + Math.ceil(this.gameTitle.width);
+    // 아이콘, 이름, 세모를 한 덩어리로 가운데에 놓는다.
+    const titleWidth = Math.ceil(this.gameTitle.width);
+    const width = 18 + 6 + titleWidth + CARET.gap + CARET.width;
     const left = Math.round(GAME_WIDTH / 2 - width / 2);
     this.gameIcon.setX(left + 9);
     this.gameTitle.setX(left + 24);
+    this.drawTitleFrame();
+
+    // 세모는 격자가 접혀 있으면 아래를, 펼쳐져 있으면 위를 가리킨다.
+    const caretLeft = left + 24 + titleWidth + CARET.gap;
+    const centerY = PICKER.top + PICKER.height / 2 + 1;
+    const tip = this.choosing ? -CARET.height / 2 : CARET.height / 2;
+    this.titleCaret.clear().fillStyle(THEME.sub, 1);
+    this.titleCaret.fillTriangle(
+      caretLeft,
+      centerY - tip,
+      caretLeft + CARET.width,
+      centerY - tip,
+      caretLeft + CARET.width / 2,
+      centerY + tip,
+    );
   }
 
   private changeGame(step: 1 | -1): void {
-    this.gameIndex = (this.gameIndex + step + RANKED.length) % RANKED.length;
+    this.pickGame((this.gameIndex + step + RANKED.length) % RANKED.length);
+  }
+
+  /** index번째 게임의 랭킹을 보여 준다. 격자가 펼쳐져 있었으면 접는다. */
+  private pickGame(index: number): void {
+    this.gameIndex = index;
+    this.choosing = false;
     this.page = 0;
     this.showGame();
     this.drawFoot();
     void this.fetchBoard(false);
+  }
+
+  /** 목록 자리에 게임을 고르는 격자를 펼치거나 접는다. */
+  private setChoosing(open: boolean): void {
+    if (this.choosing === open) return;
+    this.choosing = open;
+    this.page = 0;
+    this.showGame();
+    this.relayout();
+    if (!open) return;
+    // 지금 보던 게임이 있는 쪽을 펼친다.
+    const page = pageOfIndex(this.gameIndex, this.layout.perPage);
+    if (page !== this.page) this.showPage(page);
+  }
+
+  /** 뒤로 가기를 누르면 펼쳐 둔 격자부터 접고, 접혀 있으면 허브로 돌아간다. */
+  onBackRequest(): void {
+    if (this.choosing) this.setChoosing(false);
+    else fadeToScene(this, SCENE.hub);
   }
 
   // ------------------------------------------------------------ 불러오기
@@ -186,12 +277,23 @@ export class RankingScene extends Phaser.Scene {
 
   private show(view: View): void {
     this.view = view;
-    const rows = view.kind === 'ready' ? view.board.top.length : 0;
-    this.layout = layoutPages(rows, this.listHeight, LIST.row, PAGER_HEIGHT);
+    this.relayout();
+    this.drawFoot();
+  }
+
+  /** 목록 자리에 놓을 것(랭킹 줄, 또는 게임 격자)에 맞춰 쪽을 나누고 다시 그린다. */
+  private relayout(): void {
+    if (this.choosing) {
+      const rows = Math.ceil(RANKED.length / CHOOSER.columns);
+      const byRow = layoutPages(rows, this.listHeight, CHOOSER.height + CHOOSER.gap, PAGER_HEIGHT);
+      this.layout = { perPage: byRow.perPage * CHOOSER.columns, pages: byRow.pages };
+    } else {
+      const rows = this.view.kind === 'ready' ? this.view.board.top.length : 0;
+      this.layout = layoutPages(rows, this.listHeight, LIST.row, PAGER_HEIGHT);
+    }
     this.page = clampPage(this.page, this.layout.pages);
     this.pager.set(this.layout.pages, this.page);
     this.drawList();
-    this.drawFoot();
   }
 
   private showPage(page: number): boolean {
@@ -226,6 +328,10 @@ export class RankingScene extends Phaser.Scene {
   private drawList(): void {
     this.clear(this.listObjects);
     this.retryButton?.setVisible(false);
+    if (this.choosing) {
+      this.drawChooser();
+      return;
+    }
     const view = this.view;
 
     if (view.kind === 'loading') {
@@ -252,6 +358,44 @@ export class RankingScene extends Phaser.Scene {
     pageSlice(view.board.top, this.page, this.layout.perPage).forEach((row, index) => {
       this.addRow(row, this.listTop + index * LIST.row);
     });
+  }
+
+  /** 랭킹이 있는 게임을 격자로 늘어놓는다. 하나를 누르면 그 게임의 랭킹으로 간다. */
+  private drawChooser(): void {
+    const width = (CONTENT_WIDTH - LIST.pad * 2 - CHOOSER.gap * (CHOOSER.columns - 1)) / CHOOSER.columns;
+    const first = this.page * this.layout.perPage;
+    pageSlice(RANKED, this.page, this.layout.perPage).forEach((game, offset) => {
+      const x = MARGIN + LIST.pad + (offset % CHOOSER.columns) * (width + CHOOSER.gap);
+      const y = this.listTop + Math.floor(offset / CHOOSER.columns) * (CHOOSER.height + CHOOSER.gap);
+      this.addChoice(game, first + offset, x, y, width);
+    });
+  }
+
+  private addChoice(game: MiniGameInfo, index: number, x: number, y: number, width: number): void {
+    const current = index === this.gameIndex;
+    const frame = this.add.graphics();
+    const drawFrame = (pressed: boolean): void => {
+      frame.clear();
+      if (!current && !pressed) return;
+      frame.fillStyle(current ? THEME.butterSoft : THEME.dim, 1);
+      frame.fillRoundedRect(x, y, width, CHOOSER.height, 8);
+    };
+    drawFrame(false);
+    const icon = this.add
+      .image(x + width / 2, y + 2 + CHOOSER.icon / 2, game.icon)
+      .setDisplaySize(CHOOSER.icon, CHOOSER.icon);
+    const title = addText(this, x + width / 2, y + CHOOSER.icon + 3, game.title, {
+      size: FONT_SIZE.small,
+      color: current ? THEME_CSS.accent : THEME_CSS.inkDeep,
+      originX: 0.5,
+    });
+    // 긴 이름도 칸 안에 들어가도록 줄인다.
+    title.setScale(Math.min(1, (width - 4) / title.width));
+    const zone = addTapZone(this, x, y, width, CHOOSER.height, drawFrame, () => {
+      sfx.click();
+      this.pickGame(index);
+    });
+    this.listObjects.push(frame, icon, title, zone);
   }
 
   private addRow(row: RankRow, y: number): void {
