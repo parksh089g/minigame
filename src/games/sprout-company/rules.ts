@@ -4,6 +4,7 @@
  * 매 프레임 불리는 advance가 있어서 여기 함수들은 상태를 그 자리에서 고친다.
  */
 import {
+  AWAY,
   CANDIDATE_COUNT,
   CHEER_BOOST,
   CHEER_SECONDS,
@@ -12,18 +13,22 @@ import {
   FIRST_HIRES,
   HIRE_COST,
   INBOX_SLOTS,
+  LEAD,
   LEVEL_SPEED,
   OFFICES,
   PROJECT_ORDER,
   PROJECTS,
+  RUSH,
   SPECIALTY_BOOST,
   STAFF,
   STAFF_ORDER,
   TASK_KINDS,
+  TRAINING,
   UPDATE_SCALE,
   type EffectKey,
   type EquipmentDef,
   type EquipmentId,
+  type LeadLevel,
   type ProjectDef,
   type ProjectId,
   type StaffDef,
@@ -40,6 +45,8 @@ export interface Task {
   left: number;
   /** 처음의 일. 진행 막대를 그릴 때 쓴다. */
   total: number;
+  /** 급한 의뢰의 카드. 프로젝트의 카드로 세지 않는다. */
+  rush?: boolean;
 }
 
 /** 강화 id → 레벨. 없는 id는 0레벨이다. */
@@ -48,7 +55,7 @@ export type Levels = Partial<Record<EquipmentId, number>>;
 export interface Desk {
   /** 앉은 직원. 빈 자리는 null */
   staff: StaffId | null;
-  /** 교육으로 올린 레벨. 지금은 늘 0이다. */
+  /** 교육으로 올린 레벨 */
   level: number;
   /** 이 자리의 장비 */
   gear: Levels;
@@ -62,6 +69,27 @@ export interface ActiveProject {
   /** 끝낸 카드의 수 */
   done: number;
   total: number;
+}
+
+/** 들어와서 받을지 기다리는 급한 의뢰 */
+export interface RushOffer {
+  kinds: TaskKind[];
+  /** 카드 한 장에 드는 일 */
+  work: number;
+  reward: number;
+  /** 받지 않으면 사라지기까지 남은 시간(초) */
+  left: number;
+}
+
+/** 받아서 하고 있는 급한 의뢰 */
+export interface Rush {
+  total: number;
+  done: number;
+  /** 남은 시간(초) */
+  left: number;
+  /** 처음에 주어진 시간(초). 남은 시간 막대를 그릴 때 쓴다. */
+  seconds: number;
+  reward: number;
 }
 
 export interface CompanyState {
@@ -78,13 +106,25 @@ export interface CompanyState {
   /** 회사에 하나씩 있는 장비 */
   gear: Levels;
   project: ActiveProject | null;
+  /** 일감함에 꺼내 놓은 카드. 급한 의뢰의 카드는 맨 앞에 놓인다. */
   inbox: Task[];
+  /** 일감함에 자리가 없어서 쌓아 둔 프로젝트의 카드. 자리가 나면 차례로 꺼낸다. */
+  backlog: Task[];
+  offer: RushOffer | null;
+  rush: Rush | null;
+  /** 다음 급한 의뢰가 들어오기까지 남은 시간(초). 의뢰가 열린 사무실에서만 줄어든다. */
+  rushIn: number;
   /** 프로젝트 id → 낸 횟수 (첫 출시와 업데이트를 합친 것) */
   released: Partial<Record<ProjectId, number>>;
   /** 모든 출시와 업데이트의 수 */
   releases: number;
   /** 지금 와 있는 지원자. 채용 화면을 처음 열 때 정하고, 뽑을 때까지 바뀌지 않는다. */
   candidates: StaffId[] | null;
+  /** 팀장의 단계. 0이면 팀장이 없다. */
+  lead: number;
+  /** 팀장이 다음 카드를 맡기기까지 남은 시간(초) */
+  leadWait: number;
+  /** 마지막으로 저장한 때(ms). 닫아 둔 시간을 재는 데 쓴다. */
   savedAt: number;
 }
 
@@ -113,9 +153,15 @@ export function createCompany(boss: StaffId, now = 0): CompanyState {
     gear: {},
     project: null,
     inbox: [],
+    backlog: [],
+    offer: null,
+    rush: null,
+    rushIn: RUSH.every[0],
     released: {},
     releases: 0,
     candidates: null,
+    lead: 0,
+    leadWait: 0,
     savedAt: now,
   };
 }
@@ -162,18 +208,25 @@ export function specialtyOf(state: CompanyState, staff: StaffId): TaskKind | nul
   return staff === state.boss ? null : STAFF[staff].specialty;
 }
 
-/** 이 책상의 직원이 이 업무를 할 때의 속도(응원은 뺀 것). 빈 자리는 0 */
-export function deskSpeed(state: CompanyState, index: number, kind: TaskKind): number {
+/** 이 책상의 직원이 특기가 아닌 업무를 할 때의 속도(응원은 뺀 것). 빈 자리는 0 */
+export function baseSpeed(state: CompanyState, index: number): number {
   const desk = state.desks[index];
   if (!desk?.staff) return 0;
   const trait = (STAFF[desk.staff] as StaffDef).trait;
-  const bonus =
+  return (
+    1 +
     gearBonus(desk.gear, 'desk', 'workSpeed') +
     gearBonus(state.gear, 'company', 'workSpeed') +
     (trait.key === 'workSpeed' ? trait.amount : 0) +
-    desk.level * LEVEL_SPEED;
-  const boost = specialtyOf(state, desk.staff) === kind ? SPECIALTY_BOOST : 1;
-  return boost * (1 + bonus);
+    desk.level * LEVEL_SPEED
+  );
+}
+
+/** 이 책상의 직원이 이 업무를 할 때의 속도(응원은 뺀 것). 빈 자리는 0 */
+export function deskSpeed(state: CompanyState, index: number, kind: TaskKind): number {
+  const staff = state.desks[index]?.staff;
+  if (!staff) return 0;
+  return baseSpeed(state, index) * (specialtyOf(state, staff) === kind ? SPECIALTY_BOOST : 1);
 }
 
 // ───────── 프로젝트 ─────────
@@ -183,10 +236,14 @@ export function versionOf(state: CompanyState, id: ProjectId): number {
   return state.released[id] ?? 0;
 }
 
+/** 일감함 같은 것으로 카드의 일을 아무리 줄여도 이만큼은 넘지 못한다. */
+const MAX_EASE = 0.6;
+
 /** 이 프로젝트를 지금 시작하면 카드 한 장에 드는 일 */
 export function projectWork(state: CompanyState, id: ProjectId): number {
   const def: ProjectDef = PROJECTS[id];
-  return def.work * UPDATE_SCALE.work ** versionOf(state, id);
+  const ease = Math.min(MAX_EASE, companyBonus(state, 'ease'));
+  return def.work * UPDATE_SCALE.work ** versionOf(state, id) * (1 - ease);
 }
 
 /** 이 프로젝트를 지금 내면 받는 잎사귀 */
@@ -199,7 +256,8 @@ export function projectBonus(state: CompanyState, id: ProjectId): number {
 /** 이 프로젝트를 지금 내면 오르는 평판 */
 export function projectReputation(state: CompanyState, id: ProjectId): number {
   const def: ProjectDef = PROJECTS[id];
-  return versionOf(state, id) === 0 ? def.reputation : Math.ceil(def.reputation * UPDATE_SCALE.reputation);
+  const base = versionOf(state, id) === 0 ? def.reputation : Math.ceil(def.reputation * UPDATE_SCALE.reputation);
+  return Math.round(base * (1 + companyBonus(state, 'reputation')));
 }
 
 /** 이 프로젝트를 지금 내면 늘어나는 초당 수익 (회사 보너스는 뺀 것) */
@@ -231,15 +289,30 @@ export function availableProjects(state: CompanyState): ProjectId[] {
   return PROJECT_ORDER.filter((id) => isUnlocked(state, id));
 }
 
-/** 프로젝트를 시작한다. 카드가 일감함에 놓인다. 하던 프로젝트가 있으면 시작하지 못한다. */
+/** 일감함에 자리가 있으면 쌓아 둔 카드를 차례로 꺼낸다. */
+function refill(state: CompanyState): void {
+  while (state.inbox.length < INBOX_SLOTS && state.backlog.length > 0) {
+    state.inbox.push(state.backlog.shift() as Task);
+  }
+}
+
+/**
+ * 프로젝트를 시작한다. 카드가 일감함에 놓이고, 다 놓지 못한 것은 쌓아 둔다.
+ * 하던 프로젝트가 있으면 시작하지 못한다.
+ */
 export function startProject(state: CompanyState, id: ProjectId): boolean {
   if (state.project || !isUnlocked(state, id)) return false;
   const def: ProjectDef = PROJECTS[id];
   const work = projectWork(state, id);
-  const cards = def.cards.slice(0, INBOX_SLOTS);
-  state.inbox = cards.map((kind) => ({ kind, left: work, total: work }));
-  state.project = { id, done: 0, total: cards.length };
+  state.backlog = def.cards.map((kind) => ({ kind, left: work, total: work }));
+  state.project = { id, done: 0, total: def.cards.length };
+  refill(state);
   return true;
+}
+
+/** 아직 맡기지 않은 프로젝트의 카드 수: 일감함에 있는 것과 쌓아 둔 것 */
+export function cardsWaiting(state: CompanyState): number {
+  return state.inbox.length + state.backlog.length;
 }
 
 /** 프로젝트의 카드를 모두 끝내서 출시만 남았는가 */
@@ -267,7 +340,9 @@ export function release(state: CompanyState): Release | null {
   state.released[id] = version;
   state.releases += 1;
   state.project = null;
-  state.inbox = [];
+  // 급한 의뢰의 카드는 프로젝트와 상관없이 남는다.
+  state.inbox = state.inbox.filter((task) => task.rush);
+  state.backlog = [];
   return { id, version, bonus, reputation };
 }
 
@@ -280,6 +355,7 @@ export function assign(state: CompanyState, card: number, index: number): boolea
   if (!desk?.staff || desk.task || !task) return false;
   state.inbox.splice(card, 1);
   desk.task = task;
+  refill(state);
   return true;
 }
 
@@ -300,21 +376,31 @@ export function cheer(state: CompanyState, index: number): boolean {
   return true;
 }
 
-export interface TaskDone {
-  desk: number;
-  kind: TaskKind;
-}
+/** 시간이 흐르는 동안 일어난 일 */
+export type CompanyEvent =
+  | { type: 'task'; desk: number; kind: TaskKind; rush: boolean }
+  | { type: 'rushOffer' }
+  | { type: 'rushWon'; reward: number }
+  | { type: 'rushLost' };
 
-const NOTHING: readonly TaskDone[] = [];
+const NOTHING: readonly CompanyEvent[] = [];
 
 /**
  * 시간을 dt초 흘린다. 출시작이 잎사귀를 벌고, 책상마다 일이 줄어든다.
- * 이번에 끝난 업무를 돌려준다. 끝난 자리는 비고, 다음 카드를 맡길 때까지 쉰다.
+ * 그동안 일어난 일(끝난 업무, 급한 의뢰)을 돌려준다. 끝난 자리는 비고, 다음 카드를 맡길 때까지 쉰다
+ * (팀장이 있으면 팀장이 맡긴다). random은 0 이상 1 미만의 수를 주고, 급한 의뢰를 정할 때 쓴다.
  */
-export function advance(state: CompanyState, dt: number): readonly TaskDone[] {
+export function advance(state: CompanyState, dt: number, random: () => number = Math.random): readonly CompanyEvent[] {
   if (!(dt > 0)) return NOTHING;
   state.leaves += incomePerSecond(state) * dt;
-  let done: TaskDone[] | null = null;
+  const events = work(state, dt, random);
+  tickRush(state, dt, random, events);
+  return events;
+}
+
+/** 책상의 일만 dt초 진행한다. 잎사귀는 벌지 않는다. */
+function work(state: CompanyState, dt: number, random: () => number): CompanyEvent[] {
+  const done: CompanyEvent[] = [];
   for (let index = 0; index < state.desks.length; index += 1) {
     const desk = state.desks[index];
     const task = desk.task;
@@ -330,11 +416,235 @@ export function advance(state: CompanyState, dt: number): readonly TaskDone[] {
     if (task.left <= 0) {
       desk.task = null;
       desk.cheer = 0;
-      if (state.project) state.project.done = Math.min(state.project.total, state.project.done + 1);
-      (done ??= []).push({ desk: index, kind: task.kind });
+      done.push({ type: 'task', desk: index, kind: task.kind, rush: task.rush === true });
+      if (task.rush) {
+        const rush = state.rush;
+        if (rush && (rush.done += 1) >= rush.total) {
+          state.leaves += rush.reward;
+          done.push({ type: 'rushWon', reward: rush.reward });
+          state.rush = null;
+          state.rushIn = nextRushIn(random);
+        }
+      } else if (state.project) {
+        state.project.done = Math.min(state.project.total, state.project.done + 1);
+      }
     }
   }
-  return done ?? NOTHING;
+  leadAssign(state, dt);
+  return done;
+}
+
+// ───────── 교육 ─────────
+
+export function trainCost(level: number): number {
+  return Math.round(TRAINING.baseCost * TRAINING.growth ** level);
+}
+
+/** 이 책상의 직원을 교육할 수 없는 까닭. 할 수 있으면 null */
+export function trainBlock(state: CompanyState, index: number): BuyBlock | null {
+  if (TRAINING.unlockOffice > state.office) return 'locked';
+  const desk = state.desks[index];
+  if (!desk?.staff) return 'empty';
+  if (desk.level >= TRAINING.maxLevel) return 'max';
+  if (state.leaves < trainCost(desk.level)) return 'poor';
+  return null;
+}
+
+/** 이 책상의 직원을 교육해서 레벨을 하나 올린다. */
+export function train(state: CompanyState, index: number): boolean {
+  if (trainBlock(state, index) !== null) return false;
+  const desk = state.desks[index];
+  state.leaves -= trainCost(desk.level);
+  desk.level += 1;
+  return true;
+}
+
+// ───────── 급한 의뢰 ─────────
+
+function nextRushIn(random: () => number): number {
+  const [from, to] = RUSH.every;
+  return from + (to - from) * random();
+}
+
+/** 지금 회사에 맞는 급한 의뢰를 하나 만든다. */
+function makeOffer(state: CompanyState, random: () => number): RushOffer {
+  const staff = staffCount(state);
+  const count = Math.max(RUSH.cards[0], Math.min(RUSH.cards[1], Math.floor(staff / 2)));
+  const kinds: TaskKind[] = [];
+  for (let index = 0; index < count; index += 1) {
+    kinds.push(TASK_KINDS[Math.min(TASK_KINDS.length - 1, Math.floor(random() * TASK_KINDS.length))]);
+  }
+  // 특기가 아닌 직원이 응원 없이 하면 시간이 빠듯하게 드는 만큼의 일을 준다.
+  let speed = 0;
+  for (let index = 0; index < state.desks.length; index += 1) speed += baseSpeed(state, index);
+  const work = RUSH.effort * RUSH.seconds * (speed / Math.max(1, staff));
+  const reward = Math.round(Math.max(RUSH.minReward * 4 ** state.office, incomePerSecond(state) * RUSH.rewardSeconds));
+  return { kinds, work, reward, left: RUSH.offerSeconds };
+}
+
+/** 들어온 의뢰를 받는다. 카드가 일감함 맨 앞에 놓이고 시간이 흐르기 시작한다. */
+export function acceptRush(state: CompanyState): boolean {
+  const offer = state.offer;
+  if (!offer || state.rush) return false;
+  const cards: Task[] = offer.kinds.map((kind) => ({ kind, left: offer.work, total: offer.work, rush: true }));
+  state.inbox.unshift(...cards);
+  state.rush = { total: cards.length, done: 0, left: RUSH.seconds, seconds: RUSH.seconds, reward: offer.reward };
+  state.offer = null;
+  return true;
+}
+
+/** 들어온 의뢰를 받지 않고 보낸다. */
+export function declineRush(state: CompanyState, random: () => number = Math.random): boolean {
+  if (!state.offer) return false;
+  state.offer = null;
+  state.rushIn = nextRushIn(random);
+  return true;
+}
+
+/** 하던 의뢰를 거둔다. 남은 카드는 일감함에서도 책상에서도 사라진다. */
+function dropRush(state: CompanyState, random: () => number): void {
+  state.inbox = state.inbox.filter((task) => !task.rush);
+  for (const desk of state.desks) {
+    if (desk.task?.rush) {
+      desk.task = null;
+      desk.cheer = 0;
+    }
+  }
+  state.rush = null;
+  state.rushIn = nextRushIn(random);
+  refill(state);
+}
+
+function tickRush(state: CompanyState, dt: number, random: () => number, events: CompanyEvent[]): void {
+  if (RUSH.unlockOffice > state.office) return;
+  if (state.rush) {
+    state.rush.left -= dt;
+    if (state.rush.left <= 0) {
+      dropRush(state, random);
+      events.push({ type: 'rushLost' });
+    }
+    return;
+  }
+  if (state.offer) {
+    state.offer.left -= dt;
+    if (state.offer.left <= 0) declineRush(state, random);
+    return;
+  }
+  state.rushIn -= dt;
+  if (state.rushIn <= 0) {
+    state.rushIn = 0;
+    state.offer = makeOffer(state, random);
+    events.push({ type: 'rushOffer' });
+  }
+}
+
+// ───────── 팀장 ─────────
+
+/** 지금 팀장의 솜씨. 팀장이 없으면 null */
+export function leadLevel(state: CompanyState): LeadLevel | null {
+  return state.lead > 0 ? (LEAD.levels[Math.min(state.lead, LEAD.levels.length) - 1] ?? null) : null;
+}
+
+export type LeadBlock = 'locked' | 'max' | 'poor';
+
+/** 팀장을 한 단계 올릴 수 없는 까닭. 올릴 수 있으면 null */
+export function leadBlock(state: CompanyState): LeadBlock | null {
+  if (LEAD.unlockOffice > state.office) return 'locked';
+  const next = LEAD.levels[state.lead];
+  if (!next) return 'max';
+  if (state.leaves < next.cost) return 'poor';
+  return null;
+}
+
+/** 팀장을 두거나 한 단계 올린다. */
+export function promoteLead(state: CompanyState): boolean {
+  if (leadBlock(state) !== null) return false;
+  state.leaves -= LEAD.levels[state.lead].cost;
+  state.lead += 1;
+  state.leadWait = LEAD.levels[state.lead - 1].delay;
+  return true;
+}
+
+/**
+ * 팀장이 쉬는 친구에게 카드를 맡긴다. 쉬는 친구와 카드가 함께 있는 동안에만 시간이 가고,
+ * 정해진 시간이 지날 때마다 한 장씩 맡긴다. 맡긴 책상의 번호를 돌려주고, 맡기지 않았으면 -1이다.
+ */
+function leadAssign(state: CompanyState, dt: number): number {
+  const level = leadLevel(state);
+  if (!level) return -1;
+  const idle: number[] = [];
+  for (let index = 0; index < state.desks.length; index += 1) {
+    const desk = state.desks[index];
+    if (desk.staff && !desk.task) idle.push(index);
+  }
+  if (idle.length === 0 || state.inbox.length === 0) {
+    state.leadWait = level.delay;
+    return -1;
+  }
+  state.leadWait = Math.min(state.leadWait, level.delay) - dt;
+  if (state.leadWait > 0) return -1;
+  state.leadWait = level.delay;
+
+  let desk = idle[0];
+  let card = 0;
+  if (level.match) {
+    // 특기에 맞는 짝이 있으면 그것부터 맡긴다.
+    for (const index of idle) {
+      const specialty = specialtyOf(state, state.desks[index].staff as StaffId);
+      const match = state.inbox.findIndex((task) => task.kind === specialty);
+      if (match >= 0) {
+        desk = index;
+        card = match;
+        break;
+      }
+    }
+  }
+  return assign(state, card, desk) ? desk : -1;
+}
+
+// ───────── 닫아 둔 동안 ─────────
+
+export interface Away {
+  /** 센 시간(초). 가장 긴 시간을 넘으면 거기서 잘린다. */
+  seconds: number;
+  /** 그동안 번 잎사귀 */
+  leaves: number;
+  /** 그동안 끝난 업무의 수 */
+  tasks: number;
+  /** 가장 긴 시간을 넘겨서 잘렸는가 */
+  capped: boolean;
+}
+
+/**
+ * 닫아 둔 seconds초를 한꺼번에 흘린다. 출시작은 평소의 일부만 벌고, 맡겨 둔 업무는 그대로 진행된다
+ * (팀장이 있으면 남은 카드도 맡긴다). 너무 짧게 비웠으면 아무 일도 하지 않고 null을 돌려준다.
+ */
+export function catchUp(state: CompanyState, seconds: number): Away | null {
+  if (!(seconds >= AWAY.minSeconds)) return null;
+  const counted = Math.min(seconds, AWAY.maxSeconds);
+  // 급한 의뢰는 자리를 비우면 놓친다. 들어와 있던 의뢰도 그냥 지나간다.
+  const fixed = (): number => 0.5;
+  if (state.rush) dropRush(state, fixed);
+  if (state.offer) declineRush(state, fixed);
+  const leaves = incomePerSecond(state) * counted * AWAY.rate;
+  state.leaves += leaves;
+  let tasks = 0;
+  for (let time = 0; time < counted; time += 1) {
+    const working = state.desks.some((desk) => desk.task !== null);
+    if (!working && (state.lead === 0 || state.inbox.length === 0)) break;
+    tasks += work(state, 1, fixed).length;
+  }
+  return { seconds: counted, leaves, tasks, capped: seconds > AWAY.maxSeconds };
+}
+
+/** 시간을 짧게 적는다: 45초, 12분, 2시간 5분 */
+export function formatDuration(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds));
+  if (total < 60) return `${total}초`;
+  const minutes = Math.floor(total / 60);
+  if (minutes < 60) return `${minutes}분`;
+  const rest = minutes % 60;
+  return rest > 0 ? `${Math.floor(minutes / 60)}시간 ${rest}분` : `${Math.floor(minutes / 60)}시간`;
 }
 
 // ───────── 장비 ─────────
@@ -495,7 +805,14 @@ function normalizeTask(raw: unknown): Task | null {
   const total = toNumber(raw.total);
   if (total <= 0) return null;
   const left = toNumber(raw.left, 0, total);
-  return left > 0 ? { kind: raw.kind, left, total } : null;
+  if (left <= 0) return null;
+  const task: Task = { kind: raw.kind, left, total };
+  if (raw.rush === true) task.rush = true;
+  return task;
+}
+
+function normalizeTasks(raw: unknown): Task[] {
+  return (Array.isArray(raw) ? raw : []).map(normalizeTask).filter((task): task is Task => task !== null);
 }
 
 /**
@@ -522,7 +839,7 @@ export function normalizeCompany(raw: unknown): CompanyState | null {
         seen.add(entry.staff);
       }
       if (desk.staff) {
-        desk.level = toCount(entry.level);
+        desk.level = toCount(entry.level, TRAINING.maxLevel);
         desk.gear = normalizeLevels(entry.gear, 'desk');
         desk.task = normalizeTask(entry.task);
         desk.cheer = desk.task ? toNumber(entry.cheer, 0, CHEER_SECONDS) : 0;
@@ -544,23 +861,65 @@ export function normalizeCompany(raw: unknown): CompanyState | null {
   const total = PROJECT_ORDER.reduce((sum, id) => sum + versionOf(state, id), 0);
   state.releases = Math.max(total, toCount(raw.releases));
 
-  // 하던 프로젝트: 남은 카드를 다시 세어서 맞춘다. 표에서 사라진 프로젝트면 일을 거두고 고르기부터 다시 한다.
-  const inbox = (Array.isArray(raw.inbox) ? raw.inbox : [])
-    .map(normalizeTask)
-    .filter((task): task is Task => task !== null)
-    .slice(0, INBOX_SLOTS);
-  if (isObject(raw.project) && isProjectId(raw.project.id)) {
-    const working = desks.filter((desk) => desk.task !== null).length;
-    const cards = Math.min(PROJECTS[raw.project.id].cards.length, INBOX_SLOTS);
-    const left = Math.min(cards, inbox.length + working);
-    state.project = { id: raw.project.id, total: cards, done: cards - left };
-    state.inbox = inbox.slice(0, Math.max(0, left - working));
+  let inbox = normalizeTasks(raw.inbox);
+  const backlog = normalizeTasks(raw.backlog).filter((task) => !task.rush);
+
+  // 급한 의뢰: 하던 것은 남은 카드가 있을 때만 잇는다. 아니면 그 카드들을 치운다.
+  const rushOpen = RUSH.unlockOffice <= state.office;
+  const rushCards = inbox.filter((task) => task.rush).length + desks.filter((desk) => desk.task?.rush).length;
+  if (rushOpen && isObject(raw.rush) && rushCards > 0 && toNumber(raw.rush.left) > 0) {
+    const total = Math.max(rushCards, toCount(raw.rush.total, RUSH.cards[1]));
+    state.rush = {
+      total,
+      done: total - rushCards,
+      left: toNumber(raw.rush.left, 0, RUSH.seconds),
+      seconds: RUSH.seconds,
+      reward: toCount(raw.rush.reward),
+    };
   } else {
+    inbox = inbox.filter((task) => !task.rush);
     for (const desk of desks) {
-      desk.task = null;
-      desk.cheer = 0;
+      if (desk.task?.rush) {
+        desk.task = null;
+        desk.cheer = 0;
+      }
     }
   }
+  if (rushOpen && !state.rush && isObject(raw.offer) && Array.isArray(raw.offer.kinds)) {
+    const kinds = raw.offer.kinds.filter(isTaskKind).slice(0, RUSH.cards[1]);
+    const work = toNumber(raw.offer.work);
+    const left = toNumber(raw.offer.left, 0, RUSH.offerSeconds);
+    if (kinds.length > 0 && work > 0 && left > 0) {
+      state.offer = { kinds, work, reward: toCount(raw.offer.reward), left };
+    }
+  }
+  if (typeof raw.rushIn === 'number') state.rushIn = toNumber(raw.rushIn, 0, RUSH.every[1]);
+
+  // 하던 프로젝트: 남은 카드를 다시 세어서 맞춘다. 표에서 사라진 프로젝트면 일을 거두고 고르기부터 다시 한다.
+  const urgent = inbox.filter((task) => task.rush);
+  const plain = inbox.filter((task) => !task.rush);
+  if (isObject(raw.project) && isProjectId(raw.project.id)) {
+    const working = desks.filter((desk) => desk.task !== null && !desk.task.rush).length;
+    const cards = PROJECTS[raw.project.id].cards.length;
+    const waiting = [...plain, ...backlog];
+    const left = Math.min(cards, waiting.length + working);
+    const kept = waiting.slice(0, Math.max(0, left - working));
+    state.project = { id: raw.project.id, total: cards, done: cards - left };
+    state.inbox = [...urgent, ...kept.slice(0, plain.length)];
+    state.backlog = kept.slice(plain.length);
+    refill(state);
+  } else {
+    for (const desk of desks) {
+      if (desk.task && !desk.task.rush) {
+        desk.task = null;
+        desk.cheer = 0;
+      }
+    }
+    state.inbox = urgent;
+  }
+
+  state.lead = LEAD.unlockOffice <= state.office ? toCount(raw.lead, LEAD.levels.length) : 0;
+  state.leadWait = toNumber(raw.leadWait, 0, leadLevel(state)?.delay ?? 0);
 
   if (Array.isArray(raw.candidates)) {
     const pool = hirePool(state);
