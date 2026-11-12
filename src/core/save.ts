@@ -38,6 +38,7 @@ import {
   createWeekly,
   missionProgress,
   normalizeWeekly,
+  pickedGame,
   recordWeeklyPlay,
   weeklyFor,
   type WeekContext,
@@ -266,11 +267,17 @@ export function applyPlayResult(
   let newMissions: WeeklyMission[] = [];
   const weekBefore = week ? weeklyFor(save.weekly, week.weekKey) : null;
   if (week && weekBefore) {
-    const weekAfter = recordWeeklyPlay(weekBefore, week.weekKey, {
-      gameId,
-      coins: coinsEarned + (daily?.reward ?? 0),
-      dailyCleared: daily?.cleared === true,
-    });
+    const weekAfter = recordWeeklyPlay(
+      weekBefore,
+      week.weekKey,
+      {
+        gameId,
+        coins: coinsEarned + (daily?.reward ?? 0),
+        dailyCleared: daily?.cleared === true,
+      },
+      // 주 중간에 게임 목록이 바뀌어도 "이번 주의 게임"이 그대로이도록 기록에 적어 둔다.
+      pickedGame(week),
+    );
     weekly = weekAfter;
     newMissions = week.missions.filter(
       (mission) =>
