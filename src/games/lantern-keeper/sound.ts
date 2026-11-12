@@ -40,6 +40,8 @@ export type SoundId =
   | 'ticket'
   | 'evolve'
   | 'boss'
+  | 'elite'
+  | 'chest'
   | 'surge'
   | 'windup'
   | 'dash'
@@ -148,6 +150,17 @@ export const SOUNDS: Readonly<Record<SoundId, readonly Note[]>> = {
     { f: 110, d: 0.36, type: 'sawtooth', v: 0.34 },
     { f: 104, d: 0.5, type: 'sawtooth', v: 0.34, at: 0.2 },
     { f: 55, d: 0.7, v: 0.16 },
+  ],
+  // 정예 그림자: 보스보다 짧고 가벼운 으르렁 소리
+  elite: [
+    { f: 147, d: 0.22, type: 'sawtooth', v: 0.28 },
+    { f: 131, d: 0.3, type: 'sawtooth', v: 0.28, at: 0.14 },
+  ],
+  // 보물 상자: 뚜껑이 덜컥 열리고 반짝이는 소리가 올라간다.
+  chest: [
+    { f: 196, to: 131, d: 0.08, type: 'triangle', v: 0.3 },
+    ...run([659, 784, 988, 1319], 0.06, 0.1, { type: 'triangle', v: 0.3 }, 0.08),
+    { f: 1976, d: 0.16, v: 0.12, at: 0.32 },
   ],
   surge: run([330, 392, 330, 392], 0.09, 0.08, { v: 0.24 }),
   windup: [{ f: 130, to: 430, d: 0.55, type: 'sawtooth', v: 0.2 }],
