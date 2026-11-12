@@ -10,6 +10,13 @@ import { thisWeek, weeklyGames } from '../games/registry';
 export function settleLastWeek(): void {
   const week = thisWeek(store.data.weekly);
   if (!week) return;
-  const coins = store.settleLastWeek(week.weekKey, weeklyGames());
+  announceLastWeek(store.settleLastWeek(week.weekKey, weeklyGames()));
+}
+
+/**
+ * 지난주 미션 보상을 넣어 줬다고 한 줄로 알린다. 0이면 아무것도 하지 않는다.
+ * 허브를 거치지 않고 판을 이어 하다 주가 바뀌면 판을 기록할 때 넣어 주므로(PlayResult.lastWeekCoins), 그때도 이것으로 알린다.
+ */
+export function announceLastWeek(coins: number): void {
   if (coins > 0) showToast(`지난주 미션 보상 ${coins}코인을 받았어요.`, { sticky: true });
 }

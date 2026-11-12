@@ -14,6 +14,7 @@ import { addBackdrop, addTapZone, addText, drawPanel, fadeIn, fadeToScene, Pixel
 import { syncScores } from '../../online/online';
 import { MAX_SCORE } from '../../online/protocol';
 import { floatText, showBanner } from '../../scenes/GameHud';
+import { announceLastWeek } from '../../scenes/weekly-settle';
 import { makeShareImage } from '../../share/card';
 import { displayHost, shareFileName, shareNotice, shareTitle, shareUrl } from '../../share/link';
 import { sendShare } from '../../share/send';
@@ -381,6 +382,14 @@ function versionText(version: number): string {
 export class SproutCompanyScene extends Phaser.Scene implements BackAware {
   private state!: CompanyState;
   private built = false;
+  /**
+   * 같은 기기의 다른 곳(다른 탭이나 설치한 앱)에 회사를 넘겨주고 기다리는 중이거나, 저장된 회사를 다시 읽는 중이면 true.
+   * 이때는 시간을 흘리지도 저장하지도 않는다. 낡은 회사로 다른 곳의 새 기록을 덮지 않도록.
+   */
+  private waiting = false;
+  private resuming = false;
+  /** 다른 곳에서 회사를 열었다고 알리는 막 */
+  private yieldView: Container | null = null;
   /** create가 불린 횟수. 저장을 읽는 사이에 화면이 다시 만들어졌는지 알아본다. */
   private opened = 0;
 
@@ -452,6 +461,9 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
 
   create(): void {
     this.built = false;
+    this.waiting = false;
+    this.resuming = false;
+    this.yieldView = null;
     this.panel = null;
     this.panelKind = null;
     this.desks = [];
@@ -492,11 +504,13 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
 
     // 안내 문구는 화면 아래쪽의 버튼을 덮으므로 여기서는 띄우지 않는다.
     holdToasts(true);
-    // 화면이 가려지면 그때를 적어 두고, 다시 보이면 그동안의 몫을 한꺼번에 셈한다.
+    // 화면이 가려지면 그때를 적어 두고, 다시 보이면 저장된 회사를 다시 읽은 뒤 그동안의 몫을 한꺼번에 셈한다.
     const onHidden = (): void => this.save();
-    const onVisible = (): void => this.welcomeBack();
+    const onVisible = (): void => this.resume();
     this.game.events.on(Phaser.Core.Events.HIDDEN, onHidden);
     this.game.events.on(Phaser.Core.Events.VISIBLE, onVisible);
+    // 같은 기기의 다른 곳에서 회사를 열거나 저장하면 알려 온다.
+    const unwatch = companyStore.onChange(() => this.onStoreChange());
     // 멈추거나 떠나면 음악도 잦아든다.
     music.hush(false);
     const rest = (): void => music.rest();
@@ -506,15 +520,19 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
       rest();
       this.game.events.off(Phaser.Core.Events.HIDDEN, onHidden);
       this.game.events.off(Phaser.Core.Events.VISIBLE, onVisible);
+      unwatch();
       holdToasts(false);
       this.save();
       this.built = false;
     });
     fadeIn(this);
 
+    // 다른 곳에서 그사이 저장한 것이 있으면 그것을 읽어 와서 연다. 이제부터는 이 곳이 회사를 맡는다.
     const token = (this.opened += 1);
-    void companyStore.load().then(() => {
+    // 읽지 못해도 가진 것으로 연다.
+    void companyStore.refresh().catch(() => undefined).then(() => {
       if (token !== this.opened || !this.sys.isActive()) return;
+      companyStore.claim();
       this.open();
     });
   }
@@ -529,7 +547,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
   }
 
   override update(_time: number, delta: number): void {
-    if (!this.built) return;
+    if (!this.built || this.waiting) return;
     const dt = Math.min(delta / 1000, MAX_STEP);
     this.clock += dt;
     music.tick();
@@ -657,7 +675,90 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
 
   private save(): void {
     this.saveIn = SAVE_EVERY;
-    if (this.built) companyStore.set(this.state);
+    // 다른 곳에 회사를 넘겨준 동안에는 저장하지 않는다. 그 곳의 새 기록을 낡은 것으로 덮지 않도록.
+    if (this.built && !this.waiting && companyStore.leading) companyStore.set(this.state);
+  }
+
+  // ───────── 같은 기기의 다른 곳과 나눠 쓰기 ─────────
+
+  /** 다른 곳이 회사를 맡았거나, 다른 곳에서 저장한 회사를 보내왔다. */
+  private onStoreChange(): void {
+    // 여는 중이거나 다시 읽는 중이면 그쪽에서 새것을 본다.
+    if (!this.built || this.resuming) return;
+    if (!companyStore.leading) {
+      this.waitForOther();
+      return;
+    }
+    // 이 곳이 맡고 있는데 다른 곳에서 회사를 보내왔다(백업 가져오기나 기록 지우기). 받은 회사로 다시 연다.
+    if (companyStore.data !== this.state) this.reopen();
+  }
+
+  /** 다른 곳이 회사를 맡았으니 멈추고 기다린다. 화면이 보이는 동안이면 누르면 이어 한다고 알린다. */
+  private waitForOther(): void {
+    if (this.waiting) return;
+    this.waiting = true;
+    this.closePanel();
+    // 가려진 채로 넘겨줬으면 다시 보일 때 저절로 이어 맡으므로 알릴 것이 없다.
+    if (!document.hidden) this.showYield();
+  }
+
+  /** 저장된 회사를 다시 읽어 와서 이 곳이 이어 맡는다. 다시 보일 때와, 기다리던 화면을 누를 때 부른다. */
+  private resume(): void {
+    if (!this.built || this.resuming) return;
+    // 읽는 동안에는 시간을 흘리지도 저장하지도 않는다.
+    this.waiting = true;
+    this.resuming = true;
+    const token = this.opened;
+    // 읽지 못해도 가진 것으로 이어 한다. 멈춘 채로 남지 않도록.
+    void companyStore.refresh().catch(() => undefined).then(() => {
+      this.resuming = false;
+      if (token !== this.opened || !this.built) return;
+      companyStore.claim();
+      // 다른 곳에서 그사이 저장했으면 그 회사로 다시 연다. 다시 열면서 그 뒤로 흐른 몫을 셈한다.
+      if (companyStore.data !== this.state) {
+        this.reopen();
+        return;
+      }
+      this.waiting = false;
+      this.yieldView?.destroy(true);
+      this.yieldView = null;
+      this.welcomeBack();
+    });
+  }
+
+  /** 받은 회사로 화면을 처음부터 다시 연다. 지금 들고 있는 낡은 회사는 저장하지 않는다. */
+  private reopen(): void {
+    this.built = false;
+    this.scene.restart();
+  }
+
+  /** 다른 곳에서 회사를 열었다고 화면을 덮어 알린다. 아무 데나 누르면 여기서 이어 한다. */
+  private showYield(): void {
+    if (this.yieldView) return;
+    const height = this.scale.height;
+    const scrim = this.add.rectangle(0, 0, W, height, THEME.inkDeep, 0.45).setOrigin(0, 0).setInteractive();
+    scrim.on(Phaser.Input.Events.GAMEOBJECT_POINTER_UP, () => {
+      sfx.click();
+      this.resume();
+    });
+    const boxWidth = INNER - 40;
+    const boxHeight = 64;
+    const left = Math.round((W - boxWidth) / 2);
+    const top = Math.round(height / 2 - boxHeight / 2);
+    const box = this.add.graphics();
+    drawPanel(box, left, top, boxWidth, boxHeight, { radius: 14 });
+    const title = addText(this, W / 2, top + 22, '다른 곳에서 회사를 열었어요', {
+      color: THEME_CSS.inkDeep,
+      originX: 0.5,
+      originY: 0.5,
+    });
+    const help = addText(this, W / 2, top + 44, '눌러서 여기서 이어 하기', {
+      size: FONT_SIZE.small,
+      color: THEME_CSS.sub,
+      originX: 0.5,
+      originY: 0.5,
+    });
+    this.yieldView = this.add.container(0, 0, [scrim, box, title, help]).setDepth(DEPTH.banner + 5);
   }
 
   // ───────── 위쪽: 잎사귀와 평판 ─────────
@@ -849,7 +950,15 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
   private recordRelease(): number {
     const state = this.state;
     const coins = takeReleaseCoin(state.goals);
-    store.recordPlay(COMPANY_GAME_ID, Math.min(totalReputation(state), MAX_SCORE), coins, null, thisWeek(store.data.weekly));
+    const result = store.recordPlay(
+      COMPANY_GAME_ID,
+      Math.min(totalReputation(state), MAX_SCORE),
+      coins,
+      null,
+      thisWeek(store.data.weekly),
+    );
+    // 회사를 열어 둔 채 주가 바뀌었으면 지난주 미션 보상이 여기서 들어온다. 안내는 회사를 나간 뒤에 뜬다.
+    announceLastWeek(result.lastWeekCoins);
     return coins;
   }
 

@@ -707,6 +707,42 @@ describe('주간 미션', () => {
     expect(again.save).toBe(settled.save);
   });
 
+  it('허브를 거치지 않고 주가 바뀌어도, 새 주의 첫 판이 지난주에 받지 않은 보상을 먼저 넣어 준다', () => {
+    const done = playDifferent(easy.goal).save;
+    const owed = settleLastWeek(done, NEXT_WEEK, GAMES).coins;
+    expect(owed).toBeGreaterThan(0);
+    const played = applyPlayResult(done, 'a1', 10, 3, NOW + 100, null, { ...next, games: GAMES });
+    expect(played.lastWeekCoins).toBe(owed);
+    expect(played.save.coins).toBe(done.coins + owed + 3);
+    // 이 판은 새 주의 첫 판으로 센다.
+    expect(played.save.weekly.weekKey).toBe(NEXT_WEEK);
+    expect(played.save.weekly.plays).toEqual({ a1: 1 });
+    expect(played.save.weekly.coins).toBe(3);
+    // 다음 판에서도, 허브에서 다시 따져도 두 번 주지 않는다.
+    const again = applyPlayResult(played.save, 'a1', 10, 3, NOW + 200, null, { ...next, games: GAMES });
+    expect(again.lastWeekCoins).toBe(0);
+    expect(again.save.coins).toBe(played.save.coins + 3);
+    expect(settleLastWeek(played.save, NEXT_WEEK, GAMES).coins).toBe(0);
+  });
+
+  it('같은 주의 판이거나 게임 목록을 모르면 지난주 보상을 따지지 않는다', () => {
+    const done = playDifferent(easy.goal).save;
+    const same = applyPlayResult(done, 'a1', 10, 3, NOW + 100, null, { ...week, games: GAMES });
+    expect(same.lastWeekCoins).toBe(0);
+    expect(same.save.coins).toBe(done.coins + 3);
+    // 게임 목록이 없으면 예전처럼 새 주로 넘어가기만 한다.
+    expect(applyPlayResult(done, 'a1', 10, 3, NOW + 100, null, next).lastWeekCoins).toBe(0);
+  });
+
+  it('주가 바뀐 뒤 처음 깬 단계도 지난주 보상을 먼저 넣어 준다', () => {
+    const done = playDifferent(easy.goal).save;
+    const owed = settleLastWeek(done, NEXT_WEEK, GAMES).coins;
+    const cleared = applyStageClear(done, 'p1', 1, NOW + 100, { ...next, games: GAMES });
+    expect(cleared?.lastWeekCoins).toBe(owed);
+    expect(cleared?.save.coins).toBe(done.coins + owed + STAGE_COINS);
+    expect(cleared?.save.weekly.weekKey).toBe(NEXT_WEEK);
+  });
+
   it('같은 주이거나, 이미 받았거나, 덜 채웠으면 넣어 줄 것이 없다', () => {
     const done = playDifferent(easy.goal).save;
     expect(settleLastWeek(done, WEEK, GAMES).save).toBe(done);

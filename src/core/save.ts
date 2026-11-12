@@ -125,6 +125,11 @@ export interface PlayResult {
   newAchievements: Achievement[];
   /** 이번 판으로 다 채운 주간 미션. 보상은 업적 화면의 주간 탭에서 받는다. */
   newMissions: WeeklyMission[];
+  /**
+   * 주가 바뀐 뒤 첫 판이라서, 이 판을 적기 전에 넣어 준 지난주 미션 보상(코인). 없으면 0.
+   * 허브를 거치지 않고 판을 이어 하는 사이 주가 바뀌어도 지난주 보상이 사라지지 않게 한다.
+   */
+  lastWeekCoins: number;
 }
 
 export function createDefaultSave(now: number = Date.now()): SaveData {
@@ -231,6 +236,7 @@ export function getRecord(save: SaveData, gameId: string): GameRecord {
  * challenge에 오늘의 도전을 넘기면, 이 판으로 달성했는지도 함께 따져 보상을 더한다.
  * 이미 달성한 날이거나 기기 시계가 마지막 달성일보다 앞으로 돌아가 있으면 도전은 따지지 않는다.
  * week에 이번 주의 미션을 넘기면, 이 판을 주간 기록에 더하고 이 판으로 다 채운 미션을 알려 준다.
+ * week에 게임 목록까지 있고 주가 바뀐 뒤 첫 판이면, 지난주에 받지 않은 미션 보상을 먼저 넣어 준다.
  */
 export function applyPlayResult(
   save: SaveData,
@@ -241,18 +247,23 @@ export function applyPlayResult(
   challenge: DailyChallenge | null = null,
   week: WeekContext | null = null,
 ): PlayResult {
+  // 주가 바뀐 뒤 첫 판이면 지난주에 다 채우고도 받지 않은 미션 보상부터 넣어 준다.
+  // 허브는 열릴 때 넣어 주지만, 허브를 거치지 않고 판을 이어 하는 사이 주가 바뀌면
+  // 아래에서 주간 기록이 새 주의 것으로 바뀌면서 그 보상이 사라진다.
+  const settled = week?.games ? settleLastWeek(save, week.weekKey, week.games, now) : null;
+  const base = settled ? settled.save : save;
   const score = toCount(rawScore);
   const coinsEarned =
     score > 0 ? Math.max(MIN_COINS_PER_PLAY, toCount(rawCoins)) : toCount(rawCoins);
-  const previous = getRecord(save, gameId);
+  const previous = getRecord(base, gameId);
   const isNewBest = score > previous.best;
   const best = Math.max(previous.best, score);
 
   let daily: DailyOutcome | null = null;
-  let dailyState = save.daily;
-  if (challenge && challenge.gameId === gameId && !isCleared(save.daily, challenge.dateKey)) {
+  let dailyState = base.daily;
+  if (challenge && challenge.gameId === gameId && !isCleared(base.daily, challenge.dateKey)) {
     if (score >= challenge.target) {
-      dailyState = clearDaily(save.daily, challenge.dateKey);
+      dailyState = clearDaily(base.daily, challenge.dateKey);
       daily = {
         cleared: true,
         reward: challenge.reward + streakBonus(dailyState.streak),
@@ -265,9 +276,9 @@ export function applyPlayResult(
   }
 
   // 주간 미션은 보상을 뺀, 이 판에서 얻은 것만 센다. 넘겨받은 주가 기록보다 앞선 주이면 건드리지 않는다.
-  let weekly = save.weekly;
+  let weekly = base.weekly;
   let newMissions: WeeklyMission[] = [];
-  const weekBefore = week ? weeklyFor(save.weekly, week.weekKey) : null;
+  const weekBefore = week ? weeklyFor(base.weekly, week.weekKey) : null;
   if (week && weekBefore) {
     const weekAfter = recordWeeklyPlay(
       weekBefore,
@@ -288,16 +299,16 @@ export function applyPlayResult(
   }
 
   const next: SaveData = {
-    ...save,
-    coins: save.coins + coinsEarned + (daily?.reward ?? 0),
+    ...base,
+    coins: base.coins + coinsEarned + (daily?.reward ?? 0),
     games: {
-      ...save.games,
+      ...base.games,
       [gameId]: { best, plays: previous.plays + 1, lastPlayedAt: now },
     },
     daily: dailyState,
     weekly,
     // 이번 주 랭킹에 올릴 기록. 닉네임을 정하기 전이어도 적어 둔다.
-    online: withWeekScore(save.online, gameId, score, rankWeekOf(now)),
+    online: withWeekScore(base.online, gameId, score, rankWeekOf(now)),
     updatedAt: now,
   };
 
@@ -314,6 +325,7 @@ export function applyPlayResult(
     daily,
     newAchievements,
     newMissions,
+    lastWeekCoins: settled?.coins ?? 0,
   };
 }
 
@@ -335,6 +347,8 @@ export interface StageClearResult {
   coinsEarned: number;
   newAchievements: Achievement[];
   newMissions: WeeklyMission[];
+  /** 주가 바뀐 뒤 첫 판이라 먼저 넣어 준 지난주 미션 보상(PlayResult.lastWeekCoins). 없으면 0 */
+  lastWeekCoins: number;
 }
 
 /**
@@ -361,6 +375,7 @@ export function applyStageClear(
     // 판 수로 달성한 업적에 더해, 깬 단계로 달성한 업적까지 함께 알린다.
     newAchievements: newlyAchieved(save, next),
     newMissions: play.newMissions,
+    lastWeekCoins: play.lastWeekCoins,
   };
 }
 

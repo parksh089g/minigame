@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { APP_BUILD, APP_VERSION, FONT_SIZE, GAME_WIDTH, SCENE, THEME_CSS } from '../config';
-import { exportBundleText, importBundleText } from '../core/bundle';
+import { exportBundleText, importBundleText, resetParts } from '../core/bundle';
 import { promptText, showCode } from '../core/dialog';
 import { dateStamp, downloadText, pickTextFile } from '../core/files';
 import { canVibrate, vibrate } from '../core/haptics';
@@ -31,7 +31,11 @@ const ASSIST_ON = '색깔 물 나누기와 길 잇기에서\n색마다 무늬를
 const ASSIST_OFF = '색 구분 도우미를 껐어요.';
 
 /** 기록을 초기화한 뒤에 보여 주는 안내 */
-const RESET_DONE = '기록, 코인, 꾸미기, 업적을 모두 지웠어요.';
+const RESET_DONE = '기록, 코인, 꾸미기, 업적과\n등불지기, 새싹 컴퍼니까지 모두 지웠어요.';
+/** 랭킹에 참여한 사람에게는 올린 기록이 남아 있다는 것까지 두 줄 안에 알려야 해서 줄여 쓴다. 지워지는 것은 누르기 전에 알렸다. */
+const RESET_DONE_JOINED = '등불지기, 새싹 컴퍼니까지 모두 지웠어요.\n랭킹 기록은 랭킹 화면에서 뺄 수 있어요.';
+/** "기록 초기화"를 한 번 눌렀을 때 무엇이 지워지는지 미리 알린다. */
+const RESET_WARNING = '기록, 코인, 꾸미기, 업적과\n등불지기, 새싹 컴퍼니가 모두 지워져요.';
 
 /** 저장 공간 보호가 꺼져 있을 때 저장 데이터 버튼 아래에 보여 주는 안내 */
 const BACKUP_HINT = '브라우저가 기록을 지울 수 있어요.\n내보내기로 백업해 두세요.';
@@ -254,22 +258,34 @@ export class SettingsScene extends Phaser.Scene {
       style: 'red',
       onTap: () => {
         if (this.time.now < this.resetArmedUntil) {
-          store.resetProgress();
-          // 이 기기 안의 기록만 지워진다. 랭킹에 참여한 사람에게는 올린 기록이 남아 있다는 것도 알린다.
-          const text = isJoined(store.data.online)
-            ? `${RESET_DONE}\n랭킹 기록은 랭킹 화면에서 뺄 수 있어요.`
-            : RESET_DONE;
-          this.scene.restart({ notice: { text, ok: true } });
+          this.resetArmedUntil = 0;
+          void this.resetAll();
           return;
         }
-        // 실수로 지우지 않도록 두 번 눌러야 초기화된다.
+        // 실수로 지우지 않도록 두 번 눌러야 초기화된다. 무엇이 지워지는지도 미리 알린다.
         this.resetArmedUntil = this.time.now + RESET_CONFIRM_MS;
         resetButton.setLabel('한 번 더 누르면 지워져요').setStyle('yellow');
+        const before = { text: this.noticeText.text, size: this.noticeText.style.fontSize, color: this.noticeText.style.color };
+        this.showNotice(RESET_WARNING, false);
         this.time.delayedCall(RESET_CONFIRM_MS, () => {
           resetButton.setLabel('기록 초기화').setStyle('red');
+          // 지우지 않고 지나갔으면 원래 떠 있던 문구로 돌려 둔다.
+          if (this.noticeText.text === RESET_WARNING) {
+            this.noticeText.setText(before.text).setFontSize(before.size).setColor(before.color);
+          }
         });
       },
     });
+  }
+
+  /** 이 기기의 기록을 모두 지운다. 따로 저장하는 큰 게임(등불지기, 새싹 컴퍼니)도 처음 상태로 돌린다. */
+  private async resetAll(): Promise<void> {
+    store.resetProgress();
+    await resetParts();
+    if (!this.scene.isActive()) return;
+    // 이 기기 안의 기록만 지워진다. 랭킹에 참여한 사람에게는 올린 기록이 남아 있다는 것도 알린다.
+    const text = isJoined(store.data.online) ? RESET_DONE_JOINED : RESET_DONE;
+    this.scene.restart({ notice: { text, ok: true } });
   }
 
   private async exportSave(): Promise<void> {

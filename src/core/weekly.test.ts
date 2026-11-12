@@ -209,7 +209,7 @@ describe('지금 따질 주', () => {
 
   it('그 주의 미션을 함께 돌려준다', () => {
     const week = weekContext(createWeekly(), '2026-11-12', GAMES);
-    expect(week).toEqual({ weekKey: WEEK, missions: missionsFor(WEEK, GAMES) });
+    expect(week).toEqual({ weekKey: WEEK, missions: missionsFor(WEEK, GAMES), games: GAMES });
   });
 });
 

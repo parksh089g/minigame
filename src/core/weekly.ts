@@ -81,6 +81,11 @@ export interface WeeklyState {
 export interface WeekContext {
   weekKey: string;
   missions: readonly WeeklyMission[];
+  /**
+   * 미션을 뽑은 게임 목록. 있으면 주가 바뀐 뒤 첫 판을 기록할 때 지난주 미션을 다시 뽑아서,
+   * 다 채우고도 받지 않은 보상을 먼저 넣어 줄 수 있다(save.ts의 applyPlayResult).
+   */
+  games?: readonly WeeklyGame[];
 }
 
 const DAYS_IN_WEEK = 7;
@@ -346,7 +351,7 @@ export function weekContext(
   if (weekKey === null) return null;
   // 그 주의 기록에 뽑아 둔 게임이 있으면 그대로 쓴다.
   const pick = state.weekKey === weekKey ? state.pick : undefined;
-  return { weekKey, missions: missionsFor(weekKey, games, pick) };
+  return { weekKey, missions: missionsFor(weekKey, games, pick), games };
 }
 
 /** 그 주의 미션 가운데 "정해진 게임 몇 판" 미션이 세는 게임. 그런 미션이 없는 주면 null. */
