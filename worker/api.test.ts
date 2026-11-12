@@ -27,10 +27,12 @@ function server() {
     path: string,
     body?: unknown,
     ip = '10.0.0.1',
+    /** 본문의 형식 표시. null이면 붙이지 않는다(글자열 본문에는 브라우저처럼 text/plain이 붙는다). */
+    type: string | null = 'application/json',
   ): Promise<{ status: number; body: Record<string, unknown>; headers: Headers }> => {
     const request = new Request(`https://arcade.example${path}`, {
       method,
-      headers: { 'cf-connecting-ip': ip, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
+      headers: { 'cf-connecting-ip': ip, ...(body === undefined || type === null ? {} : { 'content-type': type }) },
       body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body),
     });
     const response = await handleApi(request, service);
@@ -122,6 +124,35 @@ describe('랭킹 요청', () => {
     expect((await call('DELETE', '/api/rank', { device: 'nope' })).status).toBe(400);
     // 아무것도 저장되지 않았다.
     expect((await call('GET', '/api/rank/stack-tower')).body).toEqual({ top: [], me: null });
+  });
+
+  it('본문이 JSON이라고 밝히지 않은 요청은 받지 않는다', async () => {
+    // 다른 사이트의 페이지가 방문자 모르게 보낼 수 있는 요청은 이런 형식 표시뿐이다.
+    const { call } = server();
+    const good = { device: device(1), name: '하나', scores: { 'stack-tower': 50 } };
+    const sneaky = [
+      'text/plain',
+      'text/plain;charset=UTF-8',
+      'application/x-www-form-urlencoded',
+      'multipart/form-data; boundary=x',
+      null,
+    ];
+    for (const type of sneaky) {
+      for (const [method, path, body] of [
+        ['POST', '/api/rank', good],
+        ['DELETE', '/api/rank', { device: device(1) }],
+        ['POST', '/api/transfer', { bundle: '{}' }],
+        ['POST', '/api/transfer/take', { code: 'ABCDEFGH' }],
+      ] as const) {
+        const answer = await call(method, path, body, '10.0.0.1', type);
+        expect(answer.status, `${method} ${path} ${type}`).toBe(400);
+        expect(answer.body).toEqual({ error: 'invalid' });
+      }
+    }
+    // 아무것도 저장되지 않았다.
+    expect((await call('GET', '/api/rank/stack-tower')).body).toEqual({ top: [], me: null });
+    // 앱이 보내는 표시는 대소문자와 뒤에 붙은 글자 집합 표시가 달라도 받는다.
+    expect((await call('POST', '/api/rank', good, '10.0.0.1', 'Application/JSON; charset=utf-8')).status).toBe(200);
   });
 
   it('없는 주소와 맞지 않는 방식은 404로 답한다', async () => {
