@@ -29,8 +29,10 @@ export const TASKS: Readonly<Record<TaskKind, { name: string }>> = {
  * - workSpeed: 일하는 속도 (장비가 책상 것이면 그 자리만, 회사 것이면 모두. 직원의 성격이면 그 직원만)
  * - income: 출시작이 초마다 버는 잎사귀
  * - bonus: 출시할 때 한 번 받는 잎사귀
+ * - ease: 업무 카드 한 장에 드는 일을 줄인다 (0.03이면 3% 적게)
+ * - reputation: 출시로 얻는 평판
  */
-export const EFFECT_KEYS = ['workSpeed', 'income', 'bonus'] as const;
+export const EFFECT_KEYS = ['workSpeed', 'income', 'bonus', 'ease', 'reputation'] as const;
 export type EffectKey = (typeof EFFECT_KEYS)[number];
 
 /** amount는 한 레벨(또는 한 사람)마다 더해지는 비율이다. 0.1이면 10%. */
@@ -61,6 +63,11 @@ export const STAFF = {
   dog: { name: '강아지', look: 'runner-dog', specialty: 'plan', trait: { key: 'bonus', amount: 0.1 } },
   ghost: { name: '꼬마 유령', look: 'runner-ghost', specialty: 'code', trait: { key: 'income', amount: 0.1 } },
   cat: { name: '고양이', look: null, texture: 'card-cat', specialty: 'art', trait: { key: 'workSpeed', amount: 0.1 } },
+  bear: { name: '곰', look: null, texture: 'sc-staff-bear', specialty: 'test', trait: { key: 'income', amount: 0.1 } },
+  rabbit: { name: '토끼', look: null, texture: 'sc-staff-rabbit', specialty: 'plan', trait: { key: 'workSpeed', amount: 0.1 } },
+  frog: { name: '개구리', look: null, texture: 'sc-staff-frog', specialty: 'art', trait: { key: 'bonus', amount: 0.1 } },
+  penguin: { name: '펭귄', look: null, texture: 'sc-staff-penguin', specialty: 'code', trait: { key: 'workSpeed', amount: 0.1 } },
+  fox: { name: '여우', look: null, texture: 'sc-staff-fox', specialty: 'test', trait: { key: 'bonus', amount: 0.1 } },
 } as const satisfies Record<string, StaffDef>;
 
 export type StaffId = keyof typeof STAFF;
@@ -77,8 +84,45 @@ export const HIRE_COST = { base: 150, growth: 4 } as const;
 
 /** 특기인 업무를 할 때의 속도 배수 */
 export const SPECIALTY_BOOST = 2;
-/** 교육으로 레벨이 하나 오를 때마다 더해지는 속도. 교육은 다음 단계에서 넣는다. */
-export const LEVEL_SPEED = 0.1;
+/** 교육으로 레벨이 하나 오를 때마다 더해지는 속도 */
+export const LEVEL_SPEED = 0.15;
+
+/** 교육: 잎사귀를 들여 직원의 레벨을 올린다. n레벨에서 n+1레벨로 올리는 값은 baseCost × growth^n */
+export const TRAINING = { unlockOffice: 1, maxLevel: 10, baseCost: 150, growth: 1.8 } as const;
+
+// ───────── 팀장 ─────────
+
+export interface LeadLevel {
+  /** 이 단계로 올리는 데 드는 잎사귀 */
+  cost: number;
+  /** 쉬는 친구가 생긴 뒤 카드를 맡기기까지 걸리는 시간(초) */
+  delay: number;
+  /** true면 특기에 맞는 카드를 골라서 맡긴다. 아니면 맨 앞의 카드를 준다. */
+  match: boolean;
+  /** 이 단계가 되면 달라지는 것. 직원 창에 보인다. */
+  description: string;
+}
+
+/**
+ * 팀장을 두면 쉬는 친구에게 일감함의 카드를 알아서 맡긴다. 단계가 오를수록 빨리, 잘 맡긴다.
+ * 손으로 맡기는 것이 더 빠르고 특기도 맞출 수 있어서, 낮은 단계에서는 직접 하는 보람이 남는다.
+ */
+export const LEAD: { unlockOffice: number; levels: readonly LeadLevel[] } = {
+  unlockOffice: 1,
+  levels: [
+    { cost: 800, delay: 3, match: false, description: '쉬는 친구에게 카드를 알아서 맡겨요' },
+    { cost: 6000, delay: 1.5, match: false, description: '카드를 두 배 빨리 맡겨요' },
+    { cost: 40000, delay: 0.5, match: true, description: '특기에 맞는 카드를 바로 맡겨요' },
+  ],
+};
+
+// ───────── 닫아 둔 동안 ─────────
+
+/**
+ * 앱을 닫아 둔 동안에도 출시작이 잎사귀를 번다. 다만 열어 둔 때의 rate배만, maxSeconds까지만 쌓인다.
+ * minSeconds보다 짧게 비운 것은 세지 않는다. 맡겨 둔 업무는 그동안에도 진행된다.
+ */
+export const AWAY = { minSeconds: 60, maxSeconds: 4 * 3600, rate: 0.25 } as const;
 
 // ───────── 응원 ─────────
 
@@ -124,6 +168,36 @@ export const EQUIPMENT = {
     effect: { key: 'workSpeed', amount: 0.08 },
     unlockOffice: 1,
   },
+  tray: {
+    name: '일감함',
+    description: '카드 한 장에 드는 일 -3%',
+    scope: 'company',
+    maxLevel: 15,
+    baseCost: 500,
+    growth: 1.9,
+    effect: { key: 'ease', amount: 0.03 },
+    unlockOffice: 1,
+  },
+  internet: {
+    name: '인터넷',
+    description: '출시로 얻는 평판 +4%',
+    scope: 'company',
+    maxLevel: 10,
+    baseCost: 4000,
+    growth: 2.2,
+    effect: { key: 'reputation', amount: 0.04 },
+    unlockOffice: 2,
+  },
+  server: {
+    name: '서버',
+    description: '출시작이 버는 수익 +10%',
+    scope: 'company',
+    maxLevel: 20,
+    baseCost: 60000,
+    growth: 1.8,
+    effect: { key: 'income', amount: 0.1 },
+    unlockOffice: 3,
+  },
 } as const satisfies Record<string, EquipmentDef>;
 
 export type EquipmentId = keyof typeof EQUIPMENT;
@@ -145,11 +219,23 @@ export interface OfficeDef {
 export const OFFICES: readonly OfficeDef[] = [
   { name: '옥탑방', reputation: 0, cost: 0, desks: 2 },
   { name: '작은 사무실', reputation: 30, cost: 250, desks: 4 },
-  { name: '한 층 사무실', reputation: 200, cost: 15000, desks: 6 },
+  { name: '한 층 사무실', reputation: 200, cost: 10000, desks: 6 },
+  { name: '두 층 사무실', reputation: 1000, cost: 150000, desks: 9 },
+  { name: '사옥', reputation: 5000, cost: 6000000, desks: 12 },
 ];
 
-/** 일감함에 한 번에 쌓아 둘 수 있는 카드의 수. 프로젝트의 카드 수는 이것을 넘지 못한다. */
+/** 일감함에 한 번에 꺼내 놓는 카드의 수. 카드가 이보다 많은 프로젝트는 남은 것을 쌓아 두었다가 자리가 나면 꺼낸다. */
 export const INBOX_SLOTS = 8;
+
+/** 카드가 많은 프로젝트의 카드 목록을 만든다. 기획, 그림, 코딩, 검사 차례로 놓인다. */
+function mix(plan: number, art: number, code: number, test: number): TaskKind[] {
+  return [
+    ...Array<TaskKind>(plan).fill('plan'),
+    ...Array<TaskKind>(art).fill('art'),
+    ...Array<TaskKind>(code).fill('code'),
+    ...Array<TaskKind>(test).fill('test'),
+  ];
+}
 
 // ───────── 프로젝트 ─────────
 
@@ -229,7 +315,7 @@ export const PROJECTS = {
     work: 180,
     bonus: 700,
     income: 4,
-    reputation: 30,
+    reputation: 60,
     unlockOffice: 2,
   },
   'pin-pull': {
@@ -239,7 +325,7 @@ export const PROJECTS = {
     work: 220,
     bonus: 1100,
     income: 6,
-    reputation: 40,
+    reputation: 80,
     unlockOffice: 2,
   },
   'parking-out': {
@@ -249,8 +335,68 @@ export const PROJECTS = {
     work: 260,
     bonus: 1700,
     income: 9,
-    reputation: 50,
+    reputation: 100,
     unlockOffice: 2,
+  },
+  'screw-sort': {
+    title: '나사 풀기',
+    icon: 'icon-screw',
+    cards: mix(3, 4, 5, 4),
+    work: 1500,
+    bonus: 30000,
+    income: 40,
+    reputation: 400,
+    unlockOffice: 3,
+  },
+  'merge-tiles': {
+    title: '머지 타일',
+    icon: 'icon-merge',
+    cards: mix(4, 5, 4, 3),
+    work: 1800,
+    bonus: 45000,
+    income: 55,
+    reputation: 500,
+    unlockOffice: 3,
+  },
+  'tail-chase': {
+    title: '꼬리 잡기',
+    icon: 'icon-tail',
+    cards: mix(3, 5, 5, 3),
+    work: 2200,
+    bonus: 60000,
+    income: 75,
+    reputation: 600,
+    unlockOffice: 3,
+  },
+  'logic-tiles': {
+    title: '논리 타일',
+    icon: 'icon-logic',
+    cards: mix(8, 7, 9, 8),
+    work: 3200,
+    bonus: 600000,
+    income: 260,
+    reputation: 1500,
+    unlockOffice: 4,
+  },
+  'chosung-quiz': {
+    title: '초성 퀴즈',
+    icon: 'icon-chosung',
+    cards: mix(9, 8, 8, 7),
+    work: 3800,
+    bonus: 850000,
+    income: 340,
+    reputation: 2000,
+    unlockOffice: 4,
+  },
+  'lantern-keeper': {
+    title: '등불지기',
+    icon: 'icon-lantern',
+    cards: mix(7, 10, 9, 6),
+    work: 4500,
+    bonus: 1200000,
+    income: 450,
+    reputation: 2500,
+    unlockOffice: 4,
   },
 } as const satisfies Record<string, ProjectDef>;
 
@@ -263,3 +409,27 @@ export const PROJECT_ORDER = Object.keys(PROJECTS) as ProjectId[];
  * 평판은 처음 값의 reputation배(올림)만 오른다.
  */
 export const UPDATE_SCALE = { work: 1.3, bonus: 1.2, income: 0.4, reputation: 0.4 } as const;
+
+// ───────── 급한 의뢰 ─────────
+
+/**
+ * 가끔 급한 의뢰가 들어온다. 받으면 카드 몇 장이 일감함 맨 앞에 놓이고, 시간 안에 모두 끝내면 잎사귀를 크게 받는다.
+ * 시간이 다 되면 남은 카드는 사라지고 아무것도 받지 못한다. 받지 않고 두면 그냥 지나간다.
+ */
+export const RUSH = {
+  unlockOffice: 1,
+  /** 다음 의뢰가 들어오기까지의 시간(초). 이 사이에서 정해진다. */
+  every: [240, 420],
+  /** 의뢰를 받을지 정할 수 있는 시간(초) */
+  offerSeconds: 25,
+  /** 받은 뒤 끝내야 하는 시간(초) */
+  seconds: 60,
+  /** 카드의 수. 직원 수의 절반을 이 사이로 맞춘다. */
+  cards: [2, 4],
+  /** 특기가 아닌 직원이 응원 없이 하면 시간의 이만큼이 걸리는 양의 일을 준다. */
+  effort: 0.8,
+  /** 보상: 이만큼의 시간(초) 동안 출시작이 버는 잎사귀 */
+  rewardSeconds: 180,
+  /** 보상의 가장 작은 값. 사무실 단계가 오를 때마다 네 배가 된다. */
+  minReward: 80,
+} as const;

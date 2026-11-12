@@ -3,13 +3,16 @@ import { TEXTURE } from '../../art/sprites';
 import { GAME_WIDTH, SCENE, THEME, THEME_CSS } from '../../config';
 import { vibrate } from '../../core/haptics';
 import { sfx } from '../../core/sfx';
+import { store } from '../../core/store';
 import { addBackdrop, addText, drawPanel } from '../../core/ui';
 import { floatText, GameHud, HUD_HEIGHT, showBanner } from '../../scenes/GameHud';
-import { MiniGameScene } from '../../scenes/MiniGameScene';
+import { MiniGameScene, type ResultStat } from '../../scenes/MiniGameScene';
 import {
   canPour,
   clearBonus,
   dealStage,
+  levelPourBudget,
+  levelStage,
   isComplete,
   isSolved,
   isStuck,
@@ -98,6 +101,8 @@ const LOOK = {
     { face: THEME.coralDeep, light: THEME.coral, dark: THEME.bad },
     { face: THEME.sub, light: THEME.faint, dark: THEME.inkDeep },
   ] as readonly LiquidColors[],
+  /** 색 구분 도우미를 켰을 때의 무늬: 흰 테두리를 두른 짙은 무늬라 어떤 색의 물 위에서도 또렷하다. */
+  assist: { mark: THEME.inkDeep, halo: THEME.white },
   sparks: [THEME.gold, THEME.pink, THEME.mintDeep],
   text: {
     stage: THEME_CSS.ink,
@@ -111,6 +116,7 @@ const LOOK = {
 
 /**
  * 색마다 다른 작은 무늬. 색을 구별하기 어려운 사람도 무늬로 알아볼 수 있다.
+ * 평소에는 물보다 조금 짙은 색으로 은은하게 그리고, 설정의 색 구분 도우미를 켜면 흰 테두리를 두른 짙은 색으로 그린다.
  * 칸의 가운데를 (0, 0)으로 본 [x, y, 폭, 높이] 목록이다.
  */
 const MARKS: ReadonlyArray<ReadonlyArray<readonly [number, number, number, number]>> = [
@@ -143,9 +149,13 @@ function surfaceOf(count: number): number {
   return NECK + (TUBE_CAPACITY - count) * UNIT_HEIGHT;
 }
 
+/** 도우미를 켰을 때 무늬에 두르는 흰 테두리의 두께 */
+const HALO = 1.5;
+
 /**
  * 물 한 칸을 (left, top)에서부터 그린다.
  * lit이면 윗줄을 밝게 해서 물의 윗면처럼 보이게 하고, atBottom이면 병 바닥에 맞춰 아래를 둥글린다.
+ * assist면 무늬를 또렷하게 그린다(색 구분 도우미).
  */
 function drawUnit(
   graphics: Phaser.GameObjects.Graphics,
@@ -154,6 +164,7 @@ function drawUnit(
   color: number,
   lit: boolean,
   atBottom: boolean,
+  assist: boolean,
 ): void {
   const colors = LOOK.liquids[color % LOOK.liquids.length];
   graphics.fillStyle(colors.face, 1);
@@ -171,20 +182,33 @@ function drawUnit(
     graphics.fillStyle(colors.light, 1);
     graphics.fillRect(left, top, INNER_WIDTH, 2);
   }
-  graphics.fillStyle(colors.dark, 1);
+  const marks = MARKS[color % MARKS.length];
   const centerX = left + INNER_WIDTH / 2;
   const centerY = top + UNIT_HEIGHT / 2 + 1;
-  for (const [x, y, width, height] of MARKS[color % MARKS.length]) {
+  if (assist) {
+    graphics.fillStyle(LOOK.assist.halo, 1);
+    for (const [x, y, width, height] of marks) {
+      graphics.fillRoundedRect(
+        centerX + x - HALO,
+        centerY + y - HALO,
+        width + HALO * 2,
+        height + HALO * 2,
+        1 + HALO,
+      );
+    }
+  }
+  graphics.fillStyle(assist ? LOOK.assist.mark : colors.dark, 1);
+  for (const [x, y, width, height] of marks) {
     graphics.fillRoundedRect(centerX + x, centerY + y, width, height, 1);
   }
 }
 
 /** 병에 든 물을 그린다. 같은 색이 이어진 덩어리마다 맨 위 칸만 윗면을 밝게 한다. */
-function drawLiquid(graphics: Phaser.GameObjects.Graphics, tube: readonly number[]): void {
+function drawLiquid(graphics: Phaser.GameObjects.Graphics, tube: readonly number[], assist: boolean): void {
   graphics.clear();
   tube.forEach((color, index) => {
     const lit = index === tube.length - 1 || tube[index + 1] !== color;
-    drawUnit(graphics, -INNER_WIDTH / 2, surfaceOf(index + 1), color, lit, index === 0);
+    drawUnit(graphics, -INNER_WIDTH / 2, surfaceOf(index + 1), color, lit, index === 0, assist);
   });
 }
 
@@ -250,6 +274,8 @@ export class ColorSortScene extends MiniGameScene {
   private stagesCleared = 0;
   /** 이번 단계에서 채운 병의 수. 채울수록 소리가 높아진다. */
   private filledThisStage = 0;
+  /** 색 구분 도우미가 켜져 있는지. 판을 시작할 때 설정에서 읽는다. */
+  private assist = false;
 
   private hud!: GameHud;
   private stageLabel!: Phaser.GameObjects.Text;
@@ -266,6 +292,7 @@ export class ColorSortScene extends MiniGameScene {
   create(): void {
     this.beginMiniGame();
     this.resetState();
+    this.assist = store.data.settings.colorAssist;
 
     const { height } = this.scale;
     const panelTop = HUD_HEIGHT + 4;
@@ -286,7 +313,12 @@ export class ColorSortScene extends MiniGameScene {
       color: LOOK.text.stage,
       originX: 0.5,
     }).setDepth(DEPTH.panel);
-    this.hints = ['병을 누르고, 부을 병을 눌러요', '같은 색끼리 한 병에 모아요'].map((line, index) =>
+    // 단계 모드에서는 가장 쉬운 난이도의 단계에서만 방법을 알려 준다.
+    const lines =
+      this.stageLevel === null || levelStage(this.stageLevel) === 0
+        ? ['병을 누르고, 부을 병을 눌러요', '같은 색끼리 한 병에 모아요']
+        : [];
+    this.hints = lines.map((line, index) =>
       addText(this, GAME_WIDTH / 2, panelTop + 26 + index * 15, line, {
         color: LOOK.text.hint,
         originX: 0.5,
@@ -305,6 +337,7 @@ export class ColorSortScene extends MiniGameScene {
 
     this.addPauseButton();
     this.hud = new GameHud(this, DEPTH.hud);
+    if (this.stageLevel !== null) this.hud.showStage(this.stageLevel);
 
     this.input.on(Phaser.Input.Events.POINTER_DOWN, this.onPointerDown, this);
 
@@ -332,16 +365,19 @@ export class ColorSortScene extends MiniGameScene {
 
   /** 지금 단계의 병을 새로 깔고, 다 나타나면 누를 수 있게 한다. */
   private dealNext(first: boolean): void {
-    const dealt = dealStage(this.stage, Math.random);
+    // 단계 모드에서는 단계 번호로 정해진 판 하나만 나오고, 부을 수 있는 횟수가 더 넉넉하다.
+    const level = this.stageLevel;
+    const dealt =
+      level === null ? dealStage(this.stage, Math.random) : dealStage(levelStage(level), this.levelRandom());
     this.stageData = dealt;
     this.tubes = dealt.tubes;
-    this.budget = pourBudget(dealt.par, this.stage);
+    this.budget = level === null ? pourBudget(dealt.par, this.stage) : levelPourBudget(dealt.par);
     this.poursLeft = this.budget;
     this.selected = -1;
     this.busy = false;
     this.filledThisStage = 0;
 
-    this.stageLabel.setText(`${this.stage + 1}단계`);
+    this.stageLabel.setText(level === null ? `${this.stage + 1}단계` : `붓기 ${this.budget}번 안에 모아요`);
     this.showBudget(false);
     this.buildViews();
     sfx.flip();
@@ -393,7 +429,7 @@ export class ColorSortScene extends MiniGameScene {
     const glass = this.add.graphics();
     drawGlass(glass);
     const liquid = this.add.graphics();
-    drawLiquid(liquid, tube);
+    drawLiquid(liquid, tube, this.assist);
     const shine = this.add.graphics();
     drawShine(shine);
     const cork = this.add.graphics().setVisible(false);
@@ -521,13 +557,13 @@ export class ColorSortScene extends MiniGameScene {
 
     const source = this.views[from];
     const target = this.views[to];
-    drawLiquid(source.liquid, this.tubes[from]);
+    drawLiquid(source.liquid, this.tubes[from], this.assist);
 
     // 건너가는 물 덩어리. 떠 있는 병의 물 윗면에서 출발해 받는 병의 물 위에 내려앉는다.
     const height = result.moved * UNIT_HEIGHT;
     const flying = this.add.graphics().setDepth(DEPTH.flying);
     for (let unit = 0; unit < result.moved; unit += 1) {
-      drawUnit(flying, 0, unit * UNIT_HEIGHT, result.color, unit === 0, false);
+      drawUnit(flying, 0, unit * UNIT_HEIGHT, result.color, unit === 0, false, this.assist);
     }
     const left = -INNER_WIDTH / 2;
     flying.setPosition(source.x + left, source.container.y + surfaceOf(sourceCount));
@@ -547,7 +583,7 @@ export class ColorSortScene extends MiniGameScene {
       ],
       onComplete: () => {
         flying.destroy();
-        drawLiquid(target.liquid, this.tubes[to]);
+        drawLiquid(target.liquid, this.tubes[to], this.assist);
         this.settle(source);
         this.busy = false;
         this.afterPour(result, to);
@@ -585,7 +621,7 @@ export class ColorSortScene extends MiniGameScene {
       yoyo: true,
       ease: 'Quad.Out',
     });
-    floatText(this, view.x, view.y - 6, `+${TUBE_POINTS}`, LOOK.text.points, this.area, DEPTH.effect);
+    this.floatPoints(view.x, view.y - 6, TUBE_POINTS, LOOK.text.points, this.area, DEPTH.effect);
     sfx.hit(this.filledThisStage * 2);
     vibrate(12);
   }
@@ -597,6 +633,17 @@ export class ColorSortScene extends MiniGameScene {
     this.score += bonus;
     this.stagesCleared += 1;
     this.hud.setScore(this.score);
+
+    if (this.stageLevel !== null) {
+      // 단계 모드는 한 단계가 한 판이다. 다음 단계는 결과 화면에서 고른다.
+      this.time.delayedCall(260, () => {
+        sfx.gold();
+        vibrate([15, 30, 15]);
+        showBanner(this, this.area.centerY, '클리어!', LOOK.text.clear, 900, DEPTH.banner);
+      });
+      this.finishStage(true, this.stageStats(), 1100);
+      return;
+    }
 
     this.time.delayedCall(260, () => {
       sfx.gold();
@@ -635,11 +682,23 @@ export class ColorSortScene extends MiniGameScene {
     sfx.miss();
     vibrate([40, 30, 80]);
     showBanner(this, this.area.centerY, label, LOOK.text.over, 900, DEPTH.banner);
+    if (this.stageLevel !== null) {
+      this.finishStage(false, this.stageStats());
+      return;
+    }
     this.finishMiniGame(this.score, [
       ['깬 단계', `${this.stagesCleared}단계`],
       ['채운 병', `${this.tubesFilled}개`],
       ['부은 횟수', `${this.poursMade}번`],
     ]);
+  }
+
+  /** 단계 모드의 결과 화면에 적는 것 */
+  private stageStats(): ResultStat[] {
+    return [
+      ['부은 횟수', `${this.poursMade}번`],
+      ['남은 붓기', `${this.poursLeft}번`],
+    ];
   }
 
   /** 한 번 부어 봤으면 도움말은 더 필요 없다. */

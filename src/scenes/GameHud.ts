@@ -16,6 +16,8 @@ export class GameHud {
   private readonly scoreText: Phaser.GameObjects.Text;
   private readonly sideText: Phaser.GameObjects.Text;
   private readonly timeBar: Phaser.GameObjects.Graphics;
+  /** 단계 모드인지. 점수와 시간 대신 단계 번호만 보여 준다. */
+  private staged = false;
 
   constructor(
     private readonly scene: Phaser.Scene,
@@ -35,7 +37,18 @@ export class GameHud {
     this.timeBar = scene.add.graphics().setDepth(depth);
   }
 
+  /**
+   * 단계 모드의 HUD로 바꾼다: 가운데에 점수 대신 단계 번호를 적고, 시간 막대는 그리지 않는다.
+   * 그 뒤의 setScore와 setTime은 아무 일도 하지 않으므로, 게임은 여느 때처럼 불러도 된다.
+   */
+  showStage(level: number): void {
+    this.staged = true;
+    this.scoreText.setText(`${level}단계`);
+    this.timeBar.clear();
+  }
+
   setScore(score: number): void {
+    if (this.staged) return;
     this.scoreText.setText(String(score));
   }
 
@@ -54,6 +67,7 @@ export class GameHud {
 
   /** 남은 시간 막대를 그린다. 10초, 5초 아래에서 색이 바뀐다. */
   setTime(remaining: number, total: number): void {
+    if (this.staged) return;
     const { x, y, width, height } = TIME_BAR;
     const ratio = Phaser.Math.Clamp(remaining / total, 0, 1);
     const color = remaining <= 5 ? THEME.coral : remaining <= 10 ? THEME.gold : THEME.mintDeep;

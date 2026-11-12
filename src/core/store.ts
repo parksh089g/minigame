@@ -7,6 +7,7 @@ import { createStore, get, set, type UseStore } from 'idb-keyval';
 import type { DailyChallenge } from './daily';
 import {
   applyPlayResult,
+  applyStageClear,
   buyCosmetic,
   claimAchievement,
   claimWeeklyMission,
@@ -22,6 +23,7 @@ import {
   type ClaimMissionSaveResult,
   type PlayResult,
   type SaveData,
+  type StageClearResult,
 } from './save';
 import type { WeekContext } from './weekly';
 
@@ -130,6 +132,15 @@ class SaveStore {
       this.data = result.save;
       this.commit();
     }
+    return result;
+  }
+
+  /** 단계 모드에서 한 단계를 깬 것을 기록한다. 아직 열리지 않은 단계면 null. */
+  clearStage(gameId: string, level: number, week: WeekContext | null = null): StageClearResult | null {
+    const result = applyStageClear(this.data, gameId, level, Date.now(), week);
+    if (!result) return null;
+    this.data = result.save;
+    this.commit();
     return result;
   }
 

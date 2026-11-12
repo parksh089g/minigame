@@ -4,37 +4,48 @@ import { SPRITES } from '../../art/sprites';
 import { GAMES } from '../registry';
 import { runBot } from './bot';
 import {
+  AWAY,
   CANDIDATE_COUNT,
   CHEER_BOOST,
   CHEER_SECONDS,
   EQUIPMENT,
   EQUIPMENT_ORDER,
   INBOX_SLOTS,
+  LEAD,
+  LEVEL_SPEED,
   OFFICES,
   PROJECT_ORDER,
   PROJECTS,
+  RUSH,
   SPECIALTY_BOOST,
   STAFF,
   STAFF_ORDER,
   TASK_KINDS,
+  TRAINING,
   UPDATE_SCALE,
   type StaffDef,
 } from './data';
 import {
+  acceptRush,
   advance,
   assign,
   availableProjects,
   bestCardFor,
+  baseSpeed,
   bossFor,
   buyEquipment,
   candidatesFor,
+  cardsWaiting,
+  catchUp,
   cheer,
   companyBonus,
   createCompany,
+  declineRush,
   deskSpeed,
   equipmentBlock,
   equipmentCost,
   equipmentLevel,
+  formatDuration,
   formatLeaves,
   formatRate,
   hire,
@@ -43,16 +54,22 @@ import {
   hirePool,
   incomePerSecond,
   isReady,
+  leadBlock,
+  leadLevel,
   moveBlock,
   moveOffice,
   normalizeCompany,
   projectBonus,
   projectReputation,
   projectWork,
+  promoteLead,
   release,
   specialtyOf,
   staffCount,
   startProject,
+  train,
+  trainBlock,
+  trainCost,
   type CompanyState,
 } from './rules';
 
@@ -91,11 +108,10 @@ describe('새싹 컴퍼니의 표', () => {
     }
   });
 
-  it('프로젝트의 카드는 일감함에 다 들어간다', () => {
+  it('프로젝트마다 카드가 있고, 열리는 사무실이 있다', () => {
     for (const id of PROJECT_ORDER) {
       const def = PROJECTS[id];
       expect(def.cards.length, id).toBeGreaterThan(0);
-      expect(def.cards.length, id).toBeLessThanOrEqual(INBOX_SLOTS);
       expect(def.unlockOffice, id).toBeLessThan(OFFICES.length);
       for (const kind of def.cards) expect(TASK_KINDS, id).toContain(kind);
     }
@@ -215,7 +231,7 @@ describe('프로젝트', () => {
     assign(state, 0, 0);
     expect(advance(state, work / 2)).toHaveLength(0);
     expect(state.desks[0].task?.left).toBeCloseTo(work / 2);
-    expect(advance(state, work / 2 + 0.01)).toEqual([{ desk: 0, kind: 'plan' }]);
+    expect(advance(state, work / 2 + 0.01)).toEqual([{ type: 'task', desk: 0, kind: 'plan', rush: false }]);
     expect(state.desks[0].task).toBeNull();
     expect(state.project?.done).toBe(1);
     expect(isReady(state)).toBe(false);
@@ -303,8 +319,10 @@ describe('장비', () => {
     const state = createCompany('sprout');
     expect(equipmentBlock(state, 'computer', 0)).toBe('poor');
     state.leaves = Number.MAX_SAFE_INTEGER;
-    state.reputation = 1000;
-    moveOffice(state);
+    state.reputation = Number.MAX_SAFE_INTEGER;
+    while (moveOffice(state)) {
+      // 장비가 모두 열리는 마지막 사무실까지 간다.
+    }
     expect(equipmentBlock(state, 'computer', 3)).toBe('empty');
     for (const id of EQUIPMENT_ORDER) {
       for (let level = 0; level < EQUIPMENT[id].maxLevel; level += 1) expect(buyEquipment(state, id, 0), id).toBe(true);
@@ -383,6 +401,407 @@ describe('직원과 사무실', () => {
   });
 });
 
+/** 작은 사무실로 옮기고 잎사귀를 넉넉히 준 회사 */
+function smallOffice(): CompanyState {
+  const state = createCompany('sprout');
+  state.reputation = OFFICES[1].reputation;
+  state.leaves = OFFICES[1].cost;
+  moveOffice(state);
+  state.leaves = 1_000_000;
+  return state;
+}
+
+describe('팀장', () => {
+  it('작은 사무실부터 둘 수 있고, 단계마다 값이 오르고 빨라진다', () => {
+    const state = createCompany('sprout');
+    state.leaves = 1_000_000;
+    expect(leadBlock(state)).toBe('locked');
+    expect(promoteLead(state)).toBe(false);
+    expect(leadLevel(state)).toBeNull();
+
+    const moved = smallOffice();
+    for (let level = 0; level < LEAD.levels.length; level += 1) {
+      const leaves = moved.leaves;
+      expect(promoteLead(moved)).toBe(true);
+      expect(moved.leaves).toBe(leaves - LEAD.levels[level].cost);
+      expect(leadLevel(moved)).toBe(LEAD.levels[level]);
+      if (level > 0) {
+        expect(LEAD.levels[level].cost).toBeGreaterThan(LEAD.levels[level - 1].cost);
+        expect(LEAD.levels[level].delay).toBeLessThan(LEAD.levels[level - 1].delay);
+      }
+    }
+    expect(leadBlock(moved)).toBe('max');
+    expect(promoteLead(moved)).toBe(false);
+    moved.leaves = 0;
+    moved.lead = 0;
+    expect(leadBlock(moved)).toBe('poor');
+  });
+
+  it('팀장이 없으면 카드는 일감함에 그대로 남는다', () => {
+    const state = smallOffice();
+    startProject(state, 'lightning-tap');
+    advance(state, 30);
+    expect(state.inbox).toHaveLength(4);
+    expect(state.desks.every((desk) => desk.task === null)).toBe(true);
+  });
+
+  it('팀장은 쉬는 친구에게 정해진 시간마다 맨 앞의 카드를 한 장씩 맡긴다', () => {
+    const state = smallOffice();
+    promoteLead(state);
+    startProject(state, 'lightning-tap');
+    const delay = LEAD.levels[0].delay;
+    advance(state, delay - 0.5);
+    expect(state.inbox).toHaveLength(4);
+    advance(state, 0.6);
+    expect(state.inbox).toHaveLength(3);
+    expect(state.desks[0].task?.kind).toBe('plan');
+    // 다음 카드는 다시 그만큼 기다린 뒤에 맡긴다.
+    advance(state, 0.2);
+    expect(state.desks[1].task).toBeNull();
+    advance(state, delay);
+    expect(state.desks[1].task?.kind).toBe('art');
+  });
+
+  it('맡겨만 두어도 프로젝트가 끝까지 간다', () => {
+    const state = smallOffice();
+    promoteLead(state);
+    startProject(state, 'stack-tower');
+    for (let time = 0; time < 600 && !isReady(state); time += 0.25) advance(state, 0.25);
+    expect(isReady(state)).toBe(true);
+    expect(state.inbox).toHaveLength(0);
+  });
+
+  it('가장 높은 단계는 특기에 맞는 카드를 골라 준다', () => {
+    const state = smallOffice();
+    while (promoteLead(state)) {
+      // 끝까지 올린다.
+    }
+    startProject(state, 'lightning-tap');
+    // 사장은 일하는 중이고, 검사가 특기인 병아리만 쉬고 있다.
+    assign(state, 0, 0);
+    advance(state, LEAD.levels[LEAD.levels.length - 1].delay + 0.1);
+    expect(state.desks[1].task?.kind).toBe('test');
+  });
+});
+
+describe('닫아 둔 동안', () => {
+  const released = (): CompanyState => {
+    const state = createCompany('sprout');
+    startProject(state, 'lightning-tap');
+    finishProject(state);
+    release(state);
+    return state;
+  };
+
+  it('잠깐 비운 것은 세지 않는다', () => {
+    const state = released();
+    const leaves = state.leaves;
+    expect(catchUp(state, AWAY.minSeconds - 1)).toBeNull();
+    expect(catchUp(state, -500)).toBeNull();
+    expect(catchUp(state, Number.NaN)).toBeNull();
+    expect(state.leaves).toBe(leaves);
+  });
+
+  it('출시작이 평소의 일부만큼 번다', () => {
+    const state = released();
+    const leaves = state.leaves;
+    const rate = incomePerSecond(state);
+    const away = catchUp(state, 600);
+    expect(away).toMatchObject({ seconds: 600, tasks: 0, capped: false });
+    expect(away?.leaves).toBeCloseTo(rate * 600 * AWAY.rate);
+    expect(state.leaves).toBeCloseTo(leaves + rate * 600 * AWAY.rate);
+  });
+
+  it('아무리 오래 비워도 정해진 시간까지만 쌓인다', () => {
+    const state = released();
+    const away = catchUp(state, AWAY.maxSeconds * 10);
+    expect(away?.seconds).toBe(AWAY.maxSeconds);
+    expect(away?.capped).toBe(true);
+    expect(away?.leaves).toBeCloseTo(incomePerSecond(state) * AWAY.maxSeconds * AWAY.rate);
+  });
+
+  it('맡겨 둔 업무는 그동안 끝나지만, 일감함의 카드는 팀장이 없으면 그대로다', () => {
+    const state = createCompany('sprout');
+    startProject(state, 'lightning-tap');
+    assign(state, 0, 0);
+    assign(state, 0, 1);
+    const away = catchUp(state, 3600);
+    expect(away?.tasks).toBe(2);
+    expect(state.project?.done).toBe(2);
+    expect(state.inbox).toHaveLength(2);
+    expect(state.desks.every((desk) => desk.task === null)).toBe(true);
+    // 번 것이 없어도 끝난 일은 알려 준다.
+    expect(away?.leaves).toBe(0);
+  });
+
+  it('팀장이 있으면 남은 카드도 맡겨서 출시만 남는다', () => {
+    const state = smallOffice();
+    promoteLead(state);
+    startProject(state, 'memory-cards');
+    const away = catchUp(state, 3600);
+    expect(away?.tasks).toBe(PROJECTS['memory-cards'].cards.length);
+    expect(isReady(state)).toBe(true);
+    // 출시는 돌아와서 직접 한다.
+    expect(state.releases).toBe(0);
+  });
+
+  it('시간을 짧게 적는다', () => {
+    expect(formatDuration(45)).toBe('45초');
+    expect(formatDuration(60)).toBe('1분');
+    expect(formatDuration(59 * 60 + 59)).toBe('59분');
+    expect(formatDuration(3600)).toBe('1시간');
+    expect(formatDuration(2 * 3600 + 5 * 60 + 30)).toBe('2시간 5분');
+  });
+});
+
+describe('큰 게임', () => {
+  /** 사무실을 office까지 옮기고 빈 자리를 모두 채운 회사 */
+  const grown = (office: number): CompanyState => {
+    const state = createCompany('sprout');
+    while (state.office < office) {
+      state.reputation = OFFICES[state.office + 1].reputation;
+      state.leaves = OFFICES[state.office + 1].cost;
+      moveOffice(state);
+    }
+    for (const id of hirePool(state)) {
+      if (staffCount(state) >= state.desks.length) break;
+      state.candidates = [id];
+      state.leaves = hireCost(state);
+      hire(state, id);
+    }
+    state.leaves = 0;
+    return state;
+  };
+
+  it('카드가 많으면 일감함에 보이는 만큼만 놓이고, 맡기는 대로 나머지가 나온다', () => {
+    const state = grown(4);
+    const id = 'logic-tiles';
+    const cards = PROJECTS[id].cards.length;
+    expect(cards).toBeGreaterThan(INBOX_SLOTS);
+    expect(startProject(state, id)).toBe(true);
+    expect(state.inbox).toHaveLength(INBOX_SLOTS);
+    expect(state.backlog).toHaveLength(cards - INBOX_SLOTS);
+    expect(cardsWaiting(state)).toBe(cards);
+    expect(state.project?.total).toBe(cards);
+
+    expect(assign(state, 0, 0)).toBe(true);
+    expect(state.inbox).toHaveLength(INBOX_SLOTS);
+    expect(cardsWaiting(state)).toBe(cards - 1);
+  });
+
+  it('쌓아 둔 카드까지 모두 끝내야 출시할 수 있다', () => {
+    const state = grown(3);
+    startProject(state, 'screw-sort');
+    expect(release(state)).toBeNull();
+    finishProject(state);
+    expect(cardsWaiting(state)).toBe(0);
+    expect(release(state)?.id).toBe('screw-sort');
+    expect(state.backlog).toEqual([]);
+  });
+
+  it('뒤의 사무실일수록 자리가 많고, 열리는 게임의 카드도 많다', () => {
+    const most = (office: number) =>
+      Math.max(...PROJECT_ORDER.filter((id) => PROJECTS[id].unlockOffice === office).map((id) => PROJECTS[id].cards.length));
+    for (let office = 1; office < OFFICES.length; office += 1) {
+      expect(most(office), String(office)).toBeGreaterThan(most(office - 1));
+    }
+    expect(grown(OFFICES.length - 1).desks.every((desk) => desk.staff !== null)).toBe(true);
+  });
+});
+
+describe('교육', () => {
+  it('작은 사무실부터 할 수 있고, 레벨마다 빨라지고 값이 오른다', () => {
+    const state = createCompany('sprout');
+    state.leaves = 1_000_000;
+    expect(trainBlock(state, 0)).toBe('locked');
+    expect(train(state, 0)).toBe(false);
+
+    const moved = smallOffice();
+    const before = baseSpeed(moved, 1);
+    const leaves = moved.leaves;
+    expect(train(moved, 1)).toBe(true);
+    expect(moved.desks[1].level).toBe(1);
+    expect(moved.leaves).toBe(leaves - trainCost(0));
+    expect(baseSpeed(moved, 1)).toBeCloseTo(before + LEVEL_SPEED);
+    expect(baseSpeed(moved, 0)).toBeCloseTo(1);
+    expect(trainCost(1)).toBeGreaterThan(trainCost(0));
+  });
+
+  it('빈 자리이거나, 모자라거나, 끝까지 올렸으면 하지 못한다', () => {
+    const state = smallOffice();
+    expect(trainBlock(state, 3)).toBe('empty');
+    state.leaves = trainCost(0) - 1;
+    expect(trainBlock(state, 0)).toBe('poor');
+    state.leaves = Number.MAX_SAFE_INTEGER;
+    while (train(state, 0)) {
+      // 끝까지 올린다.
+    }
+    expect(state.desks[0].level).toBe(TRAINING.maxLevel);
+    expect(trainBlock(state, 0)).toBe('max');
+  });
+});
+
+describe('회사 장비', () => {
+  it('일감함은 카드 한 장에 드는 일을 줄이고, 아무리 올려도 다 없애지는 못한다', () => {
+    const state = smallOffice();
+    const before = projectWork(state, 'lightning-tap');
+    expect(buyEquipment(state, 'tray')).toBe(true);
+    expect(projectWork(state, 'lightning-tap')).toBeCloseTo(before * (1 - EQUIPMENT.tray.effect.amount));
+    state.gear.tray = 1000;
+    expect(projectWork(state, 'lightning-tap')).toBeGreaterThan(0);
+  });
+
+  it('인터넷은 출시 때 오르는 평판을, 서버는 초당 수익을 올린다', () => {
+    const state = smallOffice();
+    state.released['color-sort'] = 1;
+    const reputation = projectReputation(state, 'parking-out');
+    const income = incomePerSecond(state);
+    expect(equipmentBlock(state, 'internet')).toBe('locked');
+    expect(equipmentBlock(state, 'server')).toBe('locked');
+    state.gear.internet = 5;
+    state.gear.server = 3;
+    expect(projectReputation(state, 'parking-out')).toBe(
+      Math.round(PROJECTS['parking-out'].reputation * (1 + 5 * EQUIPMENT.internet.effect.amount)),
+    );
+    expect(projectReputation(state, 'parking-out')).toBeGreaterThan(reputation);
+    expect(incomePerSecond(state)).toBeCloseTo(income + PROJECTS['color-sort'].income * 3 * EQUIPMENT.server.effect.amount);
+  });
+});
+
+describe('급한 의뢰', () => {
+  /** 의뢰가 들어올 때까지 시간을 흘린다. */
+  const untilOffer = (state: CompanyState, random: () => number) => {
+    const events = [...advance(state, state.rushIn + 0.01, random)];
+    expect(events).toContainEqual({ type: 'rushOffer' });
+    return state.offer!;
+  };
+
+  it('옥탑방에는 들어오지 않고, 작은 사무실부터 가끔 들어온다', () => {
+    const first = createCompany('sprout');
+    advance(first, RUSH.every[1] * 3, seeded(1));
+    expect(first.offer).toBeNull();
+
+    const state = smallOffice();
+    expect(state.rushIn).toBeGreaterThanOrEqual(RUSH.every[0]);
+    const offer = untilOffer(state, seeded(1));
+    expect(offer.kinds.length).toBeGreaterThanOrEqual(RUSH.cards[0]);
+    expect(offer.kinds.length).toBeLessThanOrEqual(RUSH.cards[1]);
+    for (const kind of offer.kinds) expect(TASK_KINDS).toContain(kind);
+    expect(offer.reward).toBeGreaterThanOrEqual(RUSH.minReward);
+    expect(offer.left).toBe(RUSH.offerSeconds);
+  });
+
+  it('받지 않고 두면 지나가고, 다음 의뢰를 기다린다', () => {
+    const state = smallOffice();
+    const random = seeded(2);
+    untilOffer(state, random);
+    advance(state, RUSH.offerSeconds + 0.01, random);
+    expect(state.offer).toBeNull();
+    expect(state.rush).toBeNull();
+    expect(state.rushIn).toBeGreaterThanOrEqual(RUSH.every[0]);
+    expect(state.rushIn).toBeLessThanOrEqual(RUSH.every[1]);
+
+    untilOffer(state, random);
+    expect(declineRush(state, random)).toBe(true);
+    expect(state.offer).toBeNull();
+    expect(declineRush(state, random)).toBe(false);
+  });
+
+  it('받으면 카드가 일감함 맨 앞에 놓이고, 시간 안에 끝내면 잎사귀를 받는다', () => {
+    const state = smallOffice();
+    const random = seeded(3);
+    startProject(state, 'lightning-tap');
+    const offer = untilOffer(state, random);
+    const count = offer.kinds.length;
+    expect(acceptRush(state)).toBe(true);
+    expect(acceptRush(state)).toBe(false);
+    expect(state.inbox.slice(0, count).every((task) => task.rush)).toBe(true);
+    expect(state.inbox.slice(count).some((task) => task.rush)).toBe(false);
+    expect(state.rush).toMatchObject({ total: count, done: 0, left: RUSH.seconds, reward: offer.reward });
+
+    const leaves = state.leaves;
+    const done = state.project!.done;
+    const events: unknown[] = [];
+    for (let time = 0; time < RUSH.seconds && state.rush; time += 0.5) {
+      for (let index = 0; index < state.desks.length; index += 1) {
+        const card = state.inbox.findIndex((task) => task.rush);
+        if (card >= 0) assign(state, card, index);
+      }
+      events.push(...advance(state, 0.5, random));
+    }
+    expect(events).toContainEqual({ type: 'rushWon', reward: offer.reward });
+    expect(state.rush).toBeNull();
+    expect(state.leaves).toBeGreaterThanOrEqual(leaves + offer.reward);
+    // 의뢰의 카드는 프로젝트의 카드로 세지 않는다.
+    expect(state.project!.done).toBe(done);
+    expect(state.rushIn).toBeGreaterThanOrEqual(RUSH.every[0]);
+  });
+
+  it('시간이 다 되면 남은 카드가 사라지고 아무것도 받지 못한다', () => {
+    const state = smallOffice();
+    const random = seeded(4);
+    startProject(state, 'lightning-tap');
+    untilOffer(state, random);
+    acceptRush(state);
+    assign(state, 0, 0);
+    expect(state.desks[0].task?.rush).toBe(true);
+    const leaves = state.leaves;
+    state.desks[0].task!.left = 1_000_000;
+    const events = advance(state, RUSH.seconds + 0.01, random);
+    expect(events).toContainEqual({ type: 'rushLost' });
+    expect(state.rush).toBeNull();
+    expect(state.leaves).toBe(leaves);
+    expect(state.desks[0].task).toBeNull();
+    expect(state.inbox.some((task) => task.rush)).toBe(false);
+    expect(state.inbox).toHaveLength(PROJECTS['lightning-tap'].cards.length);
+  });
+
+  it('의뢰를 하던 중에 출시해도 의뢰의 카드는 남는다', () => {
+    const state = smallOffice();
+    const random = seeded(5);
+    startProject(state, 'lightning-tap');
+    finishProject(state);
+    const offer = untilOffer(state, random);
+    acceptRush(state);
+    expect(release(state)).not.toBeNull();
+    expect(state.inbox).toHaveLength(offer.kinds.length);
+    expect(state.inbox.every((task) => task.rush)).toBe(true);
+  });
+
+  it('자리를 비우면 하던 의뢰도, 들어와 있던 의뢰도 놓친다', () => {
+    const state = smallOffice();
+    const random = seeded(6);
+    untilOffer(state, random);
+    acceptRush(state);
+    assign(state, 0, 0);
+    catchUp(state, AWAY.minSeconds);
+    expect(state.rush).toBeNull();
+    expect(state.inbox).toEqual([]);
+    expect(state.desks[0].task).toBeNull();
+
+    untilOffer(state, random);
+    catchUp(state, AWAY.minSeconds);
+    expect(state.offer).toBeNull();
+  });
+
+  it('세이브에 하던 의뢰가 그대로 남고, 의뢰 없이 남은 의뢰 카드는 버린다', () => {
+    const state = smallOffice();
+    const random = seeded(7);
+    untilOffer(state, random);
+    acceptRush(state);
+    assign(state, 0, 0);
+    const saved = JSON.parse(JSON.stringify(state)) as CompanyState;
+    expect(normalizeCompany(saved)).toEqual(state);
+
+    const broken = JSON.parse(JSON.stringify(state)) as Record<string, unknown>;
+    delete broken.rush;
+    const fixed = normalizeCompany(broken)!;
+    expect(fixed.rush).toBeNull();
+    expect(fixed.inbox.some((task) => task.rush)).toBe(false);
+    expect(fixed.desks[0].task).toBeNull();
+  });
+});
+
 describe('숫자 적기', () => {
   it('큰 수는 만과 억으로 줄여 내림한다', () => {
     expect(formatLeaves(0)).toBe('0');
@@ -431,6 +850,8 @@ describe('세이브 읽기', () => {
       released: { 'lightning-tap': 2, 'no-such-game': 9 },
       releases: 1,
       candidates: ['duck', 'cat', 'cat', 'nobody'],
+      lead: 99,
+      leadWait: 500,
     });
     expect(state).not.toBeNull();
     if (!state) return;
@@ -439,7 +860,7 @@ describe('세이브 읽기', () => {
     expect(state.office).toBe(OFFICES.length - 1);
     expect(state.desks).toHaveLength(OFFICES[state.office].desks);
     // 사장이 빠져 있으면 빈 자리에 앉힌다. 같은 친구는 한 번만 앉는다.
-    expect(state.desks.map((desk) => desk.staff)).toEqual(['duck', 'sprout', null, null, null, null]);
+    expect(state.desks.map((desk) => desk.staff)).toEqual(['duck', 'sprout', ...state.desks.slice(2).map(() => null)]);
     expect(state.desks[0].gear).toEqual({ computer: EQUIPMENT.computer.maxLevel });
     expect(state.desks[0].cheer).toBe(CHEER_SECONDS);
     expect(state.gear).toEqual({ coffee: 2 });
@@ -449,6 +870,13 @@ describe('세이브 읽기', () => {
     expect(state.inbox).toHaveLength(1);
     expect(state.project).toEqual({ id: 'lightning-tap', total: 4, done: 2 });
     expect(state.candidates).toEqual(['cat']);
+    expect(state.lead).toBe(LEAD.levels.length);
+    expect(state.leadWait).toBe(LEAD.levels[LEAD.levels.length - 1].delay);
+  });
+
+  it('팀장이 생기기 전의 세이브와, 팀장을 둘 수 없는 사무실의 세이브는 팀장이 없다', () => {
+    expect(normalizeCompany({ boss: 'sprout' })).toMatchObject({ lead: 0, leadWait: 0 });
+    expect(normalizeCompany({ boss: 'sprout', office: 0, lead: 2, leadWait: 1 })).toMatchObject({ lead: 0, leadWait: 0 });
   });
 
   it('프로젝트가 사라졌으면 일을 거두고 다시 고르게 한다', () => {
@@ -465,31 +893,43 @@ describe('세이브 읽기', () => {
 });
 
 describe('진행 속도', () => {
-  // 사람은 자동 플레이보다 느리다. 보통으로 하는 사람이 십 분쯤에 작은 사무실, 한 시간쯤에 한 층 사무실에 닿도록 맞춘다.
-  const play = (cheerGap: number, reaction: number) => {
+  // 사람은 자동 플레이보다 느리다. 보통으로 하는 사람이 십 분쯤에 작은 사무실, 한 시간쯤에 한 층 사무실,
+  // 서너 시간쯤에 두 층 사무실, 열 시간쯤에 사옥에 닿도록 맞춘다.
+  const play = (cheerGap: number, reaction: number, minutes: number) => {
     const state = createCompany('sprout');
-    const report = runBot(state, 90 * 60, { cheerGap, reaction, random: seeded(7) });
+    const report = runBot(state, minutes * 60, { cheerGap, reaction, random: seeded(7) });
     return { state, report };
   };
+  const MINUTE = 60;
+  const HOUR = 3600;
 
   it('부지런히 하면 몇 분 만에 작은 사무실로, 삼사십 분쯤에 한 층 사무실로 간다', () => {
-    const { report } = play(6, 1.5);
-    expect(report.officeAt[1]).toBeGreaterThan(3 * 60);
-    expect(report.officeAt[1]).toBeLessThan(10 * 60);
-    expect(report.officeAt[2]).toBeGreaterThan(25 * 60);
-    expect(report.officeAt[2]).toBeLessThan(50 * 60);
+    const { report } = play(6, 1.5, 60);
+    expect(report.officeAt[1]).toBeGreaterThan(3 * MINUTE);
+    expect(report.officeAt[1]).toBeLessThan(10 * MINUTE);
+    expect(report.officeAt[2]).toBeGreaterThan(25 * MINUTE);
+    expect(report.officeAt[2]).toBeLessThan(50 * MINUTE);
   });
 
-  it('응원하지 않고 느긋하게 해도 한 시간 안에 한 층 사무실에 닿는다', () => {
-    const { report } = play(Infinity, 3);
-    expect(report.officeAt[1]).toBeLessThan(15 * 60);
-    expect(report.officeAt[2]).toBeLessThan(60 * 60);
+  it('응원하지 않고 느긋하게 해도 한 시간 남짓이면 한 층 사무실에 닿는다', () => {
+    const { report } = play(Infinity, 3, 90);
+    expect(report.officeAt[1]).toBeLessThan(15 * MINUTE);
+    expect(report.officeAt[2]).toBeLessThan(70 * MINUTE);
   });
 
-  it('한 층 사무실의 게임도 모두 내 보고, 프로젝트 하나가 너무 오래 걸리지 않는다', () => {
-    const { state, report } = play(6, 1.5);
+  it('두 층 사무실은 두세 시간쯤에, 사옥은 하루 안에 닿고 자리를 모두 채운다', () => {
+    const { state, report } = play(6, 1.5, 16 * 60);
+    expect(report.officeAt[3]).toBeGreaterThan(1.5 * HOUR);
+    expect(report.officeAt[3]).toBeLessThan(4 * HOUR);
+    expect(report.officeAt[4]).toBeGreaterThan(5 * HOUR);
+    expect(report.officeAt[4]).toBeLessThan(12 * HOUR);
     expect(report.allReleasedAt).not.toBeNull();
-    expect(report.slowest).toBeLessThan(8 * 60);
     expect(staffCount(state)).toBe(OFFICES[OFFICES.length - 1].desks);
-  });
+  }, 60_000);
+
+  it('느긋하게 해도 사옥까지 간다', () => {
+    const { report } = play(Infinity, 3, 16 * 60);
+    expect(report.officeAt[3]).toBeLessThan(5 * HOUR);
+    expect(report.officeAt[4]).toBeLessThan(16 * HOUR);
+  }, 60_000);
 });

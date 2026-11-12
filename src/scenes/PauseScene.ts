@@ -1,9 +1,10 @@
 import Phaser from 'phaser';
-import { FONT_SIZE, GAME_WIDTH, SCENE, THEME } from '../config';
+import { FONT_SIZE, GAME_WIDTH, SCENE, THEME, THEME_CSS } from '../config';
 import type { BackAware } from '../core/app-events';
 import { addPanel, addScrim, addText, fadeToScene, PixelButton, type ButtonStyle } from '../core/ui';
 import { howToFor } from '../games/how-to';
-import type { PauseData } from './MiniGameScene';
+import type { PauseData, StageStart } from './MiniGameScene';
+import type { StagesData } from './StagesScene';
 
 const PANEL_WIDTH = 176;
 /** 버튼이 셋일 때 카드의 높이. 버튼이 하나 늘 때마다 BUTTON.step만큼 커진다. */
@@ -34,9 +35,12 @@ export class PauseScene extends Phaser.Scene implements BackAware {
     else this.quit();
   }
 
+  /** 그만두고 나간다. 단계 모드였으면 허브가 아니라 단계를 고르던 화면으로 돌아간다. */
   private quit(): void {
-    this.scene.stop(this.opened.sceneKey);
-    fadeToScene(this, SCENE.hub);
+    const { sceneKey, gameId, stageLevel } = this.opened;
+    this.scene.stop(sceneKey);
+    if (stageLevel === undefined) fadeToScene(this, SCENE.hub);
+    else fadeToScene(this, SCENE.stages, { gameId } satisfies StagesData);
   }
 
   /** 같은 일시정지 화면의 다른 쪽을 보여 준다. 뒤의 게임은 멈춘 그대로다. */
@@ -47,7 +51,7 @@ export class PauseScene extends Phaser.Scene implements BackAware {
   create(data: PauseData): void {
     this.input.enabled = true;
     this.opened = data;
-    const howTo = data.gameId ? howToFor(data.gameId) : null;
+    const howTo = data.gameId ? howToFor(data.gameId, data.stageLevel !== undefined) : null;
     this.showingHowTo = data.page === 'howTo' && howTo !== null;
 
     addScrim(this);
@@ -67,7 +71,16 @@ export class PauseScene extends Phaser.Scene implements BackAware {
           this.scene.resume(data.sceneKey);
         },
       },
-      { label: '처음부터 다시', style: 'green', onTap: () => this.scene.start(data.sceneKey) },
+      {
+        label: '처음부터 다시',
+        style: 'green',
+        // 단계 모드였으면 같은 단계를 다시 연다.
+        onTap: () =>
+          this.scene.start(
+            data.sceneKey,
+            data.stageLevel === undefined ? undefined : ({ stageLevel: data.stageLevel } satisfies StageStart),
+          ),
+      },
       { label: '그만하기', onTap: () => this.quit() },
     ];
     // 방법을 적어 둔 게임이면 "계속하기" 바로 아래에 둔다. 판을 버리는 버튼 둘은 아래쪽에 모여 있다.
@@ -87,6 +100,13 @@ export class PauseScene extends Phaser.Scene implements BackAware {
       size: FONT_SIZE.large,
       originX: 0.5,
     });
+    if (data.stageLevel !== undefined) {
+      addText(this, GAME_WIDTH / 2, top + 41, `${data.stageLevel}단계`, {
+        size: FONT_SIZE.small,
+        color: THEME_CSS.sub,
+        originX: 0.5,
+      });
+    }
     if (extra) extra.draw(this, left + EXTRA.pad, top + 50, panelWidth - EXTRA.pad * 2);
 
     buttons.forEach((button, index) => {

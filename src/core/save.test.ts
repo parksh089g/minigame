@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { DailyChallenge } from './daily';
 import {
   applyPlayResult,
+  applyStageClear,
   buyCosmetic,
   claimAchievement,
   claimWeeklyMission,
@@ -18,6 +19,7 @@ import {
   toggleFavorite,
 } from './save';
 import { createCosmetics } from './shop';
+import { MILESTONE_COINS, STAGE_COINS } from './stages';
 import { createWeekly, missionsFor, type WeekContext, type WeeklyGame } from './weekly';
 
 const NOW = 1_700_000_000_000;
@@ -33,7 +35,7 @@ describe('normalizeSave', () => {
     const save = {
       version: SAVE_VERSION,
       coins: 12,
-      settings: { sound: false, music: false, vibration: true },
+      settings: { sound: false, music: false, vibration: true, colorAssist: true },
       games: { 'lightning-tap': { best: 80, plays: 4, lastPlayedAt: NOW - 1000 } },
       daily: { lastClearedOn: '2026-11-11', streak: 3, bestStreak: 4, totalCleared: 8 },
       cosmetics: {
@@ -60,10 +62,25 @@ describe('normalizeSave', () => {
         dailyClears: 1,
         claimed: ['easy'],
       },
+      stages: { 'color-sort': 12, 'number-puzzle': 1 },
       createdAt: NOW - 5000,
       updatedAt: NOW - 1000,
     };
     expect(normalizeSave(save, NOW)).toEqual(save);
+  });
+
+  it('단계 모드가 생기기 전의 세이브는 깬 단계가 없는 채로 읽는다', () => {
+    const old = normalizeSave({ version: 8, coins: 3, games: { g: { best: 5, plays: 2, lastPlayedAt: NOW } } }, NOW);
+    expect(old.version).toBe(SAVE_VERSION);
+    expect(old.stages).toEqual({});
+    expect(old.coins).toBe(3);
+    expect(old.games.g.best).toBe(5);
+  });
+
+  it('깬 단계의 기록이 이상하면 그 게임만 버린다', () => {
+    const save = normalizeSave({ stages: { 'color-sort': 7, 'parking-out': -1, 'logic-tiles': 'x' } }, NOW);
+    expect(save.stages).toEqual({ 'color-sort': 7 });
+    expect(normalizeSave({ stages: [3, 4] }, NOW).stages).toEqual({});
   });
 
   it('주간 미션이 생기기 전의 세이브는 주간 기록이 빈 채로 읽는다', () => {
@@ -71,6 +88,14 @@ describe('normalizeSave', () => {
     expect(old.weekly).toEqual(createWeekly());
     expect(old.coins).toBe(3);
     expect(old.version).toBe(SAVE_VERSION);
+  });
+
+  it('색 구분 도우미는 처음에 꺼져 있고, 켠 것은 그대로 읽힌다', () => {
+    expect(createDefaultSave(NOW).settings.colorAssist).toBe(false);
+    const on = normalizeSave({ version: SAVE_VERSION, games: {}, settings: { colorAssist: true } }, NOW);
+    expect(on.settings).toEqual({ sound: true, music: true, vibration: true, colorAssist: true });
+    const broken = normalizeSave({ version: SAVE_VERSION, games: {}, settings: { colorAssist: 'on' } }, NOW);
+    expect(broken.settings.colorAssist).toBe(false);
   });
 
   it('깨진 주간 기록은 버리고 나머지는 살린다', () => {
@@ -137,14 +162,19 @@ describe('normalizeSave', () => {
     expect(save.version).toBe(SAVE_VERSION);
     expect(save.coins).toBe(30);
     expect(save.games).toEqual(old.games);
-    // 배경 음악 설정은 이 세이브보다 뒤에 생겼으므로 켠 채로 읽는다
-    expect(save.settings).toEqual({ ...old.settings, music: true });
+    // 이 세이브보다 뒤에 생긴 설정: 배경 음악은 켠 채로, 색 구분 도우미는 꺼진 채로 읽는다
+    expect(save.settings).toEqual({ ...old.settings, music: true, colorAssist: false });
     expect(save.daily).toEqual({ lastClearedOn: null, streak: 0, bestStreak: 0, totalCleared: 0 });
   });
 
   it('배경 음악 설정이 생기기 전의 세이브는 음악을 켠 채로 읽고, 끈 것은 그대로 둔다', () => {
     const old = { version: 5, coins: 1, settings: { sound: false, vibration: true }, games: {} };
-    expect(normalizeSave(old, NOW).settings).toEqual({ sound: false, music: true, vibration: true });
+    expect(normalizeSave(old, NOW).settings).toEqual({
+      sound: false,
+      music: true,
+      vibration: true,
+      colorAssist: false,
+    });
     const off = { ...old, settings: { sound: true, music: false, vibration: true } };
     expect(normalizeSave(off, NOW).settings.music).toBe(false);
   });
@@ -162,7 +192,7 @@ describe('normalizeSave', () => {
       NOW,
     );
     expect(save.coins).toBe(0);
-    expect(save.settings).toEqual({ sound: true, music: true, vibration: true });
+    expect(save.settings).toEqual({ sound: true, music: true, vibration: true, colorAssist: false });
     expect(save.games).toEqual({ a: { best: 10, plays: 0, lastPlayedAt: null } });
     expect(save.createdAt).toBe(NOW);
     expect(save.version).toBe(SAVE_VERSION);
@@ -450,11 +480,12 @@ describe('resetProgress', () => {
   it('기록과 코인은 지우고 설정은 남긴다', () => {
     let save = createDefaultSave(NOW);
     save.settings.sound = false;
+    save.settings.colorAssist = true;
     save = applyPlayResult(save, 'g', 10, 7, NOW).save;
     const reset = resetProgress(save, NOW + 100);
     expect(reset.coins).toBe(0);
     expect(reset.games).toEqual({});
-    expect(reset.settings).toEqual({ sound: false, music: true, vibration: true });
+    expect(reset.settings).toEqual({ sound: false, music: true, vibration: true, colorAssist: true });
   });
 
   it('닉네임은 남긴다(온라인 랭킹의 기록은 랭킹 화면에서 따로 뺀다)', () => {
@@ -611,5 +642,74 @@ describe('주간 미션', () => {
   it('기록을 지우면 주간 기록도 지운다', () => {
     const done = playDifferent(easy.goal).save;
     expect(resetProgress(done, NOW + 100).weekly).toEqual(createWeekly());
+  });
+});
+
+describe('단계 모드', () => {
+  it('다음 단계를 깨면 기록이 오르고 코인을 받는다', () => {
+    const result = applyStageClear(createDefaultSave(NOW), 'color-sort', 1, NOW + 5);
+    expect(result).not.toBeNull();
+    expect(result?.first).toBe(true);
+    expect(result?.level).toBe(1);
+    expect(result?.coinsEarned).toBe(STAGE_COINS);
+    expect(result?.save.stages).toEqual({ 'color-sort': 1 });
+    expect(result?.save.coins).toBe(STAGE_COINS);
+    expect(result?.save.updatedAt).toBe(NOW + 5);
+  });
+
+  it('열 단계째는 코인을 더 받는다', () => {
+    const save = { ...createDefaultSave(NOW), stages: { 'color-sort': 9 } };
+    expect(applyStageClear(save, 'color-sort', 10, NOW)?.coinsEarned).toBe(MILESTONE_COINS);
+  });
+
+  it('이미 깬 단계를 다시 깨면 코인은 없고 기록도 그대로다', () => {
+    const save = { ...createDefaultSave(NOW), coins: 20, stages: { 'color-sort': 5 } };
+    const result = applyStageClear(save, 'color-sort', 3, NOW);
+    expect(result?.first).toBe(false);
+    expect(result?.coinsEarned).toBe(0);
+    expect(result?.save.coins).toBe(20);
+    expect(result?.save.stages).toEqual({ 'color-sort': 5 });
+  });
+
+  it('아직 열리지 않은 단계는 기록하지 않는다', () => {
+    const save = createDefaultSave(NOW);
+    expect(applyStageClear(save, 'color-sort', 2, NOW)).toBeNull();
+    expect(applyStageClear(save, 'color-sort', 0, NOW)).toBeNull();
+  });
+
+  it('한 판 한 것으로 세지만 최고 점수는 건드리지 않는다', () => {
+    const played = applyPlayResult(createDefaultSave(NOW), 'color-sort', 240, 4, NOW).save;
+    const result = applyStageClear(played, 'color-sort', 1, NOW + 10);
+    expect(getRecord(result!.save, 'color-sort')).toEqual({ best: 240, plays: 2, lastPlayedAt: NOW + 10 });
+  });
+
+  it('다른 게임의 단계 기록은 그대로 둔다', () => {
+    const save = { ...createDefaultSave(NOW), stages: { 'parking-out': 4 } };
+    expect(applyStageClear(save, 'color-sort', 1, NOW)?.save.stages).toEqual({ 'parking-out': 4, 'color-sort': 1 });
+  });
+
+  it('원본 세이브를 바꾸지 않는다', () => {
+    const original = createDefaultSave(NOW);
+    applyStageClear(original, 'color-sort', 1, NOW + 5);
+    expect(original).toEqual(createDefaultSave(NOW));
+  });
+
+  it('깬 단계와 받은 코인이 주간 미션에 더해진다', () => {
+    const games: WeeklyGame[] = [
+      { id: 'color-sort', title: '색깔 물 나누기', genre: 'puzzle', quick: true },
+      { id: 'lightning-tap', title: '번개 탭', genre: 'action', quick: true },
+      { id: 'stack-tower', title: '탑 쌓기', genre: 'action', quick: true },
+    ];
+    const weekKey = '2026-11-09';
+    const week: WeekContext = { weekKey, missions: missionsFor(weekKey, games) };
+    const result = applyStageClear(createDefaultSave(NOW), 'color-sort', 1, NOW, week);
+    expect(result?.save.weekly.weekKey).toBe(weekKey);
+    expect(result?.save.weekly.plays).toEqual({ 'color-sort': 1 });
+    expect(result?.save.weekly.coins).toBe(STAGE_COINS);
+  });
+
+  it('진행을 지우면 깬 단계도 지워진다', () => {
+    const cleared = applyStageClear(createDefaultSave(NOW), 'color-sort', 1, NOW)!.save;
+    expect(resetProgress(cleared, NOW + 1).stages).toEqual({});
   });
 });

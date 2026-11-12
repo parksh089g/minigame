@@ -6,7 +6,7 @@ import { sfx } from '../../core/sfx';
 import { StartGate } from '../../core/start-gate';
 import { addBackdrop, addTapZone, addText } from '../../core/ui';
 import { floatText, GameHud, HUD_HEIGHT, showBanner } from '../../scenes/GameHud';
-import { MiniGameScene } from '../../scenes/MiniGameScene';
+import { MiniGameScene, type ResultStat } from '../../scenes/MiniGameScene';
 import {
   ART_CELL,
   drawBoard,
@@ -30,6 +30,7 @@ import {
   CONTROLS_HEIGHT,
   elapse,
   isOver,
+  levelRun,
   markTile,
   neighboursOf,
   newRun,
@@ -161,6 +162,8 @@ export class LogicTilesScene extends MiniGameScene {
   /** 첫 칸을 누르거나 잠깐 기다릴 때까지 시간을 세워 둔다. 처음 하는 사람이 설명을 읽을 틈이다. */
   private readonly gate = new StartGate();
   private lastTickSecond = 0;
+  /** 함정을 놓을 때 쓰는 난수. 단계 모드에서는 단계 번호로 정해진다. */
+  private random: () => number = Math.random;
 
   private hud!: GameHud;
   private playArea!: Phaser.Geom.Rectangle;
@@ -199,6 +202,7 @@ export class LogicTilesScene extends MiniGameScene {
     this.addPauseButton();
     this.hud = new GameHud(this, DEPTH.hud);
     this.hud.setTime(TIME_BANK_SECONDS, TIME_BANK_SECONDS);
+    if (this.stageLevel !== null) this.hud.showStage(this.stageLevel);
 
     this.bindInput();
     this.dealBoard();
@@ -217,6 +221,8 @@ export class LogicTilesScene extends MiniGameScene {
       this.gate.wait(dt);
       return;
     }
+    // 단계 모드에는 시간 제한이 없다.
+    if (this.stageLevel !== null) return;
 
     this.run = elapse(this.run, dt);
     this.hud.setTime(this.run.timeLeft, TIME_BANK_SECONDS);
@@ -233,7 +239,8 @@ export class LogicTilesScene extends MiniGameScene {
   }
 
   private resetState(): void {
-    this.run = newRun();
+    this.run = this.stageLevel === null ? newRun() : levelRun(this.stageLevel);
+    this.random = this.levelRandom();
     this.mode = 'open';
     this.layout = { cell: 0, left: 0, top: 0 };
     this.pads = [];
@@ -399,7 +406,8 @@ export class LogicTilesScene extends MiniGameScene {
     this.boardBox.setPosition(left + (board.cols * cell) / 2, top + (board.rows * cell) / 2);
     this.setMode('open');
     this.pads = board.tiles.map((_, index) => this.addPad(index));
-    this.stageLabel.setText(`${stage}판`);
+    // 단계 모드에서는 단계 번호가 위쪽에 적혀 있다.
+    this.stageLabel.setText(this.stageLevel === null ? `${stage}판` : '');
     this.showTrapsLeft(stage > 1);
 
     this.tweens.add({
@@ -521,14 +529,14 @@ export class LogicTilesScene extends MiniGameScene {
 
   private onPause(): void {
     this.cancelPress();
-    // 끝난 뒤 결과 화면이 뜰 때는 드러난 판을 그대로 보여 준다.
-    if (this.playing) this.tileLayer.setVisible(false);
+    // 끝난 뒤 결과 화면이 뜰 때는 드러난 판을 그대로 보여 준다. 시간이 흐르지 않는 단계 모드에서도 가리지 않는다.
+    if (this.playing && this.stageLevel === null) this.tileLayer.setVisible(false);
   }
 
   private onResume(): void {
     this.tileLayer.setVisible(true);
     // 아직 시간이 가지 않고 있었으면 숨 고를 시간도 필요 없다.
-    if (!this.playing || !this.gate.open) return;
+    if (!this.playing || !this.gate.open || this.stageLevel !== null) return;
     this.grace = RESUME_GRACE_SECONDS;
     showBanner(this, this.boardBox.y, '준비!', LOOK.text.ready, RESUME_GRACE_SECONDS * 1000, DEPTH.banner);
   }
@@ -604,7 +612,7 @@ export class LogicTilesScene extends MiniGameScene {
       this.refuseFlagged(index);
       return;
     }
-    const { run, outcome } = tapTile(this.run, index, Math.random);
+    const { run, outcome } = tapTile(this.run, index, this.random);
     this.run = run;
     if (outcome.kind === 'opened') this.onOpened(index, outcome);
     else if (tile === 'open') this.nudgeAround(index);
@@ -705,11 +713,10 @@ export class LogicTilesScene extends MiniGameScene {
       else sfx.flip();
       vibrate(8);
       this.sparks.open.explode(Math.min(10, 2 + outcome.opened.length), spot.x, spot.y);
-      floatText(
-        this,
+      this.floatPoints(
         spot.x,
         spot.y - this.layout.cell / 2,
-        `+${outcome.points}`,
+        outcome.points,
         LOOK.text.points,
         this.playArea,
         DEPTH.effect,
@@ -829,6 +836,19 @@ export class LogicTilesScene extends MiniGameScene {
     this.plantMissingFlags();
     this.showTrapsLeft(false);
 
+    if (this.stageLevel !== null) {
+      // 단계 모드는 판 하나가 한 판이다. 다음 단계는 결과 화면에서 고른다.
+      this.time.delayedCall(CLEAR_BANNER_MS, () => {
+        sfx.gold();
+        vibrate([15, 30, 15]);
+        this.sparks.clear.explode(18, GAME_WIDTH / 2, this.boardBox.y);
+        const title = reward.flawless ? '완벽해요!' : '클리어!';
+        showBanner(this, this.boardBox.y, title, LOOK.text.good, 900, DEPTH.banner);
+      });
+      this.finishStage(true, this.stageStats(), CLEAR_BANNER_MS + 1000);
+      return;
+    }
+
     this.time.delayedCall(CLEAR_BANNER_MS, () => {
       sfx.gold();
       vibrate([15, 30, 15]);
@@ -881,10 +901,23 @@ export class LogicTilesScene extends MiniGameScene {
     this.clearHints();
     this.unveilHogs();
     showBanner(this, this.boardBox.y, '끝!', LOOK.text.over, 900, DEPTH.banner);
+    if (this.stageLevel !== null) {
+      // 숨어 있던 함정이 다 드러난 뒤에 결과를 띄운다.
+      this.finishStage(false, this.stageStats(), 1400);
+      return;
+    }
     this.finishMiniGame(this.run.score, [
       ['깬 판', `${this.run.boardsCleared}판`],
       ['연 칸', `${this.run.tilesOpened}칸`],
       ['밟은 함정', `${this.run.trapsTripped}개`],
     ]);
+  }
+
+  /** 단계 모드의 결과 화면에 적는 것 */
+  private stageStats(): ResultStat[] {
+    return [
+      ['연 칸', `${this.run.tilesOpened}칸`],
+      ['밟은 함정', `${this.run.trapsTripped}개`],
+    ];
   }
 }

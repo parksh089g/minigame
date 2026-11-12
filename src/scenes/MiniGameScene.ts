@@ -3,10 +3,12 @@ import { SCENE } from '../config';
 import { APP_EVENT, type BackAware } from '../core/app-events';
 import type { PlayResult } from '../core/save';
 import { sfx } from '../core/sfx';
+import { isUnlocked, nextLevel, stageRandom, STAGE_LEVELS } from '../core/stages';
 import { store } from '../core/store';
 import { holdToasts } from '../core/toast';
 import { fadeIn, PixelButton } from '../core/ui';
 import { getGame, thisWeek, todaysChallenge } from '../games/registry';
+import { floatText } from './GameHud';
 import { syncScores } from '../online/online';
 
 /** 결과 화면에 덧붙여 보여 줄 한 줄. 예: ['최대 콤보', '12'] */
@@ -34,8 +36,36 @@ export interface ResultStrip {
   chips: ReadonlyArray<{ texture: string; label: string }>;
 }
 
+/** 게임 씬을 단계 모드로 열 때 넘기는 것. 넘기지 않으면 여느 때의 점수 도전이다. */
+export interface StageStart {
+  /** 열 단계(1부터). 아직 열리지 않은 단계면 점수 도전으로 열린다. */
+  stageLevel?: number;
+}
+
+/** 단계 모드에서 한 단계가 끝났을 때 결과 화면(StageResultScene)에 넘기는 것 */
+export interface StageResultData {
+  title: string;
+  /** 이 게임을 실행한 씬 이름. "다음 단계"와 "다시 하기"에 쓴다. */
+  sceneKey: string;
+  gameId: string;
+  level: number;
+  /** 깼는지. false면 기회를 다 썼거나 막혀서 끝난 것이다. */
+  cleared: boolean;
+  /** 이 단계를 처음 깼는지 */
+  first: boolean;
+  /** 처음 깨서 받은 코인 */
+  coins: number;
+  /** 이어서 할 다음 단계. 마지막 단계를 깼으면 null */
+  next: number | null;
+  /** 이번 단계로 다 채운 주간 미션의 수 */
+  missions: number;
+  stats: readonly ResultStat[];
+}
+
 export interface PauseData {
   sceneKey: string;
+  /** 단계 모드로 하고 있던 단계. "처음부터 다시"가 같은 단계를 다시 열고, "그만하기"가 단계 화면으로 돌아간다. */
+  stageLevel?: number;
   /** registry.ts에 등록한 게임 id. 그 게임의 방법(games/how-to.ts)이 있으면 "방법 보기" 버튼이 생긴다. */
   gameId?: string;
   /** 게임이 일시정지 화면에 덧붙여 보여 주는 것. 제목과 버튼 사이에 자리를 내준다. */
@@ -64,11 +94,17 @@ export abstract class MiniGameScene extends Phaser.Scene implements BackAware {
   /** 점수가 오가는 진행 중인 상태인지. 카운트다운이나 종료 연출 중에는 false. */
   protected playing = false;
   private finished = false;
+  /**
+   * 단계 모드로 열렸으면 그 단계(1부터), 여느 때의 점수 도전이면 null.
+   * beginMiniGame()이 정하므로 그 뒤에 읽는다. 단계 모드를 아는 게임(registry의 stageMode)만 값이 들어온다.
+   */
+  protected stageLevel: number | null = null;
 
   /** 하위 씬의 create() 첫머리에서 부른다. */
   protected beginMiniGame(): void {
     this.playing = false;
     this.finished = false;
+    this.stageLevel = this.takeStageLevel();
 
     // 전화가 오거나 다른 앱으로 넘어가면, 또는 화면을 가로로 눕히면 자동으로 일시정지한다.
     const onHidden = (): void => this.pauseGame();
@@ -83,6 +119,39 @@ export abstract class MiniGameScene extends Phaser.Scene implements BackAware {
     });
 
     fadeIn(this);
+  }
+
+  /**
+   * 씬을 열 때 넘겨받은 단계를 읽고 지운다. Phaser는 넘긴 것이 없으면 지난번에 넘긴 것을 그대로 두므로,
+   * 지워 두지 않으면 단계 모드를 한 번 한 뒤에는 허브에서 열어도 단계 모드로 열린다.
+   */
+  private takeStageLevel(): number | null {
+    const settings = this.scene.settings;
+    const asked = (settings.data as StageStart | undefined)?.stageLevel;
+    settings.data = {};
+    if (typeof asked !== 'number' || getGame(this.gameId)?.stageMode !== true) return null;
+    return isUnlocked(store.data.stages, this.gameId, asked) ? asked : null;
+  }
+
+  /** 지금 단계의 판을 만드는 난수. 같은 단계는 언제나 같은 판이 나온다. 단계 모드가 아니면 Math.random이다. */
+  protected levelRandom(): () => number {
+    return this.stageLevel === null ? Math.random : stageRandom(this.gameId, this.stageLevel);
+  }
+
+  /**
+   * 방금 얻은 점수를 그 자리에 띄운다. 단계 모드는 점수를 세지 않으므로 아무것도 띄우지 않는다.
+   * 점수가 아닌 것(깎인 시간, 줄어든 기회)은 floatText로 직접 띄운다.
+   */
+  protected floatPoints(
+    x: number,
+    y: number,
+    points: number,
+    color: string,
+    bounds: Phaser.Geom.Rectangle,
+    depth: number,
+  ): void {
+    if (this.stageLevel !== null) return;
+    floatText(this, x, y, `+${points}`, color, bounds, depth);
   }
 
   protected addPauseButton(x = 8, y = 8): PixelButton {
@@ -108,6 +177,7 @@ export abstract class MiniGameScene extends Phaser.Scene implements BackAware {
     this.scene.launch(SCENE.pause, {
       sceneKey: this.scene.key,
       gameId: this.gameId,
+      stageLevel: this.stageLevel ?? undefined,
       extra: this.pauseExtra(),
     } satisfies PauseData);
   }
@@ -159,6 +229,38 @@ export abstract class MiniGameScene extends Phaser.Scene implements BackAware {
     this.time.delayedCall(resultDelayMs, () => {
       this.scene.pause();
       this.scene.launch(SCENE.result, data);
+    });
+  }
+
+  /**
+   * 단계 모드에서 한 단계가 끝났을 때 부른다. 깼으면 기록하고(처음 깬 단계면 코인도 준다),
+   * 잠깐 뒤에 단계 결과 화면을 띄운다. 깨지 못했으면 기록 없이 다시 하기를 권한다.
+   * 깼을 때의 소리와 연출은 게임이 하고, 깨지 못했을 때의 끝맺음 소리만 여기서 낸다.
+   */
+  protected finishStage(cleared: boolean, stats: readonly ResultStat[] = [], resultDelayMs = 900): void {
+    const level = this.stageLevel;
+    if (this.finished || level === null) return;
+    this.finished = true;
+    this.playing = false;
+    if (!cleared) this.playFinishSound();
+
+    const game = getGame(this.gameId);
+    const result = cleared ? store.clearStage(this.gameId, level, thisWeek(store.data.weekly)) : null;
+    const data: StageResultData = {
+      title: game?.title ?? '단계',
+      sceneKey: this.scene.key,
+      gameId: this.gameId,
+      level,
+      cleared,
+      first: result?.first ?? false,
+      coins: result?.coinsEarned ?? 0,
+      next: cleared ? (level < STAGE_LEVELS ? level + 1 : null) : nextLevel(store.data.stages, this.gameId),
+      missions: result?.newMissions.length ?? 0,
+      stats,
+    };
+    this.time.delayedCall(resultDelayMs, () => {
+      this.scene.pause();
+      this.scene.launch(SCENE.stageResult, data);
     });
   }
 

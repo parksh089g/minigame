@@ -2,7 +2,7 @@
  * 진행 속도를 재는 자동 플레이. 테스트에서만 쓴다.
  * 사람처럼 조금씩 늦게 누르고, 살 수 있는 것은 싼 것부터 사고, 이사할 수 있으면 이사한다.
  */
-import { EQUIPMENT, EQUIPMENT_ORDER, OFFICES, PROJECTS, type EquipmentDef, type ProjectId } from './data';
+import { EQUIPMENT, EQUIPMENT_ORDER, LEAD, OFFICES, PROJECTS, type EquipmentDef, type ProjectId } from './data';
 import {
   advance,
   assign,
@@ -18,14 +18,19 @@ import {
   hireBlock,
   hireCost,
   isReady,
+  leadBlock,
   moveBlock,
   moveOffice,
   projectBonus,
   projectIncomeGain,
   projectReputation,
   projectWork,
+  promoteLead,
   release,
   startProject,
+  train,
+  trainBlock,
+  trainCost,
   type CompanyState,
 } from './rules';
 
@@ -79,18 +84,26 @@ function spend(state: CompanyState, random: () => number): void {
     let reserve = 0;
     if (moveBlock(state) === 'poor') reserve = OFFICES[state.office + 1].cost;
     else if (candidate && hireBlock(state, candidate) === 'poor') reserve = hireCost(state);
-    let pick: { id: (typeof EQUIPMENT_ORDER)[number]; desk: number; cost: number } | null = null;
+    // 장비, 팀장, 교육 가운데 가장 싼 것부터 산다.
+    let pick: { cost: number; buy: () => void } | null = null;
+    const offer = (cost: number, buy: () => void): void => {
+      if (!pick || cost < pick.cost) pick = { cost, buy };
+    };
+    if (leadBlock(state) === null) offer(LEAD.levels[state.lead].cost, () => promoteLead(state));
     for (const id of EQUIPMENT_ORDER) {
       const def: EquipmentDef = EQUIPMENT[id];
       const desks = def.scope === 'desk' ? state.desks.map((_, index) => index) : [-1];
       for (const desk of desks) {
         if (equipmentBlock(state, id, desk) !== null) continue;
-        const cost = equipmentCost(id, equipmentLevel(state, id, desk));
-        if (!pick || cost < pick.cost) pick = { id, desk, cost };
+        offer(equipmentCost(id, equipmentLevel(state, id, desk)), () => buyEquipment(state, id, desk));
       }
     }
-    if (!pick || (reserve > 0 && pick.cost > reserve * 0.2)) return;
-    buyEquipment(state, pick.id, pick.desk);
+    state.desks.forEach((desk, index) => {
+      if (trainBlock(state, index) === null) offer(trainCost(desk.level), () => train(state, index));
+    });
+    const chosen = pick as { cost: number; buy: () => void } | null;
+    if (!chosen || (reserve > 0 && chosen.cost > reserve * 0.2)) return;
+    chosen.buy();
   }
 }
 

@@ -168,6 +168,8 @@ export const SCENE = {
   hub: 'Hub',
   settings: 'Settings',
   stats: 'Stats',
+  stages: 'Stages',
+  stageResult: 'StageResult',
   shop: 'Shop',
   achievements: 'Achievements',
   ranking: 'Ranking',
