@@ -2,8 +2,10 @@ import Phaser from 'phaser';
 import './style.css';
 import { computeGameHeight, FONT_FAMILY, FONT_SIZE, GAME_WIDTH, THEME } from './config';
 import { initAppShell, untilUpright } from './core/shell';
+import { initStage } from './core/stage-watch';
 import { HiDpiPlugin, pickRenderScale, renderScale, setRenderScale } from './core/hidpi';
 import { initInstall } from './core/install-guide';
+import { initMotionGuard } from './core/motion-guard';
 import { initPwa, isStandalone } from './core/pwa';
 import { initAudioUnlock } from './core/sfx';
 import { store } from './core/store';
@@ -125,8 +127,11 @@ async function boot(): Promise<void> {
 
   document.getElementById('boot')?.remove();
   initAudioUnlock();
+  initMotionGuard();
   initPwa();
   initAppShell(game, parent);
+  // 안내 문구와 입력 창의 크기를 캔버스에 맞춘다.
+  initStage(game);
   // 닉네임을 정해 랭킹에 참여한 경우에만, 올리지 못한 기록을 올린다.
   initOnline();
 

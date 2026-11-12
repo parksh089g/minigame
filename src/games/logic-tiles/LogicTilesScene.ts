@@ -2,6 +2,8 @@ import Phaser from 'phaser';
 import { TEXTURE } from '../../art/sprites';
 import { GAME_WIDTH, SCENE } from '../../config';
 import { vibrate } from '../../core/haptics';
+import { LENS_ROOM } from '../../core/lens';
+import { PressLens } from '../../core/lens-view';
 import { sfx } from '../../core/sfx';
 import { StartGate } from '../../core/start-gate';
 import { addBackdrop, addTapZone, addText } from '../../core/ui';
@@ -10,15 +12,15 @@ import { MiniGameScene, type ResultStat } from '../../scenes/MiniGameScene';
 import {
   ART_CELL,
   drawBoard,
-  drawFlag,
   drawHearts,
-  drawHog,
-  drawPad,
   drawToggle,
   drawTrippedFloor,
+  flagTexture,
   HEARTS_SIZE,
+  hogTexture,
   LOOK,
   MODES,
+  padTexture,
   RIM,
   toggleCenter,
   type HogMood,
@@ -133,7 +135,9 @@ const HINTS = {
 const MODE_LABELS: Record<Mode, string> = { open: '열기', flag: '깃발' };
 
 /** 판과 아래 줄은 깊이를 따로 주지 않고 만든 순서대로 겹친다. */
-const DEPTH = { effect: 20, hud: 30, banner: 40 } as const;
+const DEPTH = { effect: 20, lens: 25, hud: 30, banner: 40 } as const;
+/** 칸이 이보다 작은 판(일곱 줄부터)에서는 누른 칸을 손가락 위에 크게 띄워 보여 준다. */
+const LENS_BELOW_CELL = 33;
 
 /**
  * 논리 타일: 풀로 덮인 판에서 숫자를 실마리로 함정(낮잠 자는 고슴도치)을 피해 안전한 칸을 모두 연다.
@@ -147,14 +151,14 @@ export class LogicTilesScene extends MiniGameScene {
   private mode: Mode = 'open';
   private layout: BoardLayout = { cell: 0, left: 0, top: 0 };
   /** 칸마다의 덮개 그림. 열린 칸은 null이다. */
-  private pads: (Phaser.GameObjects.Graphics | null)[] = [];
+  private pads: (Phaser.GameObjects.Image | null)[] = [];
   /** 꽂혀 있는 깃발 그림. 칸 번호로 찾는다. */
-  private flags = new Map<number, Phaser.GameObjects.Graphics>();
+  private flags = new Map<number, Phaser.GameObjects.Image>();
   private press: Press | null = null;
   /** 손가락이 눌려 있는 단추 반쪽 */
   private pressedSide: Mode | null = null;
   /** 첫 판에서 눌러 보라고 들썩이고 있는 칸 */
-  private pointed: Phaser.GameObjects.Graphics | null = null;
+  private pointed: Phaser.GameObjects.Image | null = null;
   /** 판 위에 떠 있는 도움말 줄들. 사라진 뒤에는 비어 있다. */
   private hints: Phaser.GameObjects.Text[] = [];
   /** 0보다 크면 일시정지에서 막 돌아와 잠깐 멈춰 있는 중 */
@@ -177,6 +181,7 @@ export class LogicTilesScene extends MiniGameScene {
   private toggleView!: Phaser.GameObjects.Graphics;
   private toggleLabels!: Record<Mode, Phaser.GameObjects.Text>;
   private sparks!: Record<keyof typeof LOOK.sparks, Phaser.GameObjects.Particles.ParticleEmitter>;
+  private lens!: PressLens;
 
   constructor() {
     super(SCENE.logicTiles);
@@ -198,6 +203,7 @@ export class LogicTilesScene extends MiniGameScene {
       clear: this.createSparks(LOOK.sparks.clear, 130),
     };
     this.createControls();
+    this.lens = new PressLens(this, DEPTH.lens);
 
     this.addPauseButton();
     this.hud = new GameHud(this, DEPTH.hud);
@@ -464,10 +470,9 @@ export class LogicTilesScene extends MiniGameScene {
     return row * board.cols + col;
   }
 
-  private addPad(index: number): Phaser.GameObjects.Graphics {
+  private addPad(index: number): Phaser.GameObjects.Image {
     const { x, y } = this.cellSpot(index);
-    const pad = this.add.graphics().setPosition(x, y);
-    drawPad(pad, this.layout.cell);
+    const pad = this.add.image(x, y, padTexture(this, this.layout.cell));
     this.tileLayer.add(pad);
     return pad;
   }
@@ -562,10 +567,41 @@ export class LogicTilesScene extends MiniGameScene {
       y: pointer.worldY,
       since: performance.now(),
     };
+    this.showLens(index);
     const pad = this.pads[index];
     if (!pad) return;
     this.tweens.killTweensOf(pad);
     pad.setScale(PRESSED_SCALE);
+  }
+
+  /**
+   * 칸이 작은 판에서는 손가락이 칸을 가리므로, 누른 칸을 손가락 위에 크게 띄워 보여 준다.
+   * 눌러도 아무 일이 없는 칸(둘레에 함정이 없는 열린 칸, 드러난 함정)에는 띄우지 않는다.
+   */
+  private showLens(index: number): void {
+    const { cell } = this.layout;
+    if (cell >= LENS_BELOW_CELL) return;
+    const { tiles, counts } = this.run.board;
+    const tile = tiles[index];
+    const count = counts[index];
+    if (tile !== 'covered' && tile !== 'marked' && !(tile === 'open' && count > 0)) return;
+
+    const spot = this.cellOnScreen(index);
+    this.lens.show({ ...spot, size: cell }, HUD_HEIGHT + 2, (content) => {
+      if (tile === 'open') {
+        content.add(
+          addText(this, 0, 0, String(count), {
+            size: Math.round(LENS_ROOM * DIGIT_RATIO),
+            color: LOOK.digits[count - 1],
+            originX: 0.5,
+            originY: 0.5,
+          }),
+        );
+        return;
+      }
+      content.add(this.add.image(0, 0, padTexture(this, LENS_ROOM)));
+      if (tile === 'marked') content.add(this.add.image(0, -1, flagTexture(this)).setScale(LENS_ROOM / ART_CELL));
+    });
   }
 
   private onPointerMove(pointer: Phaser.Input.Pointer): void {
@@ -587,6 +623,7 @@ export class LogicTilesScene extends MiniGameScene {
     if (!press) return;
     this.pads[press.index]?.setScale(1);
     this.press = null;
+    this.lens.hide();
   }
 
   /**
@@ -650,8 +687,7 @@ export class LogicTilesScene extends MiniGameScene {
   private addFlag(index: number, delay: number): void {
     const { x, y } = this.cellSpot(index);
     const size = this.layout.cell / ART_CELL;
-    const flag = this.add.graphics().setPosition(x, y - 1).setScale(0);
-    drawFlag(flag);
+    const flag = this.add.image(x, y - 1, flagTexture(this)).setScale(0);
     this.tileLayer.add(flag);
     this.flags.set(index, flag);
     this.tweens.add({ targets: flag, scale: size, delay, duration: 150, ease: 'Back.Out' });
@@ -806,8 +842,7 @@ export class LogicTilesScene extends MiniGameScene {
       drawTrippedFloor(floor, this.layout.cell);
       this.tileLayer.add(floor);
     }
-    const hog = this.add.graphics().setPosition(x, y).setScale(0);
-    drawHog(hog, mood);
+    const hog = this.add.image(x, y, hogTexture(this, mood)).setScale(0);
     this.tileLayer.add(hog);
     this.tweens.add({ targets: hog, scale: size, delay, duration: 180, ease: 'Back.Out' });
   }

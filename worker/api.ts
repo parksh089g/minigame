@@ -6,14 +6,18 @@ import {
   cleanCode,
   cleanName,
   cleanScore,
+  hasWeeklyBoard,
   isDeviceId,
   isRankedGame,
+  isRankSpan,
+  isRankWeek,
   MAX_BUNDLE_CHARS,
   RANKED_GAMES,
   type ApiError,
+  type RankSpan,
 } from '../src/online/protocol';
 import { placeOf } from './limiter';
-import { TOO_FAST, type BoardApi, type Scores } from './service';
+import { TOO_FAST, type BoardApi, type Scores, type WeekEntry } from './service';
 
 /**
  * 요청 본문으로 받는 가장 큰 크기(글자 수).
@@ -72,6 +76,26 @@ function readScores(raw: unknown): Scores | null {
   return scores;
 }
 
+/**
+ * 이번 주 랭킹에 올릴 것을 읽는다. 보내지 않았으면 null, 보냈는데 이상하면 'invalid'.
+ * 주간 랭킹이 생기기 전의 앱은 이것을 보내지 않는다.
+ */
+function readWeekly(raw: unknown): WeekEntry | null | 'invalid' {
+  if (raw === undefined || raw === null) return null;
+  if (!isObject(raw) || !isRankWeek(raw.week)) return 'invalid';
+  const scores = readScores(raw.scores ?? {});
+  if (scores === null) return 'invalid';
+  // 주간 랭킹이 없는 게임(점수가 계속 쌓이는 게임)의 점수는 받지 않고 흘려보낸다.
+  for (const game of RANKED_GAMES) if (!hasWeeklyBoard(game)) delete scores[game];
+  return { week: raw.week, scores };
+}
+
+/** 주소에 적힌 랭킹의 범위. 적지 않았으면 전체 랭킹이고, 모르는 값이면 null. */
+function readSpan(url: URL): RankSpan | null {
+  const span = url.searchParams.get('span') ?? 'all';
+  return isRankSpan(span) ? span : null;
+}
+
 /** 저장소가 답하지 않을 때의 답. 앱은 이것을 "지금은 안 됨"으로 받아들인다. */
 export const busy = (): Response => fail('busy');
 
@@ -82,22 +106,25 @@ export async function handleApi(request: Request, board: BoardApi): Promise<Resp
   const path = url.pathname.replace(/\/+$/, '');
   const method = request.method;
 
-  // GET /api/rank/<게임>?me=<기기 id>
+  // GET /api/rank/<게임>?me=<기기 id>&span=<all|week>
   const rank = /^\/api\/rank\/([a-z-]+)$/.exec(path);
   if (rank && method === 'GET') {
     const game = rank[1];
     const me = url.searchParams.get('me');
-    if (!isRankedGame(game) || (me !== null && !isDeviceId(me))) return fail('invalid');
-    const result = await board.board(ip, game, me);
+    const span = readSpan(url);
+    if (!isRankedGame(game) || (me !== null && !isDeviceId(me)) || span === null) return fail('invalid');
+    const result = await board.board(ip, game, me, span);
     return result === TOO_FAST ? fail('slow') : json(result);
   }
 
-  // GET /api/rank?me=<기기 id>: 그 기기가 올라 있는 모든 게임의 순위. 누구의 것인지 적지 않은 요청은 받지 않는다.
+  // GET /api/rank?me=<기기 id>&span=<all|week>: 그 기기가 올라 있는 모든 게임의 순위. 누구의 것인지 적지 않은 요청은 받지 않는다.
   const whose = url.searchParams.get('me');
   if (path === '/api/rank' && method === 'GET' && whose !== null) {
-    if (!isDeviceId(whose)) return fail('invalid');
-    const result = await board.standings(ip, whose);
-    return result === TOO_FAST ? fail('slow') : json({ mine: result });
+    const span = readSpan(url);
+    if (!isDeviceId(whose) || span === null) return fail('invalid');
+    const result = await board.standings(ip, whose, span);
+    // 이번 주의 순위에는 서버가 보는 주를 같이 적는다. 주간 랭킹을 모르는 옛 서버의 답과 가려 준다.
+    return result === TOO_FAST ? fail('slow') : json(span === 'week' ? { mine: result, span } : { mine: result });
   }
 
   if (path === '/api/rank' && (method === 'POST' || method === 'DELETE')) {
@@ -109,8 +136,9 @@ export async function handleApi(request: Request, board: BoardApi): Promise<Resp
     }
     const name = cleanName(body.name);
     const scores = readScores(body.scores ?? {});
-    if (name === null || scores === null) return fail('invalid');
-    const result = await board.submit(ip, body.device, name, scores);
+    const weekly = readWeekly(body.weekly);
+    if (name === null || scores === null || weekly === 'invalid') return fail('invalid');
+    const result = await board.submit(ip, body.device, name, scores, weekly);
     return result === TOO_FAST ? fail('slow') : json(result);
   }
 

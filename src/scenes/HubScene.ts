@@ -3,7 +3,7 @@ import { mascotTexture } from '../art/cosmetics';
 import { MASCOT_SIZE } from '../art/vector';
 import { APP_NAME, APP_VERSION, FONT_SIZE, GAME_WIDTH, SCENE, THEME, THEME_CSS } from '../config';
 import { claimable, statsOf } from '../core/achievements';
-import { activeStreak, dateKeyOf, isCleared, streakBonus } from '../core/daily';
+import { activeStreak, dateKeyOf, isCleared, recentDays, streakBonus } from '../core/daily';
 import { vibrate } from '../core/haptics';
 import { installTip } from '../core/install';
 import { currentPlatform, showInstallGuide } from '../core/install-guide';
@@ -18,12 +18,14 @@ import { getRecord, isFavorite } from '../core/save';
 import { sfx } from '../core/sfx';
 import { clearedOf, totalCleared } from '../core/stages';
 import { store } from '../core/store';
+import { setToastAnchor } from '../core/toast';
 import { claimableMissions } from '../core/weekly';
 import {
   addBackdrop,
   addTapZone,
   addText,
   CoinCounter,
+  drawDayDots,
   drawPanel,
   fadeIn,
   fadeToScene,
@@ -44,6 +46,8 @@ import {
 } from '../games/registry';
 
 const MARGIN = 12;
+/** 안내 문구(core/toast.ts)의 가운데가 올 높이. 제목 줄의 한가운데다. */
+const TOAST_Y = 56;
 const CARD_WIDTH = GAME_WIDTH - MARGIN * 2;
 /** 게임 카드는 한 줄에 세 개씩 격자로 놓는다. 한 화면에 많이 보여야 원하는 게임을 바로 찾는다. */
 const COLUMNS = 3;
@@ -72,6 +76,8 @@ const TILE = {
 } as const;
 const DAILY_TOP = 78;
 const DAILY_HEIGHT = 40;
+/** 오늘의 도전 카드에 그리는 최근 이레의 동그라미: 반지름과 가운데 사이의 간격 */
+const DAILY_DOT = { radius: 2.5, pitch: 8 } as const;
 const CARDS_TOP = DAILY_TOP + DAILY_HEIGHT + 8;
 /** 맨 아래 버전과 오프라인 표시가 차지하는 높이 */
 const FOOTER_HEIGHT = 26;
@@ -129,7 +135,12 @@ export class HubScene extends Phaser.Scene {
     this.addFooter(height);
 
     const unsubscribe = onOfflineStatus((status) => this.showOfflineStatus(status));
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, unsubscribe);
+    // 이 화면은 아래쪽에 누르는 도움말과 상태 표시가 있어서, 안내 문구는 제목 자리에 띄운다.
+    setToastAnchor(TOAST_Y);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      unsubscribe();
+      setToastAnchor(null);
+    });
 
     fadeIn(this);
   }
@@ -270,12 +281,25 @@ export class HubScene extends Phaser.Scene {
       });
     }
 
+    // 아랫줄 오른쪽: 오늘까지 이레 동안 달성한 날. 한 번이라도 달성한 적이 있을 때부터 보인다.
+    const dots = this.add.graphics();
+    const dotsLeft =
+      daily.totalCleared > 0
+        ? drawDayDots(dots, recentDays(daily, challenge.dateKey), right, y + 28, DAILY_DOT.radius, DAILY_DOT.pitch)
+        : right;
+    /** 아랫줄의 글자가 동그라미와 겹치지 않게 줄인다. */
+    const fitSubtitle = (text: Phaser.GameObjects.Text): void => {
+      text.setScale(Math.min(1, (dotsLeft - 5 - text.x) / text.width));
+    };
+
     if (cleared) {
       addText(this, right, y + 5, '달성!', { color: THEME_CSS.good, originX: 1 });
-      addText(this, x + 40, y + 22, '내일 새 도전이 열려요', {
-        size: FONT_SIZE.small,
-        color: THEME_CSS.sub,
-      });
+      fitSubtitle(
+        addText(this, x + 40, y + 22, '내일 새 도전이 열려요', {
+          size: FONT_SIZE.small,
+          color: THEME_CSS.sub,
+        }),
+      );
     } else {
       // 오늘 달성하면 받을 코인. 연속 보너스까지 더해서 보여 준다.
       const reward = challenge.reward + streakBonus(streak + 1);
@@ -283,9 +307,11 @@ export class HubScene extends Phaser.Scene {
       this.add
         .image(Math.round(right - amount.width - 3), y + 13, 'coin')
         .setOrigin(1, 0.5);
-      addText(this, x + 40, y + 22, `${game.title} ${challenge.target}점 이상`, {
-        size: FONT_SIZE.small,
-      });
+      fitSubtitle(
+        addText(this, x + 40, y + 22, `${game.title} ${challenge.target}점 이상`, {
+          size: FONT_SIZE.small,
+        }),
+      );
     }
 
     addTapZone(this, x, y, CARD_WIDTH, DAILY_HEIGHT, drawFrame, () => {

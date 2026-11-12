@@ -1,16 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import { createDefaultSave, type SaveData } from '../core/save';
 import type { ApiResult } from './api';
-import type { SubmitRequest, SubmitResult } from './protocol';
+import { withWeekScore } from './profile';
+import { rankWeekOf, type SubmitRequest, type SubmitResult } from './protocol';
 import { ScoreSync } from './sync';
 
 const ID = '01112131-4151-6171-8191-a1b1c1d1e1f1';
+
+/** 한국 시각으로 2026년 11월 12일 목요일 15시. 이 주의 이름은 2026-11-09다. */
+const THURSDAY = Date.parse('2026-11-12T15:00:00+09:00');
+const WEEK = '2026-11-09';
+const DAY = 24 * 60 * 60 * 1000;
 
 type Answer = ApiResult<SubmitResult>;
 
 /** 가짜 세이브와 가짜 서버. 서버의 답은 부를 때마다 하나씩 꺼내 쓰고, 직접 풀어 줄 때까지 기다리게 할 수도 있다. */
 function setup(answers: Array<Answer | 'wait'>) {
   let save: SaveData = createDefaultSave(1000);
+  let now = THURSDAY;
   const requests: SubmitRequest[] = [];
   const waiting: Array<(answer: Answer) => void> = [];
   const sync = new ScoreSync({
@@ -26,6 +33,7 @@ function setup(answers: Array<Answer | 'wait'>) {
       if (answer !== 'wait') return Promise.resolve(answer);
       return new Promise<Answer>((resolve) => waiting.push(resolve));
     },
+    now: () => now,
   });
   return {
     sync,
@@ -37,13 +45,20 @@ function setup(answers: Array<Answer | 'wait'>) {
       mutate(save);
     },
     join(name = '등불지기') {
-      save.online = { id: ID, name, sentName: null, sent: {} };
+      save.online = { id: ID, name, sentName: null, sent: {}, week: null };
     },
     best(game: string, best: number) {
       save.games[game] = { best, plays: 1, lastPlayedAt: 1000 };
     },
     release(answer: Answer) {
       waiting.shift()?.(answer);
+    },
+    /** 이번 주(now가 속한 주)에 낸 점수를 적는다 */
+    weekBest(game: string, score: number) {
+      save.online = withWeekScore(save.online, game, score, rankWeekOf(now));
+    },
+    wait(ms: number) {
+      now += ms;
     },
   };
 }
@@ -126,11 +141,11 @@ describe('기록 올리기', () => {
     const running = t.sync.run();
     await Promise.resolve();
     t.edit((save) => {
-      save.online = { id: null, name: null, sentName: null, sent: {} };
+      save.online = { id: null, name: null, sentName: null, sent: {}, week: null };
     });
     t.release(ok({ 'stack-tower': 90 }, { 'stack-tower': 2 }));
     await running;
-    expect(t.save.online).toEqual({ id: null, name: null, sentName: null, sent: {} });
+    expect(t.save.online).toEqual({ id: null, name: null, sentName: null, sent: {}, week: null });
     expect(t.sync.rankOf('stack-tower')).toBeNull();
   });
 
@@ -143,5 +158,63 @@ describe('기록 올리기', () => {
     t.sync.noteRank('gate-run', 3);
     t.sync.forgetRanks();
     expect(t.sync.rankOf('gate-run')).toBeNull();
+  });
+});
+
+describe('이번 주 기록 올리기', () => {
+  it('이번 주에 낸 점수를 최고 점수와 함께 올리고, 올린 것을 적어 둔다', async () => {
+    const t = setup([ok({ 'stack-tower': 90 }, { 'stack-tower': 4 })]);
+    t.join();
+    t.best('stack-tower', 90);
+    t.weekBest('stack-tower', 55);
+    expect((await t.sync.run()).status).toBe('sent');
+    expect(t.requests).toEqual([
+      {
+        device: ID,
+        name: '등불지기',
+        scores: { 'stack-tower': 90 },
+        weekly: { week: WEEK, scores: { 'stack-tower': 55 } },
+      },
+    ]);
+    expect(t.save.online.week).toEqual({ key: WEEK, bests: { 'stack-tower': 55 }, sent: { 'stack-tower': 55 } });
+    expect(await t.sync.run()).toEqual({ status: 'idle' });
+  });
+
+  it('최고 기록은 그대로여도 이번 주 기록이 오르면 올린다', async () => {
+    const t = setup([ok({ 'stack-tower': 90 }, { 'stack-tower': 4 }), ok({}, {})]);
+    t.join();
+    t.best('stack-tower', 90);
+    await t.sync.run();
+    t.weekBest('stack-tower', 60);
+    expect((await t.sync.run()).status).toBe('sent');
+    expect(t.requests[1]).toEqual({
+      device: ID,
+      name: '등불지기',
+      scores: {},
+      weekly: { week: WEEK, scores: { 'stack-tower': 60 } },
+    });
+  });
+
+  it('올리지 못한 채로 주가 바뀌면 지난 주의 점수는 보내지 않는다', async () => {
+    const t = setup([{ ok: false, reason: 'offline' }, ok({ 'stack-tower': 90 }, { 'stack-tower': 4 })]);
+    t.join();
+    t.best('stack-tower', 90);
+    t.weekBest('stack-tower', 55);
+    expect((await t.sync.run()).status).toBe('failed');
+    t.wait(7 * DAY);
+    expect((await t.sync.run()).status).toBe('sent');
+    expect(t.requests[1]).toEqual({ device: ID, name: '등불지기', scores: { 'stack-tower': 90 } });
+  });
+
+  it('닉네임을 정하기 전에 낸 이번 주의 점수는 참여할 때 같이 올라간다', async () => {
+    const t = setup([ok({ 'stack-tower': 90 }, { 'stack-tower': 1 })]);
+    t.best('stack-tower', 90);
+    t.weekBest('stack-tower', 55);
+    expect(await t.sync.run()).toEqual({ status: 'off' });
+    t.edit((save) => {
+      save.online = { ...save.online, id: ID, name: '등불지기' };
+    });
+    await t.sync.run();
+    expect(t.requests[0].weekly).toEqual({ week: WEEK, scores: { 'stack-tower': 55 } });
   });
 });

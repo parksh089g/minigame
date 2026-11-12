@@ -39,6 +39,32 @@ describe('서버 부르기', () => {
     expect(calls[1].path).toBe('/api/rank/stack-tower');
   });
 
+  it('이번 주 랭킹은 범위를 주소에 적어 받아 온다. 주가 적혀 있지 않은 답은 쓰지 않는다', async () => {
+    const board = { top: [{ rank: 1, name: '하나', score: 5, mine: true }], me: { rank: 1, score: 5, name: '하나' } };
+    const { api, calls } = fakeServer(() => json({ ...board, week: '2026-11-09' }));
+    expect(await api.board('stack-tower', ID, 'week')).toEqual({
+      ok: true,
+      data: { ...board, week: '2026-11-09' },
+    });
+    expect(calls[0].path).toBe(`/api/rank/stack-tower?me=${ID}&span=week`);
+    await api.board('stack-tower', null, 'week');
+    expect(calls[1].path).toBe('/api/rank/stack-tower?span=week');
+    await api.board('stack-tower', ID, 'all');
+    expect(calls[2].path).toBe(`/api/rank/stack-tower?me=${ID}`);
+    // 주간 랭킹을 모르는 예전 서버는 범위를 못 알아듣고 전체 랭킹을 돌려준다. 그것을 이번 주 랭킹으로 보여 주면 안 된다.
+    const old = fakeServer(() => json(board));
+    expect(await old.api.board('stack-tower', ID, 'week')).toEqual({ ok: false, reason: 'offline' });
+  });
+
+  it('이번 주의 내 순위도 범위를 적어 받아 온다', async () => {
+    const mine = { 'stack-tower': { rank: 2, score: 70 } };
+    const { api, calls } = fakeServer(() => json({ mine, span: 'week' }));
+    expect(await api.standings(ID, 'week')).toEqual({ ok: true, data: mine });
+    expect(calls[0].path).toBe(`/api/rank?me=${ID}&span=week`);
+    const old = fakeServer(() => json({ mine }));
+    expect(await old.api.standings(ID, 'week')).toEqual({ ok: false, reason: 'offline' });
+  });
+
   it('모든 게임의 내 순위를 한 번에 받아 온다', async () => {
     const mine = { 'stack-tower': { rank: 2, score: 70 }, 'merge-tiles': { rank: 501, score: 4 } };
     const { api, calls } = fakeServer(() => json({ mine }));
