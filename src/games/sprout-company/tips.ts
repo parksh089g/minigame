@@ -18,6 +18,7 @@ const WHEN: Readonly<Record<TipId, (state: CompanyState) => boolean>> = {
   lead: (state) => state.lead === 0 && leadBlock(state) === null,
   rush: (state) => state.offer !== null,
   backlog: (state) => state.backlog.length > 0,
+  play: (state) => state.releases >= 2,
   dept: (state) => state.office >= DEPARTMENT.unlockOffice && departmentCount(state) === 0,
   queue: (state) => state.office >= QUEUE.unlockOffice && state.project !== null && state.queue.length === 0,
 };
