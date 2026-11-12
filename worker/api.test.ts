@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
-import { MAX_BUNDLE_CHARS, TRANSFER_TTL_MS } from '../src/online/protocol';
+import { MAX_BUNDLE_CHARS, rankDayOf, TRANSFER_TTL_MS } from '../src/online/protocol';
 import { handleApi } from './api';
 import type { SqlRunner, SqlValue } from './board-db';
 import { LIMITS } from './limiter';
@@ -447,5 +447,155 @@ describe('주간 랭킹 요청', () => {
     });
     expect((await call('DELETE', '/api/rank', { device: device(1) })).status).toBe(200);
     expect((await call('GET', '/api/rank/stack-tower?span=week')).body.top).toEqual([]);
+  });
+});
+
+describe('오늘의 랭킹 요청', () => {
+  /** 시험 서버의 시계(2027년 1월 15일 17시, 한국 시각)가 속한 날 */
+  const TODAY = rankDayOf(1_800_000_000_000);
+  const HOUR = 60 * 60 * 1000;
+  const submit = (
+    call: ReturnType<typeof server>['call'],
+    n: number,
+    name: string,
+    score: number,
+    day = TODAY,
+  ) =>
+    call('POST', '/api/rank', {
+      device: device(n),
+      name,
+      scores: {},
+      daily: { day, scores: { 'lantern-keeper': score } },
+    });
+
+  it('오늘의 판 점수를 올리고, 오늘의 랭킹에서 본다. 다른 랭킹에는 들어가지 않는다', async () => {
+    const { call } = server();
+    const posted = await call('POST', '/api/rank', {
+      device: device(1),
+      name: '등불지기',
+      scores: { 'lantern-keeper': 1200 },
+      daily: { day: TODAY, scores: { 'lantern-keeper': 700 } },
+    });
+    expect(posted.status).toBe(200);
+    expect(posted.body).toEqual({ bests: { 'lantern-keeper': 1200 }, ranks: { 'lantern-keeper': 1 } });
+    await submit(call, 2, '종지기', 900);
+
+    const today = await call('GET', `/api/daily/lantern-keeper?me=${device(1)}`);
+    expect(today.status).toBe(200);
+    expect(today.body).toEqual({
+      top: [
+        { rank: 1, name: '종지기', score: 900, mine: false },
+        { rank: 2, name: '등불지기', score: 700, mine: true },
+      ],
+      me: { rank: 2, score: 700, name: '등불지기' },
+      day: TODAY,
+    });
+    // 누구인지 밝히지 않고도 볼 수 있다.
+    expect((await call('GET', '/api/daily/lantern-keeper')).body.me).toBeNull();
+    // 오늘의 판에서만 낸 점수는 전체 랭킹과 이번 주 랭킹에 올라가지 않는다.
+    expect((await call('GET', '/api/rank/lantern-keeper')).body.top).toHaveLength(1);
+    expect((await call('GET', '/api/rank/lantern-keeper?span=week')).body.top).toEqual([]);
+  });
+
+  it('같은 날에는 더 높은 점수만 남고, 닉네임을 바꾸면 그날의 줄도 바뀐다', async () => {
+    const { call } = server();
+    await submit(call, 1, '등불지기', 700);
+    await submit(call, 1, '등불지기', 300);
+    expect((await call('GET', '/api/daily/lantern-keeper')).body.top).toEqual([
+      { rank: 1, name: '등불지기', score: 700, mine: false },
+    ]);
+    await submit(call, 1, '새이름', 950);
+    expect((await call('GET', '/api/daily/lantern-keeper')).body.top).toEqual([
+      { rank: 1, name: '새이름', score: 950, mine: false },
+    ]);
+  });
+
+  it('서버의 오늘과 다른 날의 점수는 버린다. 요청은 받아들인다', async () => {
+    const { call } = server();
+    for (const day of [TODAY - 1, TODAY + 1]) {
+      expect((await submit(call, 1, '등불지기', 700, day)).status).toBe(200);
+    }
+    expect((await call('GET', '/api/daily/lantern-keeper')).body).toEqual({ top: [], me: null, day: TODAY });
+  });
+
+  it('0시(한국 시각)에 새 날이 시작되고, 지난 날의 기록은 보이지 않는다', async () => {
+    const { call, wait } = server();
+    await submit(call, 1, '등불지기', 700);
+    // 17시에서 여섯 시간 뒤는 아직 같은 날 23시다.
+    wait(6 * HOUR);
+    expect((await call('GET', '/api/daily/lantern-keeper')).body.top).toHaveLength(1);
+    wait(2 * HOUR);
+    expect((await call('GET', `/api/daily/lantern-keeper?me=${device(1)}`)).body).toEqual({
+      top: [],
+      me: null,
+      day: TODAY + 1,
+    });
+    // 어제의 날로 늦게 온 점수는 새 날에 들어가지 않는다.
+    await submit(call, 1, '등불지기', 700);
+    expect((await call('GET', '/api/daily/lantern-keeper')).body.top).toEqual([]);
+    await submit(call, 2, '종지기', 400, TODAY + 1);
+    expect((await call('GET', '/api/daily/lantern-keeper')).body.top).toHaveLength(1);
+  });
+
+  it('오늘의 랭킹을 모르는 옛 앱처럼 보내지 않아도 된다', async () => {
+    const { call } = server();
+    const posted = await call('POST', '/api/rank', {
+      device: device(1),
+      name: '등불지기',
+      scores: { 'lantern-keeper': 30 },
+    });
+    expect(posted.status).toBe(200);
+    expect((await call('GET', '/api/daily/lantern-keeper')).body.top).toEqual([]);
+  });
+
+  it('오늘의 판이 없는 게임의 점수는 올리지 않는다. 요청은 받아들인다', async () => {
+    const { call } = server();
+    const posted = await call('POST', '/api/rank', {
+      device: device(1),
+      name: '등불지기',
+      scores: {},
+      daily: { day: TODAY, scores: { 'stack-tower': 30, 'lantern-keeper': 500 } },
+    });
+    expect(posted.status).toBe(200);
+    expect((await call('GET', '/api/daily/lantern-keeper')).body.top).toHaveLength(1);
+    // 오늘의 랭킹이 없는 게임은 물어볼 수도 없다.
+    expect((await call('GET', '/api/daily/stack-tower')).status).toBe(400);
+    expect((await call('GET', '/api/daily/nope')).status).toBe(400);
+  });
+
+  it('맞지 않는 값은 받지 않는다', async () => {
+    const { call } = server();
+    const base = { device: device(1), name: '등불지기', scores: {} };
+    for (const daily of [
+      'x',
+      [],
+      { scores: { 'lantern-keeper': 3 } },
+      { day: '오늘', scores: {} },
+      { day: 1.5, scores: {} },
+      { day: -3, scores: {} },
+      { day: TODAY, scores: { nope: 3 } },
+      { day: TODAY, scores: { 'lantern-keeper': -1 } },
+      { day: TODAY, scores: 'x' },
+    ]) {
+      expect((await call('POST', '/api/rank', { ...base, daily })).status).toBe(400);
+    }
+    expect((await call('GET', '/api/daily/lantern-keeper?me=nope')).status).toBe(400);
+    expect((await call('POST', '/api/daily/lantern-keeper', {})).status).toBe(404);
+  });
+
+  it('기록을 지우면 오늘의 랭킹에서도 빠진다', async () => {
+    const { call } = server();
+    await submit(call, 1, '등불지기', 700);
+    expect((await call('DELETE', '/api/rank', { device: device(1) })).status).toBe(200);
+    expect((await call('GET', '/api/daily/lantern-keeper')).body.top).toEqual([]);
+  });
+
+  it('랭킹 보기와 같은 한도로 센다', async () => {
+    const { call } = server();
+    const [limit] = LIMITS.read;
+    for (let i = 0; i < limit; i += 1) {
+      expect((await call('GET', '/api/daily/lantern-keeper')).status).toBe(200);
+    }
+    expect((await call('GET', '/api/daily/lantern-keeper')).status).toBe(429);
   });
 });

@@ -5,6 +5,7 @@ import { homeScene } from '../../core/home';
 import { music } from '../../core/music';
 import { sfx, tone } from '../../core/sfx';
 import { addText, fadeToScene } from '../../core/ui';
+import { noteDayScore } from '../../online/online';
 import { showBanner } from '../../scenes/GameHud';
 import { MiniGameScene, type PauseExtra, type ResultStat } from '../../scenes/MiniGameScene';
 import { registerLanternTextures } from './art';
@@ -16,7 +17,7 @@ import { BOSS_BAR_HEIGHT, HP_DANGER, HUD_HEIGHT, RunHud } from './hud';
 import { iconKey } from './icons';
 import { Joystick } from './joystick';
 import { levelUpHeader, showChoices, TICKET_HEADER } from './levelup';
-import { buildLobby, type LobbyPage } from './lobby';
+import { buildLobby, parentPage, type LobbyPage } from './lobby';
 import { DAILY_REWARD, dailyPlan, dailyToday, dayIndexOf } from './daily';
 import { applyRun, learnTip, metaStore, newDepth, newUnlocks } from './meta';
 import { BOSS_SONG, FINAL_SONG, LOBBY_SONG, STAGE_SONGS } from './music';
@@ -615,13 +616,14 @@ export class LanternKeeperScene extends MiniGameScene {
     if (!this.sim.state.over) metaStore.setRun(this.sim.state);
   }
 
-  /** 뒤로 가기: 준비 화면에서는 한 걸음 뒤로(강화나 도전 과제 쪽 → 고르는 쪽 → 허브), 판 중에는 일시정지 */
+  /** 뒤로 가기: 준비 화면에서는 한 걸음 뒤로(오늘의 랭킹 → 오늘의 판 → 고르는 쪽 → 허브), 판 중에는 일시정지 */
   override onBackRequest(): void {
     if (this.phase !== 'lobby') {
       super.onBackRequest();
       return;
     }
-    if (this.lobbyPage !== 'main') this.scene.restart({ page: 'main' } satisfies StartData);
+    const parent = parentPage(this.lobbyPage);
+    if (parent !== null) this.scene.restart({ page: parent } satisfies StartData);
     else fadeToScene(this, homeScene());
   }
 
@@ -654,6 +656,8 @@ export class LanternKeeperScene extends MiniGameScene {
     // 오늘 시작한 오늘의 판만 그날의 기록에 남는다. 날이 넘어간 뒤에 이어서 끝낸 판은 보통 판으로 친다.
     const today = dayIndexOf(new Date());
     const daily = state.daily === today ? { day: today, score: scoreFor(summary) } : undefined;
+    // 오늘의 랭킹에 올릴 기록으로 적어 둔다. 아래에서 판을 마칠 때 다른 기록과 함께 서버에 올라간다.
+    if (daily) noteDayScore(LANTERN_GAME_ID, daily.score, daily.day);
     metaStore.setRun(null);
     metaStore.set(
       applyRun(before, {

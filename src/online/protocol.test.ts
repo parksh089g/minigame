@@ -7,10 +7,13 @@ import {
   CODE_ALPHABET,
   CODE_LENGTH,
   codeFrom,
+  DAILY_GAMES,
   deviceIdFrom,
   formatCode,
   isDeviceId,
+  hasDailyBoard,
   hasWeeklyBoard,
+  isRankDay,
   isRankedGame,
   isRankSpan,
   isRankWeek,
@@ -18,6 +21,8 @@ import {
   NAME_MAX,
   RANK_SCAN,
   RANKED_GAMES,
+  rankDayOf,
+  rankDayStart,
   rankLabel,
   RANK_WEEK_MS,
   rankWeekOf,
@@ -216,5 +221,47 @@ describe('랭킹 주', () => {
     expect(isRankSpan('week')).toBe(true);
     expect(isRankSpan('month')).toBe(false);
     expect(isRankSpan(null)).toBe(false);
+  });
+});
+
+describe('랭킹 날', () => {
+  const kst = (text: string): number => Date.parse(`${text}+09:00`);
+
+  it('0시(한국 시각)에 새 날이 시작된다', () => {
+    const noon = rankDayOf(kst('2026-11-12T12:00:00'));
+    expect(rankDayOf(kst('2026-11-12T00:00:00'))).toBe(noon);
+    expect(rankDayOf(kst('2026-11-12T23:59:59'))).toBe(noon);
+    expect(rankDayOf(kst('2026-11-13T00:00:00'))).toBe(noon + 1);
+    expect(rankDayOf(kst('2026-11-12T00:00:00') - 1)).toBe(noon - 1);
+    // 달과 해가 넘어가도 하루씩 는다.
+    expect(rankDayOf(kst('2027-01-01T00:00:01'))).toBe(rankDayOf(kst('2026-12-31T23:00:00')) + 1);
+  });
+
+  it('기기가 어느 나라에 있든 같은 순간에는 같은 날이다', () => {
+    // 협정 세계시로는 아직 11일 오후지만 한국은 12일 새벽이다.
+    expect(rankDayOf(Date.parse('2026-11-11T15:00:00Z'))).toBe(rankDayOf(kst('2026-11-12T12:00:00')));
+    expect(rankDayOf(Date.parse('2026-11-11T14:59:59Z'))).toBe(rankDayOf(kst('2026-11-11T12:00:00')));
+  });
+
+  it('그날이 시작된 때는 한국 시각으로 0시다', () => {
+    const day = rankDayOf(kst('2026-11-12T12:00:00'));
+    expect(rankDayStart(day)).toBe(kst('2026-11-12T00:00:00'));
+    expect(rankDayOf(rankDayStart(day))).toBe(day);
+    expect(rankDayOf(rankDayStart(day + 1) - 1)).toBe(day);
+  });
+
+  it('날의 모양을 가린다', () => {
+    expect(isRankDay(rankDayOf(kst('2026-11-12T12:00:00')))).toBe(true);
+    for (const value of [0, -3, 1.5, Number.NaN, 5_000_000, '20770', null, undefined]) {
+      expect(isRankDay(value)).toBe(false);
+    }
+  });
+
+  it('오늘의 랭킹은 오늘의 판이 있는 게임(등불지기)에만 있다', () => {
+    expect(DAILY_GAMES).toEqual(['lantern-keeper']);
+    expect(hasDailyBoard('lantern-keeper')).toBe(true);
+    expect(hasDailyBoard('stack-tower')).toBe(false);
+    expect(hasDailyBoard('nope')).toBe(false);
+    expect(hasDailyBoard(undefined)).toBe(false);
   });
 });

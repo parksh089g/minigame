@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { createDefaultSave, type SaveData } from '../core/save';
 import type { ApiResult } from './api';
-import { withWeekScore } from './profile';
-import { rankWeekOf, type SubmitRequest, type SubmitResult } from './protocol';
+import { withDayScore, withWeekScore } from './profile';
+import { rankDayOf, rankWeekOf, type SubmitRequest, type SubmitResult } from './protocol';
 import { ScoreSync } from './sync';
 
 const ID = '01112131-4151-6171-8191-a1b1c1d1e1f1';
@@ -45,7 +45,7 @@ function setup(answers: Array<Answer | 'wait'>) {
       mutate(save);
     },
     join(name = '등불지기') {
-      save.online = { id: ID, name, sentName: null, sent: {}, week: null };
+      save.online = { id: ID, name, sentName: null, sent: {}, week: null, day: null };
     },
     best(game: string, best: number) {
       save.games[game] = { best, plays: 1, lastPlayedAt: 1000 };
@@ -56,6 +56,10 @@ function setup(answers: Array<Answer | 'wait'>) {
     /** 이번 주(now가 속한 주)에 낸 점수를 적는다 */
     weekBest(game: string, score: number) {
       save.online = withWeekScore(save.online, game, score, rankWeekOf(now));
+    },
+    /** 오늘(now가 속한 날)의 판에서 낸 점수를 적는다 */
+    dayBest(game: string, score: number) {
+      save.online = withDayScore(save.online, game, score, rankDayOf(now));
     },
     wait(ms: number) {
       now += ms;
@@ -141,11 +145,11 @@ describe('기록 올리기', () => {
     const running = t.sync.run();
     await Promise.resolve();
     t.edit((save) => {
-      save.online = { id: null, name: null, sentName: null, sent: {}, week: null };
+      save.online = { id: null, name: null, sentName: null, sent: {}, week: null, day: null };
     });
     t.release(ok({ 'stack-tower': 90 }, { 'stack-tower': 2 }));
     await running;
-    expect(t.save.online).toEqual({ id: null, name: null, sentName: null, sent: {}, week: null });
+    expect(t.save.online).toEqual({ id: null, name: null, sentName: null, sent: {}, week: null, day: null });
     expect(t.sync.rankOf('stack-tower')).toBeNull();
   });
 
@@ -216,5 +220,68 @@ describe('이번 주 기록 올리기', () => {
     });
     await t.sync.run();
     expect(t.requests[0].weekly).toEqual({ week: WEEK, scores: { 'stack-tower': 55 } });
+  });
+});
+
+describe('오늘의 판 기록 올리기', () => {
+  const TODAY = rankDayOf(THURSDAY);
+  const GAME = 'lantern-keeper';
+
+  it('오늘의 판에서 낸 점수를 다른 기록과 함께 올리고, 올린 것을 적어 둔다', async () => {
+    const t = setup([ok({ [GAME]: 1200 }, { [GAME]: 4 })]);
+    t.join();
+    t.best(GAME, 1200);
+    t.weekBest(GAME, 1200);
+    t.dayBest(GAME, 700);
+    expect((await t.sync.run()).status).toBe('sent');
+    expect(t.requests).toEqual([
+      {
+        device: ID,
+        name: '등불지기',
+        scores: { [GAME]: 1200 },
+        weekly: { week: WEEK, scores: { [GAME]: 1200 } },
+        daily: { day: TODAY, scores: { [GAME]: 700 } },
+      },
+    ]);
+    expect(t.save.online.day).toEqual({ key: TODAY, bests: { [GAME]: 700 }, sent: { [GAME]: 700 } });
+    expect(await t.sync.run()).toEqual({ status: 'idle' });
+  });
+
+  it('오늘의 기록만 올라도 올린다', async () => {
+    const t = setup([ok({}, {}), ok({}, {})]);
+    t.join();
+    await t.sync.run();
+    t.dayBest(GAME, 700);
+    expect((await t.sync.run()).status).toBe('sent');
+    expect(t.requests[1]).toEqual({
+      device: ID,
+      name: '등불지기',
+      scores: {},
+      daily: { day: TODAY, scores: { [GAME]: 700 } },
+    });
+  });
+
+  it('올리지 못한 채로 날이 바뀌면 어제의 점수는 보내지 않는다', async () => {
+    const t = setup([{ ok: false, reason: 'offline' }, ok({}, {})]);
+    t.join();
+    t.edit((save) => {
+      save.online = { ...save.online, sentName: '등불지기' };
+    });
+    t.dayBest(GAME, 700);
+    expect((await t.sync.run()).status).toBe('failed');
+    t.wait(DAY);
+    expect(await t.sync.run()).toEqual({ status: 'idle' });
+    expect(t.requests).toHaveLength(1);
+  });
+
+  it('닉네임을 정하기 전에 낸 오늘의 점수는 참여할 때 같이 올라간다', async () => {
+    const t = setup([ok({}, {})]);
+    t.dayBest(GAME, 700);
+    expect(await t.sync.run()).toEqual({ status: 'off' });
+    t.edit((save) => {
+      save.online = { ...save.online, id: ID, name: '등불지기' };
+    });
+    await t.sync.run();
+    expect(t.requests[0].daily).toEqual({ day: TODAY, scores: { [GAME]: 700 } });
   });
 });

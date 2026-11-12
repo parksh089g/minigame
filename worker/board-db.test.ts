@@ -327,3 +327,69 @@ describe('주간 랭킹', () => {
     expect(board.me).toEqual({ rank: TOP_COUNT + 3, score: 1000 - (TOP_COUNT + 3), name: `이름${TOP_COUNT + 3}` });
   });
 });
+
+describe('오늘의 랭킹', () => {
+  const DAY = 20_833;
+
+  it('그날의 판에서 낸 점수만으로 순위를 매긴다. 전체 랭킹과 주간 랭킹과는 따로다', () => {
+    const db = new BoardDb(memorySql());
+    db.submit(device(1), '하나', { [GAME]: 900 }, 1000, { week: '2027-01-11', scores: { [GAME]: 900 } });
+    db.submit(device(2), '둘', {}, 2000, null, { day: DAY, scores: { [GAME]: 300 } });
+    db.submit(device(1), '하나', {}, 3000, null, { day: DAY, scores: { [GAME]: 200 } });
+    const today = db.dayBoard(GAME, device(1), DAY);
+    expect(today.day).toBe(DAY);
+    expect(today.top.map((row) => [row.rank, row.name, row.score, row.mine])).toEqual([
+      [1, '둘', 300, false],
+      [2, '하나', 200, true],
+    ]);
+    expect(today.me).toEqual({ rank: 2, score: 200, name: '하나' });
+    expect(db.board(GAME, null).top.map((row) => row.score)).toEqual([900]);
+    expect(db.board(GAME, null, '2027-01-11').top.map((row) => row.score)).toEqual([900]);
+    // 다른 랭킹의 답에는 날이 적혀 있지 않다.
+    expect(db.board(GAME, null).day).toBeUndefined();
+  });
+
+  it('같은 날에는 더 높은 점수만 남고, 같은 점수면 먼저 낸 사람이 앞이다', () => {
+    const db = new BoardDb(memorySql());
+    db.submit(device(1), '하나', {}, 1000, null, { day: DAY, scores: { [GAME]: 300 } });
+    db.submit(device(2), '둘', {}, 2000, null, { day: DAY, scores: { [GAME]: 300 } });
+    db.submit(device(1), '하나', {}, 3000, null, { day: DAY, scores: { [GAME]: 100 } });
+    expect(db.dayBoard(GAME, null, DAY).top.map((row) => [row.name, row.score])).toEqual([
+      ['하나', 300],
+      ['둘', 300],
+    ]);
+    db.submit(device(2), '둘', {}, 4000, null, { day: DAY, scores: { [GAME]: 301 } });
+    expect(db.dayBoard(GAME, null, DAY).top.map((row) => row.name)).toEqual(['둘', '하나']);
+  });
+
+  it('날이 바뀌면 빈 랭킹에서 새로 시작하고, 지난 날의 줄은 지운다', () => {
+    const sql = memorySql();
+    const db = new BoardDb(sql);
+    db.submit(device(1), '하나', {}, 1000, null, { day: DAY, scores: { [GAME]: 900 } });
+    expect(db.dayBoard(GAME, device(1), DAY + 1)).toEqual({ top: [], me: null, day: DAY + 1 });
+    db.submit(device(2), '둘', {}, 2000, null, { day: DAY + 1, scores: { [GAME]: 10 } });
+    expect(db.dayBoard(GAME, null, DAY + 1).top.map((row) => row.name)).toEqual(['둘']);
+    expect(sql.exec<{ day: number }>('SELECT DISTINCT day FROM daily').toArray()).toEqual([{ day: DAY + 1 }]);
+  });
+
+  it('오늘의 판이 없는 게임의 점수는 넣지 않는다', () => {
+    const sql = memorySql();
+    const db = new BoardDb(sql);
+    db.submit(device(1), '하나', {}, 1000, null, { day: DAY, scores: { [GAME]: 300, [OTHER]: 4 } });
+    expect(sql.exec<{ game: string }>('SELECT game FROM daily').toArray()).toEqual([{ game: GAME }]);
+  });
+
+  it('닉네임을 바꾸면 오늘의 줄에서도 바뀌고, 기록을 지우면 오늘의 랭킹에서도 빠진다', () => {
+    const db = new BoardDb(memorySql());
+    db.submit(device(1), '하나', {}, 1000, null, { day: DAY, scores: { [GAME]: 300 } });
+    db.submit(device(2), '둘', {}, 2000, null, { day: DAY, scores: { [GAME]: 200 } });
+    db.submit(device(1), '새이름', {}, 3000, null, { day: DAY, scores: {} });
+    expect(db.dayBoard(GAME, null, DAY).top[0]).toMatchObject({ name: '새이름', score: 300 });
+    db.forget(device(1));
+    expect(db.dayBoard(GAME, device(1), DAY)).toEqual({
+      top: [{ rank: 1, name: '둘', score: 200, mine: false }],
+      me: null,
+      day: DAY,
+    });
+  });
+});
