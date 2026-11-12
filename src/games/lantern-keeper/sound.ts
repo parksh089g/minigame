@@ -49,6 +49,7 @@ export type SoundId =
   | 'bolt'
   | 'bell'
   | 'flint'
+  | 'vent'
   | 'revive'
   | 'clear'
   | 'death';
@@ -163,6 +164,11 @@ export const SOUNDS: Readonly<Record<SoundId, readonly Note[]>> = {
     { f: 659, d: 0.2, type: 'triangle', v: 0.18 },
     { f: 1319, to: 1305, d: 0.12, type: 'sine', v: 0.08 },
   ],
+  // 불구멍: 훅 하고 불길이 솟는다. 화면에 여럿 있어서 작게 둔다.
+  vent: [
+    { f: 140, to: 420, d: 0.16, type: 'sawtooth', v: 0.12 },
+    { f: 90, to: 60, d: 0.22, type: 'triangle', v: 0.14, at: 0.06 },
+  ],
   // 부싯돌: 탁 하고 불꽃이 튄다.
   flint: [{ f: 980, to: 260, d: 0.05, type: 'square', v: 0.1 }],
   revive: [
@@ -197,6 +203,7 @@ export const MIN_GAP_MS: Readonly<Partial<Record<SoundId, number>>> = {
   strike: 140,
   bolt: 170,
   flint: 150,
+  vent: 450,
   volley: 200,
   charge: 200,
   windup: 200,

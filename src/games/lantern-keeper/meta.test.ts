@@ -208,7 +208,8 @@ describe('캐릭터와 스테이지 고르기', () => {
     expect(newUnlocks(0, 130)).toEqual([HEROES.stargazer.name]);
     expect(newUnlocks(130, 250)).toEqual([STAGES.marsh.name]);
     expect(newUnlocks(130, 130)).toEqual([]);
-    expect(newUnlocks(0, 600)).toEqual([HEROES.stargazer.name, HEROES.stormer.name, STAGES.marsh.name]);
+    expect(newUnlocks(250, 430)).toEqual([HEROES.stormer.name, STAGES.ridge.name]);
+    expect(newUnlocks(0, 600)).toEqual([HEROES.stargazer.name, HEROES.stormer.name, STAGES.marsh.name, STAGES.ridge.name]);
     expect(newUnlocks(600, 600)).toEqual([]);
   });
 

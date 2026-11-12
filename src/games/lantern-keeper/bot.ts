@@ -26,6 +26,8 @@ const HAZARD_AHEAD = 0.25;
 const BURST_MARGIN = 8;
 /** 웅덩이에 발을 들이는 것을 꺼리는 정도. 적을 피하는 것보다는 훨씬 가볍다. */
 const MIRE_COST = 0.8;
+/** 달아올랐거나 불길이 솟는 불구멍에 발을 들이는 것을 꺼리는 정도. 사람은 깜빡이는 테두리를 보고 비킨다. */
+const SCORCH_COST = 6;
 
 /** 열여섯 방향 가운데, 조금 나아갔을 때 적과 덜 가깝고 빛 조각에 가까워지는 쪽을 고른다. */
 export function steer(sim: Sim): [number, number] {
@@ -72,6 +74,7 @@ export function steer(sim: Sim): [number, number] {
       if (d < HAZARD_RANGE) cost += ((HAZARD_RANGE - d) / HAZARD_RANGE) ** 2 * 8;
     }
     if (sim.isMire(x, y)) cost += MIRE_COST;
+    if (sim.isScorching(x, y)) cost += SCORCH_COST;
     if (gem) cost += Math.hypot(gem.x - x, gem.y - y) * 0.02;
     if (cost < bestCost) {
       bestCost = cost;
