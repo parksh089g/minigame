@@ -53,9 +53,12 @@ export interface GoalsState {
 
 const isGoalKind = (value: unknown): value is GoalKind => typeof value === 'string' && value in GOALS;
 
-/** 그 날짜와 사무실에 맞는 목표를 정한다. 같은 날짜와 사무실이면 언제나 같다. */
-export function goalsFor(day: string, office: number): Goal[] {
-  const open = GOAL_KINDS.filter((kind) => (GOALS[kind] as GoalDef).unlockOffice <= office);
+/**
+ * 그 날짜와 사무실에 맞는 목표를 정한다. 같은 날짜와 사무실이면 언제나 같다.
+ * skip에 적힌 것은 고르지 않는다. 더 올릴 것이 남지 않아서 채울 수 없는 목표를 빼는 데 쓴다.
+ */
+export function goalsFor(day: string, office: number, skip: readonly GoalKind[] = []): Goal[] {
+  const open = GOAL_KINDS.filter((kind) => (GOALS[kind] as GoalDef).unlockOffice <= office && !skip.includes(kind));
   // 날짜에서 뽑은 수로 줄을 세워 앞의 셋을 고른다. 날마다 다른 조합이 나온다.
   const ranked = open
     .map((kind) => ({ kind, order: seededUnit(`${day}:${kind}`) }))
@@ -68,14 +71,14 @@ export function goalsFor(day: string, office: number): Goal[] {
   });
 }
 
-export function createGoals(day = '', office = 0): GoalsState {
-  const list = day === '' ? [] : goalsFor(day, office);
+export function createGoals(day = '', office = 0, skip: readonly GoalKind[] = []): GoalsState {
+  const list = day === '' ? [] : goalsFor(day, office, skip);
   return { day, list, progress: list.map(() => 0), claimed: list.map(() => false), releaseCoins: 0 };
 }
 
 /** 날이 바뀌었으면 새 목표를, 아니면 그대로 돌려준다. */
-export function rollGoals(goals: GoalsState, day: string, office: number): GoalsState {
-  return goals.day === day ? goals : createGoals(day, office);
+export function rollGoals(goals: GoalsState, day: string, office: number, skip: readonly GoalKind[] = []): GoalsState {
+  return goals.day === day ? goals : createGoals(day, office, skip);
 }
 
 /** 이 일을 amount번 한 것을 목표에 센다. 목표를 넘겨서는 세지 않는다. */

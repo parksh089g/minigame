@@ -60,7 +60,7 @@ import {
   type StaffId,
   type TaskKind,
 } from './data';
-import { bumpGoals, createGoals, normalizeGoals, type GoalsState } from './goals';
+import { bumpGoals, createGoals, GOALS, normalizeGoals, type GoalKind, type GoalsState } from './goals';
 
 export const COMPANY_VERSION = 1;
 
@@ -779,6 +779,32 @@ export function train(state: CompanyState, index: number): boolean {
   desk.level += 1;
   bumpGoals(state.goals, 'train');
   return true;
+}
+
+/**
+ * 지금은 채울 수 없는 오늘의 목표. 교육이나 장비를 거의 다 올려서 목표의 수만큼 남지 않았을 때다.
+ * 새 목표를 정할 때 이것들은 빼고 고른다.
+ */
+export function stuckGoals(state: CompanyState): GoalKind[] {
+  const most = (kind: GoalKind): number => Math.max(...GOALS[kind].targets);
+  const stuck: GoalKind[] = [];
+  let lessons = 0;
+  for (const desk of state.desks) if (desk.staff) lessons += Math.max(0, TRAINING.maxLevel - desk.level);
+  if (lessons < most('train')) stuck.push('train');
+  let upgrades = 0;
+  for (const id of EQUIPMENT_ORDER) {
+    const def: EquipmentDef = EQUIPMENT[id];
+    if (def.unlockOffice > state.office) continue;
+    if (def.scope === 'company') {
+      upgrades += Math.max(0, def.maxLevel - equipmentLevel(state, id));
+      continue;
+    }
+    state.desks.forEach((desk, index) => {
+      if (desk.staff) upgrades += Math.max(0, def.maxLevel - equipmentLevel(state, id, index));
+    });
+  }
+  if (upgrades < most('upgrade')) stuck.push('upgrade');
+  return stuck;
 }
 
 // ───────── 급한 의뢰 ─────────
