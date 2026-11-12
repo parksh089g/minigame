@@ -71,6 +71,10 @@ export const SC = {
   spark: 'sc-spark',
   plant: 'sc-plant',
   window: 'sc-window',
+  tray: 'sc-tray',
+  internet: 'sc-internet',
+  server: 'sc-server',
+  rush: 'sc-rush',
 } as const;
 
 export const COMPUTER_SIZE = { width: 26, height: 22 } as const;
@@ -83,6 +87,17 @@ function monitor(c: Ctx, x: number, y: number, w: number, h: number, frame: stri
   box(c, x + 1.6, y + 1.6, w - 3.2, h - 3.6, 1.4, screen);
   stroke(c, `M${x + 3.4} ${y + 4.4}h${w * 0.3}`, WHITE, 1.1);
   stroke(c, `M${x + 3.4} ${y + 7}h${w * 0.18}`, WHITE, 1.1);
+}
+
+/** 머리만 있는 직원의 그림 크기 */
+const HEAD_SIZE = { width: 28, height: 28 } as const;
+
+/** 두 눈과 볼. left와 right는 눈의 x, y는 눈의 높이다. */
+function face(c: Ctx, left: number, right: number, y: number): void {
+  oval(c, left, y, 1.4, 1.8, INK);
+  oval(c, right, y, 1.4, 1.8, INK);
+  oval(c, left - 2.6, y + 3.4, 1.9, 1.2, '#ffb3c4');
+  oval(c, right + 2.6, y + 3.4, 1.9, 1.2, '#ffb3c4');
 }
 
 const ARTS: Record<string, Art> = {
@@ -233,6 +248,134 @@ const ARTS: Record<string, Art> = {
       oval(c, 25, 8, 3, 3, '#ffe9a8');
       box(c, 16, 2.5, 2, 21, 0, '#fffaf0');
       box(c, 2.5, 12, 29, 2, 0, '#fffaf0');
+    },
+  },
+  /** 일감함: 서류가 꽂힌 받침 */
+  'sc-tray': {
+    width: 22,
+    height: 22,
+    draw(c) {
+      box(c, 5.5, 3.5, 12, 12, 1.4, '#bfe3ff');
+      box(c, 4, 6.5, 14, 10, 1.4, '#fffaf0');
+      stroke(c, 'M6.5 10h8M6.5 12.5h5', '#d9d2e6', 1);
+      box(c, 2, 14, 18, 6.5, 2, '#c8b8f0');
+      box(c, 7.5, 16.2, 7, 2, 1, '#a892e6');
+    },
+  },
+  /** 인터넷: 안테나가 달린 공유기 */
+  'sc-internet': {
+    width: 22,
+    height: 22,
+    draw(c) {
+      stroke(c, 'M5.5 13V7.5M16.5 13V7.5', '#8d7aa8', 1.6);
+      stroke(c, 'M7.5 5.5q3.5-3.5 7 0', '#3f86c4', 1.3);
+      stroke(c, 'M9.3 8.2q1.7-1.7 3.4 0', '#3f86c4', 1.3);
+      box(c, 2, 12.5, 18, 6.5, 2.4, '#bfe3ff');
+      box(c, 2, 16, 18, 3, 1.5, '#8cc4f0');
+      oval(c, 6, 15, 1, 1, '#5cc79a');
+      oval(c, 9.5, 15, 1, 1, '#ffcf5c');
+      box(c, 4, 19, 3, 1.8, 0.8, '#8d7aa8');
+      box(c, 15, 19, 3, 1.8, 0.8, '#8d7aa8');
+    },
+  },
+  /** 서버: 불이 깜박이는 선반 */
+  'sc-server': {
+    width: 22,
+    height: 22,
+    draw(c) {
+      box(c, 4, 1, 14, 19.5, 2.4, '#6b5b8c');
+      const lights = ['#8fe0bd', '#ffcf5c', '#ff9fb5'];
+      lights.forEach((light, index) => {
+        const y = 3 + index * 5.6;
+        box(c, 6, y, 10, 4.2, 1, '#8d7aa8');
+        oval(c, 8, y + 2.1, 0.9, 0.9, light);
+        stroke(c, `M11 ${y + 2.1}h3.2`, '#c8b8f0', 1);
+      });
+      box(c, 3, 19.5, 16, 2.2, 1.1, '#4a3f66');
+    },
+  },
+  /** 급한 의뢰: 자명종 */
+  'sc-rush': {
+    width: 18,
+    height: 18,
+    draw(c) {
+      oval(c, 4.3, 4, 2.6, 2.6, '#e06d75');
+      oval(c, 13.7, 4, 2.6, 2.6, '#e06d75');
+      stroke(c, 'M4.6 15.6l-1.2 1.6M13.4 15.6l1.2 1.6', '#e06d75', 1.4);
+      oval(c, 9, 10, 7.2, 7.2, '#ff8f8f');
+      oval(c, 9, 10, 5.3, 5.3, WHITE);
+      stroke(c, 'M9 7v3.2l2.2 1.3', INK, 1.2);
+    },
+  },
+  /** 곰 */
+  'sc-staff-bear': {
+    ...HEAD_SIZE,
+    draw(c) {
+      oval(c, 6.5, 7, 4.6, 4.6, '#b98a62');
+      oval(c, 21.5, 7, 4.6, 4.6, '#b98a62');
+      oval(c, 6.5, 7, 2.2, 2.2, '#f2c9a5');
+      oval(c, 21.5, 7, 2.2, 2.2, '#f2c9a5');
+      oval(c, 14, 16, 11.5, 10.5, '#c99a70');
+      oval(c, 14, 19.5, 5.2, 4, '#f6dcc0');
+      face(c, 9.3, 18.7, 14.5);
+      oval(c, 14, 18, 1.7, 1.2, INK);
+      stroke(c, 'M14 19v1.6', INK, 0.9);
+    },
+  },
+  /** 토끼 */
+  'sc-staff-rabbit': {
+    ...HEAD_SIZE,
+    draw(c) {
+      oval(c, 9, 7.5, 3, 7, '#ffd9e2', -0.16);
+      oval(c, 19, 7.5, 3, 7, '#ffd9e2', 0.16);
+      oval(c, 9, 7.5, 1.3, 4.8, '#ff9fb5', -0.16);
+      oval(c, 19, 7.5, 1.3, 4.8, '#ff9fb5', 0.16);
+      oval(c, 14, 18.5, 10.5, 8.8, '#ffd9e2');
+      face(c, 9.6, 18.4, 17.5);
+      oval(c, 14, 20.2, 1.3, 1, '#ff7fa3');
+    },
+  },
+  /** 개구리 */
+  'sc-staff-frog': {
+    ...HEAD_SIZE,
+    draw(c) {
+      oval(c, 7.5, 8.5, 4.8, 4.8, '#8fd67a');
+      oval(c, 20.5, 8.5, 4.8, 4.8, '#8fd67a');
+      oval(c, 14, 17.5, 11.5, 9.3, '#8fd67a');
+      oval(c, 7.5, 8.5, 3.1, 3.1, WHITE);
+      oval(c, 20.5, 8.5, 3.1, 3.1, WHITE);
+      oval(c, 8, 9, 1.5, 1.7, INK);
+      oval(c, 20, 9, 1.5, 1.7, INK);
+      stroke(c, 'M9.5 19q4.5 3.2 9 0', INK, 1.1);
+      oval(c, 6.5, 19, 1.9, 1.2, '#ffb3c4');
+      oval(c, 21.5, 19, 1.9, 1.2, '#ffb3c4');
+    },
+  },
+  /** 펭귄 */
+  'sc-staff-penguin': {
+    ...HEAD_SIZE,
+    draw(c) {
+      oval(c, 14, 15.5, 11, 11.5, '#566699');
+      oval(c, 10, 16.5, 5, 6, WHITE);
+      oval(c, 18, 16.5, 5, 6, WHITE);
+      oval(c, 14, 20.5, 6.5, 5, WHITE);
+      face(c, 10, 18, 15.5);
+      fill(c, 'M11.3 18.6h5.4L14 21.8z', '#ffb14a');
+    },
+  },
+  /** 여우 */
+  'sc-staff-fox': {
+    ...HEAD_SIZE,
+    draw(c) {
+      fill(c, 'M3 3.5l8.5 3-6.5 7z', '#f59a4a');
+      fill(c, 'M25 3.5l-8.5 3 6.500 7z', '#f59a4a');
+      fill(c, 'M5.4 6l3.800 1.400-2.900 3.100z', '#fff3e6');
+      fill(c, 'M22.6 6l-3.800 1.400 2.900 3.100z', '#fff3e6');
+      oval(c, 14, 16.5, 11.5, 9.5, '#f7a85a');
+      oval(c, 8.5, 20, 5, 4, '#fff3e6');
+      oval(c, 19.5, 20, 5, 4, '#fff3e6');
+      face(c, 9.5, 18.5, 15.5);
+      oval(c, 14, 19.6, 1.6, 1.2, INK);
     },
   },
 };

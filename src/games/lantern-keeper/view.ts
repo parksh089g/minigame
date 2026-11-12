@@ -2,8 +2,18 @@ import Phaser from 'phaser';
 import { darknessTexture, flashOf, FLOOR_OF, HERO_FRAMES, LK, LOOK } from './art';
 import { ENEMIES, POSTS, STAGES } from './data';
 import { auraStats, fireflyStats, isEvolved } from './rules';
-import { AIM_LOCK_SECONDS, CHARGE_SECONDS, CHARGING, dashOf, type Gem, type Post, type ShotLook, type Sim } from './sim';
-import { puddlesAround } from './terrain';
+import {
+  AIM_LOCK_SECONDS,
+  CHARGE_SECONDS,
+  CHARGING,
+  dashOf,
+  WARDEN_CHARGING,
+  type Gem,
+  type Post,
+  type ShotLook,
+  type Sim,
+} from './sim';
+import { puddlesAround, VENT, ventClock, ventsAround } from './terrain';
 
 const DEPTH = {
   floor: 0,
@@ -134,6 +144,8 @@ export class RunView {
   private readonly frames: readonly [string, string];
   /** 웅덩이가 있는 스테이지인지 */
   private readonly puddles: boolean;
+  /** 불구멍이 있는 스테이지인지 */
+  private readonly vents: boolean;
   private stride = 0;
 
   constructor(
@@ -150,6 +162,7 @@ export class RunView {
     const { hero, stage } = sim.state;
     this.frames = HERO_FRAMES[hero];
     this.puddles = STAGES[stage].puddles;
+    this.vents = STAGES[stage].vents;
     this.width = width;
     this.height = height;
     this.centerX = Math.round(width / 2);
@@ -294,7 +307,7 @@ export class RunView {
       const x = Math.round(e.x + offsetX);
       const y = Math.round(e.y + offsetY);
       const brain = info.brain;
-      if ((brain === 'charge' || brain === 'lord') && e.mode === 1) {
+      if ((brain === 'charge' || brain === 'lord' || brain === 'warden') && e.mode === 1) {
         // 내달릴 길. 겨누는 동안에는 옅게 따라오다가, 방향이 굳으면 짙어지고 깜빡인다.
         const dash = dashOf(e.kind, e.tier);
         const length = dash.speed * dash.seconds + info.radius;
@@ -306,7 +319,10 @@ export class RunView {
         g.lineBetween(x, y, endX, endY);
         g.lineStyle(1, locked ? LOOK.threatCore : LOOK.threat, locked ? 0.85 : 0.5);
         g.lineBetween(x, y, endX, endY);
-      } else if ((brain === 'volley' || brain === 'matron') && e.mode === CHARGING) {
+      } else if (
+        ((brain === 'volley' || brain === 'matron') && e.mode === CHARGING) ||
+        (brain === 'warden' && e.mode === WARDEN_CHARGING)
+      ) {
         // 모으는 빛: 고리가 보스 쪽으로 조여들고 가운데가 밝아진다.
         const progress = 1 - Math.max(0, e.timer) / CHARGE_SECONDS;
         air.lineStyle(2, LOOK.threat, 0.35 + 0.55 * progress);
@@ -487,6 +503,61 @@ export class RunView {
     }
   }
 
+  /**
+   * 화면에 걸치는 불구멍을 그린다. 잠잠할 때는 어두운 구덩이, 달아오르면 안에서부터 불빛이 차오르고,
+   * 솟는 동안에는 구덩이 가득 불길이 인다.
+   */
+  private drawVents(sim: Sim, seconds: number): void {
+    const s = sim.state;
+    const p = s.player;
+    const g = this.terrain;
+    g.clear();
+    const midX = p.x + this.width / 2 - this.centerX;
+    const midY = p.y + this.height / 2 - this.centerY;
+    for (const vent of ventsAround(midX, midY, this.width / 2 + 26, this.height / 2 + 30, s.seed)) {
+      const x = Math.round(vent.x - p.x + this.centerX);
+      const y = Math.round(vent.y - p.y + this.centerY);
+      const clock = ventClock(vent, s.t);
+      g.fillStyle(LOOK.ventRim, 0.8);
+      g.fillEllipse(x, y, vent.rx * 2 + 4, vent.ry * 2 + 4);
+      g.fillStyle(LOOK.vent, 0.9);
+      g.fillEllipse(x, y, vent.rx * 2, vent.ry * 2);
+      if (clock < VENT.warm) {
+        // 달아오른다: 불빛이 안에서부터 차오르고, 테두리가 깜빡여서 곧 솟는다는 것을 알린다.
+        const heat = clock / VENT.warm;
+        g.fillStyle(LOOK.ventWarm, 0.25 + 0.45 * heat);
+        g.fillEllipse(x, y, vent.rx * 2 * heat, vent.ry * 2 * heat);
+        const blink = Math.floor(seconds * (6 + 8 * heat)) % 2 === 0;
+        g.lineStyle(1, LOOK.threat, blink ? 0.9 : 0.45);
+        g.strokeEllipse(x, y, vent.rx * 2 + 2, vent.ry * 2 + 2);
+      } else if (clock < VENT.warm + VENT.erupt) {
+        // 솟는다: 구덩이 가득한 불빛 위로 불길 몇 가닥이 일렁이며 솟는다.
+        const left = 1 - (clock - VENT.warm) / VENT.erupt;
+        const fade = Math.min(1, left * 4);
+        g.fillStyle(LOOK.ventWarm, 0.85 * fade);
+        g.fillEllipse(x, y, vent.rx * 2, vent.ry * 2);
+        g.fillStyle(LOOK.ventFire, 0.9 * fade);
+        g.fillEllipse(x, y, vent.rx * 1.3, vent.ry * 1.3);
+        for (let k = -2; k <= 2; k += 1) {
+          const sway = Math.sin(seconds * 17 + k * 1.9 + vent.x);
+          const tall = Math.round((9 + 5 * sway) * fade * (1 - Math.abs(k) * 0.22));
+          const fx = Math.round(x + k * vent.rx * 0.36);
+          g.fillStyle(k % 2 === 0 ? LOOK.ventFire : LOOK.ventWarm, 0.9 * fade);
+          g.fillRect(fx - 1, y - tall, 3, tall);
+          g.fillStyle(LOOK.ventCore, 0.8 * fade);
+          g.fillRect(fx, y - Math.round(tall * 0.5), 1, Math.round(tall * 0.5));
+        }
+        g.lineStyle(1, LOOK.threat, 0.9 * fade);
+        g.strokeEllipse(x, y, vent.rx * 2 + 2, vent.ry * 2 + 2);
+      } else {
+        // 잠잠하다: 바닥에 남은 불씨만 희미하게 숨 쉰다.
+        const breath = 0.5 + 0.5 * Math.sin(seconds * 2 + vent.offset * 3);
+        g.fillStyle(LOOK.ventWarm, 0.1 + 0.08 * breath);
+        g.fillEllipse(x, y, vent.rx * 0.9, vent.ry * 0.9);
+      }
+    }
+  }
+
   sync(sim: Sim, seconds: number, dt: number): void {
     const s = sim.state;
     const p = s.player;
@@ -498,6 +569,7 @@ export class RunView {
     this.floor.setTilePosition(Math.round(p.x - this.centerX), Math.round(p.y - this.centerY));
 
     if (this.puddles) this.drawPuddles(sim, seconds);
+    if (this.vents) this.drawVents(sim, seconds);
 
     // 웅덩이에서는 발이 무거워 걸음도 느려진다.
     if (p.moving) this.stride += (p.wading ? 36 : 60) * dt;

@@ -24,6 +24,7 @@ const SCALES: Readonly<Record<keyof typeof SONGS, Set<number>>> = {
   lobby: scale('c', 'd', 'e', 'f', 'g', 'a', 'b'),
   meadow: scale('a', 'b', 'c', 'd', 'e', 'f', 'g', 'g#'),
   marsh: scale('d', 'e', 'f', 'g', 'a', 'bb', 'c', 'c#', 'eb'),
+  ridge: scale('g', 'a', 'bb', 'c', 'd', 'eb', 'f', 'f#'),
   boss: scale('e', 'f#', 'g', 'a', 'b', 'c', 'd', 'd#', 'c#', 'f'),
   final: scale('e', 'f#', 'g', 'a', 'b', 'c', 'd', 'd#', 'c#', 'f'),
 };

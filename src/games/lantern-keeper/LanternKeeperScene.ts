@@ -366,6 +366,9 @@ export class LanternKeeperScene extends MiniGameScene {
           // 새벽 종은 두 번 울린다.
           if (event.evolved) board.play('bell', now, 0.3);
           break;
+        case 'vent':
+          board.play('vent', now);
+          break;
         case 'spark':
           this.view.flint(sim, event.x, event.y, event.radius);
           board.play('flint', now);
