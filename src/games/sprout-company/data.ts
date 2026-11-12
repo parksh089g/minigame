@@ -632,11 +632,13 @@ export const DECOR = {
   'wall-cloud': { slot: 'wall', name: '구름 벽지', cost: 200, color: 0xd3eaff, mark: 0xffffff, pattern: 'cloud' },
   'floor-carpet': { slot: 'floor', name: '분홍 양탄자', cost: 60, color: 0xf7c4d2, mark: 0xf7c4d2, pattern: 'plain' },
   'floor-wood': { slot: 'floor', name: '나무 바닥', cost: 100, color: 0xe9c391, mark: 0xd6a970, pattern: 'plank' },
+  'floor-tile': { slot: 'floor', name: '하늘 타일', cost: 100, color: 0xe3f2ff, mark: 0xc7e0f4, pattern: 'grid' },
   'floor-check': { slot: 'floor', name: '바둑판 바닥', cost: 150, color: 0xf4ecf0, mark: 0xdccbd5, pattern: 'check' },
   'floor-grass': { slot: 'floor', name: '잔디 바닥', cost: 200, color: 0xbfe6a8, mark: 0x9ccf84, pattern: 'tuft' },
   'sign-wood': { slot: 'sign', name: '나무 간판', cost: 60, color: 0xf0cfa5, mark: 0xd6a970, pattern: 'plain' },
   'sign-mint': { slot: 'sign', name: '민트 간판', cost: 100, color: 0xbdebd9, mark: 0x7fd3ae, pattern: 'plain' },
   'sign-pink': { slot: 'sign', name: '분홍 간판', cost: 100, color: 0xffd3dd, mark: 0xe97f99, pattern: 'plain' },
+  'sign-sky': { slot: 'sign', name: '하늘 간판', cost: 150, color: 0xcfe6fb, mark: 0x8fbfe8, pattern: 'plain' },
   'sign-gold': { slot: 'sign', name: '금빛 간판', cost: 200, color: 0xffe08a, mark: 0xe0a020, pattern: 'plain' },
 } as const satisfies Record<string, DecorDef>;
 

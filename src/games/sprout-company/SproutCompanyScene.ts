@@ -242,6 +242,8 @@ interface DeskView {
   bubbleX: number;
   /** 컴퓨터를 그리는 배율 */
   gearScale: number;
+  /** 막대의 오른쪽을 줄이는 길이. 낮은 칸에서 하트를 달 자리를 낸다. */
+  barTrim: number;
   frame: Graphics;
   body: Phaser.GameObjects.Image | null;
   bodyY: number;
@@ -727,9 +729,9 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
         const left = W - MARGIN - width;
         this.signPlate
           .fillStyle(plate.mark, 1)
-          .fillRoundedRect(left, 29.5, width, 12.5, 6)
+          .fillRoundedRect(left, 29.5, width, 11.5, 5.5)
           .fillStyle(plate.color, 1)
-          .fillRoundedRect(left, 28.5, width, 12, 6);
+          .fillRoundedRect(left, 28.5, width, 11.5, 5.5);
       }
     }
   }
@@ -941,6 +943,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
       deskTop,
       bubbleX,
       gearScale: narrow ? 0.8 : 1,
+      barTrim: compact && hasBuddy(state, index) ? 8 : 0,
       frame,
       body: null,
       bodyY: 0,
@@ -1100,7 +1103,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     if (breakOpen(state)) {
       const inset = view.width < TILE_WIDTH.wide ? 9 : 15;
       const left = view.x + inset;
-      const length = view.width - inset * 2;
+      const length = view.width - inset * 2 - view.barTrim;
       const filled = Math.round(length * Phaser.Math.Clamp(desk.energy, 0, 1));
       const shown = `${filled}|${resting}`;
       if (shown !== view.energyShown) {
@@ -1123,7 +1126,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     if (task) {
       const inset = view.width < TILE_WIDTH.wide ? 9 : 15;
       const left = view.x + inset;
-      const length = view.width - inset * 2;
+      const length = view.width - inset * 2 - view.barTrim;
       const share = Phaser.Math.Clamp(1 - task.left / task.total, 0, 1);
       view.bar
         .clear()
@@ -2230,7 +2233,11 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
         } else {
           swatch.fillStyle(THEME.shadow, 1).fillRoundedRect(x, y + 2, 28, 24, 5);
           swatch.fillStyle(def?.color ?? base[slot], 1).fillRoundedRect(x, y, 28, 24, 5);
-          if (def) paintPattern(swatch, def, x + 2, y + 2, 24, 20);
+          // 구름은 작은 칸에 들어가지 않아서 하나만 줄여서 그린다.
+          if (def?.pattern === 'cloud') {
+            swatch.fillStyle(def.mark, 1).fillCircle(x + 9, y + 14, 3.5).fillCircle(x + 14, y + 11, 5).fillCircle(x + 19, y + 14, 3.5);
+            swatch.fillRect(x + 9, y + 13, 10, 4.5);
+          } else if (def) paintPattern(swatch, def, x + 2, y + 2, 24, 20);
         }
         panel.add(swatch);
         panel.add(addText(this, left + 48, middle - 14, def?.name ?? '기본', { color: THEME_CSS.inkDeep }));
