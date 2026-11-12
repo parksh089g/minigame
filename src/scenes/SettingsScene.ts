@@ -24,6 +24,10 @@ const RESET_CONFIRM_MS = 3000;
 const TOP = { sound: 44, data: 124, transfer: 214, notice: 266, info: 298 } as const;
 const TRANSFER_MINUTES = Math.round(TRANSFER_TTL_MS / 60000);
 
+/** 색 구분 도우미를 켰을 때 무엇이 달라지는지 알려 주는 안내 */
+const ASSIST_ON = '색깔 물 나누기와 길 잇기에서\n색마다 무늬를 또렷하게 보여 줘요.';
+const ASSIST_OFF = '색 구분 도우미를 껐어요.';
+
 /** 기록을 초기화한 뒤에 보여 주는 안내 */
 const RESET_DONE = '기록, 코인, 꾸미기, 업적을 모두 지웠어요.';
 
@@ -41,7 +45,7 @@ interface SettingsData {
   notice?: { text: string; ok: boolean };
 }
 
-/** 효과음·배경 음악·진동 설정, 세이브 내보내기·가져오기·초기화, 다른 기기로 옮기기, 앱 정보. */
+/** 효과음·배경 음악·진동·색 구분 도우미 설정, 세이브 내보내기·가져오기·초기화, 다른 기기로 옮기기, 앱 정보. */
 export class SettingsScene extends Phaser.Scene {
   private noticeText!: Phaser.GameObjects.Text;
   private resetArmedUntil = 0;
@@ -65,9 +69,12 @@ export class SettingsScene extends Phaser.Scene {
     });
     addText(this, GAME_WIDTH / 2, 8, '설정', { size: FONT_SIZE.large, originX: 0.5 });
 
-    this.addSection(TOP.sound, '소리와 진동');
-    // 효과음과 배경 음악은 한 줄에 반씩 나란히 둔다. 배경 음악은 음악이 있는 게임에서만 들린다.
+    this.addSection(TOP.sound, '소리, 진동, 화면');
+    // 한 줄에 둘씩 반반 나란히 둔다. 윗줄은 효과음과 배경 음악(음악이 있는 게임에서만 들린다),
+    // 아랫줄은 진동과 색 구분 도우미다.
     const half = (CONTENT_WIDTH - 12) / 2;
+    const leftHalf = { left: LEFT, right: LEFT + half, width: 50 };
+    const rightHalf = { left: RIGHT - half, right: RIGHT, width: 50 };
     this.addToggleRow(
       TOP.sound + 16,
       '효과음',
@@ -78,7 +85,7 @@ export class SettingsScene extends Phaser.Scene {
           sfx.click();
         },
       },
-      { left: LEFT, right: LEFT + half, width: 50 },
+      leftHalf,
     );
     this.addToggleRow(
       TOP.sound + 16,
@@ -90,20 +97,44 @@ export class SettingsScene extends Phaser.Scene {
           sfx.click();
         },
       },
-      { left: RIGHT - half, right: RIGHT, width: 50 },
+      rightHalf,
     );
     if (canVibrate()) {
-      this.addToggleRow(TOP.sound + 46, '진동', {
-        isOn: () => store.data.settings.vibration,
-        toggle: () => {
-          store.update((save) => void (save.settings.vibration = !save.settings.vibration));
-          vibrate(30);
+      this.addToggleRow(
+        TOP.sound + 46,
+        '진동',
+        {
+          isOn: () => store.data.settings.vibration,
+          toggle: () => {
+            store.update((save) => void (save.settings.vibration = !save.settings.vibration));
+            vibrate(30);
+          },
         },
-      });
+        leftHalf,
+      );
     } else {
-      addText(this, LEFT, TOP.sound + 52, '진동');
-      addText(this, RIGHT, TOP.sound + 52, '이 기기는 지원 안 함', { color: THEME_CSS.sub, originX: 1 });
+      addText(this, leftHalf.left, TOP.sound + 52, '진동');
+      addText(this, leftHalf.right, TOP.sound + 53, '지원 안 함', {
+        size: FONT_SIZE.small,
+        color: THEME_CSS.sub,
+        originX: 1,
+      });
     }
+    // 켜면 색으로 푸는 게임이 색마다 다른 무늬를 또렷하게 그린다. 무엇이 달라지는지는 켤 때 아래에 알린다.
+    this.addToggleRow(
+      TOP.sound + 46,
+      '색 구분\n도우미',
+      {
+        isOn: () => store.data.settings.colorAssist,
+        toggle: () => {
+          store.update((save) => void (save.settings.colorAssist = !save.settings.colorAssist));
+          sfx.click();
+          const on = store.data.settings.colorAssist;
+          this.showNotice(on ? ASSIST_ON : ASSIST_OFF, true);
+        },
+      },
+      rightHalf,
+    );
 
     this.addSection(TOP.data, '저장 데이터');
     this.addDataButtons(TOP.data + 16);
@@ -123,14 +154,18 @@ export class SettingsScene extends Phaser.Scene {
     addText(this, LEFT, y, title, { color: THEME_CSS.accent });
   }
 
-  /** 이름은 왼쪽 끝에, 켜고 끄는 버튼은 오른쪽 끝에 둔다. span을 안 주면 한 줄을 다 쓴다. */
+  /**
+   * 이름은 왼쪽 끝에, 켜고 끄는 버튼은 오른쪽 끝에 둔다. span을 안 주면 한 줄을 다 쓴다.
+   * 이름이 두 줄이면 줄 사이를 붙여서 버튼의 높이 안에 들어가게 한다.
+   */
   private addToggleRow(
     y: number,
     label: string,
     binding: { isOn: () => boolean; toggle: () => void },
     span: { left: number; right: number; width: number } = { left: LEFT, right: RIGHT, width: 64 },
   ): void {
-    addText(this, span.left, y + 6, label);
+    if (label.includes('\n')) addText(this, span.left, y - 2, label, { lineSpacing: -1 });
+    else addText(this, span.left, y + 6, label);
     const width = span.width;
     const button = new PixelButton(this, {
       x: span.right - width,

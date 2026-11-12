@@ -33,7 +33,7 @@ describe('normalizeSave', () => {
     const save = {
       version: SAVE_VERSION,
       coins: 12,
-      settings: { sound: false, music: false, vibration: true },
+      settings: { sound: false, music: false, vibration: true, colorAssist: true },
       games: { 'lightning-tap': { best: 80, plays: 4, lastPlayedAt: NOW - 1000 } },
       daily: { lastClearedOn: '2026-11-11', streak: 3, bestStreak: 4, totalCleared: 8 },
       cosmetics: {
@@ -71,6 +71,14 @@ describe('normalizeSave', () => {
     expect(old.weekly).toEqual(createWeekly());
     expect(old.coins).toBe(3);
     expect(old.version).toBe(SAVE_VERSION);
+  });
+
+  it('색 구분 도우미는 처음에 꺼져 있고, 켠 것은 그대로 읽힌다', () => {
+    expect(createDefaultSave(NOW).settings.colorAssist).toBe(false);
+    const on = normalizeSave({ version: SAVE_VERSION, games: {}, settings: { colorAssist: true } }, NOW);
+    expect(on.settings).toEqual({ sound: true, music: true, vibration: true, colorAssist: true });
+    const broken = normalizeSave({ version: SAVE_VERSION, games: {}, settings: { colorAssist: 'on' } }, NOW);
+    expect(broken.settings.colorAssist).toBe(false);
   });
 
   it('깨진 주간 기록은 버리고 나머지는 살린다', () => {
@@ -137,14 +145,19 @@ describe('normalizeSave', () => {
     expect(save.version).toBe(SAVE_VERSION);
     expect(save.coins).toBe(30);
     expect(save.games).toEqual(old.games);
-    // 배경 음악 설정은 이 세이브보다 뒤에 생겼으므로 켠 채로 읽는다
-    expect(save.settings).toEqual({ ...old.settings, music: true });
+    // 이 세이브보다 뒤에 생긴 설정: 배경 음악은 켠 채로, 색 구분 도우미는 꺼진 채로 읽는다
+    expect(save.settings).toEqual({ ...old.settings, music: true, colorAssist: false });
     expect(save.daily).toEqual({ lastClearedOn: null, streak: 0, bestStreak: 0, totalCleared: 0 });
   });
 
   it('배경 음악 설정이 생기기 전의 세이브는 음악을 켠 채로 읽고, 끈 것은 그대로 둔다', () => {
     const old = { version: 5, coins: 1, settings: { sound: false, vibration: true }, games: {} };
-    expect(normalizeSave(old, NOW).settings).toEqual({ sound: false, music: true, vibration: true });
+    expect(normalizeSave(old, NOW).settings).toEqual({
+      sound: false,
+      music: true,
+      vibration: true,
+      colorAssist: false,
+    });
     const off = { ...old, settings: { sound: true, music: false, vibration: true } };
     expect(normalizeSave(off, NOW).settings.music).toBe(false);
   });
@@ -162,7 +175,7 @@ describe('normalizeSave', () => {
       NOW,
     );
     expect(save.coins).toBe(0);
-    expect(save.settings).toEqual({ sound: true, music: true, vibration: true });
+    expect(save.settings).toEqual({ sound: true, music: true, vibration: true, colorAssist: false });
     expect(save.games).toEqual({ a: { best: 10, plays: 0, lastPlayedAt: null } });
     expect(save.createdAt).toBe(NOW);
     expect(save.version).toBe(SAVE_VERSION);
@@ -450,11 +463,12 @@ describe('resetProgress', () => {
   it('기록과 코인은 지우고 설정은 남긴다', () => {
     let save = createDefaultSave(NOW);
     save.settings.sound = false;
+    save.settings.colorAssist = true;
     save = applyPlayResult(save, 'g', 10, 7, NOW).save;
     const reset = resetProgress(save, NOW + 100);
     expect(reset.coins).toBe(0);
     expect(reset.games).toEqual({});
-    expect(reset.settings).toEqual({ sound: false, music: true, vibration: true });
+    expect(reset.settings).toEqual({ sound: false, music: true, vibration: true, colorAssist: true });
   });
 
   it('닉네임은 남긴다(온라인 랭킹의 기록은 랭킹 화면에서 따로 뺀다)', () => {

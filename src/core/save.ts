@@ -43,7 +43,7 @@ import {
   type WeeklyState,
 } from './weekly';
 
-export const SAVE_VERSION = 7;
+export const SAVE_VERSION = 8;
 
 /** 점수를 냈으면 한 판에 적어도 이만큼은 코인을 준다. 처음 하는 사람이 빈손으로 끝나지 않게 한다. */
 export const MIN_COINS_PER_PLAY = 1;
@@ -63,6 +63,8 @@ export interface Settings {
   /** 배경 음악. 음악이 있는 게임에서만 쓰인다. */
   music: boolean;
   vibration: boolean;
+  /** 색 구분 도우미: 색으로 푸는 게임에서 색마다 다른 무늬를 크고 또렷하게 보여 준다. */
+  colorAssist: boolean;
 }
 
 export interface SaveData {
@@ -119,7 +121,7 @@ export function createDefaultSave(now: number = Date.now()): SaveData {
   return {
     version: SAVE_VERSION,
     coins: 0,
-    settings: { sound: true, music: true, vibration: true },
+    settings: { sound: true, music: true, vibration: true, colorAssist: false },
     games: {},
     daily: createDailyState(),
     cosmetics: createCosmetics(),
@@ -186,6 +188,7 @@ export function normalizeSave(raw: unknown, now: number = Date.now()): SaveData 
       sound: toBool(settings.sound, base.settings.sound),
       music: toBool(settings.music, base.settings.music),
       vibration: toBool(settings.vibration, base.settings.vibration),
+      colorAssist: toBool(settings.colorAssist, base.settings.colorAssist),
     },
     games,
     daily: normalizeDaily(raw.daily),
