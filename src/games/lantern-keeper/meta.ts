@@ -14,6 +14,7 @@ import {
   type LanternStats,
   type RunFeats,
 } from './challenges';
+import { discover, normalizeCodex } from './codex';
 import {
   HERO_ORDER,
   HEROES,
@@ -29,6 +30,7 @@ import {
 } from './data';
 import { clampDepth, depthName, isUnlocked, metaCost, type Levels } from './rules';
 import { restoreRun, type RunState } from './sim';
+import { normalizeTips, OLD_HAND_TIPS, type TipId } from './tips';
 
 export const META_VERSION = 2;
 
@@ -53,6 +55,12 @@ export interface LanternMeta {
   stats: LanternStats;
   /** 보상을 받은 도전 과제의 id */
   claimed: string[];
+  /** 도감: 판에서 만난 그림자와 주운 것의 이름(codex.ts의 MET_IDS). 진화형은 stats.evolved가 가린다. */
+  codex: string[];
+  /** 도감에 새로 열렸는데 아직 들여다보지 않은 항목의 이름 */
+  unread: string[];
+  /** 이미 본 안내(tips.ts). 처음 겪는 일마다 한 번씩만 뜬다. */
+  tips: TipId[];
 }
 
 export function createDefaultMeta(): LanternMeta {
@@ -69,6 +77,9 @@ export function createDefaultMeta(): LanternMeta {
     depth: 0,
     stats: createStats(),
     claimed: [],
+    codex: [],
+    unread: [],
+    tips: [],
   };
 }
 
@@ -109,6 +120,10 @@ export function normalizeMeta(raw: unknown): LanternMeta {
   if (meta.clears > 0 && meta.stats.deepest === 0) meta.stats.deepest = 1;
   const claimed = Array.isArray(data.claimed) ? data.claimed : [];
   meta.claimed = CHALLENGES.map((challenge) => challenge.id).filter((id) => claimed.includes(id));
+  // 도감이 생기기 전의 저장에는 만난 기록이 없다. 비운 채로 시작하고, 판을 하는 대로 채워진다.
+  Object.assign(meta, normalizeCodex(data.codex, data.unread));
+  // 안내가 생기기 전부터 하던 사람에게는 그때도 있던 일을 새삼 알려 주지 않는다.
+  meta.tips = Array.isArray(data.tips) ? normalizeTips(data.tips) : meta.runs > 0 ? [...OLD_HAND_TIPS] : [];
   return meta;
 }
 
@@ -162,6 +177,8 @@ export function buyMeta(meta: LanternMeta, id: MetaId): LanternMeta {
 export interface RunResult extends RunFeats {
   embers: number;
   seconds: number;
+  /** 그 판에서 만난 것(sim.ts의 state.seen). 도감에 적힌다. */
+  seen?: readonly string[];
 }
 
 /** 한 판의 결과를 반영한다. 완주했으면 그 스테이지의 다음 깊은 밤이 열리고, 도전 과제의 기록이 쌓인다. */
@@ -179,7 +196,19 @@ export function applyRun(meta: LanternMeta, result: RunResult): LanternMeta {
     bestSeconds: Math.max(meta.bestSeconds, Math.floor(result.seconds)),
     depths,
     stats: addRun(meta.stats, result),
+    ...discover(meta, result.seen ?? [], result.evolved),
   };
+}
+
+/** 도감에서 그 항목들을 들여다봤다고 적는다. 새로 열렸다는 표시가 사라진다. */
+export function readEntries(meta: LanternMeta, ids: readonly string[]): LanternMeta {
+  const unread = meta.unread.filter((id) => !ids.includes(id));
+  return unread.length === meta.unread.length ? meta : { ...meta, unread };
+}
+
+/** 그 안내를 봤다고 적는다. 이미 봤으면 그대로 돌려준다. */
+export function learnTip(meta: LanternMeta, id: TipId): LanternMeta {
+  return meta.tips.includes(id) ? meta : { ...meta, tips: [...meta.tips, id] };
 }
 
 /** 이룬 도전 과제의 보상을 받는다. 이루지 못했거나 이미 받았으면 그대로 돌려준다. */
