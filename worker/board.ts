@@ -4,7 +4,7 @@
  * 규칙은 service.ts에 있고, 여기서는 그것을 Cloudflare에 얹기만 한다.
  */
 import { DurableObject } from 'cloudflare:workers';
-import type { RankBoard, RankedGame, StashResult, SubmitResult } from '../src/online/protocol';
+import type { RankBoard, RankedGame, Standings, StashResult, SubmitResult } from '../src/online/protocol';
 import { BoardService, type BoardApi, type Limited, type Scores } from './service';
 
 /** 이 객체는 다른 자원을 쓰지 않는다. */
@@ -20,6 +20,10 @@ export class ArcadeBoard extends DurableObject<NoBindings> implements BoardApi {
 
   board(ip: string, game: RankedGame, device: string | null): Limited<RankBoard> {
     return this.service.board(ip, game, device);
+  }
+
+  standings(ip: string, device: string): Limited<Standings> {
+    return this.service.standings(ip, device);
   }
 
   submit(ip: string, device: string, name: string, scores: Scores): Limited<SubmitResult> {

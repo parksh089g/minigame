@@ -11,6 +11,7 @@ import {
   TRANSFER_TTL_MS,
   type RankBoard,
   type RankedGame,
+  type Standings,
   type StashResult,
   type SubmitResult,
 } from '../src/online/protocol';
@@ -117,6 +118,16 @@ export class BoardDb {
       }
     }
     return { top, me };
+  }
+
+  /** 이 기기가 올라 있는 모든 게임에서의 순위와 점수. 어디에도 올라 있지 않으면 비어 있다. */
+  standings(device: string): Standings {
+    const standings: Standings = {};
+    for (const game of RANKED_GAMES) {
+      const own = this.own(game, device);
+      if (own) standings[game] = { rank: this.rankOf(game, own.score, own.at), score: own.score };
+    }
+    return standings;
   }
 
   /**

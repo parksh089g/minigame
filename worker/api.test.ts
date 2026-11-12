@@ -269,3 +269,51 @@ describe('요청 한도', () => {
     expect((await call('POST', '/api/transfer/take', { code: 'ZZZZZZZZ' })).status).toBe(429);
   });
 });
+
+describe('모든 게임의 내 순위 요청', () => {
+  it('내가 올라 있는 게임의 순위와 점수를 한 번에 받는다', async () => {
+    const { call } = server();
+    await call('POST', '/api/rank', { device: device(1), name: '하나', scores: { 'stack-tower': 70, 'merge-tiles': 300 } });
+    const second = await call('POST', '/api/rank', { device: device(2), name: '두리', scores: { 'stack-tower': 90 } });
+    expect(second.status).toBe(200);
+
+    const mine = await call('GET', `/api/rank?me=${device(1)}`);
+    expect(mine.status).toBe(200);
+    expect(mine.body).toEqual({
+      mine: { 'stack-tower': { rank: 2, score: 70 }, 'merge-tiles': { rank: 1, score: 300 } },
+    });
+    expect(mine.headers.get('cache-control')).toBe('no-store');
+    // 닉네임이나 다른 사람의 기록은 들어 있지 않다.
+    expect(JSON.stringify(mine.body)).not.toContain('하나');
+    expect(JSON.stringify(mine.body)).not.toContain(device(2));
+
+    const nobody = await call('GET', `/api/rank?me=${device(9)}`);
+    expect(nobody.status).toBe(200);
+    expect(nobody.body).toEqual({ mine: {} });
+  });
+
+  it('기기 id의 모양이 틀리면 받지 않고, 적지 않았으면 없는 주소로 답한다', async () => {
+    const { call } = server();
+    expect((await call('GET', '/api/rank?me=someone')).status).toBe(400);
+    expect((await call('GET', '/api/rank?me=')).status).toBe(400);
+    expect((await call('GET', `/api/rank?me=${device(1)}x`)).status).toBe(400);
+    expect((await call('GET', '/api/rank')).status).toBe(404);
+  });
+
+  it('랭킹 보기와 같은 한도로 센다', async () => {
+    const { call, wait } = server();
+    const [limit, windowMs] = LIMITS.read;
+    for (let n = 0; n < limit; n += 1) {
+      expect((await call('GET', `/api/rank?me=${device(1)}`)).status).toBe(200);
+    }
+    const blocked = await call('GET', `/api/rank?me=${device(1)}`);
+    expect(blocked.status).toBe(429);
+    expect(blocked.body).toEqual({ error: 'slow' });
+    // 한 게임의 랭킹 보기도 같이 막힌다.
+    expect((await call('GET', '/api/rank/stack-tower')).status).toBe(429);
+    // 다른 곳에서 온 요청은 막히지 않는다.
+    expect((await call('GET', `/api/rank?me=${device(1)}`, undefined, '10.0.0.2')).status).toBe(200);
+    wait(windowMs);
+    expect((await call('GET', `/api/rank?me=${device(1)}`)).status).toBe(200);
+  });
+});
