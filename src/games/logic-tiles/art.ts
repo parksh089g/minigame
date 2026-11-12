@@ -5,6 +5,7 @@
  */
 import type Phaser from 'phaser';
 import { THEME, THEME_CSS } from '../../config';
+import { bakeShape } from '../../core/bake';
 import { drawPanel } from '../../core/ui';
 
 type Graphics = Phaser.GameObjects.Graphics;
@@ -128,17 +129,28 @@ export function drawBoard(g: Graphics, cols: number, rows: number, cell: number,
 }
 
 /** 덮인 칸: 도톰한 풀 방석. 원점은 칸의 한가운데다. */
-export function drawPad(g: Graphics, cell: number): void {
+function drawPad(g: Graphics, cell: number): void {
   const size = cell - 2;
   const half = size / 2;
   const radius = cell * 0.26;
-  g.clear();
   g.fillStyle(LOOK.pad.lip, 1);
   g.fillRoundedRect(-half, -half + PAD_LIP, size, size - PAD_LIP, radius);
   g.fillStyle(LOOK.pad.face, 1);
   g.fillRoundedRect(-half, -half, size, size - PAD_LIP, radius);
   g.fillStyle(LOOK.pad.shine, 0.8);
   g.fillEllipse(-size * 0.16, -size * 0.27, size * 0.36, size * 0.13);
+}
+
+/**
+ * 덮인 칸의 그림. 판에 수십 개가 놓이므로 칸 크기마다 한 장씩 구워서 같이 쓴다.
+ * 돌려주는 것은 텍스처의 이름이고, 이미지의 한가운데가 칸의 한가운데다.
+ */
+export function padTexture(scene: Phaser.Scene, cell: number): string {
+  // 칸의 크기는 판의 열 수에 따라 달라진다. 소수 둘째 자리까지 같으면 같은 그림을 쓴다.
+  const size = Math.round(cell * 100) / 100;
+  return bakeShape(scene, `logic-tiles-pad-${size}`, { width: Math.ceil(size), height: Math.ceil(size) }, (g) =>
+    drawPad(g, size),
+  );
 }
 
 /** 함정을 밟은 칸의 바닥. 원점은 칸의 한가운데다. */
@@ -152,8 +164,7 @@ export function drawTrippedFloor(g: Graphics, cell: number): void {
 // ───────── 깃발과 고슴도치 ─────────
 
 /** 깃발: 작은 받침에 세운 세모 깃발. 원점은 칸의 한가운데이고, ART_CELL 크기의 칸에 맞춰 그린다. */
-export function drawFlag(g: Graphics): void {
-  g.clear();
+function drawFlag(g: Graphics): void {
   g.fillStyle(LOOK.flag.pole, 1);
   g.fillEllipse(-2.2, 7, 9, 3.2);
   g.fillRoundedRect(-3.4, -9, 2.4, 16.5, 1.2);
@@ -186,8 +197,7 @@ function drawHogEyes(g: Graphics, mood: HogMood): void {
  * 함정: 가시를 세운 동글동글한 고슴도치. 원점은 칸의 한가운데이고, ART_CELL 크기의 칸에 맞춰 그린다.
  * 등 둘레에 삐죽한 가시가 있어서 색이 아니어도 숫자나 깃발과 헷갈리지 않는다.
  */
-export function drawHog(g: Graphics, mood: HogMood): void {
-  g.clear();
+function drawHog(g: Graphics, mood: HogMood): void {
   g.fillStyle(LOOK.hog.spikes, 1);
   const spikes = 9;
   for (let i = 0; i < spikes; i += 1) {
@@ -216,6 +226,20 @@ export function drawHog(g: Graphics, mood: HogMood): void {
   g.fillStyle(LOOK.hog.nose, 1);
   g.fillEllipse(0, 5, 2.4, 1.8);
   drawHogEyes(g, mood);
+}
+
+/** 깃발과 고슴도치의 그림은 ART_CELL 크기로 굽는다. 칸이 그보다 커도 또렷하게 ART_ZOOM배까지 촘촘하게 둔다. */
+const ART_ZOOM = 1.5;
+const ART_BOX = { width: ART_CELL, height: ART_CELL, zoom: ART_ZOOM } as const;
+
+/** 깃발 그림의 텍스처 이름. 이미지의 한가운데가 칸의 한가운데다. */
+export function flagTexture(scene: Phaser.Scene): string {
+  return bakeShape(scene, 'logic-tiles-flag', ART_BOX, drawFlag);
+}
+
+/** 고슴도치 그림의 텍스처 이름. 이미지의 한가운데가 칸의 한가운데다. */
+export function hogTexture(scene: Phaser.Scene, mood: HogMood): string {
+  return bakeShape(scene, `logic-tiles-hog-${mood}`, ART_BOX, (g) => drawHog(g, mood));
 }
 
 // ───────── 목숨 ─────────

@@ -10,15 +10,15 @@ import { MiniGameScene } from '../../scenes/MiniGameScene';
 import {
   ART_CELL,
   drawBoard,
-  drawFlag,
   drawHearts,
-  drawHog,
-  drawPad,
   drawToggle,
   drawTrippedFloor,
+  flagTexture,
   HEARTS_SIZE,
+  hogTexture,
   LOOK,
   MODES,
+  padTexture,
   RIM,
   toggleCenter,
   type HogMood,
@@ -146,14 +146,14 @@ export class LogicTilesScene extends MiniGameScene {
   private mode: Mode = 'open';
   private layout: BoardLayout = { cell: 0, left: 0, top: 0 };
   /** 칸마다의 덮개 그림. 열린 칸은 null이다. */
-  private pads: (Phaser.GameObjects.Graphics | null)[] = [];
+  private pads: (Phaser.GameObjects.Image | null)[] = [];
   /** 꽂혀 있는 깃발 그림. 칸 번호로 찾는다. */
-  private flags = new Map<number, Phaser.GameObjects.Graphics>();
+  private flags = new Map<number, Phaser.GameObjects.Image>();
   private press: Press | null = null;
   /** 손가락이 눌려 있는 단추 반쪽 */
   private pressedSide: Mode | null = null;
   /** 첫 판에서 눌러 보라고 들썩이고 있는 칸 */
-  private pointed: Phaser.GameObjects.Graphics | null = null;
+  private pointed: Phaser.GameObjects.Image | null = null;
   /** 판 위에 떠 있는 도움말 줄들. 사라진 뒤에는 비어 있다. */
   private hints: Phaser.GameObjects.Text[] = [];
   /** 0보다 크면 일시정지에서 막 돌아와 잠깐 멈춰 있는 중 */
@@ -456,10 +456,9 @@ export class LogicTilesScene extends MiniGameScene {
     return row * board.cols + col;
   }
 
-  private addPad(index: number): Phaser.GameObjects.Graphics {
+  private addPad(index: number): Phaser.GameObjects.Image {
     const { x, y } = this.cellSpot(index);
-    const pad = this.add.graphics().setPosition(x, y);
-    drawPad(pad, this.layout.cell);
+    const pad = this.add.image(x, y, padTexture(this, this.layout.cell));
     this.tileLayer.add(pad);
     return pad;
   }
@@ -642,8 +641,7 @@ export class LogicTilesScene extends MiniGameScene {
   private addFlag(index: number, delay: number): void {
     const { x, y } = this.cellSpot(index);
     const size = this.layout.cell / ART_CELL;
-    const flag = this.add.graphics().setPosition(x, y - 1).setScale(0);
-    drawFlag(flag);
+    const flag = this.add.image(x, y - 1, flagTexture(this)).setScale(0);
     this.tileLayer.add(flag);
     this.flags.set(index, flag);
     this.tweens.add({ targets: flag, scale: size, delay, duration: 150, ease: 'Back.Out' });
@@ -799,8 +797,7 @@ export class LogicTilesScene extends MiniGameScene {
       drawTrippedFloor(floor, this.layout.cell);
       this.tileLayer.add(floor);
     }
-    const hog = this.add.graphics().setPosition(x, y).setScale(0);
-    drawHog(hog, mood);
+    const hog = this.add.image(x, y, hogTexture(this, mood)).setScale(0);
     this.tileLayer.add(hog);
     this.tweens.add({ targets: hog, scale: size, delay, duration: 180, ease: 'Back.Out' });
   }

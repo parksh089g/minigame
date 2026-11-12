@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { TEXTURE } from '../../art/sprites';
 import { FONT_SIZE, GAME_WIDTH, MIN_GAME_HEIGHT, SCENE, THEME, THEME_CSS } from '../../config';
+import { bakeShape } from '../../core/bake';
 import { vibrate } from '../../core/haptics';
 import { sfx } from '../../core/sfx';
 import { addBackdrop, addText, drawPanel } from '../../core/ui';
@@ -50,7 +51,7 @@ interface PlateLook {
 
 /** 판에서 풀려나온 나사. 상자나 쟁반으로 날아간다. */
 interface Token {
-  head: Phaser.GameObjects.Graphics;
+  head: Phaser.GameObjects.Image;
   /** 톡 튀어나오는 움직임이 끝나는 시각. 그 뒤에 날아가기 시작한다. */
   readyAt: number;
   /** 지금 가고 있는 길. 가는 곳이 바뀌면 멈추고 새로 간다. */
@@ -207,7 +208,6 @@ function drawMark(
 
 /** 나사 머리를 (0, 0)을 가운데로 그린다. 아래쪽에 짙은 테가 살짝 보여 도톰해 보인다. */
 function drawScrew(graphics: Phaser.GameObjects.Graphics, look: ScrewLook): void {
-  graphics.clear();
   graphics.fillStyle(look.deep, 1);
   graphics.fillCircle(0, 1.5, SCREW_RADIUS);
   graphics.fillStyle(look.face, 1);
@@ -215,6 +215,19 @@ function drawScrew(graphics: Phaser.GameObjects.Graphics, look: ScrewLook): void
   graphics.fillStyle(LOOK.shine, 0.55);
   graphics.fillEllipse(-2.8, -4, 5, 2.4);
   drawMark(graphics, look.shape, look.mark, 0, 0);
+}
+
+/** 나사 머리 그림의 크기. 아래쪽 테가 들어가도록 지름보다 조금 넉넉하다. */
+const SCREW_ART = Math.ceil(SCREW_RADIUS * 2) + 4;
+
+/**
+ * 나사 머리의 그림. 판마다 여러 개가 박혀 있으므로 색마다 한 장씩 구워서 같이 쓴다.
+ * 이미지의 한가운데가 나사의 한가운데다.
+ */
+function screwTexture(scene: Phaser.Scene, color: number): string {
+  return bakeShape(scene, `screw-sort-screw-${color}`, { width: SCREW_ART, height: SCREW_ART }, (graphics) =>
+    drawScrew(graphics, LOOK.screws[color]),
+  );
 }
 
 interface PixelRect {
@@ -234,7 +247,6 @@ function drawPlate(
   holes: ReadonlyArray<{ x: number; y: number }>,
   look: PlateLook,
 ): void {
-  graphics.clear();
   graphics.fillStyle(look.deep, 1);
   for (const rect of rects) {
     graphics.fillRoundedRect(rect.x, rect.y, rect.width, rect.height, PLATE.radius);
@@ -258,7 +270,6 @@ function drawPlate(
 function drawBox(graphics: Phaser.GameObjects.Graphics, look: ScrewLook): void {
   const left = -BOX.width / 2;
   const top = -BOX.height / 2;
-  graphics.clear();
   graphics.fillStyle(look.deep, 1);
   graphics.fillRoundedRect(left, top + BOX.lip, BOX.width, BOX.height, BOX.radius);
   graphics.fillStyle(look.face, 1);
@@ -270,6 +281,20 @@ function drawBox(graphics: Phaser.GameObjects.Graphics, look: ScrewLook): void {
     drawMark(graphics, look.shape, LOOK.well.mark, x, 0, LOOK.well.markAlpha);
   }
 }
+
+/** 상자의 그림. 색마다 한 장씩 구워 둔다. 이미지의 왼쪽 위가 상자의 왼쪽 위다. */
+function boxTexture(scene: Phaser.Scene, color: number): string {
+  const box = {
+    width: BOX.width,
+    height: BOX.height + BOX.lip,
+    originX: BOX.width / 2,
+    originY: BOX.height / 2,
+  };
+  return bakeShape(scene, `screw-sort-box-${color}`, box, (graphics) => drawBox(graphics, LOOK.screws[color]));
+}
+
+/** 판의 그림은 단계마다 모양이 달라서 그때그때 굽는다. 이름 앞에 이것을 붙여 두고, 다 쓴 것은 지운다. */
+const PLATE_TEXTURE = 'screw-sort-plate-';
 
 const EMPTY_STAGE: Stage = { plates: [], screws: [], boxes: [], solution: [] };
 
@@ -305,6 +330,8 @@ export class ScrewSortScene extends MiniGameScene {
   /** 판들을 아래에서 위로 쌓인 순서대로 담는 층 */
   private boardLayer!: Phaser.GameObjects.Container;
   private plateViews: Array<Phaser.GameObjects.Container | null> = [];
+  /** 단계를 깐 횟수. 판 그림의 이름에 넣어서 단계마다 다른 텍스처를 쓴다. */
+  private deals = 0;
   /** 나사 번호로 찾는 나사 머리 */
   private tokens: Token[] = [];
   /** 자리마다 열려 있는 상자. 담긴 나사도 이 그릇에 들어 있어서 상자와 함께 움직인다. */
@@ -464,21 +491,36 @@ export class ScrewSortScene extends MiniGameScene {
 
   // ───────── 바탕 그리기 ─────────
 
+  /** upTo번째까지 깔았던 단계의 판 그림을 지운다. */
+  private dropPlateTextures(upTo: number): void {
+    for (const key of this.textures.getTextureKeys()) {
+      if (!key.startsWith(PLATE_TEXTURE)) continue;
+      const deal = Number(key.slice(PLATE_TEXTURE.length).split('-')[0]);
+      if (deal <= upTo) this.textures.remove(key);
+    }
+  }
+
+  /** 작업대. 구멍이 많아서 한 장으로 구워 놓는다. 화면의 길이에 따라 크기가 달라지므로 들어올 때마다 새로 굽는다. */
   private drawBench(): void {
     const area = this.benchArea;
-    const graphics = this.add.graphics().setDepth(DEPTH.bench);
-    drawPanel(graphics, area.x, area.y, area.width, area.height, {
-      fill: LOOK.bench.face,
-      shadow: LOOK.bench.lip,
-      radius: BENCH.radius,
-      depth: BENCH.lip,
+    const key = 'screw-sort-bench';
+    if (this.textures.exists(key)) this.textures.remove(key);
+    const box = { width: area.width, height: area.height + BENCH.lip, originX: -area.x, originY: -area.y };
+    bakeShape(this, key, box, (graphics) => {
+      drawPanel(graphics, area.x, area.y, area.width, area.height, {
+        fill: LOOK.bench.face,
+        shadow: LOOK.bench.lip,
+        radius: BENCH.radius,
+        depth: BENCH.lip,
+      });
+      // 칸마다 작은 구멍을 찍어서 나사가 박힐 자리가 어디인지 보이게 한다.
+      graphics.fillStyle(LOOK.bench.peg, 1);
+      for (let cell = 0; cell < BOARD_COLS * BOARD_ROWS; cell += 1) {
+        const { x, y } = this.cellCenter(cell);
+        graphics.fillCircle(x, y, 1.6);
+      }
     });
-    // 칸마다 작은 구멍을 찍어서 나사가 박힐 자리가 어디인지 보이게 한다.
-    graphics.fillStyle(LOOK.bench.peg, 1);
-    for (let cell = 0; cell < BOARD_COLS * BOARD_ROWS; cell += 1) {
-      const { x, y } = this.cellCenter(cell);
-      graphics.fillCircle(x, y, 1.6);
-    }
+    this.add.image(area.x, area.y, key).setOrigin(0, 0).setDepth(DEPTH.bench);
   }
 
   private addLabels(): void {
@@ -529,8 +571,8 @@ export class ScrewSortScene extends MiniGameScene {
   private showNext(color: number | null): void {
     const icon = this.nextIcon;
     icon.setPosition(this.nextX + 13, this.boxY);
+    icon.clear();
     if (color === null) {
-      icon.clear();
       icon.fillStyle(LOOK.next.empty, 1);
       icon.fillCircle(0, 0, SCREW_RADIUS);
       return;
@@ -597,6 +639,9 @@ export class ScrewSortScene extends MiniGameScene {
   }
 
   private buildBoard(stage: Stage): void {
+    // 두 단계 전의 판 그림은 이제 화면에 없으므로 지운다(바로 앞 단계의 판은 아직 사라지는 중일 수 있다).
+    this.deals += 1;
+    this.dropPlateTextures(this.deals - 2);
     this.plateViews = stage.plates.map((plate, index) => {
       const centers = plate.cells.map((cell) => this.cellCenter(cell));
       const x = centers.reduce((sum, center) => sum + center.x, 0) / centers.length;
@@ -613,8 +658,19 @@ export class ScrewSortScene extends MiniGameScene {
           const center = this.cellCenter(screw.cell);
           return { x: center.x - x, y: center.y - y };
         });
-      const body = this.add.graphics();
-      drawPlate(body, rects, holes, LOOK.plates[index % LOOK.plates.length]);
+      // 판은 둥근 네모 여럿으로 이루어져 있어서, 한 장으로 구워 두고 그 그림을 놓는다.
+      const left = Math.min(...rects.map((rect) => rect.x));
+      const top = Math.min(...rects.map((rect) => rect.y));
+      const box = {
+        width: Math.max(...rects.map((rect) => rect.x + rect.width)) - left,
+        height: Math.max(...rects.map((rect) => rect.y + rect.height)) - top,
+        originX: -left,
+        originY: -top,
+      };
+      const texture = bakeShape(this, `${PLATE_TEXTURE}${this.deals}-${index}`, box, (graphics) =>
+        drawPlate(graphics, rects, holes, LOOK.plates[index % LOOK.plates.length]),
+      );
+      const body = this.add.image(left, top, texture).setOrigin(0, 0);
 
       const view = this.add.container(x, y, [body]).setScale(0.7).setAlpha(0);
       this.boardLayer.add(view);
@@ -632,8 +688,7 @@ export class ScrewSortScene extends MiniGameScene {
     this.tokens = stage.screws.map((screw) => {
       const view = this.plateViews[screw.plate]!;
       const center = this.cellCenter(screw.cell);
-      const head = this.add.graphics().setPosition(center.x - view.x, center.y - view.y);
-      drawScrew(head, LOOK.screws[screw.color]);
+      const head = this.add.image(center.x - view.x, center.y - view.y, screwTexture(this, screw.color));
       view.add(head);
       return { head, readyAt: 0, flight: null };
     });
@@ -941,8 +996,7 @@ export class ScrewSortScene extends MiniGameScene {
 
   /** 새 상자가 미리 보기 자리에서 제자리로 미끄러져 들어온다. */
   private enterBox(slot: number, color: number, delay: number): void {
-    const body = this.add.graphics();
-    drawBox(body, LOOK.screws[color]);
+    const body = this.add.image(-BOX.width / 2, -BOX.height / 2, boxTexture(this, color)).setOrigin(0, 0);
     const container = this.add
       .container(this.nextX, this.boxY, [body])
       .setDepth(DEPTH.box)
