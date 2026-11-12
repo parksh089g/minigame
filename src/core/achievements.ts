@@ -124,6 +124,10 @@ export const ACHIEVEMENTS: readonly Achievement[] = [
   { id: 'logic-800', group: 'score', title: '논리의 달인', description: '논리 타일 800점 이상', goal: 800, reward: 50, measure: bestOf('logic-tiles') },
   { id: 'number-350', group: 'score', title: '숫자 탐정', description: '숫자 퍼즐 350점 이상', goal: 350, reward: 20, measure: bestOf('number-puzzle') },
   { id: 'number-700', group: 'score', title: '숫자의 달인', description: '숫자 퍼즐 700점 이상', goal: 700, reward: 50, measure: bestOf('number-puzzle') },
+  { id: 'block-800', group: 'score', title: '빈틈없이', description: '블록 800점 이상', goal: 800, reward: 20, measure: bestOf('block-fill') },
+  { id: 'block-1600', group: 'score', title: '블록의 달인', description: '블록 1600점 이상', goal: 1600, reward: 50, measure: bestOf('block-fill') },
+  { id: 'chosung-500', group: 'score', title: '낱말 박사', description: '초성 퀴즈 500점 이상', goal: 500, reward: 20, measure: bestOf('chosung-quiz') },
+  { id: 'chosung-1000', group: 'score', title: '초성의 달인', description: '초성 퀴즈 1000점 이상', goal: 1000, reward: 50, measure: bestOf('chosung-quiz') },
   { id: 'lantern-3000', group: 'score', title: '꺼지지 않는 불', description: '등불지기 3000점 이상', goal: 3000, reward: 20, measure: bestOf('lantern-keeper') },
   { id: 'lantern-8000', group: 'score', title: '새벽을 본 등불', description: '등불지기 8000점 이상', goal: 8000, reward: 50, measure: bestOf('lantern-keeper') },
 
