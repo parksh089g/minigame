@@ -492,7 +492,9 @@ export class RankingScene extends Phaser.Scene implements BackAware {
       const me = this.view.kind === 'ready' ? this.view.board.me : null;
       const waiting = this.view.kind === 'ready' ? this.waitingNote() : null;
       // 순위는 올라가 있는 기록의 것이다. 새 기록을 올리지 못했으면 순위 대신 그 사정을 알린다.
-      const rank = me && waiting === null ? `${rankLabel(me.rank)} · ${me.score}점` : null;
+      // 이어지는 성장 게임은 점수가 아니라 평판이다.
+      const score = me ? (this.shown.ongoing ? `평판 ${me.score}` : `${me.score}점`) : '';
+      const rank = me && waiting === null ? `${rankLabel(me.rank)} · ${score}` : null;
       const status = this.view.kind !== 'ready' ? '' : (rank ?? waiting ?? '이 게임은 아직 기록이 없어요');
       const name = addText(this, MARGIN + 10, middle, online.name, { color: THEME_CSS.accent, originY: 0.5 });
       const note = addText(this, RIGHT - 10, middle, status, {
