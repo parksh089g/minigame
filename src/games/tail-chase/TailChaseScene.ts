@@ -3,6 +3,7 @@ import { TEXTURE } from '../../art/sprites';
 import { FONT_SIZE, GAME_WIDTH, SCENE } from '../../config';
 import { vibrate } from '../../core/haptics';
 import { sfx } from '../../core/sfx';
+import { AUTO_START_SECONDS } from '../../core/start-gate';
 import { SWIPE_MIN_DISTANCE, swipeDirection } from '../../core/swipe';
 import { addBackdrop, addText } from '../../core/ui';
 import { floatText, GameHud, HUD_HEIGHT, showBanner } from '../../scenes/GameHud';
@@ -57,8 +58,11 @@ interface SwipeTrack {
   turned: boolean;
 }
 
-/** 처음에 첫 밀기를 기다려 주는 시간(초). 그 안에 밀지 않으면 저절로 출발한다. */
-const READY_SECONDS = 1.2;
+/**
+ * 처음에 첫 밀기를 기다려 주는 시간(초). 그 안에 밀지 않으면 저절로 출발한다.
+ * 처음 하는 사람이 설명을 읽을 틈이 되도록, 다른 게임들이 첫 조작을 기다리는 시간과 같게 둔다.
+ */
+const READY_SECONDS = AUTO_START_SECONDS;
 /** 일시정지에서 돌아온 뒤 다시 기어가기까지의 여유(초). 그 안에 밀면 바로 출발한다. */
 const RESUME_GRACE_SECONDS = 0.8;
 /**
