@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  APP_BUILD,
+  buildCodeOf,
   computeGameHeight,
   GAME_WIDTH,
   MAX_GAME_HEIGHT,
@@ -24,6 +26,22 @@ describe('computeGameHeight', () => {
   it('크기를 알 수 없으면 최소 높이를 쓴다', () => {
     expect(computeGameHeight(0, 0)).toBe(MIN_GAME_HEIGHT);
     expect(computeGameHeight(Number.NaN, 500)).toBe(MIN_GAME_HEIGHT);
+  });
+});
+
+describe('buildCodeOf', () => {
+  it('빌드한 파일 주소에서 해시를 꺼낸다', () => {
+    expect(buildCodeOf('https://example.com/assets/index-CHpDxKHg.js')).toBe('CHpDxKHg');
+    expect(buildCodeOf('/sub/assets/index-B5FDlC3d.js?v=1#x')).toBe('B5FDlC3d');
+    // 해시에는 붙임표와 밑줄도 들어갈 수 있다.
+    expect(buildCodeOf('/assets/index-a_b-cdEf.js')).toBe('a_b-cdEf');
+  });
+
+  it('해시가 없는 주소(개발 서버, 테스트)에서는 빈 글자열이다', () => {
+    expect(buildCodeOf('http://localhost:5173/src/config.ts')).toBe('');
+    expect(buildCodeOf('file:///home/user/src/config.ts')).toBe('');
+    expect(buildCodeOf('/assets/index.js')).toBe('');
+    expect(APP_BUILD).toBe('');
   });
 });
 
