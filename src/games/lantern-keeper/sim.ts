@@ -14,6 +14,7 @@ import {
   RUN_SECONDS,
   STAGES,
   SURGES,
+  type BurstInfo,
   type EnemyKind,
   type HeroId,
   type MetaId,
@@ -75,12 +76,14 @@ export interface Enemy {
   slowTo: number;
   /** 반딧불에 다시 맞을 수 있을 때까지(초) */
   fireflyCd: number;
-  /** 보스의 다음 행동까지, 뛰는 적의 다음 뜀이나 착지까지(초) */
+  /** 보스의 다음 행동까지, 뛰는 적의 다음 뜀이나 착지까지, 쏘는 적의 다음 발사까지, 터지는 적이 터질 때까지(초) */
   timer: number;
   /**
    * 돌진하는 보스: 0 쫓기, 1 힘 모으기, 2 돌진.
    * 빛덩이를 쏘는 보스: 0 다음은 쏘기, 1 다음은 부하 부르기(늪의 어미만), 2 쏘려고 빛을 모으는 중.
    * 뛰는 적: 0 웅크림, 1 뛰는 중
+   * 쏘는 적: 0 다가오거나 기다리는 중, 1 쏘려고 숨을 들이쉬는 중
+   * 터지는 적: 0 쫓기, 1 부푸는 중
    */
   mode: number;
   /** 몇 번째 중간 보스인지(0부터). 다른 적은 0 */
@@ -256,6 +259,10 @@ export type SimEvent =
   | { type: 'blast' }
   /** 등갓의 빛막이 피해를 막았다 */
   | { type: 'block' }
+  /** 쏘는 적이 어둠 방울을 뱉었다 */
+  | { type: 'spit' }
+  /** 터지는 적이 (x, y)에서 터졌다 */
+  | { type: 'burst'; x: number; y: number; radius: number }
   | { type: 'levelup' }
   | { type: 'shoot' }
   | { type: 'strike'; x: number; y: number; radius: number }
@@ -318,6 +325,10 @@ export const HOP_SECONDS = 0.38;
 export const HOP_REST = 0.44;
 /** 보스가 쏘는 빛덩이 */
 const HAZARD = { speed: 56, life: 3.6, radius: 3, spread: 0.24 } as const;
+/** 쏘는 적의 어둠 방울. 보스의 빛덩이보다 느리고 멀리 가지 못해서, 옆으로 걸으면 피할 수 있다. */
+const SPIT = { speed: 46, life: 2.6, radius: 3 } as const;
+/** 날아다니는 것이 이만큼 있으면 쏘는 적은 쉬어 간다. 화면이 방울로 뒤덮이지 않게 한다. */
+const SPIT_LIMIT = 6;
 /** 되살아날 때: 채워지는 체력 비율, 무적 시간(초), 둘레의 적을 밀어내는 반경과 피해 */
 const REVIVE = { hp: 0.5, invulnerable: 2.5, radius: 64, damage: 40 } as const;
 
@@ -672,7 +683,16 @@ export class Sim {
       slowTo: 1,
       fireflyCd: 0,
       // 보스는 나타나고 조금 뒤에 첫 행동을 한다. 뛰는 적은 저마다 다른 박자로 뛴다.
-      timer: ENEMIES[kind].boss ? (kind === 'giant' ? 5 : 3) : ENEMIES[kind].hops ? this.rand() * HOP_REST : 0,
+      // 쏘는 적은 다가온 뒤에 조금 있다가 쏘되, 여럿이 한꺼번에 쏘지 않게 번호에 따라 어긋나게 한다.
+      timer: ENEMIES[kind].boss
+        ? kind === 'giant'
+          ? 5
+          : 3
+        : ENEMIES[kind].hops
+          ? this.rand() * HOP_REST
+          : ENEMIES[kind].shoots
+            ? 1 + (s.nextUid % 5) * 0.35
+            : 0,
       mode: 0,
       tier: 0,
       vx: 0,
@@ -907,6 +927,50 @@ export class Sim {
             e.timer = HOP_REST;
           }
         }
+      } else if (info.shoots) {
+        // 닿는 거리까지만 다가와서(0) 멈춰 숨을 들이쉬고(1), 그때 플레이어가 있는 쪽으로 어둠 방울을 뱉는다.
+        const shot = info.shoots;
+        if (e.mode === 1) {
+          speed = 0;
+          e.timer -= dt;
+          if (e.timer <= 0) {
+            e.mode = 0;
+            e.timer = shot.every;
+            s.hazards.push({
+              x: e.x,
+              y: e.y,
+              vx: dirX * SPIT.speed,
+              vy: dirY * SPIT.speed,
+              life: SPIT.life,
+              radius: SPIT.radius,
+              damage: Math.round(shot.damage * hard),
+            });
+            this.events.push({ type: 'spit' });
+          }
+        } else {
+          if (e.timer > 0) e.timer -= dt;
+          if (distance < shot.range) {
+            speed = 0;
+            if (e.timer <= 0 && s.hazards.length < SPIT_LIMIT) {
+              e.mode = 1;
+              e.timer = shot.windup;
+            }
+          }
+        }
+      } else if (info.bursts) {
+        // 가까이 오면(0) 멈춰서 부풀다가(1) 터진다. 부푸는 동안 쓰러뜨리거나 둘레 밖으로 나가면 다치지 않는다.
+        const burst = info.bursts;
+        if (e.mode === 1) {
+          speed = 0;
+          e.timer -= dt;
+          if (e.timer <= 0) {
+            if (this.burst(e, burst, hard)) return;
+            continue;
+          }
+        } else if (distance < burst.trigger) {
+          e.mode = 1;
+          e.timer = burst.fuse;
+        }
       }
 
       e.x += dirX * speed * dt;
@@ -947,6 +1011,27 @@ export class Sim {
         if (this.hurt(Math.round(info.damage * (info.boss ? this.depth.damage : hard)))) return;
       }
     }
+  }
+
+  /**
+   * 부풀던 적이 터진다. 둘레 안의 플레이어가 다치고, 둘레 안의 다른 그림자도 함께 다친다.
+   * 터진 적은 여느 적처럼 쓰러진 것으로 친다. 판이 끝났으면 true.
+   */
+  private burst(source: Enemy, burst: BurstInfo, hard: number): boolean {
+    const s = this.state;
+    const p = s.player;
+    source.hp = 0;
+    this.events.push({ type: 'burst', x: source.x, y: source.y, radius: burst.radius });
+    for (const other of s.enemies) {
+      if (other === source || other.hp <= 0) continue;
+      const reach = burst.radius + ENEMIES[other.kind].radius;
+      if ((other.x - source.x) ** 2 + (other.y - source.y) ** 2 < reach * reach) this.damage(other, burst.splash, null);
+    }
+    const reach = burst.radius + PLAYER_BASE.radius;
+    if (p.inv <= 0 && (p.x - source.x) ** 2 + (p.y - source.y) ** 2 < reach * reach) {
+      return this.hurt(Math.round(burst.damage * hard));
+    }
+    return false;
   }
 
   /** 보스가 angle 쪽을 가운데로 count갈래의 빛덩이를 쏜다. gap은 갈래 사이의 각도. */

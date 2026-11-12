@@ -31,6 +31,8 @@ export type SoundId =
   | 'pull'
   | 'blast'
   | 'block'
+  | 'spit'
+  | 'burst'
   | 'levelUp'
   | 'ticket'
   | 'evolve'
@@ -97,6 +99,13 @@ export const SOUNDS: Readonly<Record<SoundId, readonly Note[]>> = {
     { f: 1319, d: 0.05, type: 'triangle', v: 0.3 },
     { f: 1976, to: 1568, d: 0.18, type: 'triangle', v: 0.24, at: 0.04 },
   ],
+  // 쏘는 적이 어둠 방울을 뱉는다: 작게 퉤 하는 소리
+  spit: [{ f: 420, to: 180, d: 0.09, type: 'square', v: 0.12 }],
+  // 터지는 적: 짧게 퍽 하고 터진다.
+  burst: [
+    { f: 300, to: 70, d: 0.16, type: 'sawtooth', v: 0.26 },
+    { f: 620, to: 240, d: 0.1, type: 'triangle', v: 0.16 },
+  ],
   levelUp: [
     ...run([523, 659, 784, 1047], 0.06, 0.1, { v: 0.26 }),
     { f: 1319, d: 0.22, v: 0.24, at: 0.24 },
@@ -158,6 +167,8 @@ export const SOUNDS: Readonly<Record<SoundId, readonly Note[]>> = {
  */
 export const MIN_GAP_MS: Readonly<Partial<Record<SoundId, number>>> = {
   kill: 85,
+  spit: 160,
+  burst: 120,
   strike: 140,
   bolt: 170,
   volley: 200,

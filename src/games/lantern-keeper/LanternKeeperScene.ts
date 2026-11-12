@@ -295,6 +295,14 @@ export class LanternKeeperScene extends MiniGameScene {
           board.play('block', now);
           vibrate(15);
           break;
+        case 'spit':
+          board.play('spit', now);
+          break;
+        case 'burst':
+          this.view.pop(event.x, event.y, event.radius);
+          this.view.burst(sim, event.x, event.y, 10);
+          board.play('burst', now);
+          break;
         case 'strike':
           this.view.ring(event.x, event.y, event.radius);
           board.play('strike', now);

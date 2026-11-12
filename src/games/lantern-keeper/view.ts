@@ -27,6 +27,8 @@ interface Ring {
   y: number;
   radius: number;
   life: number;
+  /** 적이 터진 자리면 위험한 색으로 그린다 */
+  hostile?: boolean;
 }
 
 /** 번갯불이 지나간 길. 잠깐 보였다 사라진다. */
@@ -194,6 +196,11 @@ export class RunView {
     this.rings.push({ x, y, radius, life: RING_SECONDS });
   }
 
+  /** 적이 터진 자리에 퍼지는 붉은 고리 */
+  pop(x: number, y: number, radius: number): void {
+    this.rings.push({ x, y, radius, life: RING_SECONDS, hostile: true });
+  }
+
   /** 번갯불이 지나간 길을 잠깐 그린다. points는 세상 좌표의 x, y가 번갈아 들어 있다. */
   bolt(points: number[], evolved: boolean): void {
     this.flashes.push({ points, evolved, life: FLASH_SECONDS });
@@ -231,13 +238,39 @@ export class RunView {
     this.scene.tweens.add({ targets: this.player, alpha: 0.25, duration: ms, ease: 'Sine.In' });
   }
 
-  /** 보스의 공격 예고: 돌진할 길은 바닥에, 쏘려고 모으는 빛은 보스 위에 그린다. */
+  /**
+   * 공격 예고. 보스가 돌진할 길과 적이 터질 둘레는 바닥에, 쏘려고 모으는 빛은 그 적 위에 그린다.
+   * 예고가 보이는 동안 비키면 맞지 않는다.
+   */
   private drawThreats(sim: Sim, seconds: number, offsetX: number, offsetY: number): void {
     const g = this.ground;
     const air = this.air;
     for (const e of sim.state.enemies) {
       const info = ENEMIES[e.kind];
-      if (!info.boss || e.hp <= 0) continue;
+      if (e.hp <= 0) continue;
+      if (!info.boss) {
+        if (e.mode !== 1 || (!info.bursts && !info.shoots)) continue;
+        const x = Math.round(e.x + offsetX);
+        const y = Math.round(e.y + offsetY);
+        if (info.bursts) {
+          // 터질 둘레: 바닥의 원이 안에서부터 차오르고, 다 차면 터진다.
+          const progress = 1 - Math.max(0, e.timer) / info.bursts.fuse;
+          g.fillStyle(LOOK.threat, 0.1);
+          g.fillCircle(x, y, info.bursts.radius);
+          g.fillStyle(LOOK.threat, 0.22);
+          g.fillCircle(x, y, info.bursts.radius * progress);
+          g.lineStyle(1, LOOK.threat, 0.75);
+          g.strokeCircle(x, y, info.bursts.radius);
+        } else if (info.shoots) {
+          // 쏘기 전에 모으는 어둠: 작은 고리가 조여들고 가운데가 밝아진다.
+          const progress = 1 - Math.max(0, e.timer) / info.shoots.windup;
+          air.lineStyle(1, LOOK.threat, 0.4 + 0.5 * progress);
+          air.strokeCircle(x, y, info.radius + 2 + 7 * (1 - progress));
+          air.fillStyle(LOOK.threatCore, 0.5 + 0.4 * progress);
+          air.fillCircle(x, y, 1 + progress);
+        }
+        continue;
+      }
       const x = Math.round(e.x + offsetX);
       const y = Math.round(e.y + offsetY);
       const brain = info.brain;
@@ -401,7 +434,13 @@ export class RunView {
       const frame = ENEMIES[e.kind].hops ? (e.mode === 1 ? 0 : 1) : Math.floor(beat + e.uid * 0.37) % 2;
       const key = frames[frame];
       const boss = Boolean(ENEMIES[e.kind].boss);
-      const image = this.enemies.put(e.flash > 0 ? flashOf(key) : key, x, y);
+      const info = ENEMIES[e.kind];
+      // 터지려고 부푸는 적은 점점 커지면서 깜빡인다.
+      const swell = info.bursts && e.mode === 1 ? 1 - Math.max(0, e.timer) / info.bursts.fuse : 0;
+      const lit = e.flash > 0 || (swell > 0 && Math.floor(seconds * (8 + 10 * swell)) % 2 === 0);
+      const image = this.enemies.put(lit ? flashOf(key) : key, x, y);
+      const scale = 1 + 0.4 * swell;
+      if (image.scaleX !== scale) image.setScale(scale);
       const depth = boss ? DEPTH.boss : DEPTH.enemy;
       if (image.depth !== depth) image.setDepth(depth);
     }
@@ -475,7 +514,7 @@ export class RunView {
       ring.life -= dt;
       if (ring.life <= 0) continue;
       const progress = 1 - ring.life / RING_SECONDS;
-      g.fillStyle(LOOK.strike, 0.35 * (1 - progress));
+      g.fillStyle(ring.hostile ? LOOK.threat : LOOK.strike, 0.35 * (1 - progress));
       g.fillCircle(Math.round(ring.x + offsetX), Math.round(ring.y + offsetY), ring.radius * (0.5 + 0.5 * progress));
       this.rings[kept] = ring;
       kept += 1;

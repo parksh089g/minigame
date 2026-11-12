@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { playRun } from './bot';
+import { playRun, steer } from './bot';
 import {
   ENEMIES,
   EVOLVE_LEVEL,
@@ -16,6 +16,7 @@ import {
   MID_BOSS_COUNT,
   MID_BOSS_EVERY,
   MID_BOSS_TIERS,
+  PLAYER_BASE,
   RUN_SECONDS,
   STAGE_ORDER,
   STAGES,
@@ -552,6 +553,167 @@ describe('등갓', () => {
     const kept: Upgrade[] = [{ type: 'passive', id: all[0], level: 2 }];
     sim.state.offer = kept;
     expect(sim.options()).toEqual(kept);
+  });
+});
+
+describe('쫓아오기만 하지 않는 적', () => {
+  const distanceTo = (sim: Sim, e: Enemy): number => Math.hypot(e.x - sim.state.player.x, e.y - sim.state.player.y);
+  /** type인 일이 일어날 때까지 돌린다. limit초 안에 일어나지 않으면 false */
+  const until = (sim: Sim, type: SimEvent['type'], limit = 12, moveX = 0, moveY = 0): boolean => {
+    for (let i = 0; i < limit / STEP; i += 1) {
+      sim.step(STEP, moveX, moveY);
+      if (sim.events.some((event) => event.type === type)) return true;
+    }
+    return false;
+  };
+
+  it('눈총 그림자는 멀찍이 멈춰 서서 숨을 들이쉬었다가 어둠 방울을 쏜다', () => {
+    const sim = quietSim();
+    const foe = enemy('glare', 160, 0, 9999);
+    foe.timer = 0;
+    sim.state.enemies.push(foe);
+    const shot = ENEMIES.glare.shoots!;
+    expect(until(sim, 'spit')).toBe(true);
+    // 닿는 거리까지만 다가오고, 더 붙지 않는다.
+    expect(distanceTo(sim, foe)).toBeGreaterThan(shot.range - 4);
+    expect(distanceTo(sim, foe)).toBeLessThanOrEqual(shot.range);
+    // 방울은 플레이어 쪽으로, 걷는 것보다 느리게 날아온다.
+    expect(sim.state.hazards).toHaveLength(1);
+    const [orb] = sim.state.hazards;
+    expect(orb.vx).toBeLessThan(0);
+    expect(orb.vy).toBeCloseTo(0, 5);
+    expect(Math.hypot(orb.vx, orb.vy)).toBeLessThan(PLAYER_BASE.speed);
+    // 가만히 서 있으면 맞는다.
+    expect(until(sim, 'hurt', 3)).toBe(true);
+    expect(sim.state.player.hp).toBe(BASE_HP - shot.damage);
+  });
+
+  it('쏜 뒤에 옆으로 비키면 방울에 맞지 않는다', () => {
+    const sim = quietSim();
+    const foe = enemy('glare', 120, 0, 9999);
+    foe.timer = 0;
+    sim.state.enemies.push(foe);
+    expect(until(sim, 'spit')).toBe(true);
+    expect(advance(sim, 2.4, 0, 1)).not.toContainEqual({ type: 'hurt' });
+    expect(sim.state.player.hp).toBe(BASE_HP);
+  });
+
+  it('숨을 들이쉬는 동안에는 멈춰 있고, 그 틈에 쓰러뜨리면 쏘지 못한다', () => {
+    const sim = quietSim();
+    const foe = enemy('glare', 60, 0, 9999);
+    foe.timer = 0;
+    sim.state.enemies.push(foe);
+    sim.step(STEP, 0, 0);
+    expect(foe.mode).toBe(1);
+    const at = foe.x;
+    advance(sim, ENEMIES.glare.shoots!.windup / 2);
+    expect(foe.x).toBe(at);
+    expect(sim.state.hazards).toHaveLength(0);
+    foe.hp = 0;
+    expect(advance(sim, 2)).not.toContainEqual({ type: 'spit' });
+  });
+
+  it('날아다니는 것이 많으면 쏘는 적은 쉬어 간다', () => {
+    const sim = quietSim();
+    for (let i = 0; i < 6; i += 1) {
+      sim.state.hazards.push({ x: 5000, y: i * 20, vx: 0, vy: 0, life: 99, radius: 3, damage: 1 });
+    }
+    for (let i = 0; i < 6; i += 1) {
+      const foe = enemy('squirt', 70, i * 14 - 35, 9999);
+      foe.timer = 0;
+      sim.state.enemies.push(foe);
+    }
+    expect(advance(sim, 3)).not.toContainEqual({ type: 'spit' });
+    sim.state.hazards.length = 0;
+    expect(until(sim, 'spit', 3)).toBe(true);
+  });
+
+  it('부푼 그림자는 가까이 와서 부풀었다가 터지고, 그 자리에 서 있으면 다친다', () => {
+    const sim = quietSim();
+    const foe = enemy('puff', 70, 0, 9999);
+    sim.state.enemies.push(foe);
+    const info = ENEMIES.puff.bursts!;
+    for (let i = 0; i < 600 && foe.mode === 0; i += 1) sim.step(STEP, 0, 0);
+    // 닿기 전에 멈춰서 부푼다.
+    expect(foe.mode).toBe(1);
+    expect(distanceTo(sim, foe)).toBeGreaterThan(ENEMIES.puff.radius + PLAYER_BASE.radius);
+    expect(sim.state.player.hp).toBe(BASE_HP);
+    const at = foe.x;
+    advance(sim, info.fuse / 2);
+    expect(foe.x).toBe(at);
+    expect(until(sim, 'burst', info.fuse)).toBe(true);
+    expect(sim.events).toContainEqual({ type: 'burst', x: foe.x, y: foe.y, radius: info.radius });
+    expect(sim.events).toContainEqual({ type: 'hurt' });
+    expect(sim.state.player.hp).toBe(BASE_HP - info.damage);
+    // 터진 것은 여느 적처럼 쓰러진 것으로 치고 빛 조각을 남긴다.
+    sim.step(STEP, 0, 0);
+    expect(sim.state.enemies).toHaveLength(0);
+    expect(sim.state.kills).toBe(1);
+    expect(sim.state.gems).toHaveLength(1);
+  });
+
+  it('부푸는 동안 둘레 밖으로 나가면 다치지 않는다', () => {
+    const sim = quietSim();
+    const foe = enemy('spore', 60, 0, 9999);
+    sim.state.enemies.push(foe);
+    for (let i = 0; i < 600 && foe.mode === 0; i += 1) sim.step(STEP, 0, 0);
+    expect(foe.mode).toBe(1);
+    expect(until(sim, 'burst', 2, -1, 0)).toBe(true);
+    expect(sim.events).not.toContainEqual({ type: 'hurt' });
+    expect(sim.state.player.hp).toBe(BASE_HP);
+    expect(distanceTo(sim, foe)).toBeGreaterThan(ENEMIES.spore.bursts!.radius + PLAYER_BASE.radius);
+  });
+
+  it('터지면 둘레의 다른 그림자도 함께 다치고, 부푸는 동안 쓰러뜨리면 터지지 않는다', () => {
+    const sim = quietSim();
+    sim.state.player.hp = 1e9;
+    const info = ENEMIES.puff.bursts!;
+    const foe = enemy('puff', 20, 0, 9999);
+    const beside = enemy('brute', 36, 12, 500);
+    const away = enemy('brute', 20, info.radius + 40, 500);
+    sim.state.enemies.push(foe, beside, away);
+    expect(until(sim, 'burst', 3)).toBe(true);
+    expect(beside.hp).toBe(500 - info.splash);
+    expect(away.hp).toBe(500);
+
+    const calm = quietSim();
+    const dud = enemy('puff', 20, 0, 9999);
+    calm.state.enemies.push(dud);
+    calm.step(STEP, 0, 0);
+    expect(dud.mode).toBe(1);
+    dud.hp = 0;
+    expect(advance(calm, 2)).not.toContainEqual(expect.objectContaining({ type: 'burst' }));
+    expect(calm.state.player.hp).toBe(BASE_HP);
+  });
+
+  it('자동 플레이는 부풀고 있는 적의 둘레 밖으로 걸어 나간다', () => {
+    const sim = quietSim();
+    const foe = enemy('puff', 18, 0, 9999);
+    foe.mode = 1;
+    foe.timer = 5;
+    sim.state.enemies.push(foe);
+    const reach = ENEMIES.puff.bursts!.radius + PLAYER_BASE.radius;
+    for (let i = 0; i < 90 && distanceTo(sim, foe) <= reach; i += 1) {
+      const [x, y] = steer(sim);
+      sim.step(STEP, x, y);
+    }
+    expect(distanceTo(sim, foe)).toBeGreaterThan(reach);
+    expect(sim.state.player.x).toBeLessThan(0);
+  });
+
+  it('스테이지마다 쏘는 적과 터지는 적이 하나씩 있고, 처음부터 나오지는 않는다', () => {
+    for (const id of STAGE_ORDER) {
+      const rows = STAGES[id].spawns;
+      const shooters = rows.filter((row) => ENEMIES[row.kind].shoots);
+      const bursters = rows.filter((row) => ENEMIES[row.kind].bursts);
+      expect(shooters).toHaveLength(1);
+      expect(bursters).toHaveLength(1);
+      // 쫓아오는 적에 익숙해진 뒤에 나오고, 무리의 대부분은 여전히 쫓아오는 적이다.
+      expect(shooters[0].from).toBeGreaterThanOrEqual(90);
+      expect(bursters[0].from).toBeGreaterThan(shooters[0].from);
+      const total = rows.reduce((sum, row) => sum + row.weight, 0);
+      expect((shooters[0].weight + bursters[0].weight) / total).toBeLessThan(0.15);
+    }
   });
 });
 

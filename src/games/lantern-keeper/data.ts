@@ -31,10 +31,14 @@ export type EnemyKind =
   | 'bat'
   | 'brute'
   | 'wisp'
+  | 'glare'
+  | 'puff'
   | 'drip'
   | 'moth'
   | 'toad'
   | 'stump'
+  | 'squirt'
+  | 'spore'
   | 'giant'
   | 'ram'
   | 'owl'
@@ -47,6 +51,32 @@ export type EnemyKind =
  * lord 돌진한 뒤 부하를 부른다 · matron 사방으로 쏘기와 부하 부르기를 번갈아 한다
  */
 export type BossBrain = 'summon' | 'charge' | 'volley' | 'lord' | 'matron';
+
+/** 멀찍이 멈춰 서서 어둠 방울을 쏘는 적의 숫자 */
+export interface ShootInfo {
+  /** 이 거리(px) 안에 들어오면 더 다가오지 않고 쏜다 */
+  range: number;
+  /** 쏘고 나서 다음에 쏘기까지(초) */
+  every: number;
+  /** 쏘기 전에 멈춰서 숨을 들이쉬는 시간(초). 이 동안 예고가 보인다. */
+  windup: number;
+  /** 어둠 방울에 맞았을 때의 피해 */
+  damage: number;
+}
+
+/** 가까이 와서 부풀었다가 터지는 적의 숫자 */
+export interface BurstInfo {
+  /** 이 거리(px) 안에 들어오면 멈춰서 부풀기 시작한다 */
+  trigger: number;
+  /** 부풀기 시작해서 터지기까지(초). 이 동안 터질 둘레가 바닥에 보인다. */
+  fuse: number;
+  /** 터지는 둘레의 반지름(px) */
+  radius: number;
+  /** 둘레 안에 있던 플레이어가 받는 피해 */
+  damage: number;
+  /** 둘레 안에 있던 다른 그림자가 받는 피해. 무리 속에서 터뜨리면 이득이다. */
+  splash: number;
+}
 
 export interface EnemyInfo {
   name: string;
@@ -61,6 +91,8 @@ export interface EnemyInfo {
   radius: number;
   /** 폴짝폴짝 뛰어서, 멈췄다가 한 번에 다가온다 */
   hops?: boolean;
+  shoots?: ShootInfo;
+  bursts?: BurstInfo;
   boss?: boolean;
   brain?: BossBrain;
 }
@@ -71,11 +103,47 @@ export const ENEMIES: Readonly<Record<EnemyKind, EnemyInfo>> = {
   bat: { name: '밤박쥐', hp: 5, speed: 40, damage: 4, xp: 1, radius: 5 },
   wisp: { name: '도깨비불', hp: 14, speed: 30, damage: 8, xp: 2, radius: 5 },
   brute: { name: '돌그림자', hp: 45, speed: 15, damage: 12, xp: 4, radius: 8 },
+  glare: {
+    name: '눈총 그림자',
+    hp: 10,
+    speed: 24,
+    damage: 5,
+    xp: 2,
+    radius: 6,
+    shoots: { range: 84, every: 5, windup: 0.7, damage: 4 },
+  },
+  puff: {
+    name: '부푼 그림자',
+    hp: 26,
+    speed: 34,
+    damage: 6,
+    xp: 3,
+    radius: 6,
+    bursts: { trigger: 24, fuse: 0.9, radius: 30, damage: 12, splash: 40 },
+  },
   // 안개 늪
   drip: { name: '늪방울', hp: 7, speed: 21, damage: 5, xp: 1, radius: 6 },
   moth: { name: '안개나방', hp: 4, speed: 44, damage: 4, xp: 1, radius: 5 },
   toad: { name: '늪두꺼비', hp: 18, speed: 58, damage: 9, xp: 2, radius: 6, hops: true },
   stump: { name: '이끼 등걸', hp: 60, speed: 13, damage: 14, xp: 5, radius: 9 },
+  squirt: {
+    name: '물총 봉오리',
+    hp: 12,
+    speed: 20,
+    damage: 5,
+    xp: 2,
+    radius: 6,
+    shoots: { range: 90, every: 5.2, windup: 0.7, damage: 4 },
+  },
+  spore: {
+    name: '포자 주머니',
+    hp: 30,
+    speed: 30,
+    damage: 6,
+    xp: 3,
+    radius: 7,
+    bursts: { trigger: 26, fuse: 1, radius: 34, damage: 13, splash: 45 },
+  },
   // 중간 보스의 체력은 MID_BOSS_TIERS가 정한다. 여기 적힌 값은 첫 번째 것과 같다.
   giant: { name: '어스름 거인', hp: 320, speed: 30, damage: 18, xp: 30, radius: 15, boss: true, brain: 'summon' },
   ram: { name: '뿔그림자', hp: 320, speed: 26, damage: 20, xp: 30, radius: 14, boss: true, brain: 'charge' },
@@ -134,6 +202,8 @@ export const STAGES: Readonly<Record<StageId, StageInfo>> = {
       { kind: 'bat', from: 75, weight: 6 },
       { kind: 'wisp', from: 200, weight: 5 },
       { kind: 'brute', from: 160, weight: 2 },
+      { kind: 'glare', from: 130, weight: 1 },
+      { kind: 'puff', from: 280, weight: 1.2 },
     ],
     surge: ['shade', 'wisp'],
     minions: ['bat', 'wisp'],
@@ -150,6 +220,8 @@ export const STAGES: Readonly<Record<StageId, StageInfo>> = {
       { kind: 'moth', from: 60, weight: 6 },
       { kind: 'toad', from: 120, weight: 5 },
       { kind: 'stump', from: 170, weight: 2 },
+      { kind: 'squirt', from: 120, weight: 1 },
+      { kind: 'spore', from: 270, weight: 1.2 },
     ],
     surge: ['moth', 'toad'],
     minions: ['moth', 'toad'],
