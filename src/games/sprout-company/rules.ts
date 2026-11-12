@@ -6,6 +6,12 @@
 import {
   AWAY,
   BRANCH,
+  BREAK,
+  BUDDIES,
+  DECOR,
+  DECOR_ORDER,
+  DECOR_SLOTS,
+  BUDDY,
   CANDIDATE_COUNT,
   CHEER_BOOST,
   CHEER_SECONDS,
@@ -36,6 +42,9 @@ import {
   TIPS,
   TRAINING,
   UPDATE_SCALE,
+  type DecorDef,
+  type DecorId,
+  type DecorSlot,
   type DepartmentId,
   type EffectKey,
   type EquipmentDef,
@@ -79,6 +88,10 @@ export interface Desk {
   cheer: number;
   /** 이 자리의 직원이 든 부서. 없으면 null */
   dept: DepartmentId | null;
+  /** 기운. 1이면 가득, 0이면 바닥. 휴게실이 열린 사무실에서만 줄고 찬다. */
+  energy: number;
+  /** 휴게실에서 쉬는 중인가. 쉬는 동안에는 일을 맡지 않는다. */
+  resting: boolean;
 }
 
 export interface ActiveProject {
@@ -159,6 +172,8 @@ export interface CompanyState {
   perks: Partial<Record<PerkId, number>>;
   /** 지금까지 가 본 가장 큰 사무실. 처음 이사할 때만 코인을 주려고 적어 둔다. */
   topOffice: number;
+  /** 사 둔 꾸미기와 지금 쓰는 것. 자회사를 세워도 남는다. */
+  decor: Decor;
   /** 이미 본 처음 안내의 id */
   tips: string[];
   /** 마지막으로 저장한 때(ms). 닫아 둔 시간을 재는 데 쓴다. */
@@ -168,7 +183,7 @@ export interface CompanyState {
 // ───────── 처음 상태 ─────────
 
 function emptyDesk(staff: StaffId | null = null): Desk {
-  return { staff, level: 0, gear: {}, task: null, cheer: 0, dept: null };
+  return { staff, level: 0, gear: {}, task: null, cheer: 0, dept: null, energy: 1, resting: false };
 }
 
 /** 꾸미기에서 쓰는 캐릭터 id로 사장이 될 친구를 찾는다. 모르는 id면 새싹이다. */
@@ -208,6 +223,7 @@ export function createCompany(boss: StaffId, now = 0): CompanyState {
     fruit: 0,
     perks: {},
     topOffice: 0,
+    decor: { owned: [], wall: null, floor: null, sign: null },
     tips: [],
     savedAt: now,
   };
@@ -268,13 +284,107 @@ export function legacyBonus(state: CompanyState, key: EffectKey): number {
   return sum;
 }
 
+// ───────── 휴게실과 기운 ─────────
+
+/** 휴게실이 있는 사무실인가. 없는 곳에서는 기운이 줄지도 않고 보너스도 없다. */
+export function breakOpen(state: CompanyState): boolean {
+  return BREAK.unlockOffice <= state.office;
+}
+
+/** 이 책상의 친구가 기운이 남아서 더 빨리 일하는가 */
+export function isPeppy(state: CompanyState, index: number): boolean {
+  const desk = state.desks[index];
+  return breakOpen(state) && !!desk?.staff && !desk.resting && desk.energy > 0;
+}
+
+/** 가득 찬 기운이 쉬지 않고 일해서 바닥나기까지의 시간(초) */
+export function staminaSeconds(state: CompanyState): number {
+  return BREAK.workSeconds * (1 + companyBonus(state, 'stamina'));
+}
+
+/** 바닥난 기운을 휴게실에서 가득 채우는 데 걸리는 시간(초) */
+export function restSeconds(state: CompanyState): number {
+  return BREAK.restSeconds / (1 + companyBonus(state, 'rest'));
+}
+
+/** 기운이 바닥나서 지금 쉬러 가도 되는가: 급한 의뢰가 없고 휴게실에 자리가 있어야 한다. */
+function canRest(state: CompanyState, desk: Desk): boolean {
+  return desk.energy <= 0 && !state.rush && restingCount(state) < BREAK.seats;
+}
+
+/** 지금 휴게실에서 쉬는 친구의 수 */
+export function restingCount(state: CompanyState): number {
+  return state.desks.reduce((count, desk) => count + (desk.staff && desk.resting ? 1 : 0), 0);
+}
+
+// ───────── 자리와 단짝 ─────────
+
+/** 책상이 count개일 때 한 줄에 놓는 수. 화면도 이대로 놓는다. */
+export function deskColumns(count: number): number {
+  return count <= 4 ? 2 : count <= 9 ? 3 : 4;
+}
+
+/** 이 친구의 단짝. 없으면 null */
+export function buddyOf(id: StaffId): StaffId | null {
+  for (const [a, b] of BUDDIES) {
+    if (a === id) return b;
+    if (b === id) return a;
+  }
+  return null;
+}
+
+/** 이 책상의 옆자리: 같은 줄의 바로 왼쪽과 오른쪽 책상의 번호 */
+export function neighbors(state: CompanyState, index: number): number[] {
+  const count = state.desks.length;
+  if (!Number.isInteger(index) || index < 0 || index >= count) return [];
+  const columns = deskColumns(count);
+  const column = index % columns;
+  const near: number[] = [];
+  if (column > 0) near.push(index - 1);
+  if (column < columns - 1 && index + 1 < count) near.push(index + 1);
+  return near;
+}
+
+/** 이 책상의 친구가 단짝과 옆자리에 앉아 있는가 */
+export function hasBuddy(state: CompanyState, index: number): boolean {
+  const staff = state.desks[index]?.staff;
+  const buddy = staff ? buddyOf(staff) : null;
+  return buddy !== null && neighbors(state, index).some((near) => state.desks[near].staff === buddy);
+}
+
+/** 단짝이 둘 다 회사에 있는데 옆자리가 아닌 짝이 있는가 */
+export function hasLonelyBuddy(state: CompanyState): boolean {
+  return state.desks.some((desk, index) => {
+    const buddy = desk.staff ? buddyOf(desk.staff) : null;
+    return buddy !== null && !hasBuddy(state, index) && state.desks.some((other) => other.staff === buddy);
+  });
+}
+
+/**
+ * 두 책상의 자리를 맞바꾼다. 친구가 하던 일, 레벨, 부서, 그 자리의 컴퓨터까지 함께 옮겨 간다.
+ * 한쪽이 빈 자리면 그리로 옮겨 앉는 것이 된다.
+ */
+export function swapDesks(state: CompanyState, a: number, b: number): boolean {
+  const first = state.desks[a];
+  const second = state.desks[b];
+  if (!first || !second || a === b || (!first.staff && !second.staff)) return false;
+  state.desks[a] = second;
+  state.desks[b] = first;
+  return true;
+}
+
 /** 사장은 특기 없이 모든 업무를 고르게 한다. */
 export function specialtyOf(state: CompanyState, staff: StaffId): TaskKind | null {
   return staff === state.boss ? null : STAFF[staff].specialty;
 }
 
-/** 이 책상의 직원이 특기가 아닌 업무를 할 때의 속도(응원은 뺀 것). 빈 자리는 0 */
+/** 이 책상의 직원이 특기가 아닌 업무를 할 때의 속도(응원은 뺀 것). 기운이 남아 있으면 그만큼 빠르다. 빈 자리는 0 */
 export function baseSpeed(state: CompanyState, index: number): number {
+  return plainSpeed(state, index) * (isPeppy(state, index) ? 1 + BREAK.boost : 1);
+}
+
+/** 기운을 뺀 속도 */
+function plainSpeed(state: CompanyState, index: number): number {
   const desk = state.desks[index];
   if (!desk?.staff) return 0;
   const trait = (STAFF[desk.staff] as StaffDef).trait;
@@ -283,7 +393,8 @@ export function baseSpeed(state: CompanyState, index: number): number {
     gearBonus(desk.gear, 'desk', 'workSpeed') +
     gearBonus(state.gear, 'company', 'workSpeed') +
     (trait.key === 'workSpeed' ? trait.amount : 0) +
-    desk.level * LEVEL_SPEED;
+    desk.level * LEVEL_SPEED +
+    (hasBuddy(state, index) ? BUDDY.speed : 0);
   return own * (1 + legacyBonus(state, 'workSpeed'));
 }
 
@@ -512,16 +623,17 @@ function releaseQueued(state: CompanyState): Release | null {
 export function assign(state: CompanyState, card: number, index: number): boolean {
   const desk = state.desks[index];
   const task = state.inbox[card];
-  if (!desk?.staff || desk.task || !task) return false;
+  if (!desk?.staff || desk.task || desk.resting || !task) return false;
   state.inbox.splice(card, 1);
   desk.task = task;
   refill(state);
   return true;
 }
 
-/** 이 책상에 맡기기 좋은 카드의 번호: 가장 잘하는 업무의 카드, 다 같으면 맨 앞. 일감함이 비었으면 -1 */
+/** 이 책상에 맡기기 좋은 카드의 번호: 가장 잘하는 업무의 카드, 다 같으면 맨 앞. 일감함이 비었거나 쉬는 중이면 -1 */
 export function bestCardFor(state: CompanyState, index: number): number {
-  if (!state.desks[index]?.staff || state.inbox.length === 0) return -1;
+  const desk = state.desks[index];
+  if (!desk?.staff || desk.resting || state.inbox.length === 0) return -1;
   let best = 0;
   let bestSkill = 0;
   state.inbox.forEach((task, card) => {
@@ -534,11 +646,16 @@ export function bestCardFor(state: CompanyState, index: number): number {
   return best;
 }
 
+/** 응원 한 번이 이어지는 시간(초) */
+export function cheerSeconds(state: CompanyState): number {
+  return CHEER_SECONDS * (1 + companyBonus(state, 'cheer'));
+}
+
 /** 일하는 책상을 응원한다. 잠깐 빨라진다. */
 export function cheer(state: CompanyState, index: number): boolean {
   const desk = state.desks[index];
   if (!desk?.task) return false;
-  desk.cheer = CHEER_SECONDS;
+  desk.cheer = cheerSeconds(state);
   bumpGoals(state.goals, 'cheer');
   return true;
 }
@@ -572,18 +689,38 @@ export function advance(state: CompanyState, dt: number, random: () => number = 
 /** 책상의 일만 dt초 진행한다. 잎사귀는 벌지 않는다. */
 function work(state: CompanyState, dt: number, random: () => number): CompanyEvent[] {
   const done: CompanyEvent[] = [];
+  const open = breakOpen(state);
+  const stamina = open ? staminaSeconds(state) : 0;
+  const rest = open ? restSeconds(state) : 0;
   for (let index = 0; index < state.desks.length; index += 1) {
     const desk = state.desks[index];
+    if (desk.resting) {
+      // 휴게실에서 쉬는 중: 기운이 가득 차면 자리로 돌아온다.
+      desk.energy = open ? Math.min(1, desk.energy + dt / rest) : 1;
+      if (desk.energy >= 1 || !desk.staff) desk.resting = false;
+      continue;
+    }
     const task = desk.task;
     if (!task) {
       desk.cheer = 0;
+      if (open && desk.staff) {
+        // 기운이 바닥났으면 쉬러 가고, 아니면 자리에서 기다리며 천천히 채운다.
+        if (canRest(state, desk)) desk.resting = true;
+        else desk.energy = Math.min(1, desk.energy + (dt * BREAK.idle) / rest);
+      }
       continue;
     }
-    const speed = deskSpeed(state, index, task.kind);
-    // 응원이 남은 동안만 빠르다. 한 번에 긴 시간을 흘려도 응원이 끝난 뒤는 보통 속도로 센다.
+    const speed = plainSpeed(state, index) * skill(state, index, task.kind);
+    // 응원과 기운은 남은 동안만 빠르다. 한 번에 긴 시간을 흘려도 끝난 뒤는 보통 속도로 센다.
     const cheered = Math.min(desk.cheer, dt);
-    task.left -= speed * (cheered * CHEER_BOOST + (dt - cheered));
+    const peppy = open ? Math.min(desk.energy * stamina, dt) : 0;
+    const both = Math.min(cheered, peppy);
+    const pep = 1 + BREAK.boost;
+    task.left -=
+      speed *
+      (both * CHEER_BOOST * pep + (cheered - both) * CHEER_BOOST + (peppy - both) * pep + (dt - Math.max(cheered, peppy)));
     desk.cheer = Math.max(0, desk.cheer - dt);
+    if (open) desk.energy = Math.max(0, desk.energy - dt / stamina);
     if (task.left <= 0) {
       desk.task = null;
       desk.cheer = 0;
@@ -601,6 +738,8 @@ function work(state: CompanyState, dt: number, random: () => number): CompanyEve
       } else if (state.project) {
         state.project.done = Math.min(state.project.total, state.project.done + 1);
       }
+      // 기운이 바닥난 채로 일을 마쳤으면 다음 일을 받기 전에 쉬러 간다.
+      if (open && canRest(state, desk)) desk.resting = true;
     }
   }
   leadAssign(state, dt);
@@ -650,7 +789,7 @@ function makeOffer(state: CompanyState, random: () => number): RushOffer {
   }
   // 특기가 아닌 직원이 응원 없이 하면 시간이 빠듯하게 드는 만큼의 일을 준다.
   let speed = 0;
-  for (let index = 0; index < state.desks.length; index += 1) speed += baseSpeed(state, index);
+  for (let index = 0; index < state.desks.length; index += 1) speed += plainSpeed(state, index);
   const work = RUSH.effort * RUSH.seconds * (speed / Math.max(1, staff));
   const reward = Math.round(Math.max(RUSH.minReward * 4 ** state.office, incomePerSecond(state) * RUSH.rewardSeconds));
   return { kinds, work, reward, left: RUSH.offerSeconds };
@@ -662,6 +801,8 @@ export function acceptRush(state: CompanyState): boolean {
   if (!offer || state.rush) return false;
   const cards: Task[] = offer.kinds.map((kind) => ({ kind, left: offer.work, total: offer.work, rush: true }));
   state.inbox.unshift(...cards);
+  // 급한 일이 오면 쉬던 친구들도 채운 만큼만 가지고 자리로 돌아온다.
+  for (const desk of state.desks) desk.resting = false;
   state.rush = { total: cards.length, done: 0, left: RUSH.seconds, seconds: RUSH.seconds, reward: offer.reward };
   state.offer = null;
   return true;
@@ -749,7 +890,7 @@ function leadAssign(state: CompanyState, dt: number): number {
   const idle: number[] = [];
   for (let index = 0; index < state.desks.length; index += 1) {
     const desk = state.desks[index];
-    if (desk.staff && !desk.task) idle.push(index);
+    if (desk.staff && !desk.task && !desk.resting) idle.push(index);
   }
   if (idle.length === 0 || state.inbox.length === 0) {
     state.leadWait = level.delay;
@@ -792,6 +933,11 @@ export interface Away {
   releases: Release[];
 }
 
+/** 닫아 둔 동안 출시작이 버는 몫. 열어 둔 때를 1로 친다. */
+export function awayRate(state: CompanyState): number {
+  return AWAY.rate * (1 + companyBonus(state, 'away'));
+}
+
 /**
  * 닫아 둔 seconds초를 한꺼번에 흘린다. 출시작은 평소의 일부만 벌고, 맡겨 둔 업무는 그대로 진행된다
  * (팀장이 있으면 남은 카드도 맡기고, 예약해 둔 게임이 있으면 다 만든 게임을 출시하고 이어서 만든다).
@@ -804,7 +950,7 @@ export function catchUp(state: CompanyState, seconds: number): Away | null {
   const fixed = (): number => 0.5;
   if (state.rush) dropRush(state, fixed);
   if (state.offer) declineRush(state, fixed);
-  const leaves = incomePerSecond(state) * counted * AWAY.rate;
+  const leaves = incomePerSecond(state) * counted * awayRate(state);
   state.leaves += leaves;
   let tasks = 0;
   const releases: Release[] = [];
@@ -1101,6 +1247,7 @@ export function foundBranch(state: CompanyState): Founding | null {
     fruit: state.fruit + fruit,
     perks: state.perks,
     topOffice: state.topOffice,
+    decor: state.decor,
     stars: state.stars,
     releases: state.releases,
     goals: state.goals,
@@ -1110,6 +1257,60 @@ export function foundBranch(state: CompanyState): Founding | null {
   const seed = seedLeaves(state);
   state.leaves = seed;
   return { fruit, branches: state.branches, seed };
+}
+
+// ───────── 사옥 꾸미기 ─────────
+
+/** 사 둔 꾸미기(owned)와 곳마다 지금 쓰는 것. 쓰는 것이 없으면 null */
+export interface Decor extends Record<DecorSlot, DecorId | null> {
+  owned: DecorId[];
+}
+
+/** 이 곳에 지금 쓰는 꾸미기. 기본 모습이면 null */
+export function decorOf(state: CompanyState, slot: DecorSlot): DecorDef | null {
+  const id = state.decor[slot];
+  return id ? DECOR[id] : null;
+}
+
+/** 이 꾸미기를 살 수 없는 까닭. coins는 가진 허브의 코인이다. 살 수 있으면 null */
+export function decorBlock(state: CompanyState, id: DecorId, coins: number): 'owned' | 'poor' | null {
+  if (state.decor.owned.includes(id)) return 'owned';
+  if (!(coins >= DECOR[id].cost)) return 'poor';
+  return null;
+}
+
+/** 꾸미기를 사서 바로 쓴다. 치를 코인을 돌려주고, 못 샀으면 0이다. 코인을 빼는 일은 부른 쪽이 한다. */
+export function buyDecor(state: CompanyState, id: DecorId, coins: number): number {
+  if (decorBlock(state, id, coins) !== null) return 0;
+  const def: DecorDef = DECOR[id];
+  state.decor.owned.push(id);
+  state.decor[def.slot] = id;
+  return def.cost;
+}
+
+/** 사 둔 꾸미기로 바꾼다. id가 null이면 기본 모습으로 돌린다. */
+export function useDecor(state: CompanyState, slot: DecorSlot, id: DecorId | null): boolean {
+  if (id !== null && (!state.decor.owned.includes(id) || (DECOR[id] as DecorDef).slot !== slot)) return false;
+  if (state.decor[slot] === id) return false;
+  state.decor[slot] = id;
+  return true;
+}
+
+function normalizeDecor(raw: unknown): Decor {
+  const decor: Decor = { owned: [], wall: null, floor: null, sign: null };
+  if (!isObject(raw)) return decor;
+  if (Array.isArray(raw.owned)) {
+    // 산 차례를 그대로 둔다.
+    for (const entry of raw.owned as unknown[]) {
+      const id = DECOR_ORDER.find((known) => known === entry);
+      if (id && !decor.owned.includes(id)) decor.owned.push(id);
+    }
+  }
+  for (const slot of DECOR_SLOTS) {
+    const id = decor.owned.find((owned) => owned === raw[slot]);
+    if (id && (DECOR[id] as DecorDef).slot === slot) decor[slot] = id;
+  }
+  return decor;
 }
 
 /** n단계에서 n+1단계로 올리는 데 드는 열매 */
@@ -1218,6 +1419,7 @@ export function normalizeCompany(raw: unknown): CompanyState | null {
   // 자회사를 세운 적이 있으면 가장 큰 사무실까지 가 본 것이다.
   const reached = state.branches > 0 ? OFFICES.length - 1 : state.office;
   state.topOffice = Math.max(reached, toCount(raw.topOffice, OFFICES.length - 1));
+  state.decor = normalizeDecor(raw.decor);
   state.gear = normalizeLevels(raw.gear, 'company');
   if (DEPARTMENT.unlockOffice <= state.office && isObject(raw.departments)) {
     for (const id of DEPARTMENT_ORDER) {
@@ -1243,7 +1445,10 @@ export function normalizeCompany(raw: unknown): CompanyState | null {
         desk.level = toCount(entry.level, TRAINING.maxLevel);
         desk.gear = normalizeLevels(entry.gear, 'desk');
         desk.task = normalizeTask(entry.task);
-        desk.cheer = desk.task ? toNumber(entry.cheer, 0, CHEER_SECONDS) : 0;
+        desk.cheer = desk.task ? toNumber(entry.cheer, 0, cheerSeconds(state)) : 0;
+        // 기운이 생기기 전의 세이브는 가득 찬 것으로 읽는다.
+        desk.energy = typeof entry.energy === 'number' ? toNumber(entry.energy, 0, 1) : 1;
+        desk.resting = entry.resting === true && !desk.task && desk.energy < 1 && breakOpen(state);
         if (isDepartmentId(entry.dept)) {
           const count = members[entry.dept] ?? 0;
           if (count < departmentSeats(departmentLevel(state, entry.dept))) {
