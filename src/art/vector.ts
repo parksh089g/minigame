@@ -407,6 +407,16 @@ const ICONS: Record<string, Art> = {
       roundRect(c, 4.500, 10.500, 15, 11, 3.500, THEME_CSS.sub);
     },
   },
+  /** 공유: 상자 밖으로 올라가는 화살표 */
+  'icon-share': {
+    width: 14,
+    height: 14,
+    view: [24, 24],
+    draw(c) {
+      strokePath(c, 'M6 12.500V19.500h12V12.500', THEME_CSS.ink, 3);
+      strokePath(c, 'M12 15V4.500M7.800 8.300 12 4.100l4.200 4.200', THEME_CSS.ink, 3);
+    },
+  },
   'icon-star': {
     width: 16,
     height: 16,
@@ -1122,4 +1132,43 @@ export function registerVectorTextures(scene: Phaser.Scene): void {
   for (const [id, look] of [...Object.entries(ORB_LOOKS), [TEXTURE.orbGold, GOLD_ORB] as const]) {
     add(id, { width: ORB_SIZE, height: ORB_SIZE, draw: (c) => drawOrb(c, look) });
   }
+}
+
+/** 이름으로 그림을 찾는다. 아이콘, 배경 소품, 메뉴에 세워 두는 캐릭터까지 본다. */
+function artOf(key: string): Art | undefined {
+  if (Object.hasOwn(ICONS, key)) return ICONS[key];
+  if (Object.hasOwn(WORLD, key)) return WORLD[key];
+  const view = [CHARACTER_BOX.width, CHARACTER_BOX.height] as const;
+  for (const [id, look] of Object.entries(RUNNER_LOOKS)) {
+    for (const pose of ['idle', 'cheer'] as const) {
+      if (mascotTexture(id, pose) !== key) continue;
+      const character = CHARACTERS[look.kind];
+      return { ...MASCOT_SIZE, view, draw: (c) => character(c, pose) };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * 텍스처로 등록해 둔 그림을 다른 캔버스의 (x, y)에 width × height 크기로 다시 그린다.
+ * 텍스처를 늘여 붙이는 것과 달리 곡선을 새로 그리므로 어떤 크기에서도 또렷하다.
+ * 공유 카드처럼 게임 화면 밖에서 큰 그림이 필요할 때 쓴다. 이 파일에 없는 이름이면 그리지 않고 false를 돌려준다.
+ */
+export function paintArt(
+  context: CanvasRenderingContext2D,
+  key: string,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): boolean {
+  const art = artOf(key);
+  if (!art) return false;
+  const [viewWidth, viewHeight] = art.view ?? [art.width, art.height];
+  context.save();
+  context.translate(x, y);
+  context.scale(width / viewWidth, height / viewHeight);
+  art.draw(context);
+  context.restore();
+  return true;
 }
