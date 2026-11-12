@@ -22,6 +22,11 @@ export interface MiniGameInfo {
   dailyTargets: readonly number[];
   /** true면 허브 목록의 맨 앞에 놓는다. 대표로 내세울 게임에 쓴다. */
   featured?: boolean;
+  /**
+   * true면 둘이서 겨뤄 승패로 끝나는 게임이다. 점수가 없어서 허브 카드에 최고 기록 대신 "둘이서"가 보이고,
+   * 온라인 랭킹과 오늘의 도전에서 빠지며, 결과도 공용 결과 화면이 아니라 그 게임의 화면에서 보여 준다.
+   */
+  versus?: boolean;
 }
 
 export const GAMES: readonly MiniGameInfo[] = [
@@ -128,6 +133,40 @@ export const GAMES: readonly MiniGameInfo[] = [
     sceneKey: SCENE.numberPuzzle,
     coinsFor: (score) => Math.floor(score / 25),
     dailyTargets: [100, 220, 420],
+  },
+  {
+    id: 'path-link',
+    title: '길 잇기',
+    icon: 'icon-path',
+    sceneKey: SCENE.pathLink,
+    coinsFor: (score) => Math.floor(score / 25),
+    dailyTargets: [90, 300, 500],
+  },
+  {
+    id: 'block-fill',
+    title: '블록 채우기',
+    icon: 'icon-block',
+    sceneKey: SCENE.blockFill,
+    coinsFor: (score) => Math.floor(score / 50),
+    dailyTargets: [300, 700, 1100],
+  },
+  {
+    id: 'chosung-quiz',
+    title: '초성 퀴즈',
+    icon: 'icon-chosung',
+    sceneKey: SCENE.chosungQuiz,
+    coinsFor: (score) => Math.floor(score / 35),
+    dailyTargets: [150, 450, 750],
+  },
+  {
+    id: 'duel',
+    title: '둘이서 대결',
+    icon: 'icon-duel',
+    sceneKey: SCENE.duel,
+    // 승패로 끝나는 게임이라 점수와 상관없이 한 판을 마치면 이만큼 준다.
+    coinsFor: () => 3,
+    dailyTargets: [],
+    versus: true,
   },
   {
     id: LANTERN_GAME_ID,

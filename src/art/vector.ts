@@ -647,6 +647,94 @@ const ICONS: Record<string, Art> = {
       }
     },
   },
+  /** 길 잇기: 같은 색 점 두 쌍을 서로 겹치지 않는 굽은 선으로 이은 모습 */
+  'icon-path': {
+    width: 32,
+    height: 32,
+    draw(c) {
+      const dot = (x: number, y: number, color: string, shine: string): void => {
+        oval(c, x, y, 4.400, 4.400, color);
+        oval(c, x - 1.300, y - 1.500, 1.500, 1, shine, -0.6);
+      };
+      strokePath(c, 'M6.500 6.500H25.500V25.500', '#7dbef2', 4.600);
+      strokePath(c, 'M6.500 25.500V16H16', '#ff9fb5', 4.600);
+      dot(6.500, 6.500, '#5fa3dc', '#b9dcf7');
+      dot(25.500, 25.500, '#5fa3dc', '#b9dcf7');
+      dot(6.500, 25.500, '#e97f99', '#ffd0db');
+      dot(16, 16, '#e97f99', '#ffd0db');
+    },
+  },
+  /** 블록 채우기: 네 칸씩 네 줄인 판에 놓인 말랑한 블록 세 개. 맨 아랫줄이 가득 찼다 */
+  'icon-block': {
+    width: 32,
+    height: 32,
+    draw(c) {
+      roundRect(c, 2, 4, 28, 27, 6, '#e6cfc6');
+      roundRect(c, 2, 2, 28, 27, 6, '#ffffff');
+      for (let row = 0; row < 4; row += 1) {
+        for (let col = 0; col < 4; col += 1) {
+          roundRect(c, 4.500 + col * 6, 4 + row * 6, 5, 5, 1.600, '#f3e4dd');
+        }
+      }
+      /** 칸 여러 개를 이어 붙인 블록 한 토막. 아래로 도톰한 옆면이 보인다. */
+      const slab = (col: number, row: number, cols: number, rows: number, lip: string, top: string): void => {
+        const x = 4.500 + col * 6;
+        const y = 4 + row * 6;
+        const w = cols * 6 - 1;
+        const h = rows * 6 - 1;
+        roundRect(c, x, y, w, h, 1.900, lip);
+        roundRect(c, x, y, w, h - 1.100, 1.900, top);
+      };
+      slab(2, 0, 2, 2, '#7dbef2', '#9dd6ff');
+      slab(0, 1, 1, 3, '#7fd3ae', '#9be3c9');
+      slab(0, 3, 2, 1, '#7fd3ae', '#9be3c9');
+      slab(2, 3, 2, 1, '#f2b93b', '#ffcf5c');
+      for (const [col, row] of [
+        [2, 0],
+        [0, 1],
+        [2, 3],
+      ]) {
+        roundRect(c, 5.500 + col * 6, 5 + row * 6, 2.400, 0.900, 0.450, 'rgba(255, 255, 255, 0.75)');
+      }
+    },
+  },
+  /** 초성 퀴즈: 글자 조각 두 개에 적힌 초성 ㅊ과 ㅅ. 글꼴이 준비되기 전에도 그릴 수 있게 획으로 긋는다. */
+  'icon-chosung': {
+    width: 32,
+    height: 32,
+    draw(c) {
+      const tile = (x: number, lip: string, top: string): void => {
+        roundRect(c, x, 7.500, 14, 19.500, 4.500, lip);
+        roundRect(c, x, 5, 14, 19.500, 4.500, top);
+        roundRect(c, x + 2.500, 6.800, 4.500, 1.600, 0.800, 'rgba(255, 255, 255, 0.6)');
+      };
+      tile(1.500, '#f2cf73', '#ffe9a8');
+      tile(16.500, '#9684e0', '#c9bcf8');
+      strokePath(c, 'M6.900 9.300H10.100M4.700 12.500H12.300M8.500 12.500Q8.300 16.600 4.700 19.800M8.900 15.600Q10 18.300 12.300 19.800', INK, 2);
+      strokePath(c, 'M23.500 9.800Q23.300 15.800 19.500 19.800M23.900 14.200Q25.200 17.800 27.500 19.800', INK, 2);
+    },
+  },
+  /** 둘이서 대결: 가운데 줄을 사이에 두고 마주 앉은 하늘색 친구와 분홍 친구 */
+  'icon-duel': {
+    width: 32,
+    height: 32,
+    draw(c) {
+      // 위쪽 친구는 반 바퀴 돌려 그려서 맞은편에 앉은 것처럼 보인다.
+      c.save();
+      c.translate(32, 32);
+      c.rotate(Math.PI);
+      oval(c, 16, 24.200, 11.500, 7.300, '#9dd6ff');
+      oval(c, 9.800, 20.400, 2.600, 1.300, '#d3ecff', -0.5);
+      face(c, 16, 23, { gap: 7.600, eye: 1.250, blush: false });
+      c.restore();
+      oval(c, 16, 24.200, 11.500, 7.300, '#ff9fb5');
+      oval(c, 9.800, 20.400, 2.600, 1.300, '#ffd0db', -0.5);
+      face(c, 16, 23, { gap: 7.600, eye: 1.250, blush: false });
+      roundRect(c, 2.500, 15, 5, 2, 1, '#e9c9a6');
+      roundRect(c, 24.500, 15, 5, 2, 1, '#e9c9a6');
+      softPath(c, starPath(16, 16.200, 3.300, 0.5), '#ffcf5c', 1.600);
+    },
+  },
 };
 
 // ───────── 기억 카드의 그림 ─────────

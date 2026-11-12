@@ -21,6 +21,7 @@ const EMPTY: AchievementStats = {
   totalPlays: 0,
   gamesTried: 0,
   best: {},
+  played: {},
   dailyCleared: 0,
   bestStreak: 0,
   cosmeticsOwned: 0,
@@ -101,6 +102,13 @@ describe('progressOf', () => {
   it('다른 게임의 점수는 세지 않는다', () => {
     expect(progressOf(must('tap-80'), stats({ best: { 'jump-runner': 999 } })).complete).toBe(false);
   });
+
+  it('판 수 업적은 그 게임을 한 판 수만 센다', () => {
+    const duel = must('duel-10');
+    expect(progressOf(duel, stats({ totalPlays: 50, played: { 'lightning-tap': 50 } })).complete).toBe(false);
+    expect(progressOf(duel, stats({ played: { duel: 9 } })).complete).toBe(false);
+    expect(progressOf(duel, stats({ played: { duel: 10 } })).complete).toBe(true);
+  });
 });
 
 describe('statsOf', () => {
@@ -119,6 +127,7 @@ describe('statsOf', () => {
       totalPlays: 6,
       gamesTried: 2,
       best: { 'lightning-tap': 90, 'memory-cards': 0, 'jump-runner': 160 },
+      played: { 'lightning-tap': 4, 'memory-cards': 0, 'jump-runner': 2 },
       dailyCleared: 5,
       bestStreak: 3,
       cosmeticsOwned: 2,

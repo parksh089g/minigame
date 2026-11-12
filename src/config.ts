@@ -185,4 +185,8 @@ export const SCENE = {
   tailChase: 'TailChase',
   logicTiles: 'LogicTiles',
   numberPuzzle: 'NumberPuzzle',
+  duel: 'Duel',
+  pathLink: 'PathLink',
+  blockFill: 'BlockFill',
+  chosungQuiz: 'ChosungQuiz',
 } as const;
