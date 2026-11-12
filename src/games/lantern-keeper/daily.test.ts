@@ -8,6 +8,7 @@ import {
   dayIndexOf,
   dayLabel,
   dayResetLabel,
+  MOONER_DAILY_FROM,
   normalizeDaily,
   TUNDRA_DAILY_FROM,
   withRo,
@@ -48,7 +49,7 @@ describe('오늘의 판: 날짜', () => {
 
 describe('오늘의 판: 조건', () => {
   it('같은 날이면 누구에게나 같고, 날이 바뀌면 캐릭터와 스테이지가 모두 바뀐다', () => {
-    // 바람 설원이 섞이기 전의 날과 그 뒤의 날을 모두 지나간다.
+    // 바람 설원이 섞이기 전의 날과 그 뒤의 날, 달잡이가 섞인 뒤의 날을 모두 지나간다.
     for (let day = TUNDRA_DAILY_FROM - 30; day < TUNDRA_DAILY_FROM + 60; day += 1) {
       const plan = dailyPlan(day);
       expect(dailyPlan(day)).toEqual(plan);
@@ -66,7 +67,7 @@ describe('오늘의 판: 조건', () => {
   it('캐릭터와 스테이지의 모든 짝이 차례로 한 번씩 나온다', () => {
     const cycle = HERO_ORDER.length * STAGE_ORDER.length;
     const pairs = new Set<string>();
-    for (let day = TUNDRA_DAILY_FROM + 7; day < TUNDRA_DAILY_FROM + 7 + cycle; day += 1) {
+    for (let day = MOONER_DAILY_FROM + 3; day < MOONER_DAILY_FROM + 3 + cycle; day += 1) {
       const plan = dailyPlan(day);
       pairs.add(`${plan.hero}/${plan.stage}`);
     }
@@ -84,6 +85,20 @@ describe('오늘의 판: 조건', () => {
     expect(dailyPlan(20_770)).toMatchObject({ hero: HERO_ORDER[20_770 % 4], stage: 'marsh' });
     const after = Array.from({ length: 16 }, (_, i) => dailyPlan(TUNDRA_DAILY_FROM + i));
     expect(after.filter((plan) => plan.stage === 'tundra')).toHaveLength(4);
+  });
+
+  it('달잡이는 정해진 날부터 섞이고, 그 전의 날은 캐릭터 넷이 돌던 차례 그대로다', () => {
+    // 2026년 11월 20일(한국 시각)이 그날이다.
+    expect(dayLabel(MOONER_DAILY_FROM)).toBe('11월 20일');
+    expect(MOONER_DAILY_FROM).toBeGreaterThan(TUNDRA_DAILY_FROM);
+    const before = Array.from({ length: 400 }, (_, i) => dailyPlan(MOONER_DAILY_FROM - 1 - i));
+    expect(before.some((plan) => plan.hero === 'mooner')).toBe(false);
+    for (const plan of before) expect(plan.hero).toBe(HERO_ORDER[plan.day % 4]);
+    // 바람 설원이 섞인 뒤부터 달잡이가 섞이기 전까지의 나흘은 먼저 정해 둔 차례 그대로다.
+    expect([0, 1, 2, 3].map((i) => dailyPlan(TUNDRA_DAILY_FROM + i).stage)).toEqual(['ridge', 'tundra', 'meadow', 'ridge']);
+    const after = Array.from({ length: 20 }, (_, i) => dailyPlan(MOONER_DAILY_FROM + i));
+    expect(after.filter((plan) => plan.hero === 'mooner')).toHaveLength(4);
+    expect(new Set(after.filter((plan) => plan.hero === 'mooner').map((plan) => plan.stage)).size).toBe(4);
   });
 
   it('엉뚱한 날짜가 와도 조건은 나온다', () => {
