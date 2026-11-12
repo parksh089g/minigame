@@ -168,7 +168,9 @@ export class StatsScene extends Phaser.Scene implements BackAware {
     );
     const best =
       stat.best !== null
-        ? { text: String(stat.best), color: THEME_CSS.accent, size: FONT_SIZE.normal }
+        ? stat.ongoing
+          ? { text: `${STATS_TEXT.reputation} ${stat.best}`, color: THEME_CSS.accent, size: FONT_SIZE.small }
+          : { text: String(stat.best), color: THEME_CSS.accent, size: FONT_SIZE.normal }
         : stat.versus
           ? { text: STATS_TEXT.versus, color: THEME_CSS.lilacDeep, size: FONT_SIZE.small }
           : { text: STATS_TEXT.none, color: THEME_CSS.faint, size: FONT_SIZE.normal };
