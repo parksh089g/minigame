@@ -3,6 +3,7 @@ import { TEXTURE } from '../../art/sprites';
 import { GAME_WIDTH, SCENE } from '../../config';
 import { vibrate } from '../../core/haptics';
 import { sfx } from '../../core/sfx';
+import { StartGate } from '../../core/start-gate';
 import { addBackdrop, addText } from '../../core/ui';
 import { floatText, GameHud, HUD_HEIGHT, showBanner } from '../../scenes/GameHud';
 import { MiniGameScene } from '../../scenes/MiniGameScene';
@@ -124,6 +125,8 @@ export class NumberPuzzleScene extends MiniGameScene {
   private phase: Phase = 'dealing';
   /** 0보다 크면 일시정지에서 막 돌아와 잠깐 멈춰 있는 중 */
   private grace = 0;
+  /** 첫 칸이나 숫자를 고르거나 잠깐 기다릴 때까지 시간을 세워 둔다. 처음 하는 사람이 설명을 읽을 틈이다. */
+  private readonly gate = new StartGate();
   private lastTickSecond = 0;
   /** 이번 판에서 틀리지 않고 이어서 채운 칸의 수. 이어질수록 효과음이 높아진다. */
   private streak = 0;
@@ -209,6 +212,10 @@ export class NumberPuzzleScene extends MiniGameScene {
       this.grace -= dt;
       return;
     }
+    if (!this.gate.open) {
+      this.gate.wait(dt);
+      return;
+    }
 
     this.run = elapse(this.run, dt);
     this.drawTime();
@@ -229,6 +236,7 @@ export class NumberPuzzleScene extends MiniGameScene {
     this.selection = NO_SELECTION;
     this.phase = 'dealing';
     this.grace = 0;
+    this.gate.reset();
     this.lastTickSecond = 0;
     this.streak = 0;
     this.shaking = null;
@@ -470,6 +478,7 @@ export class NumberPuzzleScene extends MiniGameScene {
     if (arrow) {
       event.preventDefault();
       const { grid, puzzle } = this.run;
+      this.gate.start();
       this.stopPointing();
       this.selection = moveCursor(grid, puzzle.size, this.selection, arrow[0], arrow[1]);
       this.refresh();
@@ -493,6 +502,7 @@ export class NumberPuzzleScene extends MiniGameScene {
 
   /** 누른 결과를 받아들인다: 고른 것을 바꾸고, 숫자를 두게 되었으면 둔다. */
   private apply(press: Press): void {
+    this.gate.start();
     this.stopPointing();
     this.selection = press.selection;
     if (press.attempt) {
@@ -669,8 +679,8 @@ export class NumberPuzzleScene extends MiniGameScene {
 
   private onResume(): void {
     this.boardLayer.setVisible(true);
-    // 판을 고르던 중이 아니면 시간이 흐르고 있지 않았으니 여유도 필요 없다.
-    if (!this.playing || this.phase !== 'idle') return;
+    // 판을 고르던 중이 아니거나 아직 첫 조작 전이면 시간이 흐르고 있지 않았으니 여유도 필요 없다.
+    if (!this.playing || this.phase !== 'idle' || !this.gate.open) return;
     this.grace = RESUME_GRACE_SECONDS;
     const ms = RESUME_GRACE_SECONDS * 1000;
     showBanner(this, this.boardCenterY, '준비!', LOOK.text.ready, ms, DEPTH.banner);

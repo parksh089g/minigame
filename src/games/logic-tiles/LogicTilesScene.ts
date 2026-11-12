@@ -3,6 +3,7 @@ import { TEXTURE } from '../../art/sprites';
 import { GAME_WIDTH, SCENE } from '../../config';
 import { vibrate } from '../../core/haptics';
 import { sfx } from '../../core/sfx';
+import { StartGate } from '../../core/start-gate';
 import { addBackdrop, addTapZone, addText } from '../../core/ui';
 import { floatText, GameHud, HUD_HEIGHT, showBanner } from '../../scenes/GameHud';
 import { MiniGameScene } from '../../scenes/MiniGameScene';
@@ -157,6 +158,8 @@ export class LogicTilesScene extends MiniGameScene {
   private hints: Phaser.GameObjects.Text[] = [];
   /** 0보다 크면 일시정지에서 막 돌아와 잠깐 멈춰 있는 중 */
   private grace = 0;
+  /** 첫 칸을 누르거나 잠깐 기다릴 때까지 시간을 세워 둔다. 처음 하는 사람이 설명을 읽을 틈이다. */
+  private readonly gate = new StartGate();
   private lastTickSecond = 0;
 
   private hud!: GameHud;
@@ -210,6 +213,10 @@ export class LogicTilesScene extends MiniGameScene {
       this.grace -= dt;
       return;
     }
+    if (!this.gate.open) {
+      this.gate.wait(dt);
+      return;
+    }
 
     this.run = elapse(this.run, dt);
     this.hud.setTime(this.run.timeLeft, TIME_BANK_SECONDS);
@@ -236,6 +243,7 @@ export class LogicTilesScene extends MiniGameScene {
     this.pointed = null;
     this.hints = [];
     this.grace = 0;
+    this.gate.reset();
     this.lastTickSecond = 0;
   }
 
@@ -519,7 +527,8 @@ export class LogicTilesScene extends MiniGameScene {
 
   private onResume(): void {
     this.tileLayer.setVisible(true);
-    if (!this.playing) return;
+    // 아직 시간이 가지 않고 있었으면 숨 고를 시간도 필요 없다.
+    if (!this.playing || !this.gate.open) return;
     this.grace = RESUME_GRACE_SECONDS;
     showBanner(this, this.boardBox.y, '준비!', LOOK.text.ready, RESUME_GRACE_SECONDS * 1000, DEPTH.banner);
   }
@@ -531,6 +540,7 @@ export class LogicTilesScene extends MiniGameScene {
     const index = this.cellAt(pointer.worldX, pointer.worldY);
     if (index === null) return;
 
+    this.gate.start();
     this.stopPointing();
     // 마우스가 있으면 오른쪽 단추가 곧 깃발이다.
     if (pointer.rightButtonDown()) {

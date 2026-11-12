@@ -4,6 +4,7 @@ import { CARD_HEIGHT, CARD_WIDTH } from '../../art/textures';
 import { GAME_WIDTH, SCENE, THEME, THEME_CSS } from '../../config';
 import { vibrate } from '../../core/haptics';
 import { sfx } from '../../core/sfx';
+import { StartGate } from '../../core/start-gate';
 import { store } from '../../core/store';
 import { addBackdrop, addText } from '../../core/ui';
 import { floatText, GameHud, HUD_HEIGHT, showBanner } from '../../scenes/GameHud';
@@ -65,6 +66,8 @@ export class MemoryCardsScene extends MiniGameScene {
   private mismatch: { cards: [Card, Card]; timer: Phaser.Time.TimerEvent } | null = null;
   private boardIndex = 0;
   private elapsed = 0;
+  /** 첫 카드를 뒤집거나 잠깐 기다릴 때까지 시간을 세워 둔다. 다른 게임들과 시작하는 방식을 맞춘 것이다. */
+  private readonly gate = new StartGate();
   private score = 0;
   private streak = 0;
   private maxStreak = 0;
@@ -124,6 +127,10 @@ export class MemoryCardsScene extends MiniGameScene {
     if (!this.playing) return;
     // 탭이 가려졌다 돌아와도 시간이 한꺼번에 흐르지 않게 한 프레임의 길이를 제한한다.
     const dt = Math.min(deltaMs, 100) / 1000;
+    if (!this.gate.open) {
+      this.gate.wait(dt);
+      return;
+    }
     this.elapsed += dt;
 
     if (this.elapsed >= ROUND_SECONDS) {
@@ -147,6 +154,7 @@ export class MemoryCardsScene extends MiniGameScene {
     this.mismatch = null;
     this.boardIndex = 0;
     this.elapsed = 0;
+    this.gate.reset();
     this.score = 0;
     this.streak = 0;
     this.maxStreak = 0;
@@ -293,6 +301,7 @@ export class MemoryCardsScene extends MiniGameScene {
     if (this.mismatch) this.hideMismatch(false);
     if (card.faceUp) return;
 
+    this.gate.start();
     this.setFace(card, true);
     sfx.flip();
 
