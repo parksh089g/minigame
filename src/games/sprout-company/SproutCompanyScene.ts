@@ -21,6 +21,7 @@ import { getGame, thisWeek } from '../registry';
 import { COMPUTER_SIZE, computerTexture, registerCompanyTextures, SC, TASK_COLORS, taskTexture } from './art';
 import {
   AWAY,
+  BRANCH,
   COMPANY_GAME_ID,
   COMPANY_SCENE,
   DEPARTMENT,
@@ -31,8 +32,9 @@ import {
   INBOX_SLOTS,
   LEAD,
   LEVEL_SPEED,
-  OFFICE_COINS,
   OFFICES,
+  PERK_ORDER,
+  PERKS,
   PLAY_STARS,
   PROJECT_ORDER,
   PROJECTS,
@@ -47,6 +49,8 @@ import {
   type Effect,
   type EquipmentDef,
   type EquipmentId,
+  type PerkDef,
+  type PerkId,
   type ProjectId,
   type StaffDef,
   type StaffId,
@@ -59,6 +63,7 @@ import {
   availableProjects,
   bossFor,
   buyEquipment,
+  buyPerk,
   candidatesFor,
   cardsWaiting,
   catchUp,
@@ -79,6 +84,9 @@ import {
   formatDuration,
   formatLeaves,
   formatRate,
+  foundBlock,
+  foundBranch,
+  fruitFor,
   gameIncome,
   hasFreeDesk,
   hire,
@@ -93,17 +101,23 @@ import {
   leadLevel,
   leaveDepartment,
   moveBlock,
+  moveCoins,
   moveOffice,
+  perkBlock,
+  perkCost,
+  perkLevel,
   projectBonus,
   projectReputation,
   promoteLead,
   queueBlock,
   release,
+  seedLeaves,
   setStars,
   skill,
   specialtyOf,
   starsOf,
   startProject,
+  totalReputation,
   train,
   trainBlock,
   trainCost,
@@ -177,7 +191,7 @@ interface Button {
 }
 
 /** 아래쪽 버튼으로 여는 창 다섯과, 사무실 창에서 여는 부서 창, 위쪽의 수익을 눌러 여는 출시작 창, 돌아왔을 때 저절로 뜨는 알림 */
-type PanelKind = 'project' | 'gear' | 'staff' | 'office' | 'goals' | 'dept' | 'games' | 'away';
+type PanelKind = 'project' | 'gear' | 'staff' | 'office' | 'goals' | 'dept' | 'games' | 'branch' | 'found' | 'away';
 const PANELS: readonly { kind: PanelKind; label: string }[] = [
   { kind: 'project', label: '게임' },
   { kind: 'gear', label: '장비' },
@@ -571,11 +585,18 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     if (state.reputation !== this.shownReputation) {
       this.shownReputation = state.reputation;
       const next = OFFICES[state.office + 1];
-      this.reputationText.setText(next ? `평판 ${state.reputation}/${next.reputation}` : `평판 ${state.reputation}`);
+      // 다음 사무실까지 평판이 얼마나 찼는지. 가장 큰 사무실에서는 자회사를 세울 평판까지, 그 뒤로는 다음 열매까지를 보여 준다.
+      let from = OFFICES[state.office].reputation;
+      let goal = next ? next.reputation : BRANCH.reputation;
+      let counting = true;
+      if (!next && state.reputation >= BRANCH.reputation) {
+        from = fruitFor(state.reputation) * BRANCH.perFruit;
+        goal = from + BRANCH.perFruit;
+        counting = false;
+      }
+      this.reputationText.setText(counting ? `평판 ${state.reputation}/${goal}` : `평판 ${state.reputation}`);
       this.officeText.setText(OFFICES[state.office].name);
-      // 다음 사무실까지 평판이 얼마나 찼는지
-      const from = OFFICES[state.office].reputation;
-      const share = next ? Phaser.Math.Clamp((state.reputation - from) / (next.reputation - from), 0, 1) : 1;
+      const share = Phaser.Math.Clamp((state.reputation - from) / (goal - from), 0, 1);
       const width = 70;
       const left = W - MARGIN - width;
       this.reputationBar
@@ -671,12 +692,13 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
 
   /**
    * 출시 한 번을 허브에 적는다. 허브에는 한 판으로 세고, 카드에는 평판이 기록으로 남고, 랭킹에도 평판이 오른다.
+   * 자회사가 된 회사들의 평판도 합쳐서 적으므로, 자회사를 세워도 기록은 줄지 않는다.
    * 코인은 하루 상한까지만 나온다. 받은 코인을 돌려준다.
    */
   private recordRelease(): number {
     const state = this.state;
     const coins = takeReleaseCoin(state.goals);
-    store.recordPlay(COMPANY_GAME_ID, Math.min(state.reputation, MAX_SCORE), coins, null, thisWeek(store.data.weekly));
+    store.recordPlay(COMPANY_GAME_ID, Math.min(totalReputation(state), MAX_SCORE), coins, null, thisWeek(store.data.weekly));
     return coins;
   }
 
@@ -1204,7 +1226,9 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
       text = Math.floor(this.clock / 4) % 2 === 0 ? first : '카드와 같은 그림을 단 친구는 두 배 빨라요';
     } else if (moveBlock(state) === null) text = '사무실 버튼에서 더 큰 곳으로 이사할 수 있어요';
     else if (state.queue.length > 0) text = `다 만들면 저절로 출시해요. 다음은 ${PROJECTS[state.queue[0]].title}`;
-    else text = '일하는 친구를 누르면 응원으로 빨라져요';
+    else if (foundBlock(state) === null && Math.floor(this.clock / 4) % 2 === 1) {
+      text = `자회사를 세우면 열매 ${fruitFor(state.reputation)}개를 받아요`;
+    } else text = '일하는 친구를 누르면 응원으로 빨라져요';
     if (this.hint.text !== text) this.hint.setText(text);
     const color = rush ? THEME_CSS.accent : THEME_CSS.sub;
     if (this.hintColor !== color) {
@@ -1244,7 +1268,8 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     this.dots.gear?.setVisible(canBuy);
     this.dots.staff?.setVisible(canHire);
     const canGrow = DEPARTMENT_ORDER.some((id) => departmentBlock(state, id) === null);
-    this.dots.office?.setVisible(moveBlock(state) === null || canGrow);
+    const canPower = PERK_ORDER.some((id) => perkBlock(state, id) === null);
+    this.dots.office?.setVisible(moveBlock(state) === null || canGrow || canPower);
     this.dots.goals?.setVisible(hasGoalToClaim(state.goals));
   }
 
@@ -1335,6 +1360,8 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     else if (kind === 'goals') this.buildGoalsPanel(panel);
     else if (kind === 'dept') this.buildDeptPanel(panel);
     else if (kind === 'games') this.buildGamesPanel(panel);
+    else if (kind === 'branch') this.buildBranchPanel(panel);
+    else if (kind === 'found') this.buildFoundPanel(panel);
     else this.buildAwayPanel(panel);
     // 창을 만드는 동안 쪽 번호가 맞춰지므로, 다 만든 뒤의 모습을 적어 둔다.
     this.panelSignature = this.signatureOf(kind);
@@ -1346,9 +1373,10 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     this.panelKind = null;
   }
 
-  /** 닫기를 눌렀을 때. 부서 창은 사무실 창에서 열었으니 그리로 돌아간다. */
+  /** 닫기를 눌렀을 때. 부서 창과 자회사 창은 사무실 창에서 열었으니 그리로 돌아간다. */
   private dismissPanel(): void {
-    if (this.panelKind === 'dept') this.openPanel('office');
+    if (this.panelKind === 'dept' || this.panelKind === 'branch') this.openPanel('office');
+    else if (this.panelKind === 'found') this.openPanel('branch');
     else this.closePanel();
   }
 
@@ -1389,10 +1417,13 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
       return `${page}|${id}|${departmentLevel(state, id)}${departmentBlock(state, id) ?? ''}|${seats}`;
     }
     if (kind === 'goals') return `${state.goals.day}|${state.goals.progress.join(',')}|${state.goals.claimed.join(',')}`;
+    const branch = `${state.branches}|${state.fruit}|${foundBlock(state) ?? ''}|${state.reputation}`;
+    if (kind === 'found') return branch;
+    if (kind === 'branch') return `${page}|${branch}|${PERK_ORDER.map((id) => `${perkLevel(state, id)}${perkBlock(state, id) ?? ''}`).join(',')}`;
     const departments = DEPARTMENT_ORDER.map(
       (id) => `${departmentLevel(state, id)}${departmentBlock(state, id) ?? ''}${departmentMembers(state, id).length}`,
     );
-    return `${state.office}|${moveBlock(state) ?? ''}|${state.reputation}|${departments.join(',')}`;
+    return `${state.office}|${moveBlock(state) ?? ''}|${branch}|${departments.join(',')}|${this.canPower()}`;
   }
 
   /** 창의 바탕과 제목, 닫기 버튼을 만든다. 내용이 놓일 맨 위 y를 돌려준다. */
@@ -1779,7 +1810,10 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     const deptOpen = DEPARTMENT.unlockOffice <= state.office;
     const first = deptOpen ? state.office : 0;
     const officeRows = OFFICES.length - first;
-    const rowCount = officeRows + (deptOpen ? DEPARTMENT_ORDER.length : 0);
+    // 가장 큰 사무실에 왔거나 자회사를 세운 적이 있으면 자회사 줄이 하나 더 붙는다.
+    const branchOpen = state.office === OFFICES.length - 1 || state.branches > 0;
+    const deptRows = deptOpen ? DEPARTMENT_ORDER.length : 0;
+    const rowCount = officeRows + deptRows + (branchOpen ? 1 : 0);
     const { left, top, width } = this.panelFrame(panel, '사무실', rowCount * rowHeight + 20 + 34);
     OFFICES.forEach((office, index) => {
       if (index < first) return;
@@ -1800,11 +1834,11 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
 
       if (next) {
         this.costButton(panel, left + width - 66, middle - 13, office.cost, moveBlock(state) === null, () => {
+          // 새 사무실에 처음 온 값으로 허브의 코인을 한 번 받는다. 자회사를 세운 뒤에 다시 지나갈 때는 받지 않는다.
+          const coins = moveCoins(state);
           if (!moveOffice(state)) return;
           this.play('move');
           vibrate([12, 50, 12]);
-          // 새 사무실에 처음 온 값으로 허브의 코인을 한 번 받는다.
-          const coins = OFFICE_COINS[state.office] ?? 0;
           if (coins > 0) {
             store.update((save) => {
               save.coins += coins;
@@ -1840,6 +1874,11 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
         this.rowLine(panel, left, y, width);
         this.buildDeptRow(panel, id, y + rowHeight / 2, left, width);
       });
+    }
+    if (branchOpen) {
+      const y = top + (officeRows + deptRows) * rowHeight;
+      this.rowLine(panel, left, y, width);
+      this.buildBranchRow(panel, y + rowHeight / 2, left, width);
     }
     const note = deptOpen
       ? '부서원은 그 부서의 일을 더 빨리 해요'
@@ -2053,6 +2092,191 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     );
   }
 
+  // ───────── 자회사 ─────────
+
+  /** 열매로 올릴 수 있는 본사의 힘이 있는가 */
+  private canPower(): boolean {
+    return PERK_ORDER.some((id) => perkBlock(this.state, id) === null);
+  }
+
+  /** 열매 그림과 수를 (x, y)를 왼쪽 가운데로 적는다. 적은 글을 돌려준다. */
+  private fruitCount(panel: Container, x: number, y: number, text: string, color: string = THEME_CSS.inkDeep): Phaser.GameObjects.Text {
+    panel.add(this.add.image(x + 6, y, SC.fruit).setDisplaySize(12, 12));
+    const label = addText(this, x + 15, y, text, { color, originY: 0.5 });
+    panel.add(label);
+    return label;
+  }
+
+  /** 사무실 창의 자회사 한 줄. 눌러서 자회사 창을 연다. */
+  private buildBranchRow(panel: Container, middle: number, left: number, width: number): void {
+    const state = this.state;
+    const block = foundBlock(state);
+    panel.add(this.add.image(left + 24, middle, SC.fruit).setDisplaySize(22, 22));
+    const name = addText(this, left + 42, middle - 15, '자회사', { color: THEME_CSS.inkDeep });
+    panel.add(name);
+    if (state.branches > 0) {
+      panel.add(addText(this, name.x + name.width + 4, middle - 13, `${state.branches}곳`, { size: FONT_SIZE.small, color: THEME_CSS.lilacDeep }));
+    }
+    let detail: string;
+    if (block === null) detail = `지금 세우면 열매 ${fruitFor(state.reputation)}개를 받아요`;
+    else if (block === 'reputation') detail = `평판 ${state.reputation}/${BRANCH.reputation}이 되면 세워요`;
+    else detail = `열매 ${state.fruit}개  수익 +${Math.round(BRANCH.income * state.branches * 100)}%`;
+    this.rowDetail(panel, left + 42, middle, left + width - 70, detail);
+    const ready = block === null || this.canPower();
+    this.button(panel, left + width - 66, middle - 13, 56, 26, '열기', ready ? 'green' : 'neutral', () => {
+      this.pages.branch = 0;
+      this.openPanel('branch');
+    });
+  }
+
+  /** 본사의 힘이 지금 주는 것을 짧게 적는다: +60%, 2.0만 */
+  private perkNow(id: PerkId): string {
+    const def: PerkDef = PERKS[id];
+    const level = perkLevel(this.state, id);
+    if (def.effect) return `+${Math.round(def.effect.amount * level * 100)}%`;
+    return def.seed && level > 0 ? formatLeaves(def.seed[Math.min(level, def.seed.length) - 1]) : '';
+  }
+
+  /** 자회사 창: 자회사를 세우고, 받은 열매로 본사의 힘을 올린다. */
+  private buildBranchPanel(panel: Container): void {
+    const state = this.state;
+    const block = foundBlock(state);
+    const header = {
+      height: 62,
+      draw: (top: number, left: number, width: number): void => {
+        const fruit = this.fruitCount(panel, left + 14, top + 8, `열매 ${state.fruit}개`);
+        const share = Math.round(BRANCH.income * state.branches * 100);
+        const owned = state.branches > 0 ? `자회사 ${state.branches}곳  수익 +${share}%` : `자회사마다 수익 +${Math.round(BRANCH.income * 100)}%`;
+        const summary = addText(this, left + width - 14, top + 8, owned, { size: FONT_SIZE.small, color: THEME_CSS.sub, originX: 1, originY: 0.5 });
+        panel.add(summary.setScale(Math.min(1, (left + width - 20 - fruit.x - fruit.width) / summary.width)));
+
+        let first: string;
+        let second: string;
+        if (block === null) {
+          const gain = fruitFor(state.reputation);
+          first = `지금 세우면 열매 ${gain}개를 받아요`;
+          second = `평판 ${(gain + 1) * BRANCH.perFruit}이 되면 하나 더 받아요`;
+        } else if (block === 'reputation') {
+          first = `평판 ${state.reputation}/${BRANCH.reputation}이 되면 세울 수 있어요`;
+          second = `평판 ${BRANCH.perFruit}마다 열매를 하나 받아요`;
+        } else {
+          first = `${OFFICES[OFFICES.length - 1].name}에서 평판 ${BRANCH.reputation}을 채우면`;
+          second = '자회사를 또 세울 수 있어요';
+        }
+        const right = left + width - (block === null ? 74 : 14);
+        const one = addText(this, left + 14, top + 24, first, { size: FONT_SIZE.small, color: block === null ? THEME_CSS.good : THEME_CSS.ink });
+        const two = addText(this, left + 14, top + 39, second, { size: FONT_SIZE.small, color: THEME_CSS.sub });
+        panel.add([one.setScale(Math.min(1, (right - left - 14) / one.width)), two.setScale(Math.min(1, (right - left - 14) / two.width))]);
+        if (block === null) {
+          this.button(panel, left + width - 68, top + 24, 58, 28, '세우기', 'pink', () => this.openPanel('found'));
+        }
+      },
+    };
+    const bottom = this.listPanel(
+      panel,
+      'branch',
+      '자회사',
+      PERK_ORDER,
+      38,
+      18,
+      (id: PerkId, middle, left, width) => {
+        const def: PerkDef = PERKS[id];
+        const level = perkLevel(state, id);
+        const name = addText(this, left + 14, middle - 15, def.name, { color: THEME_CSS.inkDeep });
+        panel.add(name);
+        if (level > 0) {
+          panel.add(
+            addText(this, name.x + name.width + 4, middle - 13, `${level}단계 ${this.perkNow(id)}`, {
+              size: FONT_SIZE.small,
+              color: THEME_CSS.lilacDeep,
+            }),
+          );
+        }
+        // 종잣돈은 단계마다 값이 달라서, 다음 단계에 들고 시작할 잎사귀를 적는다.
+        const seed = def.seed?.[Math.min(level, def.seed.length - 1)];
+        const detail = seed === undefined ? def.description : `잎사귀 ${formatLeaves(seed)}로 새 회사를 시작`;
+        this.rowDetail(panel, left + 14, middle, left + width - 70, detail);
+        const perk = perkBlock(state, id);
+        if (perk === 'max') {
+          this.rowState(panel, left, width, middle, '최고');
+          return;
+        }
+        const x = left + width - 66;
+        const cost = perkCost(id, level);
+        const button = this.button(panel, x, middle - 13, 56, 26, `  ${cost}`, perk === null ? 'green' : 'neutral', () => {
+          if (!buyPerk(state, id)) return;
+          this.play('upgrade');
+          this.save();
+          this.refreshNow();
+        });
+        panel.add(this.add.image(x + 17, middle - 1.5, SC.fruit).setDisplaySize(11, 11).setAlpha(perk === null ? 1 : 0.45));
+        if (perk !== null) button.setEnabled(false);
+      },
+      header,
+    );
+    panel.add(
+      addText(this, W / 2, bottom + 3, '열매로 올린 힘은 새 회사에도 그대로 남아요', { size: FONT_SIZE.small, color: THEME_CSS.faint, originX: 0.5 }),
+    );
+  }
+
+  /** 자회사를 세울지 한 번 더 묻는다. 되돌릴 수 없는 일이라 받는 것과 처음으로 돌아가는 것을 적어 준다. */
+  private buildFoundPanel(panel: Container): void {
+    const state = this.state;
+    if (foundBlock(state) !== null) {
+      // 열어 둔 사이에 세울 수 없게 됐으면 자회사 창으로 돌아간다.
+      this.panelKind = 'branch';
+      this.buildBranchPanel(panel);
+      return;
+    }
+    const gain = fruitFor(state.reputation);
+    const { left, top, width } = this.panelFrame(panel, '자회사 세우기', 172);
+    const line = (y: number, text: string, color: string, size: number = FONT_SIZE.small): void => {
+      const label = addText(this, W / 2, y, text, { size, color, originX: 0.5 });
+      panel.add(label.setScale(Math.min(1, (width - 24) / label.width)));
+    };
+    line(top, '지금 회사는 자회사가 되고,', THEME_CSS.ink, FONT_SIZE.normal);
+    line(top + 16, '옥탑방에서 새 회사를 시작해요', THEME_CSS.ink, FONT_SIZE.normal);
+
+    const amount = addText(this, W / 2 + 10, top + 52, `열매 +${gain}`, { size: FONT_SIZE.large, color: THEME_CSS.good, originX: 0.5, originY: 0.5 });
+    panel.add([amount, this.add.image(amount.x - amount.width / 2 - 13, top + 52, SC.fruit).setDisplaySize(20, 20)]);
+    line(top + 70, `자회사가 생겨서 수익 +${Math.round(BRANCH.income * 100)}%`, THEME_CSS.good);
+
+    this.rowLine(panel, left, top + 88, width);
+    line(top + 94, '남는 것: 열매와 본사의 힘, 딴 별, 평판 기록', THEME_CSS.sub);
+    line(top + 108, '처음부터: 잎사귀, 직원, 장비, 사무실, 부서', THEME_CSS.accent);
+
+    this.button(panel, left + 14, top + 132, 84, 30, '아직이요', 'neutral', () => this.openPanel('branch'));
+    this.button(panel, left + width - 98, top + 132, 84, 30, '세우기', 'pink', () => this.foundNow());
+  }
+
+  /** 자회사를 세운다. 회사가 옥탑방으로 돌아가므로 화면을 처음부터 다시 맞춘다. */
+  private foundNow(): void {
+    const state = this.state;
+    const founded = foundBranch(state);
+    if (!founded) return;
+    this.play('found');
+    vibrate([12, 50, 12, 50, 20]);
+    store.update((save) => {
+      save.coins += BRANCH.coins;
+    });
+    this.selected = 0;
+    this.pages = {};
+    this.shownReputation = -1;
+    this.stripSignature = '';
+    this.inboxSignature = '';
+    this.offerSignature = '';
+    this.save();
+    this.buildRoom();
+    // 받은 열매를 바로 쓸 수 있게 자회사 창을 다시 연다.
+    this.openPanel('branch');
+    this.refreshNow();
+    const centerY = (ROOM_TOP + this.roomBottom) / 2;
+    showBanner(this, centerY, `자회사 ${founded.branches}호!`, THEME_CSS.good, 1800, DEPTH.banner);
+    const bounds = new Phaser.Geom.Rectangle(0, 0, W, this.scale.height);
+    floatText(this, W / 2, centerY + 26, `열매 +${founded.fruit}  코인 +${BRANCH.coins}`, THEME_CSS.accent, bounds, DEPTH.banner);
+    if (seedLeaves(state) > 0) floatText(this, 70, 44, `+${formatLeaves(founded.seed)}`, THEME_CSS.good, bounds, DEPTH.banner);
+  }
+
   /** 오늘의 목표: 채우면 허브의 코인을 받는다. */
   private buildGoalsPanel(panel: Container): void {
     const state = this.state;
@@ -2173,17 +2397,20 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
    */
   private prepareShare(): void {
     const state = this.state;
-    const key = `${state.reputation}|${state.office}|${state.releases}`;
+    const key = `${totalReputation(state)}|${state.office}|${state.releases}|${state.branches}`;
     if (key === this.shareKey) return;
     this.shareKey = key;
     this.shareImage = null;
     void makeShareImage(
       {
         title: COMPANY_TITLE,
-        score: state.reputation,
-        best: state.reputation,
+        score: totalReputation(state),
+        best: totalReputation(state),
         isNewBest: false,
-        note: `${OFFICES[state.office].name} · 게임 ${state.releases}번 출시`,
+        note:
+          state.branches > 0
+            ? `자회사 ${state.branches}곳 · 게임 ${state.releases}번 출시`
+            : `${OFFICES[state.office].name} · 게임 ${state.releases}번 출시`,
         invite: '나도 회사 차리기',
         host: displayHost(window.location.href),
         icon: 'icon-company',
@@ -2206,7 +2433,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     const pageUrl = window.location.href;
     void sendShare({
       title: shareTitle(COMPANY_TITLE),
-      text: `포켓 아케이드 [${COMPANY_TITLE}] 평판 ${state.reputation}! 우리 회사에 놀러 오세요`,
+      text: `포켓 아케이드 [${COMPANY_TITLE}] 평판 ${totalReputation(state)}! 우리 회사에 놀러 오세요`,
       url: shareUrl(pageUrl, COMPANY_GAME_ID),
       image: this.shareImage,
     }).then((outcome) => {

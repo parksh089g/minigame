@@ -3,8 +3,19 @@
  * 어떤 때에 어떤 안내가 뜨는지만 여기에 두고, 글은 data.ts에, 화면에 띄우는 일은 씬에 있다.
  * 본 안내는 회사의 세이브에 적혀서 다시 뜨지 않는다.
  */
-import { DEPARTMENT, QUEUE, TIP_IDS, TRAINING, type TipId } from './data';
-import { departmentCount, equipmentBlock, hasFreeDesk, hirePool, leadBlock, moveBlock, trainBlock, type CompanyState } from './rules';
+import { DEPARTMENT, PERK_ORDER, QUEUE, TIP_IDS, TRAINING, type TipId } from './data';
+import {
+  departmentCount,
+  equipmentBlock,
+  foundBlock,
+  hasFreeDesk,
+  hirePool,
+  leadBlock,
+  moveBlock,
+  perkBlock,
+  trainBlock,
+  type CompanyState,
+} from './rules';
 
 /** 안내마다 그것이 뜰 때 */
 const WHEN: Readonly<Record<TipId, (state: CompanyState) => boolean>> = {
@@ -21,6 +32,8 @@ const WHEN: Readonly<Record<TipId, (state: CompanyState) => boolean>> = {
   play: (state) => state.releases >= 2,
   dept: (state) => state.office >= DEPARTMENT.unlockOffice && departmentCount(state) === 0,
   queue: (state) => state.office >= QUEUE.unlockOffice && state.project !== null && state.queue.length === 0,
+  branch: (state) => foundBlock(state) === null,
+  fruit: (state) => PERK_ORDER.some((id) => perkBlock(state, id) === null),
 };
 
 /** 지금 띄울 안내. 이미 본 것은 건너뛰고, 띄울 것이 없으면 null */
