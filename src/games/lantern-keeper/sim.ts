@@ -281,6 +281,8 @@ export type SimEvent =
   | { type: 'block' }
   /** 쏘는 적이 어둠 방울을 뱉었다 */
   | { type: 'spit' }
+  /** 터지는 적이 가까이 와서 부풀기 시작했다 */
+  | { type: 'swell' }
   /** 터지는 적이 (x, y)에서 터졌다 */
   | { type: 'burst'; x: number; y: number; radius: number }
   /** 등불 기둥이 (x, y)에 나타났다. first는 이 판의 첫 기둥인지 */
@@ -1031,6 +1033,7 @@ export class Sim {
         } else if (distance < burst.trigger) {
           e.mode = 1;
           e.timer = burst.fuse;
+          this.events.push({ type: 'swell' });
         }
       }
 

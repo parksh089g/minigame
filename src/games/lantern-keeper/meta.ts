@@ -30,6 +30,7 @@ import {
 } from './data';
 import { clampDepth, depthName, isUnlocked, metaCost, type Levels } from './rules';
 import { restoreRun, type RunState } from './sim';
+import { normalizeTips, OLD_HAND_TIPS, type TipId } from './tips';
 
 export const META_VERSION = 2;
 
@@ -58,6 +59,8 @@ export interface LanternMeta {
   codex: string[];
   /** 도감에 새로 열렸는데 아직 들여다보지 않은 항목의 이름 */
   unread: string[];
+  /** 이미 본 안내(tips.ts). 처음 겪는 일마다 한 번씩만 뜬다. */
+  tips: TipId[];
 }
 
 export function createDefaultMeta(): LanternMeta {
@@ -76,6 +79,7 @@ export function createDefaultMeta(): LanternMeta {
     claimed: [],
     codex: [],
     unread: [],
+    tips: [],
   };
 }
 
@@ -118,6 +122,8 @@ export function normalizeMeta(raw: unknown): LanternMeta {
   meta.claimed = CHALLENGES.map((challenge) => challenge.id).filter((id) => claimed.includes(id));
   // 도감이 생기기 전의 저장에는 만난 기록이 없다. 비운 채로 시작하고, 판을 하는 대로 채워진다.
   Object.assign(meta, normalizeCodex(data.codex, data.unread));
+  // 안내가 생기기 전부터 하던 사람에게는 그때도 있던 일을 새삼 알려 주지 않는다.
+  meta.tips = Array.isArray(data.tips) ? normalizeTips(data.tips) : meta.runs > 0 ? [...OLD_HAND_TIPS] : [];
   return meta;
 }
 
@@ -198,6 +204,11 @@ export function applyRun(meta: LanternMeta, result: RunResult): LanternMeta {
 export function readEntries(meta: LanternMeta, ids: readonly string[]): LanternMeta {
   const unread = meta.unread.filter((id) => !ids.includes(id));
   return unread.length === meta.unread.length ? meta : { ...meta, unread };
+}
+
+/** 그 안내를 봤다고 적는다. 이미 봤으면 그대로 돌려준다. */
+export function learnTip(meta: LanternMeta, id: TipId): LanternMeta {
+  return meta.tips.includes(id) ? meta : { ...meta, tips: [...meta.tips, id] };
 }
 
 /** 이룬 도전 과제의 보상을 받는다. 이루지 못했거나 이미 받았으면 그대로 돌려준다. */
