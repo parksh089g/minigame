@@ -8,6 +8,9 @@ import {
   CANDIDATE_COUNT,
   CHEER_BOOST,
   CHEER_SECONDS,
+  DEPARTMENT,
+  DEPARTMENT_ORDER,
+  DEPARTMENTS,
   EQUIPMENT,
   EQUIPMENT_ORDER,
   INBOX_SLOTS,
@@ -16,6 +19,7 @@ import {
   OFFICES,
   PROJECT_ORDER,
   PROJECTS,
+  QUEUE,
   RUSH,
   SPECIALTY_BOOST,
   STAFF,
@@ -23,6 +27,7 @@ import {
   TASK_KINDS,
   TRAINING,
   UPDATE_SCALE,
+  type ProjectDef,
   type StaffDef,
 } from './data';
 import {
@@ -41,7 +46,17 @@ import {
   companyBonus,
   createCompany,
   declineRush,
+  departmentBlock,
+  departmentBoost,
+  departmentCost,
+  departmentCount,
+  departmentLevel,
+  departmentMembers,
+  departmentSeats,
+  departmentsMissing,
+  dequeue,
   deskSpeed,
+  enqueue,
   equipmentBlock,
   equipmentCost,
   equipmentLevel,
@@ -54,8 +69,11 @@ import {
   hirePool,
   incomePerSecond,
   isReady,
+  joinBlock,
+  joinDepartment,
   leadBlock,
   leadLevel,
+  leaveDepartment,
   moveBlock,
   moveOffice,
   normalizeCompany,
@@ -63,13 +81,16 @@ import {
   projectReputation,
   projectWork,
   promoteLead,
+  queueBlock,
   release,
+  skill,
   specialtyOf,
   staffCount,
   startProject,
   train,
   trainBlock,
   trainCost,
+  upgradeDepartment,
   type CompanyState,
 } from './rules';
 
@@ -96,6 +117,34 @@ function finishProject(state: CompanyState): number {
   }
   return time;
 }
+
+/** 사무실을 office까지 옮긴 회사. 직원은 처음의 둘뿐이다. */
+function movedTo(office: number): CompanyState {
+  const state = createCompany('sprout');
+  while (state.office < office) {
+    state.reputation = OFFICES[state.office + 1].reputation;
+    state.leaves = OFFICES[state.office + 1].cost;
+    moveOffice(state);
+  }
+  state.leaves = 0;
+  return state;
+}
+
+/** 사무실을 office까지 옮기고 빈 자리를 모두 채운 회사 */
+function grown(office: number): CompanyState {
+  const state = movedTo(office);
+  for (const id of hirePool(state)) {
+    if (staffCount(state) >= state.desks.length) break;
+    state.candidates = [id];
+    state.leaves = hireCost(state);
+    hire(state, id);
+  }
+  state.leaves = 0;
+  return state;
+}
+
+/** 이 친구가 앉은 책상의 번호 */
+const deskOf = (state: CompanyState, id: string): number => state.desks.findIndex((desk) => desk.staff === id);
 
 describe('새싹 컴퍼니의 표', () => {
   it('출시작은 포켓 아케이드에 실제로 있는 게임이다', () => {
@@ -555,26 +604,9 @@ describe('닫아 둔 동안', () => {
 });
 
 describe('큰 게임', () => {
-  /** 사무실을 office까지 옮기고 빈 자리를 모두 채운 회사 */
-  const grown = (office: number): CompanyState => {
-    const state = createCompany('sprout');
-    while (state.office < office) {
-      state.reputation = OFFICES[state.office + 1].reputation;
-      state.leaves = OFFICES[state.office + 1].cost;
-      moveOffice(state);
-    }
-    for (const id of hirePool(state)) {
-      if (staffCount(state) >= state.desks.length) break;
-      state.candidates = [id];
-      state.leaves = hireCost(state);
-      hire(state, id);
-    }
-    state.leaves = 0;
-    return state;
-  };
-
   it('카드가 많으면 일감함에 보이는 만큼만 놓이고, 맡기는 대로 나머지가 나온다', () => {
     const state = grown(4);
+    state.departments = { plan: 1 };
     const id = 'logic-tiles';
     const cards = PROJECTS[id].cards.length;
     expect(cards).toBeGreaterThan(INBOX_SLOTS);
@@ -802,6 +834,336 @@ describe('급한 의뢰', () => {
   });
 });
 
+describe('부서', () => {
+  const LAST = OFFICES.length - 1;
+
+  it('부서의 표가 맞게 적혀 있다', () => {
+    expect(DEPARTMENT.seats).toHaveLength(DEPARTMENT.maxLevel);
+    for (let level = 1; level < DEPARTMENT.seats.length; level += 1) {
+      expect(DEPARTMENT.seats[level]).toBeGreaterThanOrEqual(DEPARTMENT.seats[level - 1]);
+    }
+    // 업무마다 그것을 맡는 부서가 하나씩 있다.
+    expect(DEPARTMENT_ORDER.map((id) => DEPARTMENTS[id].kind).sort()).toEqual([...TASK_KINDS].sort());
+    for (const id of PROJECT_ORDER) {
+      const def: ProjectDef = PROJECTS[id];
+      if (def.departments === undefined) continue;
+      expect(def.departments, id).toBeGreaterThan(0);
+      expect(def.departments, id).toBeLessThanOrEqual(DEPARTMENT_ORDER.length);
+      expect(def.unlockOffice, id).toBeGreaterThanOrEqual(DEPARTMENT.unlockOffice);
+    }
+    expect(QUEUE.slots).toBeGreaterThan(0);
+    expect(DEPARTMENT.unlockOffice).toBeLessThanOrEqual(LAST);
+    expect(QUEUE.unlockOffice).toBeLessThanOrEqual(LAST);
+  });
+
+  it('사옥부터 세울 수 있고, 단계마다 값이 오른다', () => {
+    const early = grown(DEPARTMENT.unlockOffice - 1);
+    early.leaves = 1e12;
+    expect(departmentBlock(early, 'art')).toBe('locked');
+    expect(upgradeDepartment(early, 'art')).toBe(false);
+
+    const state = grown(DEPARTMENT.unlockOffice);
+    expect(departmentBlock(state, 'art')).toBe('poor');
+    expect(departmentCount(state)).toBe(0);
+    for (let level = 0; level < DEPARTMENT.maxLevel; level += 1) {
+      const cost = departmentCost(level);
+      if (level > 0) expect(cost).toBeGreaterThan(departmentCost(level - 1));
+      state.leaves = cost;
+      expect(upgradeDepartment(state, 'art')).toBe(true);
+      expect(state.leaves).toBe(0);
+      expect(departmentLevel(state, 'art')).toBe(level + 1);
+    }
+    state.leaves = 1e12;
+    expect(departmentBlock(state, 'art')).toBe('max');
+    expect(upgradeDepartment(state, 'art')).toBe(false);
+    expect(departmentCount(state)).toBe(1);
+  });
+
+  it('세우면 특기가 맞는 친구가 자리만큼 알아서 든다', () => {
+    const state = grown(LAST);
+    const artists = state.desks.filter((desk) => desk.staff && specialtyOf(state, desk.staff) === 'art').length;
+    expect(artists).toBeGreaterThanOrEqual(3);
+    state.leaves = 1e12;
+    upgradeDepartment(state, 'art');
+    expect(departmentSeats(1)).toBe(DEPARTMENT.seats[0]);
+    expect(departmentMembers(state, 'art')).toHaveLength(DEPARTMENT.seats[0]);
+    for (const index of departmentMembers(state, 'art')) {
+      expect(specialtyOf(state, state.desks[index].staff as never)).toBe('art');
+    }
+    // 단계가 올라 자리가 늘면 남은 친구가 마저 든다. 특기가 다른 친구는 저절로 들지 않는다.
+    while (departmentLevel(state, 'art') < DEPARTMENT.maxLevel) upgradeDepartment(state, 'art');
+    expect(departmentMembers(state, 'art')).toHaveLength(Math.min(artists, departmentSeats(DEPARTMENT.maxLevel)));
+    expect(departmentMembers(state, 'code')).toEqual([]);
+  });
+
+  it('새로 뽑은 친구는 특기에 맞는 부서에 자리가 있으면 바로 든다', () => {
+    const state = movedTo(LAST);
+    state.leaves = 1e12;
+    upgradeDepartment(state, 'art');
+    expect(departmentMembers(state, 'art')).toEqual([]);
+    state.candidates = ['drop', 'duck'];
+    const seat = hire(state, 'drop');
+    expect(state.desks[seat].dept).toBe('art');
+    state.candidates = ['duck'];
+    expect(state.desks[hire(state, 'duck')].dept).toBeNull();
+  });
+
+  it('부서원은 그 부서의 업무를 더 빨리 하고, 특기와는 곱으로 겹친다', () => {
+    const state = grown(LAST);
+    const drop = deskOf(state, 'drop');
+    const duck = deskOf(state, 'duck');
+    expect(skill(state, drop, 'art')).toBe(SPECIALTY_BOOST);
+    expect(skill(state, duck, 'art')).toBe(1);
+    expect(skill(state, 99, 'art')).toBe(0);
+
+    state.departments = { art: 2 };
+    state.desks[drop].dept = 'art';
+    state.desks[duck].dept = 'art';
+    const team = 1 + departmentBoost(2);
+    expect(departmentBoost(2)).toBeCloseTo(DEPARTMENT.boost * 2);
+    expect(skill(state, drop, 'art')).toBeCloseTo(SPECIALTY_BOOST * team);
+    // 특기가 아닌 친구도 부서에 들면 그 업무가 빨라진다. 다른 업무는 그대로다.
+    expect(skill(state, duck, 'art')).toBeCloseTo(team);
+    expect(skill(state, duck, 'code')).toBe(SPECIALTY_BOOST);
+    expect(skill(state, drop, 'plan')).toBe(1);
+    expect(deskSpeed(state, drop, 'art')).toBeCloseTo(baseSpeed(state, drop) * SPECIALTY_BOOST * team);
+
+    // 부서의 단계가 오르면 더 빨라진다.
+    const before = deskSpeed(state, drop, 'art');
+    state.departments = { art: 3 };
+    expect(deskSpeed(state, drop, 'art')).toBeGreaterThan(before);
+  });
+
+  it('직원을 넣고, 빼고, 다른 부서로 옮긴다. 한 사람은 한 부서에만 든다', () => {
+    const state = grown(LAST);
+    const duck = deskOf(state, 'duck');
+    expect(joinBlock(state, duck, 'art')).toBe('closed');
+    expect(joinDepartment(state, duck, 'art')).toBe(false);
+    expect(joinBlock(state, 99, 'art')).toBe('empty');
+
+    state.departments = { art: 1, code: 1 };
+    expect(joinDepartment(state, duck, 'art')).toBe(true);
+    expect(joinBlock(state, duck, 'art')).toBe('member');
+    expect(joinDepartment(state, duck, 'code')).toBe(true);
+    expect(state.desks[duck].dept).toBe('code');
+    expect(departmentMembers(state, 'art')).toEqual([]);
+
+    // 자리가 다 차면 더 넣지 못한다.
+    const others = state.desks.map((_, index) => index).filter((index) => index !== duck);
+    for (let seat = 0; seat < departmentSeats(1); seat += 1) expect(joinDepartment(state, others[seat], 'art')).toBe(true);
+    expect(joinBlock(state, others[departmentSeats(1)], 'art')).toBe('full');
+
+    expect(leaveDepartment(state, duck)).toBe(true);
+    expect(leaveDepartment(state, duck)).toBe(false);
+    expect(state.desks[duck].dept).toBeNull();
+  });
+
+  it('맡길 카드를 고를 때 부서도 본다', () => {
+    const state = grown(LAST);
+    const duck = deskOf(state, 'duck');
+    state.departments = { art: 5 };
+    state.desks[duck].dept = 'art';
+    const card = (kind: 'plan' | 'art' | 'code') => ({ kind, left: 10, total: 10 });
+    // 코딩이 특기지만, 높은 단계의 그림부에 들어 있으면 그림 카드를 더 빨리 한다.
+    state.inbox = [card('plan'), card('code'), card('art')];
+    expect(skill(state, duck, 'art')).toBeGreaterThan(skill(state, duck, 'code'));
+    expect(bestCardFor(state, duck)).toBe(2);
+    state.inbox = [card('plan'), card('code')];
+    expect(bestCardFor(state, duck)).toBe(1);
+    state.inbox = [card('plan'), card('plan')];
+    expect(bestCardFor(state, duck)).toBe(0);
+
+    // 가장 잘 맡기는 팀장은 가장 잘하는 짝부터 맡긴다.
+    state.lead = LEAD.levels.length;
+    state.leadWait = 0;
+    state.inbox = [card('plan'), card('art')];
+    for (const desk of state.desks) if (desk.staff && desk.staff !== 'duck') desk.task = card('code');
+    advance(state, 0.01, () => 0.5);
+    expect(state.desks[duck].task?.kind).toBe('art');
+  });
+
+  it('가장 큰 게임들은 부서를 세워야 처음 만들 수 있다. 한 번 낸 뒤의 업데이트는 그냥 된다', () => {
+    const state = grown(LAST);
+    expect(departmentsMissing(state, 'screw-sort')).toBe(0);
+    expect(departmentsMissing(state, 'logic-tiles')).toBe(1);
+    expect(departmentsMissing(state, 'lantern-keeper')).toBe(3);
+    expect(startProject(state, 'logic-tiles')).toBe(false);
+    expect(state.project).toBeNull();
+
+    state.departments = { test: 1 };
+    expect(departmentsMissing(state, 'logic-tiles')).toBe(0);
+    expect(departmentsMissing(state, 'chosung-quiz')).toBe(1);
+    expect(startProject(state, 'chosung-quiz')).toBe(false);
+    expect(startProject(state, 'logic-tiles')).toBe(true);
+
+    // 부서가 생기기 전에 이미 낸 게임은 부서가 없어도 다시 만들 수 있다.
+    const old = grown(LAST);
+    old.released['lantern-keeper'] = 1;
+    expect(departmentsMissing(old, 'lantern-keeper')).toBe(0);
+    expect(startProject(old, 'lantern-keeper')).toBe(true);
+  });
+});
+
+describe('예약 줄', () => {
+  const LAST = OFFICES.length - 1;
+  /** 예약한 게임이 모두 시작될 때까지 돌린다. 그동안 저절로 된 출시의 id를 돌려준다. */
+  const drainQueue = (state: CompanyState): string[] => {
+    const released: string[] = [];
+    for (let time = 0; state.queue.length > 0; time += 0.5) {
+      for (let index = 0; index < state.desks.length; index += 1) {
+        const card = bestCardFor(state, index);
+        if (card >= 0) assign(state, card, index);
+      }
+      for (const event of advance(state, 0.5, () => 0.5)) {
+        if (event.type === 'release') released.push(event.release.id);
+      }
+      if (time > 100_000) throw new Error('예약이 줄지 않는다');
+    }
+    return released;
+  };
+
+  it('사옥에서, 만드는 게임이 있을 때, 자리가 남아 있어야 예약할 수 있다', () => {
+    const early = grown(QUEUE.unlockOffice - 1);
+    startProject(early, 'lightning-tap');
+    expect(queueBlock(early, 'stack-tower')).toBe('locked');
+    expect(enqueue(early, 'stack-tower')).toBe(false);
+
+    const state = grown(LAST);
+    expect(queueBlock(state, 'stack-tower')).toBe('idle');
+    expect(enqueue(state, 'stack-tower')).toBe(false);
+    startProject(state, 'lightning-tap');
+    expect(queueBlock(state, 'lantern-keeper')).toBe('department');
+    for (let slot = 0; slot < QUEUE.slots; slot += 1) expect(enqueue(state, 'stack-tower')).toBe(true);
+    expect(queueBlock(state, 'stack-tower')).toBe('full');
+    expect(enqueue(state, 'memory-cards')).toBe(false);
+    expect(state.queue).toHaveLength(QUEUE.slots);
+  });
+
+  it('예약한 것을 뺄 수 있다', () => {
+    const state = grown(LAST);
+    startProject(state, 'lightning-tap');
+    enqueue(state, 'stack-tower');
+    enqueue(state, 'memory-cards');
+    expect(dequeue(state, 5)).toBe(false);
+    expect(dequeue(state, -1)).toBe(false);
+    expect(dequeue(state, 0)).toBe(true);
+    expect(state.queue).toEqual(['memory-cards']);
+  });
+
+  it('예약이 있으면 다 만든 게임을 저절로 출시하고 다음 게임을 시작한다', () => {
+    const state = grown(LAST);
+    startProject(state, 'lightning-tap');
+    enqueue(state, 'stack-tower');
+    enqueue(state, 'lightning-tap');
+    expect(drainQueue(state)).toEqual(['lightning-tap', 'stack-tower']);
+    expect(state.releases).toBe(2);
+    expect(state.released).toEqual({ 'lightning-tap': 1, 'stack-tower': 1 });
+    // 같은 게임을 다시 예약한 것은 업데이트로 시작한다.
+    expect(state.project?.id).toBe('lightning-tap');
+    expect(state.inbox[0].total).toBeCloseTo(projectWork(state, 'lightning-tap'));
+    expect(state.leaves).toBeGreaterThan(0);
+
+    // 예약이 비면 마지막 게임은 직접 출시할 때까지 기다린다.
+    finishProject(state);
+    advance(state, 5, () => 0.5);
+    expect(isReady(state)).toBe(true);
+    expect(state.releases).toBe(2);
+    expect(release(state)?.version).toBe(2);
+  });
+
+  it('직접 출시해도 예약한 게임이 바로 시작된다', () => {
+    const state = grown(LAST);
+    startProject(state, 'lightning-tap');
+    enqueue(state, 'stack-tower');
+    state.inbox = [];
+    state.backlog = [];
+    if (state.project) state.project.done = state.project.total;
+    expect(release(state)?.id).toBe('lightning-tap');
+    expect(state.project?.id).toBe('stack-tower');
+    expect(state.queue).toEqual([]);
+    expect(cardsWaiting(state)).toBe(PROJECTS['stack-tower'].cards.length);
+  });
+
+  it('팀장이 있으면 닫아 둔 동안에도 예약한 게임을 이어서 만들고 출시한다', () => {
+    const state = grown(LAST);
+    state.lead = LEAD.levels.length;
+    startProject(state, 'lightning-tap');
+    enqueue(state, 'stack-tower');
+    enqueue(state, 'memory-cards');
+    const away = catchUp(state, 3600);
+    expect(away?.releases.map((entry) => entry.id)).toEqual(['lightning-tap', 'stack-tower']);
+    expect(state.releases).toBe(2);
+    // 마지막 게임은 다 만들어 두고, 돌아온 사람이 출시한다.
+    expect(state.project?.id).toBe('memory-cards');
+    expect(isReady(state)).toBe(true);
+    expect(state.queue).toEqual([]);
+  });
+
+  it('예약이 없으면 닫아 둔 동안 출시하지 않는다', () => {
+    const state = grown(LAST);
+    state.lead = LEAD.levels.length;
+    startProject(state, 'lightning-tap');
+    const away = catchUp(state, 3600);
+    expect(away?.releases).toEqual([]);
+    expect(isReady(state)).toBe(true);
+  });
+
+  it('부서와 예약을 저장했다가 그대로 읽는다', () => {
+    const state = grown(LAST);
+    state.leaves = 1e12;
+    upgradeDepartment(state, 'art');
+    upgradeDepartment(state, 'art');
+    upgradeDepartment(state, 'code');
+    joinDepartment(state, 0, 'code');
+    startProject(state, 'logic-tiles');
+    enqueue(state, 'stack-tower');
+    enqueue(state, 'logic-tiles');
+    const copy = normalizeCompany(JSON.parse(JSON.stringify(state)));
+    expect(copy).toEqual(state);
+    expect(copy?.queue).toEqual(['stack-tower', 'logic-tiles']);
+    expect(departmentMembers(copy as CompanyState, 'art')).toHaveLength(departmentSeats(2));
+  });
+
+  it('맞지 않는 부서와 예약은 버린다', () => {
+    const state = grown(LAST);
+    const raw = JSON.parse(JSON.stringify(state)) as Record<string, unknown> & { desks: { dept: unknown }[] };
+    raw.departments = { art: 99, music: 3, code: -2 };
+    // 세우지 않은 부서와 모르는 부서, 자리를 넘는 사람은 뺀다.
+    raw.desks.forEach((desk, index) => {
+      desk.dept = index < 6 ? 'art' : index < 8 ? 'code' : 'music';
+    });
+    raw.queue = ['stack-tower', 'no-such-game', 'lantern-keeper'];
+    const read = normalizeCompany(raw) as CompanyState;
+    expect(read.departments).toEqual({ art: DEPARTMENT.maxLevel });
+    expect(departmentMembers(read, 'art')).toHaveLength(departmentSeats(DEPARTMENT.maxLevel));
+    expect(read.desks.filter((desk) => desk.dept !== null && desk.dept !== 'art')).toEqual([]);
+    // 만드는 게임이 없으면 예약도 없다.
+    expect(read.queue).toEqual([]);
+
+    raw.project = { id: 'lightning-tap', done: 0, total: 4 };
+    raw.inbox = [{ kind: 'plan', left: 5, total: 10 }];
+    const making = normalizeCompany(raw) as CompanyState;
+    // 부서가 모자라 시작할 수 없는 게임과 모르는 게임은 뺀다.
+    expect(making.queue).toEqual(['stack-tower']);
+
+    // 부서와 예약이 열리기 전의 사무실에서는 둘 다 없다.
+    raw.office = DEPARTMENT.unlockOffice - 1;
+    const early = normalizeCompany(raw) as CompanyState;
+    expect(early.departments).toEqual({});
+    expect(early.desks.every((desk) => desk.dept === null)).toBe(true);
+    expect(early.queue).toEqual([]);
+  });
+
+  it('부서가 생기기 전의 세이브도 그대로 읽는다', () => {
+    const state = grown(LAST);
+    const raw = JSON.parse(JSON.stringify(state)) as Record<string, unknown> & { desks: Record<string, unknown>[] };
+    delete raw.departments;
+    delete raw.queue;
+    for (const desk of raw.desks) delete desk.dept;
+    expect(normalizeCompany(raw)).toEqual(state);
+  });
+});
+
 describe('숫자 적기', () => {
   it('큰 수는 만과 억으로 줄여 내림한다', () => {
     expect(formatLeaves(0)).toBe('0');
@@ -925,6 +1287,8 @@ describe('진행 속도', () => {
     expect(report.officeAt[4]).toBeLessThan(12 * HOUR);
     expect(report.allReleasedAt).not.toBeNull();
     expect(staffCount(state)).toBe(OFFICES[OFFICES.length - 1].desks);
+    // 가장 큰 게임까지 내려면 부서를 셋은 세워야 한다.
+    expect(departmentCount(state)).toBeGreaterThanOrEqual(3);
   }, 60_000);
 
   it('느긋하게 해도 사옥까지 간다', () => {

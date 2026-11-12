@@ -63,6 +63,12 @@ describe('처음 안내', () => {
 
     state.backlog = [{ kind: 'plan', left: 1, total: 1 }];
     expect(drain(state)).toEqual(['backlog']);
+
+    // 사옥에 오면 부서를, 만드는 게임이 있으면 예약을 알려 준다.
+    state.office = OFFICES.length - 1;
+    expect(drain(state)).toEqual(['dept']);
+    state.project = { id: 'lightning-tap', done: 0, total: 4 };
+    expect(drain(state)).toEqual(['queue']);
     expect([...state.tips].sort()).toEqual([...TIP_IDS].sort());
   });
 

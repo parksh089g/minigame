@@ -2,7 +2,7 @@
  * 진행 속도를 재는 자동 플레이. 테스트에서만 쓴다.
  * 사람처럼 조금씩 늦게 누르고, 살 수 있는 것은 싼 것부터 사고, 이사할 수 있으면 이사한다.
  */
-import { EQUIPMENT, EQUIPMENT_ORDER, LEAD, OFFICES, PROJECTS, type EquipmentDef, type ProjectId } from './data';
+import { DEPARTMENT_ORDER, EQUIPMENT, EQUIPMENT_ORDER, LEAD, OFFICES, PROJECTS, type EquipmentDef, type ProjectId } from './data';
 import {
   advance,
   assign,
@@ -11,6 +11,10 @@ import {
   buyEquipment,
   candidatesFor,
   cheer,
+  departmentBlock,
+  departmentCost,
+  departmentLevel,
+  departmentsMissing,
   equipmentBlock,
   equipmentCost,
   equipmentLevel,
@@ -31,6 +35,7 @@ import {
   train,
   trainBlock,
   trainCost,
+  upgradeDepartment,
   type CompanyState,
 } from './rules';
 
@@ -58,9 +63,10 @@ const STEP = 0.25;
 function pickProject(state: CompanyState): ProjectId {
   const next = OFFICES[state.office + 1];
   const needsReputation = next !== undefined && state.reputation < next.reputation;
-  let best: ProjectId = availableProjects(state)[0];
+  const open = availableProjects(state).filter((id) => departmentsMissing(state, id) === 0);
+  let best: ProjectId = open[0];
   let bestScore = -1;
-  for (const id of availableProjects(state)) {
+  for (const id of open) {
     const work = projectWork(state, id) * PROJECTS[id].cards.length;
     const leaves = projectBonus(state, id) + projectIncomeGain(state, id) * 180;
     const score = (needsReputation ? projectReputation(state, id) * 1000 + leaves * 0.01 : leaves) / work;
@@ -84,7 +90,7 @@ function spend(state: CompanyState, random: () => number): void {
     let reserve = 0;
     if (moveBlock(state) === 'poor') reserve = OFFICES[state.office + 1].cost;
     else if (candidate && hireBlock(state, candidate) === 'poor') reserve = hireCost(state);
-    // 장비, 팀장, 교육 가운데 가장 싼 것부터 산다.
+    // 장비, 팀장, 교육, 부서 가운데 가장 싼 것부터 산다.
     let pick: { cost: number; buy: () => void } | null = null;
     const offer = (cost: number, buy: () => void): void => {
       if (!pick || cost < pick.cost) pick = { cost, buy };
@@ -101,6 +107,9 @@ function spend(state: CompanyState, random: () => number): void {
     state.desks.forEach((desk, index) => {
       if (trainBlock(state, index) === null) offer(trainCost(desk.level), () => train(state, index));
     });
+    for (const id of DEPARTMENT_ORDER) {
+      if (departmentBlock(state, id) === null) offer(departmentCost(departmentLevel(state, id)), () => upgradeDepartment(state, id));
+    }
     const chosen = pick as { cost: number; buy: () => void } | null;
     if (!chosen || (reserve > 0 && chosen.cost > reserve * 0.2)) return;
     chosen.buy();
