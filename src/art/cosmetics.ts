@@ -70,6 +70,32 @@ export const BACKDROP_LOOKS: Record<string, BackdropLook> = {
       ['dot', 70, 100, 2, '#e9e3ff'],
     ],
   },
+  // 맑은 하늘에 뜬 구름
+  'backdrop-ocean': {
+    size: 120,
+    base: '#eff8ff',
+    marks: [
+      ['cloud', 32, 30, 20, '#ddeeff'],
+      ['cloud', 86, 76, 24, '#e3f3ff'],
+      ['cloud', 30, 98, 12, '#e3f3ff'],
+      ['dot', 96, 24, 4, '#ddeeff'],
+      ['dot', 62, 52, 2.5, '#e3f3ff'],
+    ],
+  },
+  // 흩날리는 꽃잎
+  'backdrop-blossom': {
+    size: 120,
+    base: '#fff3f6',
+    marks: [
+      ['leaf', 26, 24, 10, '#ffdfe8'],
+      ['leaf', 90, 44, 12, '#ffe6ed'],
+      ['leaf', 52, 76, 8, '#ffdfe8'],
+      ['leaf', 98, 100, 9, '#ffe6ed'],
+      ['leaf', 18, 96, 7, '#ffe6ed'],
+      ['dot', 66, 18, 3, '#fff0c9'],
+      ['dot', 14, 58, 2.5, '#ffdfe8'],
+    ],
+  },
 };
 
 /** 달리는 친구의 생김새. 그림은 art/vector.ts의 CHARACTERS에 있다. */
@@ -123,6 +149,8 @@ export const CARD_BACK_LOOKS: Record<string, CardBackLook> = {
   'cardback-green': { face: '#9be3c9', lip: '#7fd3ae', mark: '#bff0dd', motif: 'dots' },
   'cardback-red': { face: '#ff9fb5', lip: '#e97f99', mark: '#ffbccb', motif: 'checks' },
   'cardback-gold': { face: '#ffd772', lip: '#f2b93b', mark: '#ffe9a8', motif: 'stripes' },
+  'cardback-lavender': { face: '#c9b8ff', lip: '#a892ee', mark: '#e2d8ff', motif: 'dots' },
+  'cardback-peach': { face: '#ffc9a8', lip: '#f0a37c', mark: '#ffdfc9', motif: 'checks' },
 };
 
 /** 상점에서 보여 주는 배경 조각의 텍스처 이름 */
@@ -188,5 +216,20 @@ export const ORB_LOOKS: Record<string, OrbLook> = {
     mood: 'sleepy',
     ring: 0xb9a9f5,
     sparks: [0xd9cfff, 0xf1ecff, 0xffffff],
+  },
+  'orb-grape': {
+    base: '#b79cf0',
+    shade: '#987fdc',
+    light: '#dccdfa',
+    mood: 'happy',
+    ring: 0x987fdc,
+    sparks: [0xb79cf0, 0xdccdfa, 0xffffff],
+  },
+  'orb-ocean': {
+    base: '#7fd8e6',
+    shade: '#5cc0d2',
+    light: '#c8f1f6',
+    ring: 0x5cc0d2,
+    sparks: [0x7fd8e6, 0xc8f1f6, 0xffffff],
   },
 };
