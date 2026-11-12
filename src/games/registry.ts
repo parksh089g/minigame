@@ -11,9 +11,8 @@ import { coinsFor as lanternCoins } from './lantern-keeper/rules';
 export interface MiniGameInfo {
   /** 세이브에 쓰이는 고유 id. 한 번 정하면 바꾸지 않는다. */
   id: string;
+  /** 허브 카드와 결과 화면에 보이는 이름. 허브 카드가 좁으니 짧게 짓는다. 길면 카드에 맞게 글자가 줄어든다. */
   title: string;
-  /** 허브 카드에 보이는 한 줄 설명. 한글 11자 안팎이 카드 폭에 맞는다. */
-  tagline: string;
   icon: SpriteKey;
   /** 플레이할 씬 이름. 아직 만들지 않은 게임은 null이고 허브에 "준비 중"으로 보인다. */
   sceneKey: string | null;
@@ -29,7 +28,6 @@ export const GAMES: readonly MiniGameInfo[] = [
   {
     id: 'lightning-tap',
     title: '번개 탭',
-    tagline: '빛나는 구슬을 빠르게!',
     icon: 'icon-bolt',
     sceneKey: SCENE.lightningTap,
     coinsFor: (score) => Math.floor(score / 10),
@@ -38,7 +36,6 @@ export const GAMES: readonly MiniGameInfo[] = [
   {
     id: 'memory-cards',
     title: '기억 카드',
-    tagline: '같은 그림 짝 맞추기',
     icon: 'icon-cards',
     sceneKey: SCENE.memoryCards,
     coinsFor: (score) => Math.floor(score / 15),
@@ -47,7 +44,6 @@ export const GAMES: readonly MiniGameInfo[] = [
   {
     id: 'jump-runner',
     title: '점프 러너',
-    tagline: '한 번 탭으로 점프!',
     icon: 'icon-runner',
     sceneKey: SCENE.jumpRunner,
     coinsFor: (score) => Math.floor(score / 20),
@@ -56,7 +52,6 @@ export const GAMES: readonly MiniGameInfo[] = [
   {
     id: 'stack-tower',
     title: '탑 쌓기',
-    tagline: '타이밍 맞춰 차곡차곡',
     icon: 'icon-tower',
     sceneKey: SCENE.stackTower,
     coinsFor: (score) => Math.floor(score / 12),
@@ -65,7 +60,6 @@ export const GAMES: readonly MiniGameInfo[] = [
   {
     id: 'color-sort',
     title: '색깔 물 나누기',
-    tagline: '같은 색끼리 병에 모으기',
     icon: 'icon-flask',
     sceneKey: SCENE.colorSort,
     coinsFor: (score) => Math.floor(score / 20),
@@ -74,7 +68,6 @@ export const GAMES: readonly MiniGameInfo[] = [
   {
     id: 'gate-run',
     title: '관문 달리기',
-    tagline: '관문 골라 무리 불리기',
     icon: 'icon-gate',
     sceneKey: SCENE.gateRun,
     coinsFor: (score) => Math.floor(score / 12),
@@ -83,7 +76,6 @@ export const GAMES: readonly MiniGameInfo[] = [
   {
     id: 'pin-pull',
     title: '핀 뽑기',
-    tagline: '순서대로 뽑아 보물 얻기',
     icon: 'icon-pin',
     sceneKey: SCENE.pinPull,
     coinsFor: (score) => Math.floor(score / 15),
@@ -92,7 +84,6 @@ export const GAMES: readonly MiniGameInfo[] = [
   {
     id: 'parking-out',
     title: '주차장 빼기',
-    tagline: '막힌 차를 차례로 빼기',
     icon: 'icon-car',
     sceneKey: SCENE.parkingOut,
     coinsFor: (score) => Math.floor(score / 25),
@@ -101,7 +92,6 @@ export const GAMES: readonly MiniGameInfo[] = [
   {
     id: 'screw-sort',
     title: '나사 풀기',
-    tagline: '같은 색 나사 세 개씩',
     icon: 'icon-screw',
     sceneKey: SCENE.screwSort,
     coinsFor: (score) => Math.floor(score / 40),
@@ -110,7 +100,6 @@ export const GAMES: readonly MiniGameInfo[] = [
   {
     id: 'merge-tiles',
     title: '머지 타일',
-    tagline: '같은 숫자를 밀어 합치기',
     icon: 'icon-merge',
     sceneKey: SCENE.mergeTiles,
     coinsFor: (score) => Math.floor(score / 35),
@@ -119,7 +108,6 @@ export const GAMES: readonly MiniGameInfo[] = [
   {
     id: 'tail-chase',
     title: '꼬리 잡기',
-    tagline: '먹을수록 길어지는 꼬리',
     icon: 'icon-tail',
     sceneKey: SCENE.tailChase,
     coinsFor: (score) => Math.floor(score / 20),
@@ -128,7 +116,6 @@ export const GAMES: readonly MiniGameInfo[] = [
   {
     id: 'logic-tiles',
     title: '논리 타일',
-    tagline: '숫자 힌트로 함정 찾기',
     icon: 'icon-logic',
     sceneKey: SCENE.logicTiles,
     coinsFor: (score) => Math.floor(score / 25),
@@ -137,7 +124,6 @@ export const GAMES: readonly MiniGameInfo[] = [
   {
     id: 'number-puzzle',
     title: '숫자 퍼즐',
-    tagline: '빈칸에 맞는 숫자 채우기',
     icon: 'icon-number',
     sceneKey: SCENE.numberPuzzle,
     coinsFor: (score) => Math.floor(score / 25),
@@ -146,7 +132,6 @@ export const GAMES: readonly MiniGameInfo[] = [
   {
     id: LANTERN_GAME_ID,
     title: '등불지기',
-    tagline: '그림자 무리에서 생존',
     icon: 'icon-lantern',
     sceneKey: LANTERN_SCENE,
     coinsFor: lanternCoins,
@@ -162,8 +147,36 @@ export function orderForHub<T extends { featured?: boolean }>(games: readonly T[
   return [...games.filter((game) => game.featured), ...games.filter((game) => !game.featured)];
 }
 
-/** 허브의 게임 목록 */
+/** 허브의 게임 목록. 사람마다 달라지지 않는 기본 순서라서 랭킹 화면처럼 순서가 고정된 곳에 쓴다. */
 export const HUB_GAMES: readonly MiniGameInfo[] = orderForHub(GAMES);
+
+/**
+ * 그 사람의 허브에 놓는 순서로 늘어놓는다. 자주 하는 게임이 첫 쪽에 오게 하려는 것이다.
+ * 1. 대표 게임
+ * 2. 즐겨찾기에 넣은 게임 (게임 목록에 적힌 순서)
+ * 3. 해 본 게임 (마지막으로 한 때가 가까운 것부터)
+ * 4. 아직 안 해 본 게임 (게임 목록에 적힌 순서)
+ * lastPlayedAt은 게임 id를 받아 마지막으로 한 시각(ms)을 돌려주고, 한 번도 안 했으면 null을 돌려준다.
+ */
+export function personalHubOrder<T extends { id: string; featured?: boolean }>(
+  games: readonly T[],
+  favorites: readonly string[],
+  lastPlayedAt: (gameId: string) => number | null,
+): T[] {
+  const starred = new Set(favorites);
+  const featured = games.filter((game) => game.featured);
+  const rest = games.filter((game) => !game.featured);
+  const favorite = rest.filter((game) => starred.has(game.id));
+  const others = rest.filter((game) => !starred.has(game.id));
+  const played = others
+    .map((game) => ({ game, at: lastPlayedAt(game.id) }))
+    .filter((entry): entry is { game: T; at: number } => entry.at !== null)
+    // sort는 순서가 같은 것끼리의 차례를 지키므로, 같은 시각이면 적힌 순서 그대로다.
+    .sort((a, b) => b.at - a.at)
+    .map((entry) => entry.game);
+  const fresh = others.filter((game) => lastPlayedAt(game.id) === null);
+  return [...featured, ...favorite, ...played, ...fresh];
+}
 
 export function getGame(id: string): MiniGameInfo | undefined {
   return GAMES.find((game) => game.id === id);

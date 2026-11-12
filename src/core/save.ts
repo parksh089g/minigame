@@ -32,7 +32,7 @@ import {
   type CosmeticsState,
 } from './shop';
 
-export const SAVE_VERSION = 5;
+export const SAVE_VERSION = 6;
 
 /** 점수를 냈으면 한 판에 적어도 이만큼은 코인을 준다. 처음 하는 사람이 빈손으로 끝나지 않게 한다. */
 export const MIN_COINS_PER_PLAY = 1;
@@ -65,6 +65,8 @@ export interface SaveData {
   achievements: AchievementsState;
   /** 온라인 랭킹에서 쓰는 닉네임과, 서버에 어디까지 올렸는지. 닉네임을 정하기 전에는 비어 있다. */
   online: OnlineState;
+  /** 허브에서 별을 눌러 즐겨찾기에 넣은 게임의 id. 허브 목록의 앞쪽에 놓인다. */
+  favorites: string[];
   createdAt: number;
   updatedAt: number;
 }
@@ -105,6 +107,7 @@ export function createDefaultSave(now: number = Date.now()): SaveData {
     cosmetics: createCosmetics(),
     achievements: createAchievements(),
     online: createOnline(),
+    favorites: [],
     createdAt: now,
     updatedAt: now,
   };
@@ -122,6 +125,16 @@ const toBool = (value: unknown, fallback: boolean): boolean =>
 
 const toTimestamp = (value: unknown, fallback: number): number =>
   typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
+
+/** 즐겨찾기에 둘 수 있는 가장 많은 개수. 깨진 세이브가 끝없이 커지지 않게 막는 값이다. */
+export const MAX_FAVORITES = 64;
+
+/** 즐겨찾기 목록을 정리한다: 문자열만 남기고, 겹치는 것을 빼고, 너무 길면 자른다. */
+function normalizeFavorites(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const ids = raw.filter((id): id is string => typeof id === 'string' && id.length > 0);
+  return [...new Set(ids)].slice(0, MAX_FAVORITES);
+}
 
 /**
  * 저장소나 가져오기 파일에서 읽은 값을 안전한 SaveData로 바꾼다.
@@ -159,6 +172,7 @@ export function normalizeSave(raw: unknown, now: number = Date.now()): SaveData 
     cosmetics: normalizeCosmetics(raw.cosmetics),
     achievements: normalizeAchievements(raw.achievements),
     online: normalizeOnline(raw.online),
+    favorites: normalizeFavorites(raw.favorites),
     createdAt: toTimestamp(raw.createdAt, now),
     updatedAt: toTimestamp(raw.updatedAt, now),
   };
@@ -240,6 +254,23 @@ export function applyPlayResult(
   };
 }
 
+/** 그 게임이 즐겨찾기에 들어 있는지 */
+export function isFavorite(save: SaveData, gameId: string): boolean {
+  return save.favorites.includes(gameId);
+}
+
+/**
+ * 즐겨찾기에 넣거나(없을 때) 뺀(있을 때) 새 세이브를 돌려준다. 원본은 바꾸지 않는다.
+ * 더 넣을 자리가 없으면 받은 세이브 그대로다.
+ */
+export function toggleFavorite(save: SaveData, gameId: string, now: number = Date.now()): SaveData {
+  if (isFavorite(save, gameId)) {
+    return { ...save, favorites: save.favorites.filter((id) => id !== gameId), updatedAt: now };
+  }
+  if (gameId.length === 0 || save.favorites.length >= MAX_FAVORITES) return save;
+  return { ...save, favorites: [...save.favorites, gameId], updatedAt: now };
+}
+
 export type BuyResult =
   | { ok: true; save: SaveData; item: CosmeticItem }
   | { ok: false; reason: 'unknown' | 'owned' }
@@ -295,5 +326,7 @@ export function resetProgress(save: SaveData, now: number = Date.now()): SaveDat
     ...createDefaultSave(now),
     settings: { ...save.settings },
     online: { ...save.online, sent: { ...save.online.sent } },
+    // 즐겨찾기는 기록이 아니라 취향이라 설정처럼 남긴다.
+    favorites: [...save.favorites],
   };
 }

@@ -7,11 +7,14 @@ import {
   createDefaultSave,
   equipCosmetic,
   getRecord,
+  isFavorite,
   looksLikeSave,
+  MAX_FAVORITES,
   MIN_COINS_PER_PLAY,
   normalizeSave,
   resetProgress,
   SAVE_VERSION,
+  toggleFavorite,
 } from './save';
 import { createCosmetics } from './shop';
 
@@ -47,10 +50,28 @@ describe('normalizeSave', () => {
         sentName: '등불지기',
         sent: { 'lightning-tap': 80 },
       },
+      favorites: ['stack-tower', 'lightning-tap'],
       createdAt: NOW - 5000,
       updatedAt: NOW - 1000,
     };
     expect(normalizeSave(save, NOW)).toEqual(save);
+  });
+
+  it('즐겨찾기가 생기기 전의 세이브는 즐겨찾기가 빈 채로 읽는다', () => {
+    const old = { version: 5, coins: 3, games: { g: { best: 9, plays: 2, lastPlayedAt: NOW } } };
+    const save = normalizeSave(old, NOW);
+    expect(save.favorites).toEqual([]);
+    expect(save.games.g.best).toBe(9);
+  });
+
+  it('즐겨찾기는 문자열만 남기고 겹치는 것을 뺀다', () => {
+    const raw = { version: SAVE_VERSION, games: {}, favorites: ['a', 7, 'b', '', null, 'a'] };
+    expect(normalizeSave(raw, NOW).favorites).toEqual(['a', 'b']);
+    expect(normalizeSave({ version: SAVE_VERSION, games: {}, favorites: 'a' }, NOW).favorites).toEqual([]);
+    const many = Array.from({ length: MAX_FAVORITES + 10 }, (_, index) => `game-${index}`);
+    expect(
+      normalizeSave({ version: SAVE_VERSION, games: {}, favorites: many }, NOW).favorites,
+    ).toHaveLength(MAX_FAVORITES);
   });
 
   it('온라인 기능이 생기기 전의 세이브는 랭킹에 참여하지 않은 상태로 읽는다', () => {
@@ -363,7 +384,39 @@ describe('업적', () => {
   });
 });
 
+describe('즐겨찾기', () => {
+  it('넣고 빼기를 번갈아 하고, 원본 세이브는 바꾸지 않는다', () => {
+    const save = createDefaultSave(NOW);
+    const added = toggleFavorite(save, 'stack-tower', NOW + 10);
+    expect(added.favorites).toEqual(['stack-tower']);
+    expect(added.updatedAt).toBe(NOW + 10);
+    expect(isFavorite(added, 'stack-tower')).toBe(true);
+    expect(save.favorites).toEqual([]);
+
+    const more = toggleFavorite(added, 'merge-tiles', NOW + 20);
+    expect(more.favorites).toEqual(['stack-tower', 'merge-tiles']);
+
+    const removed = toggleFavorite(more, 'stack-tower', NOW + 30);
+    expect(removed.favorites).toEqual(['merge-tiles']);
+    expect(isFavorite(removed, 'stack-tower')).toBe(false);
+  });
+
+  it('자리가 다 찼으면 더 넣지 않고 받은 세이브를 그대로 돌려준다', () => {
+    const save = createDefaultSave(NOW);
+    save.favorites = Array.from({ length: MAX_FAVORITES }, (_, index) => `game-${index}`);
+    expect(toggleFavorite(save, 'one-more', NOW)).toBe(save);
+    expect(toggleFavorite(save, '', NOW)).toBe(save);
+    // 이미 들어 있는 것은 자리가 차 있어도 뺄 수 있다.
+    expect(toggleFavorite(save, 'game-0', NOW).favorites).toHaveLength(MAX_FAVORITES - 1);
+  });
+});
+
 describe('resetProgress', () => {
+  it('즐겨찾기는 설정처럼 남긴다', () => {
+    const save = toggleFavorite(createDefaultSave(NOW), 'stack-tower', NOW);
+    expect(resetProgress(save, NOW + 100).favorites).toEqual(['stack-tower']);
+  });
+
   it('기록과 코인은 지우고 설정은 남긴다', () => {
     let save = createDefaultSave(NOW);
     save.settings.sound = false;
