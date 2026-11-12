@@ -11,6 +11,7 @@ import {
   missionProgress,
   missionsFor,
   normalizeWeekly,
+  pickedGame,
   recordWeeklyPlay,
   weekContext,
   weekKeyOf,
@@ -191,6 +192,16 @@ describe('지금 따질 주', () => {
     expect(weekContext(state, '2026-11-12', GAMES)?.weekKey).toBe(NEXT_WEEK);
   });
 
+  it('기록이 한 주 넘게 앞서 있으면 시계가 틀려 있던 때의 기록으로 보고 오늘의 주를 따른다', () => {
+    // 시계가 1년 앞에 가 있을 때 한 판을 한 기기
+    const state = played(['p1'], '2027-11-08');
+    expect(currentWeekKey(state, '2026-11-12')).toBe(WEEK);
+    expect(weekContext(state, '2026-11-12', GAMES)?.weekKey).toBe(WEEK);
+    // 두 주 앞이면 버리고, 한 주 앞이면 따른다.
+    expect(currentWeekKey(played(['p1'], '2026-11-23'), '2026-11-12')).toBe(WEEK);
+    expect(currentWeekKey(played(['p1'], NEXT_WEEK), '2026-11-15')).toBe(NEXT_WEEK);
+  });
+
   it('잘못된 날짜면 null이다', () => {
     expect(currentWeekKey(createWeekly(), '2026-13-01')).toBeNull();
     expect(weekContext(createWeekly(), '2026-13-01', GAMES)).toBeNull();
@@ -235,11 +246,74 @@ describe('한 주의 기록', () => {
     expect(recordWeeklyPlay(state, WEEK, { gameId: 'p1', coins: 9, dailyCleared: true })).toBe(state);
   });
 
+  it('한 주 넘게 앞선 기록은 버리고 그 주부터 새로 센다', () => {
+    const ahead = { ...played(['p1', 'p1'], '2027-11-08'), coins: 40, claimed: ['easy' as const] };
+    expect(weeklyFor(ahead, WEEK)).toEqual({ ...createWeekly(), weekKey: WEEK });
+    const next = recordWeeklyPlay(ahead, WEEK, { gameId: 'a1', coins: 2, dailyCleared: false });
+    expect(next).toEqual({ weekKey: WEEK, plays: { a1: 1 }, coins: 2, dailyClears: 0, claimed: [] });
+  });
+
   it('weeklyFor는 같은 주면 그대로, 새 주면 빈 기록을 준다', () => {
     const state = played(['p1']);
     expect(weeklyFor(state, WEEK)).toBe(state);
     expect(weeklyFor(state, NEXT_WEEK)).toEqual({ ...createWeekly(), weekKey: NEXT_WEEK });
     expect(weeklyFor(createWeekly(), WEEK)).toEqual({ ...createWeekly(), weekKey: WEEK });
+  });
+});
+
+describe('이번 주의 게임을 적어 두기', () => {
+  const { weekKey, mission } = findMission('game');
+  const picked = mission.counts?.[0] ?? '';
+  /** 주 중간에 게임이 하나 늘어난 목록. 맨 앞에 넣어서 순서로 뽑으면 다른 게임이 나오게 한다. */
+  const grown: WeeklyGame[] = [{ id: 'new', title: '새 게임', genre: 'puzzle', quick: true }, ...GAMES];
+  const today = weekKey;
+
+  it('게임이 늘면 순서로 뽑은 게임이 달라지는 주가 있다', () => {
+    const moved = weeks(30).filter((key) => {
+      const before = missionsFor(key, GAMES).find((candidate) => candidate.kind === 'game');
+      const after = missionsFor(key, grown).find((candidate) => candidate.kind === 'game');
+      return before !== undefined && before.counts?.[0] !== after?.counts?.[0];
+    });
+    expect(moved.length).toBeGreaterThan(0);
+  });
+
+  it('그 주의 미션에서 뽑힌 게임을 알려 준다', () => {
+    const week = weekContext(createWeekly(), today, GAMES);
+    expect(week && pickedGame(week)).toBe(picked);
+    const other = findMission('genre');
+    expect(pickedGame({ weekKey: other.weekKey, missions: missionsFor(other.weekKey, GAMES) })).toBeNull();
+  });
+
+  it('첫 판을 기록할 때 뽑힌 게임을 함께 적고, 그 뒤로는 바꾸지 않는다', () => {
+    const play = { gameId: 'a1', coins: 0, dailyCleared: false };
+    const first = recordWeeklyPlay(createWeekly(), weekKey, play, picked);
+    expect(first.pick).toBe(picked);
+    expect(recordWeeklyPlay(first, weekKey, play, 'new').pick).toBe(picked);
+    // 적을 게임이 없는 주에는 적지 않는다.
+    expect('pick' in recordWeeklyPlay(createWeekly(), weekKey, play)).toBe(false);
+  });
+
+  it('적어 둔 게임이 있으면 게임이 늘어도 미션이 그 게임 그대로다', () => {
+    const state = recordWeeklyPlay(createWeekly(), weekKey, { gameId: picked, coins: 0, dailyCleared: false }, picked);
+    const after = weekContext(state, today, grown)?.missions.find((candidate) => candidate.kind === 'game');
+    expect(after?.counts).toEqual([picked]);
+    expect(after?.title).toBe(mission.title);
+    expect(after && missionProgress(after, state).current).toBe(1);
+  });
+
+  it('적어 둔 게임이 목록에서 빠졌으면 다시 뽑는다', () => {
+    const state = { ...played([picked], weekKey), pick: '없어진 게임' };
+    expect(weekContext(state, today, GAMES)?.missions).toEqual(missionsFor(weekKey, GAMES));
+  });
+
+  it('주가 바뀌면 적어 둔 게임도 지워지고, 보상을 받아도 남는다', () => {
+    const state = recordWeeklyPlay(createWeekly(), weekKey, { gameId: picked, coins: 0, dailyCleared: false }, picked);
+    const nextWeek = dateKeyOfDay((dayNumber(weekKey) ?? 0) + 7);
+    expect('pick' in recordWeeklyPlay(state, nextWeek, { gameId: 'a1', coins: 0, dailyCleared: false })).toBe(false);
+    const full = played(Array.from({ length: mission.goal }, () => picked), weekKey, state);
+    const week = weekContext(full, today, GAMES);
+    const claimed = week ? claimMission(full, week, mission.id) : null;
+    expect(claimed?.ok && claimed.state.pick).toBe(picked);
   });
 });
 
@@ -364,6 +438,13 @@ describe('normalizeWeekly', () => {
       claimed: ['easy', 'hard'],
     };
     expect(normalizeWeekly(state)).toEqual(state);
+  });
+
+  it('적어 둔 이번 주의 게임은 남기고, 글자가 아니거나 빈 값이면 버린다', () => {
+    const state: WeeklyState = { ...createWeekly(), weekKey: WEEK, plays: { p1: 1 }, pick: 'p1' };
+    expect(normalizeWeekly(state)).toEqual(state);
+    expect('pick' in normalizeWeekly({ ...state, pick: 7 })).toBe(false);
+    expect('pick' in normalizeWeekly({ ...state, pick: '' })).toBe(false);
   });
 
   it('주의 이름이 월요일이 아니거나 날짜가 아니면 통째로 버린다', () => {

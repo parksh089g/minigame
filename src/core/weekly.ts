@@ -69,6 +69,12 @@ export interface WeeklyState {
   dailyClears: number;
   /** 이번 주에 보상을 받은 미션 */
   claimed: MissionId[];
+  /**
+   * 이번 주의 "정해진 게임 몇 판" 미션에 뽑힌 게임의 id. 그 주의 첫 판을 기록할 때 적어 둔다.
+   * 주 중간에 게임이 늘어난 버전이 깔려도 채우던 미션이 다른 게임으로 바뀌지 않게 하려는 것이다.
+   * 그런 미션이 없는 주에는 적지 않는다.
+   */
+  pick?: string;
 }
 
 /** 지금 따지는 주와 그 주의 미션 */
@@ -78,6 +84,11 @@ export interface WeekContext {
 }
 
 const DAYS_IN_WEEK = 7;
+/**
+ * 기록의 주가 오늘의 주보다 이보다 많이(일) 앞서 있으면 기기 시계가 틀려 있던 때의 기록으로 보고 버린다.
+ * 한 주까지는 시계를 되돌린 것으로 보고 기록을 따른다.
+ */
+const MAX_AHEAD_DAYS = DAYS_IN_WEEK;
 /** 날짜 수 0(1970년 1월 1일)은 목요일이라, 3을 더하면 월요일이 7의 배수가 된다. */
 const MONDAY_SHIFT = 3;
 
@@ -158,27 +169,47 @@ export function normalizeWeekly(raw: unknown): WeeklyState {
       if (isMissionId(id) && !claimed.includes(id)) claimed.push(id);
     }
   }
-  return { weekKey, plays, coins: count(value.coins), dailyClears: count(value.dailyClears), claimed };
+  const pick = typeof value.pick === 'string' && value.pick.length > 0 ? value.pick : null;
+  return {
+    weekKey,
+    plays,
+    coins: count(value.coins),
+    dailyClears: count(value.dailyClears),
+    claimed,
+    ...(pick !== null ? { pick } : {}),
+  };
+}
+
+/** 기록의 주가 그 주보다 한 주 넘게 앞서 있는지. 기기 시계가 미래에 가 있을 때 남은 기록이 그렇다. */
+function isFarAhead(recordWeek: string, weekKey: string): boolean {
+  const record = dayNumber(recordWeek);
+  const week = dayNumber(weekKey);
+  return record !== null && week !== null && record - week > MAX_AHEAD_DAYS;
 }
 
 /**
- * 지금 미션을 따질 주. 오늘이 속한 주이지만, 기록이 그보다 뒤의 주 것이면 기록의 주를 따른다.
+ * 지금 미션을 따질 주. 오늘이 속한 주이지만, 기록이 바로 다음 주 것이면 기록의 주를 따른다.
  * 기기 시계를 되돌려 지난주의 미션을 다시 받지 못하게 하려는 것이다. 날짜가 잘못됐으면 null.
+ * 기록이 한 주 넘게 앞서 있으면 시계가 미래에 가 있던 때의 기록이므로 따르지 않는다.
+ * 그대로 따르면 그 주가 올 때까지 미션이 바뀌지 않는다.
  */
 export function currentWeekKey(state: WeeklyState, todayKey: string): string | null {
   const today = weekKeyOf(todayKey);
   if (today === null) return null;
   // YYYY-MM-DD는 글자 순서가 날짜 순서와 같다.
-  return state.weekKey !== null && state.weekKey > today ? state.weekKey : today;
+  const record = state.weekKey;
+  if (record !== null && record > today && !isFarAhead(record, today)) return record;
+  return today;
 }
 
 /**
  * 그 주의 기록. 세이브의 기록이 그 주의 것이면 그대로, 지난주 것이거나 아직 없으면 빈 기록이다.
  * weekKey가 기록보다 앞선 주이면(currentWeekKey로 고른 주가 아니면) null이고, 그때는 아무것도 하지 않는다.
+ * 다만 기록이 한 주 넘게 앞서 있으면 시계가 틀려 있던 때의 기록이라 버리고 빈 기록을 준다.
  */
 export function weeklyFor(state: WeeklyState, weekKey: string): WeeklyState | null {
   if (state.weekKey === weekKey) return state;
-  if (state.weekKey !== null && state.weekKey > weekKey) return null;
+  if (state.weekKey !== null && state.weekKey > weekKey && !isFarAhead(state.weekKey, weekKey)) return null;
   return { ...createWeekly(), weekKey };
 }
 
@@ -233,11 +264,22 @@ function genreMission(
   );
 }
 
-/** 이번 주의 게임 몇 판. 한 판이 짧은 게임 가운데에서 주마다 하나를 뽑는다. */
-function gameMission(id: MissionId, weekKey: string, games: readonly WeeklyGame[]): WeeklyMission | null {
+/**
+ * 이번 주의 게임 몇 판. 한 판이 짧은 게임 가운데에서 주마다 하나를 뽑는다.
+ * 목록에서 몇 번째인지로 뽑기 때문에 게임이 늘면 다른 게임이 뽑힌다. 그래서 그 주에 이미 뽑아 둔 게임(pick)이
+ * 아직 목록에 있으면 그 게임을 그대로 쓴다.
+ */
+function gameMission(
+  id: MissionId,
+  weekKey: string,
+  games: readonly WeeklyGame[],
+  pick?: string,
+): WeeklyMission | null {
   const quick = games.filter((game) => game.quick);
   if (quick.length === 0) return null;
-  const game = quick[Math.floor(seededUnit(`${weekKey}:game`) * quick.length)];
+  const game =
+    quick.find((candidate) => candidate.id === pick) ??
+    quick[Math.floor(seededUnit(`${weekKey}:game`) * quick.length)];
   return mission(
     id,
     'game',
@@ -264,8 +306,9 @@ function dailyMission(id: MissionId, weekKey: string): WeeklyMission {
 /**
  * 그 주의 미션 세 개(쉬운 것부터). 종류는 주마다 차례로 돌아가서 같은 미션이 잇달아 나오지 않고,
  * 목표의 크기와 어느 게임인지는 그 주의 날짜에서 뽑는다. 주의 이름이 잘못됐으면 빈 목록이다.
+ * pick은 그 주에 이미 뽑아 둔 "이번 주의 게임"이다(WeeklyState.pick).
  */
-export function missionsFor(weekKey: string, games: readonly WeeklyGame[]): WeeklyMission[] {
+export function missionsFor(weekKey: string, games: readonly WeeklyGame[], pick?: string): WeeklyMission[] {
   const index = weekIndex(weekKey);
   if (index === null || weekKeyOf(weekKey) !== weekKey) return [];
 
@@ -276,7 +319,7 @@ export function missionsFor(weekKey: string, games: readonly WeeklyGame[]): Week
   // 보통 미션: 퍼즐, 이번 주의 게임, 순발력이 차례로 돈다. 낼 수 없는 것은 건너뛴다.
   const makers = [
     () => genreMission('normal', weekKey, 'puzzle', games),
-    () => gameMission('normal', weekKey, games),
+    () => gameMission('normal', weekKey, games, pick),
     () => genreMission('normal', weekKey, 'action', games),
   ];
   let normal: WeeklyMission | null = null;
@@ -300,19 +343,33 @@ export function weekContext(
   games: readonly WeeklyGame[],
 ): WeekContext | null {
   const weekKey = currentWeekKey(state, todayKey);
-  return weekKey === null ? null : { weekKey, missions: missionsFor(weekKey, games) };
+  if (weekKey === null) return null;
+  // 그 주의 기록에 뽑아 둔 게임이 있으면 그대로 쓴다.
+  const pick = state.weekKey === weekKey ? state.pick : undefined;
+  return { weekKey, missions: missionsFor(weekKey, games, pick) };
 }
 
-/** 한 판을 그 주의 기록에 더한 새 기록을 돌려준다. 원본은 바꾸지 않는다. weekKey가 기록보다 앞선 주이면 그대로다. */
+/** 그 주의 미션 가운데 "정해진 게임 몇 판" 미션이 세는 게임. 그런 미션이 없는 주면 null. */
+export function pickedGame(week: WeekContext): string | null {
+  return week.missions.find((mission) => mission.kind === 'game')?.counts?.[0] ?? null;
+}
+
+/**
+ * 한 판을 그 주의 기록에 더한 새 기록을 돌려준다. 원본은 바꾸지 않는다. weekKey가 기록보다 앞선 주이면 그대로다.
+ * pick은 그 주의 "이번 주의 게임"이다(pickedGame). 기록에 아직 적혀 있지 않으면 함께 적어 둔다.
+ */
 export function recordWeeklyPlay(
   state: WeeklyState,
   weekKey: string,
   play: { gameId: string; coins: number; dailyCleared: boolean },
+  pick: string | null = null,
 ): WeeklyState {
   const base = weeklyFor(state, weekKey);
   if (base === null) return state;
+  const kept = base.pick ?? pick;
   return {
     ...base,
+    ...(kept !== null ? { pick: kept } : {}),
     plays: { ...base.plays, [play.gameId]: (base.plays[play.gameId] ?? 0) + 1 },
     coins: base.coins + Math.max(0, Math.floor(play.coins)),
     dailyClears: base.dailyClears + (play.dailyCleared ? 1 : 0),

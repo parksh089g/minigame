@@ -20,7 +20,7 @@ import {
 } from './save';
 import { createCosmetics } from './shop';
 import { MILESTONE_COINS, STAGE_COINS } from './stages';
-import { createWeekly, missionsFor, type WeekContext, type WeeklyGame } from './weekly';
+import { createWeekly, missionsFor, pickedGame, type WeekContext, type WeeklyGame } from './weekly';
 
 const NOW = 1_700_000_000_000;
 
@@ -675,7 +675,30 @@ describe('주간 미션', () => {
     const done = playDifferent(easy.goal).save;
     expect(claimWeeklyMission(done, next, 'easy', NOW)).toEqual({ ok: false, reason: 'incomplete' });
     const played = applyPlayResult(done, 'a1', 10, 3, NOW + 100, null, next);
-    expect(played.save.weekly).toEqual({ weekKey: NEXT_WEEK, plays: { a1: 1 }, coins: 3, dailyClears: 0, claimed: [] });
+    // 새 주는 "이번 주의 게임" 미션이 나오는 주라서, 뽑힌 게임이 기록에 함께 적힌다.
+    const pick = pickedGame(next);
+    expect(pick).not.toBeNull();
+    expect(played.save.weekly).toEqual({
+      weekKey: NEXT_WEEK,
+      plays: { a1: 1 },
+      coins: 3,
+      dailyClears: 0,
+      claimed: [],
+      pick,
+    });
+  });
+
+  it('이번 주의 게임을 적어 두어, 주 중간에 게임이 늘어도 채우던 미션이 바뀌지 않는다', () => {
+    const pick = pickedGame(next) ?? '';
+    const played = applyPlayResult(createDefaultSave(NOW), pick, 10, 3, NOW, null, next).save;
+    // 목록 맨 앞에 게임이 하나 늘어난 버전
+    const grown: WeeklyGame[] = [{ id: 'new', title: '새 게임', genre: 'puzzle', quick: true }, ...GAMES];
+    const moved = missionsFor(NEXT_WEEK, grown).find((mission) => mission.kind === 'game');
+    const kept = missionsFor(NEXT_WEEK, grown, played.weekly.pick).find((mission) => mission.kind === 'game');
+    expect(moved?.counts).not.toEqual([pick]);
+    expect(kept?.counts).toEqual([pick]);
+    // 내보냈다 가져와도 남는다.
+    expect(normalizeSave(JSON.parse(JSON.stringify(played))).weekly.pick).toBe(pick);
   });
 
   it('기기 시계를 되돌려 앞선 주를 넘기면 주간 기록은 그대로이고, 판은 평소처럼 기록된다', () => {

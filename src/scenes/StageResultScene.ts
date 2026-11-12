@@ -3,7 +3,7 @@ import { FONT_SIZE, GAME_WIDTH, SCENE, THEME, THEME_CSS } from '../config';
 import type { BackAware } from '../core/app-events';
 import { sfx } from '../core/sfx';
 import { STAGE_LEVELS } from '../core/stages';
-import { addPanel, addScrim, addText, fadeToScene, PixelButton } from '../core/ui';
+import { addPanel, addScrim, addTapZone, addText, fadeToScene, PixelButton } from '../core/ui';
 import type { AchievementsData } from './AchievementsScene';
 import type { StageResultData, StageStart } from './MiniGameScene';
 import type { StagesData } from './StagesScene';
@@ -130,11 +130,16 @@ export class StageResultScene extends Phaser.Scene implements BackAware {
       originY: 0.5,
     });
     if (!onTap) return;
-    this.add
-      .zone(left + 10, y, PANEL_WIDTH - 20, EXTRA_ROW - 4)
-      .setOrigin(0, 0)
-      .setInteractive({ useHandCursor: true })
-      .on(Phaser.Input.Events.GAMEOBJECT_POINTER_UP, onTap);
+    // 이 줄 안에서 누르기 시작했을 때만 반응한다. 마지막 수를 두던 손가락을 이 줄 위에서 떼는 것은 누른 것이 아니다.
+    addTapZone(
+      this,
+      left + 10,
+      y,
+      PANEL_WIDTH - 20,
+      EXTRA_ROW - 4,
+      (pressed) => band.setAlpha(pressed ? 0.55 : 1),
+      onTap,
+    );
   }
 
   private addButton(
