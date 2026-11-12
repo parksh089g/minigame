@@ -45,6 +45,36 @@ export class Limiter {
   }
 }
 
+/** 주소를 알 수 없는 요청은 모두 이 이름으로 함께 센다. */
+const UNKNOWN_PLACE = 'unknown';
+
+/** 16진수 네 자리까지로 된 IPv6 주소의 한 마디인지 */
+const isHexGroup = (group: string): boolean => /^[0-9a-f]{1,4}$/.test(group);
+
+/**
+ * 요청을 셀 때 "같은 곳"으로 묶는 이름을 주소에서 만든다.
+ * IPv4 주소는 그대로 쓴다. IPv6 주소는 앞 64비트만 쓴다. IPv6에서는 집 한 곳이나 휴대폰 한 대가
+ * 뒤 64비트를 마음대로 바꿔 쓸 수 있어서, 주소 전체로 세면 주소를 바꿔 가며 한도를 피할 수 있다.
+ * IPv4 주소를 품은 모양(::ffff:1.2.3.4)이나 읽을 수 없는 주소는 묶지 않고 받은 글자 그대로 쓴다.
+ */
+export function placeOf(address: string | null): string {
+  const text = (address ?? '').trim().toLowerCase();
+  if (text === '') return UNKNOWN_PLACE;
+  if (!text.includes(':') || text.includes('.')) return text;
+
+  const halves = text.split('::');
+  if (halves.length > 2) return text;
+  const head = halves[0] === '' ? [] : halves[0].split(':');
+  const tail = halves.length < 2 || halves[1] === '' ? [] : halves[1].split(':');
+  // "::"은 0으로 된 마디가 한 개 이상 줄어든 자리다.
+  const gap = halves.length === 2 ? 8 - head.length - tail.length : 0;
+  if (head.length + gap + tail.length !== 8 || (halves.length === 2 && gap < 1)) return text;
+
+  const front = [...head, ...new Array<string>(gap).fill('0'), ...tail].slice(0, 4);
+  if (![...head, ...tail].every(isHexGroup)) return text;
+  return `${front.map((group) => parseInt(group, 16).toString(16)).join(':')}::/64`;
+}
+
 /** 아래 규칙 가운데 가장 긴 구간. 이보다 오래된 기록은 어느 규칙에도 쓰이지 않는다. */
 const LONGEST_WINDOW_MS = 60 * 60 * 1000;
 
