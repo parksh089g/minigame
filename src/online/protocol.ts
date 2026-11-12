@@ -101,6 +101,50 @@ export interface RankBoard {
   top: RankRow[];
   /** 물어본 기기의 기록. 없으면 null. rank가 RANK_SCAN보다 크면 그 밖이라는 뜻이다. */
   me: { rank: number; score: number; name: string } | null;
+  /** 이번 주 랭킹일 때만 온다: 서버가 보는 이번 주(rankWeekOf). 전체 랭킹에는 없다. */
+  week?: string;
+}
+
+/** 랭킹의 범위. all은 지금까지의 최고 기록, week는 이번 주에 낸 기록만 겨룬다. */
+export const RANK_SPANS = ['all', 'week'] as const;
+export type RankSpan = (typeof RANK_SPANS)[number];
+
+export function isRankSpan(value: unknown): value is RankSpan {
+  return typeof value === 'string' && (RANK_SPANS as readonly string[]).includes(value);
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** 주간 랭킹은 한국 시각(UTC+9)으로 월요일 0시에 새로 시작한다. */
+const RANK_ZONE_MS = 9 * 60 * 60 * 1000;
+
+/**
+ * 그 시각이 속한 랭킹 주가 시작된 때(ms): 한국 시각으로 그 주 월요일 0시.
+ * 일주일(7일)을 더하면 다음 주가 시작되는 때다. 한국에는 서머타임이 없어서 한 주는 늘 7일이다.
+ */
+export function rankWeekStart(now: number): number {
+  const day = Math.floor((now + RANK_ZONE_MS) / DAY_MS);
+  // 1970년 1월 1일은 목요일이다. 월요일에서 며칠 지났는지를 빼면 그 주의 월요일이 된다.
+  const monday = day - ((((day + 3) % 7) + 7) % 7);
+  return monday * DAY_MS - RANK_ZONE_MS;
+}
+
+/** 랭킹 주 하나의 길이(ms) */
+export const RANK_WEEK_MS = 7 * DAY_MS;
+
+/**
+ * 그 시각이 속한 랭킹 주의 이름: 그 주 월요일의 날짜(YYYY-MM-DD, 한국 시각).
+ * 어느 주인지는 서버가 정한다. 앱도 같은 함수로 셈해서 보내지만, 서버의 주와 다르면 서버는 받지 않는다.
+ * 주간 미션(core/weekly.ts)의 주는 기기의 시각을 따르므로 나라에 따라 몇 시간 어긋날 수 있다.
+ */
+export function rankWeekOf(now: number): string {
+  return new Date(rankWeekStart(now) + RANK_ZONE_MS).toISOString().slice(0, 10);
+}
+
+const RANK_WEEK = /^\d{4}-\d{2}-\d{2}$/;
+
+/** 랭킹 주의 이름처럼 생겼는지. 실제로 있는 주인지는 서버의 지금 주와 견주어 가린다. */
+export function isRankWeek(value: unknown): value is string {
+  return typeof value === 'string' && RANK_WEEK.test(value);
 }
 
 /**
@@ -109,11 +153,21 @@ export interface RankBoard {
  */
 export type Standings = Record<string, { rank: number; score: number }>;
 
+/** 한 주 동안 낸 점수 묶음 */
+export interface WeekScores {
+  /** 이 점수를 낸 주(rankWeekOf) */
+  week: string;
+  /** 게임 id → 그 주에 낸 가장 높은 점수 */
+  scores: Record<string, number>;
+}
+
 export interface SubmitRequest {
   device: string;
   name: string;
   /** 게임 id → 그 기기의 최고 점수 */
   scores: Record<string, number>;
+  /** 이번 주 랭킹에 올릴 점수. 올릴 것이 없으면 보내지 않는다. 서버의 이번 주와 다른 주의 것은 서버가 버린다. */
+  weekly?: WeekScores;
 }
 
 export interface SubmitResult {

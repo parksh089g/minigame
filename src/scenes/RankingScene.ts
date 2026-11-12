@@ -20,14 +20,46 @@ import {
 } from '../core/ui';
 import { HUB_GAMES, lastPlayedGame, type MiniGameInfo } from '../games/registry';
 import { failureText, type ApiFailure } from '../online/api';
-import { loadBoard, loadStandings, scoreSync, syncScores } from '../online/online';
-import { isJoined, isWaitingToSend } from '../online/profile';
-import { isRankedGame, RANK_SCAN, rankLabel, type RankBoard, type RankRow } from '../online/protocol';
+import { knownRank, loadBoard, loadStandings, syncScores } from '../online/online';
+import { isJoined, isWaitingToSend, isWaitingToSendWeek } from '../online/profile';
+import {
+  isRankedGame,
+  RANK_SCAN,
+  rankLabel,
+  RANK_WEEK_MS,
+  rankWeekOf,
+  rankWeekStart,
+  type RankBoard,
+  type RankRow,
+  type RankSpan,
+} from '../online/protocol';
 import { askNickname } from './nickname';
 
 const MARGIN = 12;
 const CONTENT_WIDTH = GAME_WIDTH - MARGIN * 2;
 const RIGHT = GAME_WIDTH - MARGIN;
+/** 제목 오른쪽의 범위 버튼(전체, 이번 주). 오른쪽 끝에서부터 놓는다. */
+const SPANS: ReadonlyArray<{ span: RankSpan; label: string; width: number }> = [
+  { span: 'all', label: '전체', width: 36 },
+  { span: 'week', label: '이번 주', width: 48 },
+];
+const SPAN_BUTTON = { y: 10, height: 22, gap: 4 } as const;
+/** 범위 버튼들의 왼쪽 끝. 제목은 뒤로 가기 버튼과 이 사이의 가운데에 놓는다. */
+const SPANS_LEFT = RIGHT - SPANS.reduce((sum, item) => sum + item.width, 0) - SPAN_BUTTON.gap * (SPANS.length - 1);
+const TITLE_X = Math.round((8 + 26 + SPANS_LEFT) / 2);
+/** 이번 주 랭킹의 목록 위에 적는 한 줄(언제 새로 시작하는지)의 높이 */
+const WEEK_NOTE_HEIGHT = 14;
+const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'] as const;
+
+/**
+ * 이번 주 랭킹이 새로 시작하는 때를 이 기기의 시각으로 적는다. 한국에서는 "월요일 0시"다.
+ * 다른 나라에서는 요일과 시각이 다르게 보인다(랭킹의 주는 어디서나 한국 시각으로 바뀐다).
+ */
+function weekResetLabel(now: number): string {
+  const reset = new Date(rankWeekStart(now) + RANK_WEEK_MS);
+  const minutes = reset.getMinutes();
+  return `${WEEKDAYS[reset.getDay()]}요일 ${reset.getHours()}시${minutes > 0 ? ` ${minutes}분` : ''}`;
+}
 /** 게임을 고르는 줄 */
 const PICKER = { top: 44, height: 26, button: 34 } as const;
 /** 게임을 고르는 격자. 허브처럼 한 줄에 세 개씩, 아이콘 아래에 이름을 둔다. */
@@ -52,12 +84,15 @@ const RANKED: readonly MiniGameInfo[] = HUB_GAMES.filter(
 const TITLE_LEFT = MARGIN + PICKER.button + 6;
 const TITLE_WIDTH = CONTENT_WIDTH - (PICKER.button + 6) * 2;
 
-/** 마지막으로 보던 게임. 다시 들어와도 같은 게임이 보인다. */
+/** 마지막으로 보던 게임과 범위. 다시 들어와도 같은 것이 보인다. */
 let lastGameId: string | null = null;
+let lastSpan: RankSpan = 'all';
 
 export interface RankingData {
   /** 처음에 보여 줄 게임. 없으면 마지막으로 보던 게임이다. */
   gameId?: string;
+  /** 처음에 보여 줄 범위. 없으면 마지막으로 보던 범위다. */
+  span?: RankSpan;
 }
 
 type View =
@@ -68,6 +103,9 @@ type View =
 /** 게임별 온라인 랭킹을 보고, 닉네임을 정해 참여하는 화면. 인터넷이 없으면 안내만 보인다. */
 export class RankingScene extends Phaser.Scene implements BackAware {
   private gameIndex = 0;
+  /** 전체 랭킹을 보는지, 이번 주 랭킹을 보는지 */
+  private span: RankSpan = 'all';
+  private spanButtons: Array<{ span: RankSpan; button: PixelButton }> = [];
   /** 목록 자리에 랭킹 대신 게임을 고르는 격자를 펼쳐 놓았는지 */
   private choosing = false;
   private view: View = { kind: 'loading' };
@@ -113,6 +151,7 @@ export class RankingScene extends Phaser.Scene implements BackAware {
         (id) => getRecord(store.data, id).lastPlayedAt,
       );
     this.gameIndex = Math.max(0, RANKED.findIndex((game) => game.id === wanted));
+    this.span = data.span ?? lastSpan;
     this.choosing = false;
     this.listObjects = [];
     this.footObjects = [];
@@ -131,8 +170,9 @@ export class RankingScene extends Phaser.Scene implements BackAware {
       hitPadding: 6,
       onTap: () => fadeToScene(this, SCENE.hub),
     });
-    addText(this, GAME_WIDTH / 2, 8, '랭킹', { size: FONT_SIZE.large, originX: 0.5 });
+    addText(this, TITLE_X, 8, '랭킹', { size: FONT_SIZE.large, originX: 0.5 });
 
+    this.addSpanButtons();
     this.addPicker();
 
     this.footTop = height - FOOT.bottom - FOOT.button - FOOT.gap - FOOT.status;
@@ -155,6 +195,46 @@ export class RankingScene extends Phaser.Scene implements BackAware {
     this.drawFoot();
     fadeIn(this);
     void this.fetchBoard(true);
+  }
+
+  // ------------------------------------------------------------ 범위 고르기
+
+  private addSpanButtons(): void {
+    let right = RIGHT;
+    this.spanButtons = [...SPANS].reverse().map(({ span, label, width }) => {
+      const button = new PixelButton(this, {
+        x: right - width,
+        y: SPAN_BUTTON.y,
+        width,
+        height: SPAN_BUTTON.height,
+        label,
+        hitPadding: 2,
+        onTap: () => this.pickSpan(span),
+      });
+      right -= width + SPAN_BUTTON.gap;
+      return { span, button };
+    });
+    this.showSpan();
+  }
+
+  private showSpan(): void {
+    lastSpan = this.span;
+    for (const { span, button } of this.spanButtons) button.setStyle(span === this.span ? 'pink' : 'neutral');
+  }
+
+  /** 전체 랭킹과 이번 주 랭킹을 오간다. 보던 게임은 그대로다. */
+  private pickSpan(span: RankSpan): void {
+    if (span === this.span) return;
+    this.span = span;
+    this.page = 0;
+    this.showSpan();
+    if (this.choosing) {
+      // 격자에 적힌 내 순위를 고른 범위의 것으로 바꾼다.
+      this.drawList();
+      void this.refreshStandings();
+    }
+    this.drawFoot();
+    void this.fetchBoard(false);
   }
 
   // ------------------------------------------------------------ 게임 고르기
@@ -255,7 +335,8 @@ export class RankingScene extends Phaser.Scene implements BackAware {
 
   /** 격자에 적을 내 순위를 모든 게임에 대해 한 번에 불러온다. 새로 알게 된 것이 있으면 격자를 다시 그린다. */
   private async refreshStandings(): Promise<void> {
-    if ((await loadStandings()) && this.sys.isActive() && this.choosing) this.drawList();
+    const span = this.span;
+    if ((await loadStandings(span)) && this.sys.isActive() && this.choosing && span === this.span) this.drawList();
   }
 
   /** 뒤로 가기를 누르면 펼쳐 둔 격자부터 접고, 접혀 있으면 허브로 돌아간다. */
@@ -270,6 +351,7 @@ export class RankingScene extends Phaser.Scene implements BackAware {
   private async fetchBoard(sync: boolean): Promise<void> {
     const request = (this.request += 1);
     const gameId = this.shown.id;
+    const span = this.span;
     this.show({ kind: 'loading' });
     if (sync) {
       const outcome = await syncScores();
@@ -278,7 +360,7 @@ export class RankingScene extends Phaser.Scene implements BackAware {
       if (request !== this.request && this.sys.isActive()) this.drawFoot();
     }
     if (request !== this.request) return;
-    const result = await loadBoard(gameId);
+    const result = await loadBoard(gameId, span);
     if (request !== this.request) return;
     this.show(result.ok ? { kind: 'ready', board: result.data } : { kind: 'failed', reason: result.reason });
   }
@@ -297,7 +379,7 @@ export class RankingScene extends Phaser.Scene implements BackAware {
       this.layout = { perPage: byRow.perPage * CHOOSER.columns, pages: byRow.pages };
     } else {
       const rows = this.view.kind === 'ready' ? this.view.board.top.length : 0;
-      this.layout = layoutPages(rows, this.listHeight, LIST.row, PAGER_HEIGHT);
+      this.layout = layoutPages(rows, this.listHeight - this.weekNoteRoom, LIST.row, PAGER_HEIGHT);
     }
     this.page = clampPage(this.page, this.layout.pages);
     this.pager.set(this.layout.pages, this.page);
@@ -333,6 +415,11 @@ export class RankingScene extends Phaser.Scene implements BackAware {
     );
   }
 
+  /** 이번 주 랭킹을 볼 때 목록 위에 비워 두는 높이. 언제 새로 시작하는지를 거기에 적는다. */
+  private get weekNoteRoom(): number {
+    return this.span === 'week' && !this.choosing ? WEEK_NOTE_HEIGHT : 0;
+  }
+
   private drawList(): void {
     this.clear(this.listObjects);
     this.retryButton?.setVisible(false);
@@ -341,6 +428,17 @@ export class RankingScene extends Phaser.Scene implements BackAware {
       return;
     }
     const view = this.view;
+    if (this.span === 'week') {
+      const note = addText(
+        this,
+        GAME_WIDTH / 2,
+        this.listTop + (WEEK_NOTE_HEIGHT - 2) / 2,
+        `이번 주 기록만 겨뤄요 · ${weekResetLabel(Date.now())}에 새로 시작`,
+        { size: FONT_SIZE.small, color: THEME_CSS.sub, originX: 0.5, originY: 0.5 },
+      );
+      note.setScale(Math.min(1, (CONTENT_WIDTH - 16) / note.width));
+      this.listObjects.push(note);
+    }
 
     if (view.kind === 'loading') {
       this.addNote('랭킹을 불러오는 중…');
@@ -360,11 +458,16 @@ export class RankingScene extends Phaser.Scene implements BackAware {
       return;
     }
     if (view.board.top.length === 0) {
-      this.addNote('아직 아무도 없어요.\n첫 번째로 이름을 올려 보세요!');
+      this.addNote(
+        this.span === 'week'
+          ? '이번 주에는 아직 아무도 없어요.\n첫 번째로 이름을 올려 보세요!'
+          : '아직 아무도 없어요.\n첫 번째로 이름을 올려 보세요!',
+      );
       return;
     }
+    const top = this.listTop + this.weekNoteRoom;
     pageSlice(view.board.top, this.page, this.layout.perPage).forEach((row, index) => {
-      this.addRow(row, this.listTop + index * LIST.row);
+      this.addRow(row, top + index * LIST.row);
     });
   }
 
@@ -406,7 +509,7 @@ export class RankingScene extends Phaser.Scene implements BackAware {
     this.listObjects.push(frame, icon, title, zone);
 
     // 랭킹에 올라 있는 게임은 아이콘 옆에 내 순위를 적는다. 게임을 하나씩 넘겨 보지 않아도 한눈에 보인다.
-    const rank = isJoined(store.data.online) ? scoreSync.rankOf(game.id) : null;
+    const rank = isJoined(store.data.online) ? knownRank(game.id, this.span) : null;
     if (rank !== null) this.addBadge(rank, icon.x + CHOOSER.icon / 2 + BADGE.gap, icon.y, x + width - 2);
   }
 
@@ -493,7 +596,8 @@ export class RankingScene extends Phaser.Scene implements BackAware {
       const waiting = this.view.kind === 'ready' ? this.waitingNote() : null;
       // 순위는 올라가 있는 기록의 것이다. 새 기록을 올리지 못했으면 순위 대신 그 사정을 알린다.
       const rank = me && waiting === null ? `${rankLabel(me.rank)} · ${me.score}점` : null;
-      const status = this.view.kind !== 'ready' ? '' : (rank ?? waiting ?? '이 게임은 아직 기록이 없어요');
+      const none = this.span === 'week' ? '이번 주에는 아직 기록이 없어요' : '이 게임은 아직 기록이 없어요';
+      const status = this.view.kind !== 'ready' ? '' : (rank ?? waiting ?? none);
       const name = addText(this, MARGIN + 10, middle, online.name, { color: THEME_CSS.accent, originY: 0.5 });
       const note = addText(this, RIGHT - 10, middle, status, {
         size: rank ? FONT_SIZE.normal : FONT_SIZE.small,
@@ -528,7 +632,12 @@ export class RankingScene extends Phaser.Scene implements BackAware {
    */
   private waitingNote(): string | null {
     if (this.sendFailure === null) return null;
-    if (!isWaitingToSend(store.data.online, store.data.games, this.shown.id)) return null;
+    const online = store.data.online;
+    const waiting =
+      this.span === 'week'
+        ? isWaitingToSendWeek(online, this.shown.id, rankWeekOf(Date.now()))
+        : isWaitingToSend(online, store.data.games, this.shown.id);
+    if (!waiting) return null;
     // 같은 인터넷을 쓰는 사람들이 한꺼번에 참여하면 서버가 잠깐 받지 않는다(요청 한도).
     return this.sendFailure === 'slow' ? '기록은 잠시 뒤에 올라가요' : '기록을 아직 올리지 못했어요';
   }

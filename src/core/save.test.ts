@@ -57,6 +57,7 @@ describe('normalizeSave', () => {
         name: '등불지기',
         sentName: '등불지기',
         sent: { 'lightning-tap': 80 },
+        week: { key: '2026-11-09', bests: { 'lightning-tap': 70 }, sent: { 'lightning-tap': 55 } },
       },
       favorites: ['stack-tower', 'lightning-tap'],
       weekly: {
@@ -111,7 +112,13 @@ describe('normalizeSave', () => {
       createdAt: NOW - 5000,
       updatedAt: NOW - 1000,
     };
-    expect(normalizeSave(old, NOW).online).toEqual({ id: null, name: null, sentName: null, sent: {} });
+    expect(normalizeSave(old, NOW).online).toEqual({
+      id: null,
+      name: null,
+      sentName: null,
+      sent: {},
+      week: null,
+    });
   });
 
   it('꾸미기가 생기기 전의 세이브는 기본 꾸미기로 읽는다', () => {
@@ -202,6 +209,20 @@ describe('applyPlayResult', () => {
     expect(result.save.coins).toBe(4);
     expect(result.save.games['lightning-tap']).toEqual({ best: 42, plays: 1, lastPlayedAt: NOW + 1 });
     expect(result.save.updatedAt).toBe(NOW + 1);
+  });
+
+  it('랭킹이 있는 게임의 점수는 이번 주 랭킹에 올릴 기록으로도 적는다', () => {
+    // NOW는 한국 시각으로 2023년 11월 15일 수요일이다. 그 주의 월요일은 13일.
+    let save = applyPlayResult(createDefaultSave(NOW), 'lightning-tap', 42, 4, NOW).save;
+    expect(save.online.week).toEqual({ key: '2023-11-13', bests: { 'lightning-tap': 42 }, sent: {} });
+    save = applyPlayResult(save, 'lightning-tap', 30, 4, NOW + 1000).save;
+    save = applyPlayResult(save, 'not-ranked', 99, 4, NOW + 2000).save;
+    expect(save.online.week?.bests).toEqual({ 'lightning-tap': 42 });
+    // 다음 주에는 최고 기록보다 낮은 점수여도 그 주의 기록이 된다.
+    const week = 7 * 24 * 60 * 60 * 1000;
+    const next = applyPlayResult(save, 'lightning-tap', 10, 4, NOW + week);
+    expect(next.isNewBest).toBe(false);
+    expect(next.save.online.week).toEqual({ key: '2023-11-20', bests: { 'lightning-tap': 10 }, sent: {} });
   });
 
   it('최고 기록보다 낮은 점수는 기록을 바꾸지 않는다', () => {
@@ -473,6 +494,7 @@ describe('resetProgress', () => {
       name: '등불지기',
       sentName: '등불지기',
       sent: { 'lightning-tap': 80 },
+      week: { key: '2026-11-09', bests: { 'lightning-tap': 60 }, sent: { 'lightning-tap': 60 } },
     };
     const reset = resetProgress(save, NOW + 100);
     expect(reset.online).toEqual(save.online);

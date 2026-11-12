@@ -4,8 +4,15 @@
  * 규칙은 service.ts에 있고, 여기서는 그것을 Cloudflare에 얹기만 한다.
  */
 import { DurableObject } from 'cloudflare:workers';
-import type { RankBoard, RankedGame, Standings, StashResult, SubmitResult } from '../src/online/protocol';
-import { BoardService, type BoardApi, type Limited, type Scores } from './service';
+import type {
+  RankBoard,
+  RankedGame,
+  RankSpan,
+  Standings,
+  StashResult,
+  SubmitResult,
+} from '../src/online/protocol';
+import { BoardService, type BoardApi, type Limited, type Scores, type WeekEntry } from './service';
 
 /** 이 객체는 다른 자원을 쓰지 않는다. */
 type NoBindings = Record<string, never>;
@@ -18,16 +25,22 @@ export class ArcadeBoard extends DurableObject<NoBindings> implements BoardApi {
     this.service = new BoardService(ctx.storage.sql);
   }
 
-  board(ip: string, game: RankedGame, device: string | null): Limited<RankBoard> {
-    return this.service.board(ip, game, device);
+  board(ip: string, game: RankedGame, device: string | null, span: RankSpan): Limited<RankBoard> {
+    return this.service.board(ip, game, device, span);
   }
 
-  standings(ip: string, device: string): Limited<Standings> {
-    return this.service.standings(ip, device);
+  standings(ip: string, device: string, span: RankSpan): Limited<Standings> {
+    return this.service.standings(ip, device, span);
   }
 
-  submit(ip: string, device: string, name: string, scores: Scores): Limited<SubmitResult> {
-    return this.service.submit(ip, device, name, scores);
+  submit(
+    ip: string,
+    device: string,
+    name: string,
+    scores: Scores,
+    weekly: WeekEntry | null,
+  ): Limited<SubmitResult> {
+    return this.service.submit(ip, device, name, scores, weekly);
   }
 
   forget(ip: string, device: string): Limited<true> {

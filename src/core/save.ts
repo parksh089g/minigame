@@ -22,7 +22,8 @@ import {
   type DailyChallenge,
   type DailyState,
 } from './daily';
-import { createOnline, normalizeOnline, type OnlineState } from '../online/profile';
+import { createOnline, normalizeOnline, withWeekScore, type OnlineState } from '../online/profile';
+import { rankWeekOf } from '../online/protocol';
 import {
   createCosmetics,
   equip,
@@ -273,6 +274,8 @@ export function applyPlayResult(
     },
     daily: dailyState,
     weekly,
+    // 이번 주 랭킹에 올릴 기록. 닉네임을 정하기 전이어도 적어 둔다.
+    online: withWeekScore(save.online, gameId, score, rankWeekOf(now)),
     updatedAt: now,
   };
 
@@ -392,7 +395,8 @@ export function resetProgress(save: SaveData, now: number = Date.now()): SaveDat
   return {
     ...createDefaultSave(now),
     settings: { ...save.settings },
-    online: { ...save.online, sent: { ...save.online.sent } },
+    // 서버에 올라간 기록은 그대로이므로, 무엇을 올렸는지도(이번 주의 기록까지) 그대로 둔다.
+    online: structuredClone(save.online),
     // 즐겨찾기는 기록이 아니라 취향이라 설정처럼 남긴다.
     favorites: [...save.favorites],
   };

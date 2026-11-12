@@ -5,20 +5,27 @@ import {
   isWaitingToSend,
   normalizeOnline,
   pendingSubmit,
+  isWaitingToSendWeek,
+  weekBestOf,
   withName,
   withoutName,
   withSent,
+  withWeekScore,
   type OnlineState,
 } from './profile';
 
 const ID = '01112131-4151-6171-8191-a1b1c1d1e1f1';
 const OTHER_ID = '99999999-4151-6171-8191-a1b1c1d1e1f1';
+/** 랭킹 주의 이름(그 주 월요일의 날짜) */
+const WEEK = '2026-11-09';
+const NEXT_WEEK = '2026-11-16';
 
 const joined = (extra: Partial<OnlineState> = {}): OnlineState => ({
   id: ID,
   name: '등불지기',
   sentName: '등불지기',
   sent: {},
+  week: null,
   ...extra,
 });
 
@@ -41,6 +48,7 @@ describe('저장된 값 읽기', () => {
       name: null,
       sentName: null,
       sent: {},
+      week: null,
     });
   });
 
@@ -54,17 +62,32 @@ describe('참여와 닉네임', () => {
   it('닉네임을 처음 정하면 새 id로 참여한다', () => {
     const state = withName(createOnline(), '등불지기', ID);
     expect(isJoined(state)).toBe(true);
-    expect(state).toEqual({ id: ID, name: '등불지기', sentName: null, sent: {} });
+    expect(state).toEqual({ id: ID, name: '등불지기', sentName: null, sent: {}, week: null });
   });
 
   it('닉네임을 바꿔도 id와 올린 기록 표시는 그대로다', () => {
     const state = withName(joined({ sent: { 'stack-tower': 90 } }), '새이름', OTHER_ID);
-    expect(state).toEqual({ id: ID, name: '새이름', sentName: '등불지기', sent: { 'stack-tower': 90 } });
+    expect(state).toEqual({
+      id: ID,
+      name: '새이름',
+      sentName: '등불지기',
+      sent: { 'stack-tower': 90 },
+      week: null,
+    });
   });
 
   it('랭킹에서 빠지면 처음 상태로 돌아간다', () => {
-    expect(withoutName()).toEqual(createOnline());
-    expect(isJoined(withoutName())).toBe(false);
+    const state = joined({ sent: { 'stack-tower': 90 } });
+    expect(withoutName(state)).toEqual(createOnline());
+    expect(isJoined(withoutName(state))).toBe(false);
+  });
+
+  it('랭킹에서 빠져도 이번 주에 낸 점수는 남는다. 다시 참여하면 새 id로 다시 올라간다', () => {
+    const week = { key: WEEK, bests: { 'stack-tower': 90 }, sent: { 'stack-tower': 90 } };
+    const left = withoutName(joined({ week }));
+    expect(left.week).toEqual({ key: WEEK, bests: { 'stack-tower': 90 }, sent: {} });
+    const back = withName(left, '새이름', OTHER_ID);
+    expect(pendingSubmit(back, {}, WEEK)?.weekly).toEqual({ week: WEEK, scores: { 'stack-tower': 90 } });
   });
 });
 
@@ -78,7 +101,7 @@ describe('보낼 것 고르기', () => {
 
   it('참여하지 않았으면 아무것도 보내지 않는다', () => {
     expect(pendingSubmit(createOnline(), games)).toBeNull();
-    expect(pendingSubmit({ id: ID, name: null, sentName: null, sent: {} }, games)).toBeNull();
+    expect(pendingSubmit({ id: ID, name: null, sentName: null, sent: {}, week: null }, games)).toBeNull();
   });
 
   it('아직 올리지 않은 최고 점수를 모두 보낸다. 0점과 모르는 게임은 빼고', () => {
@@ -167,5 +190,118 @@ describe('올린 것 적어 두기', () => {
   it('서버가 이상한 값을 돌려줘도 망가지지 않는다', () => {
     const state = withSent(joined(), request, { nope: 5, 'stack-tower': -1 });
     expect(state.sent).toEqual({});
+  });
+});
+
+describe('이번 주에 낸 점수', () => {
+  it('랭킹이 있는 게임의 점수를 그 주의 기록으로 적는다. 닉네임이 없어도 적는다', () => {
+    const state = withWeekScore(createOnline(), 'stack-tower', 40, WEEK);
+    expect(state.week).toEqual({ key: WEEK, bests: { 'stack-tower': 40 }, sent: {} });
+    expect(weekBestOf(state, 'stack-tower', WEEK)).toBe(40);
+    expect(weekBestOf(state, 'stack-tower', NEXT_WEEK)).toBe(0);
+    expect(isJoined(state)).toBe(false);
+  });
+
+  it('같은 주에는 더 높은 점수만 남긴다', () => {
+    let state = withWeekScore(joined(), 'stack-tower', 40, WEEK);
+    const same = withWeekScore(state, 'stack-tower', 30, WEEK);
+    expect(same).toBe(state);
+    state = withWeekScore(state, 'stack-tower', 55, WEEK);
+    state = withWeekScore(state, 'gate-run', 12, WEEK);
+    expect(state.week?.bests).toEqual({ 'stack-tower': 55, 'gate-run': 12 });
+  });
+
+  it('주가 바뀌면 지난 주의 것은 버리고 새로 적는다', () => {
+    const before = joined({ week: { key: WEEK, bests: { 'stack-tower': 90 }, sent: { 'stack-tower': 90 } } });
+    const after = withWeekScore(before, 'stack-tower', 10, NEXT_WEEK);
+    expect(after.week).toEqual({ key: NEXT_WEEK, bests: { 'stack-tower': 10 }, sent: {} });
+  });
+
+  it('랭킹이 없는 게임과 0점은 적지 않는다', () => {
+    const state = joined();
+    expect(withWeekScore(state, 'not-a-game', 50, WEEK)).toBe(state);
+    expect(withWeekScore(state, 'stack-tower', 0, WEEK)).toBe(state);
+    expect(withWeekScore(state, 'stack-tower', Number.NaN, WEEK)).toBe(state);
+  });
+
+  it('아직 올리지 않은 이번 주의 점수를 최고 점수와 함께 보낸다', () => {
+    const state = joined({
+      sent: { 'stack-tower': 90 },
+      week: { key: WEEK, bests: { 'stack-tower': 55, 'gate-run': 12 }, sent: { 'gate-run': 12 } },
+    });
+    const games = { 'stack-tower': { best: 90 }, 'gate-run': { best: 30 } };
+    expect(pendingSubmit(state, games, WEEK)).toEqual({
+      device: ID,
+      name: '등불지기',
+      scores: { 'gate-run': 30 },
+      weekly: { week: WEEK, scores: { 'stack-tower': 55 } },
+    });
+    expect(isWaitingToSendWeek(state, 'stack-tower', WEEK)).toBe(true);
+    expect(isWaitingToSendWeek(state, 'gate-run', WEEK)).toBe(false);
+  });
+
+  it('최고 점수는 그대로여도 이번 주의 점수가 있으면 보낸다', () => {
+    const state = joined({
+      sent: { 'stack-tower': 90 },
+      week: { key: WEEK, bests: { 'stack-tower': 55 }, sent: {} },
+    });
+    expect(pendingSubmit(state, { 'stack-tower': { best: 90 } }, WEEK)).toEqual({
+      device: ID,
+      name: '등불지기',
+      scores: {},
+      weekly: { week: WEEK, scores: { 'stack-tower': 55 } },
+    });
+  });
+
+  it('적어 둔 것이 지난 주의 것이면 보내지 않는다', () => {
+    const state = joined({ week: { key: WEEK, bests: { 'stack-tower': 55 }, sent: {} } });
+    expect(pendingSubmit(state, {}, NEXT_WEEK)).toBeNull();
+    expect(isWaitingToSendWeek(state, 'stack-tower', NEXT_WEEK)).toBe(false);
+    // 주를 알려 주지 않으면(옛 방식) 이번 주의 점수는 따지지 않는다.
+    expect(pendingSubmit(state, {})).toBeNull();
+  });
+
+  it('참여하지 않았으면 이번 주의 점수가 있어도 보내지 않는다', () => {
+    const state = withWeekScore(createOnline(), 'stack-tower', 40, WEEK);
+    expect(pendingSubmit(state, {}, WEEK)).toBeNull();
+    expect(isWaitingToSendWeek(state, 'stack-tower', WEEK)).toBe(false);
+  });
+
+  it('서버가 답하면 보낸 것으로 적어서 다시 보내지 않는다', () => {
+    const state = joined({ week: { key: WEEK, bests: { 'stack-tower': 55 }, sent: {} } });
+    const request = pendingSubmit(state, {}, WEEK);
+    expect(request).not.toBeNull();
+    if (!request) return;
+    const after = withSent(state, request, {});
+    expect(after.week?.sent).toEqual({ 'stack-tower': 55 });
+    expect(pendingSubmit(after, {}, WEEK)).toBeNull();
+  });
+
+  it('보내는 사이에 주가 바뀌었으면 새 주의 기록은 건드리지 않는다', () => {
+    const state = joined({ week: { key: WEEK, bests: { 'stack-tower': 55 }, sent: {} } });
+    const request = pendingSubmit(state, {}, WEEK);
+    if (!request) throw new Error('보낼 것이 있어야 한다');
+    const moved = withWeekScore(state, 'stack-tower', 20, NEXT_WEEK);
+    const after = withSent(moved, request, {});
+    expect(after.week).toEqual({ key: NEXT_WEEK, bests: { 'stack-tower': 20 }, sent: {} });
+  });
+
+  it('저장된 이번 주의 기록을 읽는다. 이상한 값은 버린다', () => {
+    const week = { key: WEEK, bests: { 'stack-tower': 55, nope: 3, 'gate-run': -1 }, sent: { 'stack-tower': 40 } };
+    expect(normalizeOnline({ ...joined(), week }).week).toEqual({
+      key: WEEK,
+      bests: { 'stack-tower': 55 },
+      sent: { 'stack-tower': 40 },
+    });
+    expect(normalizeOnline({ ...joined(), week: { key: '이번 주', bests: {} } }).week).toBeNull();
+    expect(normalizeOnline({ ...joined(), week: 'x' }).week).toBeNull();
+  });
+
+  it('닉네임이 없는 세이브에서는 이번 주의 점수만 읽고, 올렸다는 표시는 버린다', () => {
+    const week = { key: WEEK, bests: { 'stack-tower': 55 }, sent: { 'stack-tower': 55 } };
+    expect(normalizeOnline({ week })).toEqual({
+      ...createOnline(),
+      week: { key: WEEK, bests: { 'stack-tower': 55 }, sent: {} },
+    });
   });
 });

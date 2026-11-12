@@ -234,3 +234,96 @@ describe('모든 게임의 내 순위', () => {
     expect(db.standings(device(RANK_SCAN + 5))[GAME].rank).toBe(RANK_SCAN + 1);
   });
 });
+
+describe('주간 랭킹', () => {
+  const WEEK = '2027-01-11';
+  const NEXT = '2027-01-18';
+
+  it('그 주에 올린 점수만으로 순위를 매긴다. 전체 랭킹과는 따로다', () => {
+    const db = new BoardDb(memorySql());
+    db.submit(device(1), '하나', { [GAME]: 900 }, 1000);
+    db.submit(device(2), '둘', { [GAME]: 700 }, 2000, { week: WEEK, scores: { [GAME]: 300 } });
+    db.submit(device(1), '하나', {}, 3000, { week: WEEK, scores: { [GAME]: 200 } });
+    expect(db.board(GAME, device(1)).top.map((row) => [row.name, row.score])).toEqual([
+      ['하나', 900],
+      ['둘', 700],
+    ]);
+    const week = db.board(GAME, device(1), WEEK);
+    expect(week.week).toBe(WEEK);
+    expect(week.top.map((row) => [row.rank, row.name, row.score, row.mine])).toEqual([
+      [1, '둘', 300, false],
+      [2, '하나', 200, true],
+    ]);
+    expect(week.me).toEqual({ rank: 2, score: 200, name: '하나' });
+    // 전체 랭킹의 답에는 주가 적혀 있지 않다.
+    expect(db.board(GAME, null).week).toBeUndefined();
+  });
+
+  it('같은 주에는 더 높은 점수만 남고, 같은 점수면 먼저 낸 사람이 앞이다', () => {
+    const db = new BoardDb(memorySql());
+    db.submit(device(1), '하나', {}, 1000, { week: WEEK, scores: { [GAME]: 300 } });
+    db.submit(device(2), '둘', {}, 2000, { week: WEEK, scores: { [GAME]: 300 } });
+    db.submit(device(1), '하나', {}, 3000, { week: WEEK, scores: { [GAME]: 100 } });
+    expect(db.board(GAME, null, WEEK).top.map((row) => [row.name, row.score])).toEqual([
+      ['하나', 300],
+      ['둘', 300],
+    ]);
+    db.submit(device(2), '둘', {}, 4000, { week: WEEK, scores: { [GAME]: 301 } });
+    expect(db.board(GAME, null, WEEK).top.map((row) => row.name)).toEqual(['둘', '하나']);
+  });
+
+  it('주가 바뀌면 빈 랭킹에서 새로 시작하고, 지난 주의 줄은 지운다', () => {
+    const sql = memorySql();
+    const db = new BoardDb(sql);
+    db.submit(device(1), '하나', { [GAME]: 900 }, 1000, { week: WEEK, scores: { [GAME]: 900, [OTHER]: 5 } });
+    expect(db.board(GAME, device(1), NEXT)).toEqual({ top: [], me: null, week: NEXT });
+    db.submit(device(2), '둘', {}, 2000, { week: NEXT, scores: { [GAME]: 10 } });
+    expect(db.board(GAME, null, NEXT).top.map((row) => row.name)).toEqual(['둘']);
+    const left = sql.exec<{ week: string }>('SELECT DISTINCT week FROM weekly').toArray();
+    expect(left).toEqual([{ week: NEXT }]);
+    // 전체 랭킹은 그대로다.
+    expect(db.board(GAME, null).top.map((row) => row.score)).toEqual([900]);
+  });
+
+  it('닉네임을 바꾸면 이번 주의 줄에서도 바뀐다', () => {
+    const db = new BoardDb(memorySql());
+    db.submit(device(1), '하나', {}, 1000, { week: WEEK, scores: { [GAME]: 300, [OTHER]: 4 } });
+    db.submit(device(1), '새이름', {}, 2000, { week: WEEK, scores: { [OTHER]: 4 } });
+    expect(db.board(GAME, null, WEEK).top[0]?.name).toBe('새이름');
+    expect(db.board(OTHER, null, WEEK).top[0]).toMatchObject({ name: '새이름', score: 4 });
+  });
+
+  it('기록을 지우면 주간 랭킹에서도 빠진다', () => {
+    const db = new BoardDb(memorySql());
+    db.submit(device(1), '하나', { [GAME]: 300 }, 1000, { week: WEEK, scores: { [GAME]: 300 } });
+    db.submit(device(2), '둘', { [GAME]: 200 }, 2000, { week: WEEK, scores: { [GAME]: 200 } });
+    db.forget(device(1));
+    expect(db.board(GAME, device(1), WEEK)).toEqual({
+      top: [{ rank: 1, name: '둘', score: 200, mine: false }],
+      me: null,
+      week: WEEK,
+    });
+  });
+
+  it('이번 주의 내 순위를 모든 게임에 대해 알려 준다', () => {
+    const db = new BoardDb(memorySql());
+    db.submit(device(1), '하나', { [GAME]: 900 }, 1000, { week: WEEK, scores: { [GAME]: 100 } });
+    db.submit(device(2), '둘', { [GAME]: 500 }, 2000, { week: WEEK, scores: { [GAME]: 400, [OTHER]: 7 } });
+    expect(db.standings(device(1), WEEK)).toEqual({ [GAME]: { rank: 2, score: 100 } });
+    expect(db.standings(device(2), WEEK)).toEqual({
+      [GAME]: { rank: 1, score: 400 },
+      [OTHER]: { rank: 1, score: 7 },
+    });
+    expect(db.standings(device(1))).toEqual({ [GAME]: { rank: 1, score: 900 } });
+  });
+
+  it('위에서부터 정해진 줄 수만 보여 주고, 그 아래의 내 순위는 따로 센다', () => {
+    const db = new BoardDb(memorySql());
+    for (let n = 1; n <= TOP_COUNT + 5; n += 1) {
+      db.submit(device(n), `이름${n}`, {}, n, { week: WEEK, scores: { [GAME]: 1000 - n } });
+    }
+    const board = db.board(GAME, device(TOP_COUNT + 3), WEEK);
+    expect(board.top).toHaveLength(TOP_COUNT);
+    expect(board.me).toEqual({ rank: TOP_COUNT + 3, score: 1000 - (TOP_COUNT + 3), name: `이름${TOP_COUNT + 3}` });
+  });
+});
