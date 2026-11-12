@@ -1,15 +1,36 @@
 import { describe, expect, it } from 'vitest';
-import { HERO_ORDER, HEROES, META, META_ORDER, STAGE_ORDER, STAGES } from './data';
+import { HERO_ORDER, HEROES, MAX_DEPTH, META, META_ORDER, STAGE_ORDER, STAGES, type StageId } from './data';
 import {
   applyRun,
   buyMeta,
+  chooseDepth,
   chooseHero,
   chooseStage,
+  claimChallenge,
   createDefaultMeta,
+  newDepth,
   newUnlocks,
   normalizeMeta,
+  openDepth,
+  type LanternMeta,
+  type RunResult,
 } from './meta';
 import { embersFor, isUnlocked, metaCost, type RunSummary } from './rules';
+
+/** 한 판의 결과. 따로 주지 않은 것은 등불지기로 밤의 풀밭에서 아무것도 못 하고 쓰러진 판이다. */
+const result = (over: Partial<RunResult> = {}): RunResult => ({
+  embers: 0,
+  seconds: 0,
+  cleared: false,
+  hero: 'keeper',
+  stage: 'meadow',
+  depth: 0,
+  kills: 0,
+  bossKills: 0,
+  level: 1,
+  evolved: [],
+  ...over,
+});
 
 describe('영구 강화 사기', () => {
   it('불씨가 충분하면 한 단계 오르고 값만큼 줄어든다', () => {
@@ -32,10 +53,107 @@ describe('영구 강화 사기', () => {
 describe('판 결과 반영', () => {
   it('불씨와 횟수, 최고 기록이 쌓인다', () => {
     let meta = createDefaultMeta();
-    meta = applyRun(meta, 20, 185.7, false);
-    meta = applyRun(meta, 60, 600, true);
-    meta = applyRun(meta, 5, 90, false);
+    meta = applyRun(meta, result({ embers: 20, seconds: 185.7 }));
+    meta = applyRun(meta, result({ embers: 60, seconds: 600, cleared: true }));
+    meta = applyRun(meta, result({ embers: 5, seconds: 90 }));
     expect(meta).toMatchObject({ embers: 85, runs: 3, clears: 1, bestSeconds: 600 });
+  });
+});
+
+describe('깊은 밤', () => {
+  const cleared = (meta: LanternMeta, stage: StageId, depth: number): LanternMeta =>
+    applyRun(meta, result({ stage, depth, seconds: 600, cleared: true }));
+  const veteran = (): LanternMeta => ({ ...createDefaultMeta(), bestSeconds: 600 });
+
+  it('처음에는 보통 밤만 열려 있고, 완주하면 그 스테이지의 다음 단계가 열린다', () => {
+    let meta = veteran();
+    expect(openDepth(meta, 'meadow')).toBe(0);
+    expect(chooseDepth(meta, 1)).toBe(meta);
+
+    const before = meta;
+    meta = cleared(meta, 'meadow', 0);
+    expect(openDepth(meta, 'meadow')).toBe(1);
+    expect(openDepth(meta, 'marsh')).toBe(0);
+    expect(newDepth(before, meta, 'meadow')).toBe(`${STAGES.meadow.name} 깊은 밤 1`);
+    expect(newDepth(before, meta, 'marsh')).toBeNull();
+    expect(chooseDepth(meta, 1).depth).toBe(1);
+  });
+
+  it('쓰러진 판이나 이미 지나온 단계의 완주로는 더 열리지 않는다', () => {
+    let meta = cleared(cleared(veteran(), 'meadow', 0), 'meadow', 1);
+    expect(openDepth(meta, 'meadow')).toBe(2);
+    const again = cleared(meta, 'meadow', 0);
+    expect(openDepth(again, 'meadow')).toBe(2);
+    expect(newDepth(meta, again, 'meadow')).toBeNull();
+    meta = applyRun(meta, result({ depth: 2, seconds: 599 }));
+    expect(openDepth(meta, 'meadow')).toBe(2);
+  });
+
+  it('가장 깊은 단계를 완주해도 그보다 깊어지지 않는다', () => {
+    let meta = veteran();
+    for (let depth = 0; depth <= MAX_DEPTH; depth += 1) meta = cleared(meta, 'marsh', depth);
+    expect(openDepth(meta, 'marsh')).toBe(MAX_DEPTH);
+  });
+
+  it('열리지 않은 단계는 고를 수 없고, 스테이지를 바꾸면 그곳에서 열린 데까지 낮아진다', () => {
+    let meta = cleared(cleared(veteran(), 'meadow', 0), 'meadow', 1);
+    meta = chooseDepth(meta, 2);
+    expect(meta.depth).toBe(2);
+    expect(chooseDepth(meta, 3)).toBe(meta);
+    expect(chooseDepth(meta, -1)).toBe(meta);
+    expect(chooseDepth(meta, 1.5)).toBe(meta);
+    meta = chooseStage(meta, 'marsh');
+    expect(meta).toMatchObject({ stage: 'marsh', depth: 0 });
+  });
+
+  it('저장된 값에서 엉뚱한 단계는 버리고, 고른 단계는 열린 데까지만 받아들인다', () => {
+    const saved = normalizeMeta({ bestSeconds: 600, stage: 'meadow', depths: { meadow: 3, marsh: 'x', cave: 2 }, depth: 7 });
+    expect(saved.depths).toEqual({ meadow: 3 });
+    expect(saved.depth).toBe(3);
+    expect(normalizeMeta({ depths: { meadow: 99 } }).depths).toEqual({ meadow: MAX_DEPTH });
+    // 깊은 밤이 생기기 전의 저장에는 이 항목들이 없다.
+    expect(normalizeMeta({ embers: 5 })).toMatchObject({ depths: {}, depth: 0 });
+  });
+
+  it('깊은 밤이 생기기 전에 완주해 둔 저장은 첫 스테이지의 깊은 밤 1이 열린다', () => {
+    const old = normalizeMeta({ bestSeconds: 600, clears: 3, stage: 'marsh' });
+    expect(old.depths).toEqual({ meadow: 1 });
+    // 고른 스테이지(안개 늪)는 열린 단계가 없으므로 보통 밤이다.
+    expect(old.depth).toBe(0);
+    expect(chooseDepth(chooseStage(old, 'meadow'), 1).depth).toBe(1);
+    // 완주한 적이 없으면 열리지 않고, 이미 열린 단계가 있으면 건드리지 않는다.
+    expect(normalizeMeta({ bestSeconds: 590, clears: 0 }).depths).toEqual({});
+    expect(normalizeMeta({ bestSeconds: 600, clears: 3, depths: { marsh: 2 } }).depths).toEqual({ marsh: 2 });
+  });
+});
+
+describe('도전 과제', () => {
+  it('한 판이 끝나면 기록이 쌓이고, 이룬 과제의 보상을 한 번만 받는다', () => {
+    let meta = createDefaultMeta();
+    expect(claimChallenge(meta, 'dawn-1')).toBe(meta);
+
+    meta = applyRun(meta, result({ seconds: 600, cleared: true, kills: 6000, bossKills: 5, level: 40, evolved: ['ember'] }));
+    expect(meta.stats).toMatchObject({ kills: 6000, bossKills: 5, bestLevel: 40, deepest: 1, heroes: ['keeper'] });
+
+    const embers = meta.embers;
+    const claimed = claimChallenge(meta, 'dawn-1');
+    expect(claimed.embers).toBe(embers + 30);
+    expect(claimed.claimed).toEqual(['dawn-1']);
+    // 두 번 받을 수 없고, 없는 과제나 이루지 못한 과제는 받을 수 없다.
+    expect(claimChallenge(claimed, 'dawn-1')).toBe(claimed);
+    expect(claimChallenge(claimed, 'nothing')).toBe(claimed);
+    expect(claimChallenge(claimed, 'deep-1')).toBe(claimed);
+  });
+
+  it('저장된 값에서 모르는 과제는 버리고, 예전 저장의 완주 기록은 보통 밤 완주로 이어받는다', () => {
+    const saved = normalizeMeta({ clears: 2, claimed: ['dawn-1', 'nothing', 'dawn-1'], stats: { kills: 500 } });
+    expect(saved.claimed).toEqual(['dawn-1']);
+    expect(saved.stats).toMatchObject({ kills: 500, deepest: 1 });
+    expect(normalizeMeta({ clears: 0 }).stats.deepest).toBe(0);
+    // 도전 과제가 생기기 전에 완주한 사람도 "첫 새벽"을 받을 수 있다.
+    expect(claimChallenge(saved, 'dawn-1')).toBe(saved);
+    const old = normalizeMeta({ clears: 2 });
+    expect(claimChallenge(old, 'dawn-1').embers).toBe(30);
   });
 });
 
@@ -115,8 +233,8 @@ describe('캐릭터와 스테이지 고르기', () => {
 });
 
 describe('늘어난 영구 강화', () => {
-  it('여덟 가지이고 모두 살 수 있는 값이 있다', () => {
-    expect(META_ORDER).toHaveLength(8);
+  it('열한 가지이고 모두 살 수 있는 값이 있다', () => {
+    expect(META_ORDER).toHaveLength(11);
     for (const id of META_ORDER) {
       expect(metaCost(id, 0)).toBeGreaterThan(0);
       expect(metaCost(id, META[id].maxLevel)).toBeNull();
@@ -132,6 +250,7 @@ describe('늘어난 영구 강화', () => {
       cleared: false,
       bonusEmbers: 0,
       bossKills: 2,
+      depth: 0,
     };
     const plain = embersFor(run);
     expect(embersFor(run, 0)).toBe(plain);

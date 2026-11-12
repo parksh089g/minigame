@@ -112,6 +112,8 @@ export const ACHIEVEMENTS: readonly Achievement[] = [
   { id: 'logic-800', group: 'score', title: '논리의 달인', description: '논리 타일 800점 이상', goal: 800, reward: 50, measure: bestOf('logic-tiles') },
   { id: 'number-350', group: 'score', title: '숫자 탐정', description: '숫자 퍼즐 350점 이상', goal: 350, reward: 20, measure: bestOf('number-puzzle') },
   { id: 'number-700', group: 'score', title: '숫자의 달인', description: '숫자 퍼즐 700점 이상', goal: 700, reward: 50, measure: bestOf('number-puzzle') },
+  { id: 'lantern-3000', group: 'score', title: '꺼지지 않는 불', description: '등불지기 3000점 이상', goal: 3000, reward: 20, measure: bestOf('lantern-keeper') },
+  { id: 'lantern-8000', group: 'score', title: '새벽을 본 등불', description: '등불지기 8000점 이상', goal: 8000, reward: 50, measure: bestOf('lantern-keeper') },
 
   { id: 'daily-1', group: 'daily', title: '오늘도 도전', description: '오늘의 도전 한 번 달성', goal: 1, reward: 10, measure: (stats) => stats.dailyCleared },
   { id: 'daily-streak-3', group: 'daily', title: '사흘 연속', description: '도전 3일 연속 달성', goal: 3, reward: 30, measure: (stats) => stats.bestStreak },

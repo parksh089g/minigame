@@ -5,14 +5,25 @@ import { addText, fadeToScene } from '../../core/ui';
 import { showBanner } from '../../scenes/GameHud';
 import { MiniGameScene, type ResultStat } from '../../scenes/MiniGameScene';
 import { registerLanternTextures } from './art';
+import { newlyDone } from './challenges';
 import { ENEMIES, LANTERN_GAME_ID, LANTERN_SCENE, WEAPONS } from './data';
 import { RunEffects } from './effects';
 import { HP_DANGER, HUD_HEIGHT, RunHud } from './hud';
 import { Joystick } from './joystick';
 import { levelUpHeader, showChoices, TICKET_HEADER } from './levelup';
 import { buildLobby, type LobbyPage } from './lobby';
-import { applyRun, metaStore, newUnlocks } from './meta';
-import { embersFor, formatClock, isEvolved, scoreFor, type Upgrade } from './rules';
+import { applyRun, metaStore, newDepth, newUnlocks } from './meta';
+import {
+  depthName,
+  depthRules,
+  embersFor,
+  formatClock,
+  formatTimes,
+  isEvolved,
+  ownedWeapons,
+  scoreFor,
+  type Upgrade,
+} from './rules';
 import { createRun, Sim } from './sim';
 import { SoundBoard, type Note } from './sound';
 import { RunView } from './view';
@@ -22,6 +33,8 @@ interface StartData {
   mode?: 'new' | 'resume';
   /** 준비 화면의 어느 쪽을 열지 */
   page?: LobbyPage;
+  /** 그 쪽의 목록이 여러 묶음으로 나뉘었을 때 보일 묶음(0부터) */
+  list?: number;
 }
 
 type Phase = 'loading' | 'lobby' | 'run' | 'choosing' | 'over';
@@ -73,6 +86,8 @@ export class LanternKeeperScene extends MiniGameScene {
   private beatIn = 0;
   private hud!: RunHud;
   private hint?: Phaser.GameObjects.Text;
+  /** 새로 시작한 판이고 첫 안내를 아직 보여 주지 않았다 */
+  private fresh = false;
 
   constructor() {
     super(LANTERN_SCENE);
@@ -81,6 +96,7 @@ export class LanternKeeperScene extends MiniGameScene {
   create(data: StartData = {}): void {
     const mode = data.mode;
     const page = data.page ?? 'main';
+    const list = data.list;
     // Phaser는 값 없이 다시 시작하면 지난번 값을 그대로 넘긴다. "다시 하기"가 준비 화면으로 가도록 비워 둔다.
     this.sys.settings.data = {};
     this.beginMiniGame();
@@ -91,19 +107,20 @@ export class LanternKeeperScene extends MiniGameScene {
     this.seconds = 0;
     this.beatIn = 0;
     this.hint = undefined;
+    this.fresh = false;
 
     void metaStore.load().then(() => {
       // 불러오는 사이에 씬을 떠났으면 아무것도 하지 않는다.
       if (!this.sys.isActive() || this.phase !== 'loading') return;
       if (mode === 'new') this.startRun(false);
       else if (mode === 'resume' && metaStore.run) this.startRun(true);
-      else this.openLobby(page);
+      else this.openLobby(page, list);
     });
   }
 
   // ------------------------------------------------------------ 준비 화면
 
-  private openLobby(page: LobbyPage): void {
+  private openLobby(page: LobbyPage, list?: number): void {
     this.phase = 'lobby';
     this.lobbyPage = page;
     buildLobby(
@@ -116,9 +133,10 @@ export class LanternKeeperScene extends MiniGameScene {
         onResume: () => this.restartWith('resume'),
         onBack: () => fadeToScene(this, SCENE.hub),
         // 쪽을 넘길 때는 기다림 없이 바로 다시 그린다.
-        onPage: (next) => this.scene.restart({ page: next } satisfies StartData),
+        onPage: (next, nextList) => this.scene.restart({ page: next, list: nextList } satisfies StartData),
       },
       page,
+      list,
     );
   }
 
@@ -142,6 +160,7 @@ export class LanternKeeperScene extends MiniGameScene {
           meta: metaStore.data.upgrades,
           hero: metaStore.data.hero,
           stage: metaStore.data.stage,
+          depth: metaStore.data.depth,
           seed: Math.floor(Math.random() * 0x7fffffff),
         });
     if (!saved) metaStore.setRun(null);
@@ -158,11 +177,7 @@ export class LanternKeeperScene extends MiniGameScene {
     this.drawHud();
 
     if (!saved) {
-      this.hint = addText(this, GAME_WIDTH / 2, height - 54, '화면을 누른 채 끌면 움직여요', {
-        color: CSS.white,
-        originX: 0.5,
-        shadow: CSS.ink,
-      }).setDepth(DEPTH.banner);
+      this.fresh = true;
       sfx.go();
     }
 
@@ -183,6 +198,23 @@ export class LanternKeeperScene extends MiniGameScene {
     this.stick.enabled = true;
     this.stick.reset();
     this.drawHud();
+    if (this.fresh) this.showIntro();
+  }
+
+  /**
+   * 새 판의 첫 안내: 움직이는 법과, 깊은 밤이면 어느 단계에 들어왔는지.
+   * "밝은 출발"로 강화를 먼저 고를 때는 그 화면에 가려지지 않도록 화면이 닫힌 뒤에 보여 준다.
+   */
+  private showIntro(): void {
+    this.fresh = false;
+    const height = this.scale.height;
+    this.hint = addText(this, GAME_WIDTH / 2, height - 54, '화면을 누른 채 끌면 움직여요', {
+      color: CSS.white,
+      originX: 0.5,
+      shadow: CSS.ink,
+    }).setDepth(DEPTH.banner);
+    const depth = this.sim.state.depth;
+    if (depth) showBanner(this, height * 0.3, depthName(depth), CSS.sky, 1600, DEPTH.banner);
   }
 
   override update(_time: number, delta: number): void {
@@ -325,13 +357,17 @@ export class LanternKeeperScene extends MiniGameScene {
 
   // ------------------------------------------------------------ 레벨업
 
-  private openLevelUp(): void {
+  /** again은 다시 뽑아서 같은 레벨업 화면을 새로 여는 것. 레벨업 소리를 또 내지 않는다. */
+  private openLevelUp(again = false): void {
     this.phase = 'choosing';
     this.stick.enabled = false;
     this.stick.reset();
-    this.board.play('levelUp', this.time.now);
-    vibrate(15);
+    if (!again) {
+      this.board.play('levelUp', this.time.now);
+      vibrate(15);
+    }
     this.drawHud();
+    const rerolls = this.sim.rerolls;
     showChoices(
       this,
       levelUpHeader(this.sim.state.player.level),
@@ -342,6 +378,16 @@ export class LanternKeeperScene extends MiniGameScene {
         this.afterPick(upgrade);
       },
       HUD_HEIGHT,
+      // 영구 강화 "다시 뽑기"를 샀고 이번 판에 아직 남아 있으면 선택지를 새로 뽑을 수 있다.
+      rerolls > 0
+        ? {
+            label: `다시 뽑기 (${rerolls}번 남음)`,
+            onTap: () => {
+              this.sim.reroll();
+              this.openLevelUp(true);
+            },
+          }
+        : undefined,
     );
   }
 
@@ -413,13 +459,13 @@ export class LanternKeeperScene extends MiniGameScene {
     if (!this.sim.state.over) metaStore.setRun(this.sim.state);
   }
 
-  /** 뒤로 가기: 준비 화면에서는 한 걸음 뒤로(강화를 사는 쪽 → 고르는 쪽 → 허브), 판 중에는 일시정지 */
+  /** 뒤로 가기: 준비 화면에서는 한 걸음 뒤로(강화나 도전 과제 쪽 → 고르는 쪽 → 허브), 판 중에는 일시정지 */
   override onBackRequest(): void {
     if (this.phase !== 'lobby') {
       super.onBackRequest();
       return;
     }
-    if (this.lobbyPage === 'upgrades') this.scene.restart({ page: 'main' } satisfies StartData);
+    if (this.lobbyPage !== 'main') this.scene.restart({ page: 'main' } satisfies StartData);
     else fadeToScene(this, SCENE.hub);
   }
 
@@ -438,10 +484,28 @@ export class LanternKeeperScene extends MiniGameScene {
 
     const summary = this.sim.summary();
     const embers = embersFor(summary, metaStore.data.upgrades.lucky);
-    const bestBefore = metaStore.data.bestSeconds;
+    const before = metaStore.data;
+    const state = this.sim.state;
+    const stage = state.stage;
     metaStore.setRun(null);
-    metaStore.set(applyRun(metaStore.data, embers, summary.seconds, summary.cleared));
-    const opened = newUnlocks(bestBefore, metaStore.data.bestSeconds);
+    metaStore.set(
+      applyRun(before, {
+        embers,
+        seconds: summary.seconds,
+        cleared: summary.cleared,
+        hero: state.hero,
+        stage,
+        depth: summary.depth,
+        kills: summary.countedKills,
+        bossKills: summary.bossKills,
+        level: summary.level,
+        evolved: ownedWeapons(state.weapons).filter((id) => isEvolved(state.weapons[id] ?? 0)),
+      }),
+    );
+    const opened = newUnlocks(before.bestSeconds, metaStore.data.bestSeconds);
+    // 완주해서 이 스테이지의 다음 깊은 밤이 열렸으면 함께 알린다.
+    const deeper = newDepth(before, metaStore.data, stage);
+    if (deeper) opened.push(deeper);
 
     // 끝나는 장면: 새벽이 오면 어둠이 걷히며 남은 그림자가 흩어지고, 쓰러지면 등불이 꺼지듯 어두워진다.
     const ending = summary.cleared ? ENDING_MS.cleared : ENDING_MS.dead;
@@ -473,6 +537,19 @@ export class LanternKeeperScene extends MiniGameScene {
       ['레벨', String(summary.level)],
       ['얻은 불씨', `+${embers}`],
     ];
+    // 이번 판으로 이룬 도전 과제가 있으면 알려 준다. 보상은 준비 화면에서 받는다.
+    const feats = newlyDone(before, metaStore.data);
+    if (feats.length > 0) {
+      stats.push(['도전 과제 달성', feats.length === 1 ? feats[0].title : `${feats[0].title} 외 ${feats.length - 1}`]);
+    }
+    // 깊은 밤에서는 점수에 배율이 붙었다는 것을 보여 준다.
+    if (summary.depth > 0) {
+      const rules = depthRules(summary.depth);
+      stats.unshift([
+        depthName(summary.depth),
+        `점수 ${formatTimes(rules.score)} · 불씨 ${formatTimes(rules.embers)}`,
+      ]);
+    }
     // 이번 기록으로 캐릭터나 스테이지가 열렸으면 알려 준다.
     if (opened.length > 0) {
       stats.push(['새로 열림', opened.length <= 2 ? opened.join(' · ') : `${opened[0]} 외 ${opened.length - 1}`]);

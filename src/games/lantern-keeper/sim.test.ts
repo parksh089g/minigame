@@ -5,8 +5,11 @@ import {
   EVOLVE_LEVEL,
   HERO_ORDER,
   HEROES,
+  MAX_DEPTH,
   MAX_LEVEL,
   MAX_WEAPONS,
+  META,
+  META_ORDER,
   MID_BOSS_COUNT,
   MID_BOSS_EVERY,
   MID_BOSS_TIERS,
@@ -17,6 +20,7 @@ import {
   type EnemyKind,
 } from './data';
 import {
+  depthRules,
   embersFor,
   maxAlive,
   midBossKind,
@@ -775,6 +779,78 @@ describe('안개 늪', () => {
   });
 });
 
+describe('깊은 밤', () => {
+  it('단계가 깊으면 같은 적이 더 튼튼하게 나온다', () => {
+    const firstEnemyHp = (depth: number): number => {
+      const sim = newSim(1, createRun({ ...config, depth }));
+      sim.state.weapons = {};
+      while (sim.state.enemies.length === 0) sim.step(STEP, 0, 0);
+      return sim.state.enemies[0].maxHp;
+    };
+    expect(firstEnemyHp(0)).toBe(ENEMIES.shade.hp);
+    expect(firstEnemyHp(3)).toBe(Math.round(ENEMIES.shade.hp * depthRules(3).hp));
+  });
+
+  it('단계가 깊으면 적도 보스도 빛덩이도 더 아프게 때린다', () => {
+    const hit = (depth: number, kind: Enemy['kind']): number => {
+      const sim = quietSim(1, { depth });
+      sim.state.enemies.push(enemy(kind, 2, 0, 9999));
+      sim.step(STEP, 0, 0);
+      return BASE_HP - sim.state.player.hp;
+    };
+    expect(hit(0, 'brute')).toBe(ENEMIES.brute.damage);
+    expect(hit(4, 'brute')).toBe(Math.round(ENEMIES.brute.damage * depthRules(4).damage));
+    expect(hit(0, 'giant')).toBe(ENEMIES.giant.damage);
+    expect(hit(4, 'giant')).toBe(Math.round(ENEMIES.giant.damage * depthRules(4).damage));
+
+    const volley = (depth: number): number => {
+      const sim = quietSim(1, { depth });
+      const owl = enemy('owl', 0, -80, 9999);
+      owl.timer = 0.01;
+      sim.state.enemies.push(owl);
+      advance(sim, CHARGE_SECONDS + 0.1);
+      return sim.state.hazards[0].damage;
+    };
+    expect(volley(4)).toBe(Math.round(volley(0) * depthRules(4).damage));
+  });
+
+  it('단계가 깊으면 중간 보스와 마지막 보스의 체력이 늘어난다', () => {
+    const bossHp = (depth: number, t: number): number => {
+      const state = createRun({ ...config, depth });
+      state.surgeIndex = SURGES.length;
+      state.t = t - 0.01;
+      state.midBosses = t >= RUN_SECONDS ? MID_BOSS_COUNT : 0;
+      const sim = newSim(1, state);
+      sim.state.weapons = {};
+      sim.step(STEP, 0, 0);
+      const boss = sim.state.enemies.find((e) => ENEMIES[e.kind].boss);
+      return boss ? boss.maxHp : 0;
+    };
+    expect(bossHp(0, MID_BOSS_EVERY)).toBe(MID_BOSS_TIERS[0].hp);
+    expect(bossHp(2, MID_BOSS_EVERY)).toBe(Math.round(MID_BOSS_TIERS[0].hp * depthRules(2).bossHp));
+    expect(bossHp(0, RUN_SECONDS)).toBe(ENEMIES.lord.hp);
+    expect(bossHp(2, RUN_SECONDS)).toBe(Math.round(ENEMIES.lord.hp * depthRules(2).bossHp));
+  });
+
+  it('판의 요약에 단계가 실리고, 단계 없이 저장된 예전 판은 보통 밤으로 이어진다', () => {
+    expect(newSim(1, createRun({ ...config, depth: 3 })).summary().depth).toBe(3);
+    expect(newSim(1, createRun({ ...config, depth: 99 })).summary().depth).toBe(MAX_DEPTH);
+    const old = JSON.parse(JSON.stringify(createRun(config))) as RunState;
+    delete old.depth;
+    expect(looksLikeRun(old)).toBe(true);
+    const sim = newSim(1, old);
+    expect(sim.summary().depth).toBe(0);
+    expect(sim.depth).toEqual(depthRules(0));
+  });
+
+  it('영구 강화를 다 올려도 가장 깊은 밤에서는 보통 밤보다 훨씬 일찍 쓰러진다', () => {
+    const upgrades = Object.fromEntries(META_ORDER.map((id) => [id, META[id].maxLevel]));
+    const survived = (depth: number): number =>
+      [1, 2].reduce((sum, seed) => sum + playRun(seed, 'kite', { ...config, meta: upgrades, depth }).seconds, 0);
+    expect(survived(MAX_DEPTH)).toBeLessThan(survived(0) * 0.8);
+  }, 30000);
+});
+
 describe('영구 강화', () => {
   it('따뜻한 품은 체력을 천천히 채운다', () => {
     const sim = quietSim(1, { meta: { mend: 3 } });
@@ -808,6 +884,58 @@ describe('영구 강화', () => {
     sim.state.enemies.push(enemy('brute', 2, 0, 9999));
     sim.step(STEP, 0, 0);
     expect(sim.state.over).toBe('dead');
+  });
+
+  it('질긴 가죽은 받는 피해를 줄인다', () => {
+    const hit = (armor: number): number => {
+      const sim = quietSim(1, { meta: { armor } });
+      sim.state.enemies.push(enemy('brute', 2, 0, 9999));
+      sim.step(STEP, 0, 0);
+      return BASE_HP - sim.state.player.hp;
+    };
+    expect(hit(0)).toBe(ENEMIES.brute.damage);
+    expect(hit(5)).toBeCloseTo(ENEMIES.brute.damage * 0.8, 5);
+  });
+
+  it('다시 뽑기는 산 만큼만 쓸 수 있고, 쓰면 선택지가 새로 나온다', () => {
+    const none = newSim();
+    expect(none.rerolls).toBe(0);
+    expect(none.reroll()).toBeNull();
+
+    const sim = newSim(1, createRun({ ...config, meta: { reroll: 2 } }));
+    expect(sim.rerolls).toBe(2);
+    // 고르기 전에는 몇 번을 물어도 같은 선택지가 나온다. 나갔다 들어와도(저장했다 되돌려도) 그대로다.
+    const first = sim.options();
+    expect(sim.options()).toEqual(first);
+    const resumed = newSim(99, JSON.parse(JSON.stringify(sim.state)) as RunState);
+    expect(resumed.options()).toEqual(first);
+
+    const second = sim.reroll();
+    expect(second).toHaveLength(3);
+    expect(sim.options()).toEqual(second);
+    expect(sim.reroll()).toHaveLength(3);
+    expect(sim.rerolls).toBe(0);
+    expect(sim.reroll()).toBeNull();
+    // 고르고 나면 다음 레벨업에는 새로 뽑는다.
+    sim.applyUpgrade(sim.options()[0]);
+    expect(sim.state.offer).toBeUndefined();
+    // 다시 뽑기가 생기기 전에 저장한 판에는 횟수가 없다.
+    const old = JSON.parse(JSON.stringify(createRun(config))) as RunState;
+    delete old.rerolls;
+    expect(newSim(1, old).rerolls).toBe(0);
+  });
+
+  it('밝은 출발은 시작하자마자 강화를 그만큼 고르게 한다', () => {
+    const sim = newSim(1, createRun({ ...config, meta: { headstart: 2 } }));
+    expect(sim.state.player.level).toBe(3);
+    expect(sim.state.pendingLevelUps).toBe(2);
+    // 고르기 전에는 진행되지 않는다.
+    sim.step(STEP, 0, 0);
+    expect(sim.state.t).toBe(0);
+    sim.applyUpgrade(sim.options()[0]);
+    sim.applyUpgrade(sim.options()[0]);
+    sim.step(STEP, 0, 0);
+    expect(sim.state.t).toBeGreaterThan(0);
   });
 
   it('되살림 등불이 없으면 그대로 끝난다', () => {

@@ -5,6 +5,8 @@
 import {
   ENEMIES,
   HEROES,
+  MAX_LEVEL,
+  MAX_WEAPONS,
   MID_BOSS_COUNT,
   MID_BOSS_EVERY,
   PLAYER_BASE,
@@ -21,7 +23,9 @@ import {
 import {
   auraStats,
   boltStats,
+  clampDepth,
   damageScale,
+  depthRules,
   EMBER_BONUS,
   emberStats,
   enemyHp,
@@ -35,6 +39,7 @@ import {
   minionKind,
   modifiers,
   oilStats,
+  ownedWeapons,
   pickSpawnKind,
   spawnPerSecond,
   speedScale,
@@ -42,6 +47,7 @@ import {
   ticketOptions,
   upgradeOptions,
   xpToNext,
+  type DepthRules,
   type Levels,
   type Modifiers,
   type Rand,
@@ -157,6 +163,8 @@ export interface RunState {
   meta: Levels<MetaId>;
   hero: HeroId;
   stage: StageId;
+  /** 깊은 밤의 단계. 없으면 보통 밤(0)이다. 깊은 밤이 생기기 전에 저장한 판에는 없다. */
+  depth?: number;
   /** 지형을 정하는 씨앗. 같은 값이면 웅덩이가 같은 자리에 있다. */
   seed: number;
   player: {
@@ -201,6 +209,13 @@ export interface RunState {
   pendingTickets: number;
   /** 쓰러졌을 때 다시 일어날 수 있는 남은 횟수 */
   revives: number;
+  /** 레벨업 선택지를 다시 뽑을 수 있는 남은 횟수. 없으면 0이다. 다시 뽑기가 생기기 전에 저장한 판에는 없다. */
+  rerolls?: number;
+  /**
+   * 지금 보여 주고 있는 레벨업 선택지. 고르면 지워진다.
+   * 판과 함께 저장해서, 고르다가 나갔다 들어와도 같은 선택지가 나온다(나갔다 들어오는 것으로 공짜로 다시 뽑지 못한다).
+   */
+  offer?: Upgrade[];
   nextUid: number;
   over: null | 'dead' | 'cleared';
 }
@@ -251,6 +266,8 @@ export interface RunConfig {
   hero?: HeroId;
   /** 안 주면 밤의 풀밭 */
   stage?: StageId;
+  /** 깊은 밤의 단계. 안 주면 보통 밤(0) */
+  depth?: number;
   /** 지형 씨앗. 안 주면 1 */
   seed?: number;
 }
@@ -281,6 +298,8 @@ const REVIVE = { hp: 0.5, invulnerable: 2.5, radius: 64, damage: 40 } as const;
 export function createRun(config: RunConfig): RunState {
   const hero = config.hero ?? 'keeper';
   const mods = modifiers({}, config.meta, HEROES[hero].trait);
+  // "밝은 출발"을 샀으면 그만큼 레벨이 오른 채로 시작해서, 첫 걸음을 떼기 전에 강화를 고른다.
+  const headstart = Math.max(0, Math.floor(config.meta.headstart ?? 0));
   return {
     version: RUN_STATE_VERSION,
     t: 0,
@@ -289,8 +308,19 @@ export function createRun(config: RunConfig): RunState {
     meta: { ...config.meta },
     hero,
     stage: config.stage ?? 'meadow',
+    depth: clampDepth(config.depth),
     seed: config.seed ?? 1,
-    player: { x: 0, y: 0, hp: mods.maxHp, inv: 0, face: 1, moving: false, wading: false, level: 1, xp: 0 },
+    player: {
+      x: 0,
+      y: 0,
+      hp: mods.maxHp,
+      inv: 0,
+      face: 1,
+      moving: false,
+      wading: false,
+      level: 1 + headstart,
+      xp: 0,
+    },
     weapons: { [HEROES[hero].weapon]: 1 },
     passives: {},
     enemies: [],
@@ -308,9 +338,10 @@ export function createRun(config: RunConfig): RunState {
     kills: 0,
     bossKills: 0,
     bonusEmbers: 0,
-    pendingLevelUps: 0,
+    pendingLevelUps: headstart,
     pendingTickets: 0,
     revives: config.meta.second ? 1 : 0,
+    rerolls: Math.max(0, Math.floor(config.meta.reroll ?? 0)),
     nextUid: 1,
     over: null,
   };
@@ -365,6 +396,8 @@ export class Sim {
   /** step()을 부를 때마다 비워지고 그 사이에 일어난 일이 쌓인다. */
   readonly events: SimEvent[] = [];
   mods: Modifiers;
+  /** 이 판의 깊은 밤 규칙 */
+  readonly depth: DepthRules;
 
   private readonly heads = new Int32Array(BUCKETS);
   private next = new Int32Array(512);
@@ -374,6 +407,7 @@ export class Sim {
     private readonly rand: Rand,
   ) {
     this.mods = this.computeMods();
+    this.depth = depthRules(state.depth ?? 0);
   }
 
   private computeMods(): Modifiers {
@@ -394,15 +428,50 @@ export class Sim {
     return Math.min(this.state.t, RUN_SECONDS);
   }
 
-  /** 레벨업 선택지를 뽑는다. */
+  /** 레벨업 선택지. 한 번 뽑으면 고르거나 다시 뽑을 때까지 같은 것이 나온다. */
   options(): Upgrade[] {
+    const s = this.state;
+    if (!Array.isArray(s.offer) || !this.fits(s.offer)) s.offer = this.draw();
+    return s.offer;
+  }
+
+  private draw(): Upgrade[] {
     return upgradeOptions({ weapons: this.state.weapons, passives: this.state.passives }, this.rand);
+  }
+
+  /** 뽑아 둔 선택지가 지금 가진 것과 맞는지. 그사이에 강화권을 썼거나 저장된 값이 엉뚱하면 맞지 않는다. */
+  private fits(offer: readonly Upgrade[]): boolean {
+    const s = this.state;
+    if (offer.length === 0) return false;
+    const full = ownedWeapons(s.weapons).length >= MAX_WEAPONS;
+    return offer.every((upgrade) => {
+      if (upgrade.type === 'weapon') {
+        const level = s.weapons[upgrade.id] ?? 0;
+        return upgrade.level === level + 1 && upgrade.level <= MAX_LEVEL && (level > 0 || !full);
+      }
+      if (upgrade.type === 'passive') return upgrade.level === (s.passives[upgrade.id] ?? 0) + 1 && upgrade.level <= MAX_LEVEL;
+      return upgrade.type === 'heal' || upgrade.type === 'embers';
+    });
+  }
+
+  /** 레벨업 선택지를 다시 뽑을 수 있는 남은 횟수 */
+  get rerolls(): number {
+    return Math.max(0, this.state.rerolls ?? 0);
+  }
+
+  /** 다시 뽑기를 한 번 써서 레벨업 선택지를 새로 뽑는다. 남은 횟수가 없으면 null */
+  reroll(): Upgrade[] | null {
+    if (this.rerolls <= 0) return null;
+    this.state.rerolls = this.rerolls - 1;
+    this.state.offer = this.draw();
+    return this.state.offer;
   }
 
   /** 레벨업에서 고른 강화를 반영한다. */
   applyUpgrade(upgrade: Upgrade): void {
     const s = this.state;
     if (s.pendingLevelUps > 0) s.pendingLevelUps -= 1;
+    delete s.offer;
     this.grant(upgrade);
   }
 
@@ -450,6 +519,7 @@ export class Sim {
       bossKills: s.bossKills,
       cleared: s.over === 'cleared',
       bonusEmbers: s.bonusEmbers,
+      depth: clampDepth(s.depth),
     };
   }
 
@@ -509,7 +579,7 @@ export class Sim {
   private hurt(amount: number): boolean {
     const s = this.state;
     const p = s.player;
-    p.hp -= amount;
+    p.hp -= amount * this.mods.taken;
     p.inv = PLAYER_BASE.invulnerable;
     this.events.push({ type: 'hurt' });
     if (p.hp > 0) return false;
@@ -536,7 +606,7 @@ export class Sim {
 
   private makeEnemy(kind: EnemyKind, x: number, y: number): Enemy {
     const s = this.state;
-    const hp = enemyHp(kind, this.clock);
+    const hp = Math.round(enemyHp(kind, this.clock) * (ENEMIES[kind].boss ? this.depth.bossHp : this.depth.hp));
     const enemy: Enemy = {
       uid: s.nextUid,
       kind,
@@ -577,7 +647,7 @@ export class Sim {
     const s = this.state;
     const t = this.clock;
 
-    s.spawnDebt += spawnPerSecond(t) * dt;
+    s.spawnDebt += spawnPerSecond(t) * this.depth.spawn * dt;
     const limit = maxAlive(t);
     while (s.spawnDebt >= 1) {
       if (s.enemies.length >= limit) {
@@ -608,7 +678,7 @@ export class Sim {
     if (s.midBosses < MID_BOSS_COUNT && s.t >= (s.midBosses + 1) * MID_BOSS_EVERY) {
       const boss = this.spawnBoss(midBossKind(s.stage, s.midBosses));
       boss.tier = s.midBosses;
-      boss.hp = midBossTier(boss.tier).hp;
+      boss.hp = Math.round(midBossTier(boss.tier).hp * this.depth.bossHp);
       boss.maxHp = boss.hp;
       s.midBosses += 1;
     }
@@ -657,8 +727,8 @@ export class Sim {
     // buildGrid 뒤에 생긴 적은 격자에 없으므로 그때의 수까지만 이웃으로 본다.
     const gridCount = enemies.length;
     const recycle = Math.max(s.viewW, s.viewH) * 0.5 + 90;
-    const fast = speedScale(this.clock);
-    const hard = damageScale(this.clock);
+    const fast = speedScale(this.clock) * this.depth.speed;
+    const hard = damageScale(this.clock) * this.depth.damage;
 
     for (let i = 0; i < gridCount; i += 1) {
       const e = enemies[i];
@@ -821,7 +891,7 @@ export class Sim {
       const px = p.x - e.x;
       const py = p.y - e.y;
       if (p.inv <= 0 && px * px + py * py < reach * reach) {
-        if (this.hurt(info.boss ? info.damage : Math.round(info.damage * hard))) return;
+        if (this.hurt(Math.round(info.damage * (info.boss ? this.depth.damage : hard)))) return;
       }
     }
   }
@@ -839,7 +909,7 @@ export class Sim {
         vy: Math.sin(a) * HAZARD.speed,
         life: HAZARD.life,
         radius: HAZARD.radius,
-        damage,
+        damage: Math.round(damage * this.depth.damage),
       });
     }
     this.events.push({ type: 'volley' });
