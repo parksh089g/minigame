@@ -140,7 +140,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     icon: 'icon-path',
     sceneKey: SCENE.pathLink,
     coinsFor: (score) => Math.floor(score / 25),
-    dailyTargets: [100, 200, 300],
+    dailyTargets: [90, 300, 500],
   },
   {
     id: 'block-fill',
