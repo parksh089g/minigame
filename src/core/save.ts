@@ -293,11 +293,7 @@ export function applyPlayResult(
   };
 
   // 이번 판 전에는 달성하지 못했던 업적만 "새로 달성"으로 알린다.
-  const before = new Set(completedIds(statsOf(save)));
-  const newAchievements = completedIds(statsOf(next))
-    .filter((id) => !before.has(id))
-    .map((id) => getAchievement(id))
-    .filter((achievement): achievement is Achievement => achievement !== undefined);
+  const newAchievements = newlyAchieved(save, next);
 
   return {
     save: next,
@@ -310,6 +306,15 @@ export function applyPlayResult(
     newAchievements,
     newMissions,
   };
+}
+
+/** before에서는 달성하지 못했는데 after에서는 달성한 업적 */
+function newlyAchieved(before: SaveData, after: SaveData): Achievement[] {
+  const had = new Set(completedIds(statsOf(before)));
+  return completedIds(statsOf(after))
+    .filter((id) => !had.has(id))
+    .map((id) => getAchievement(id))
+    .filter((achievement): achievement is Achievement => achievement !== undefined);
 }
 
 export interface StageClearResult {
@@ -338,12 +343,14 @@ export function applyStageClear(
   const cleared = clearLevel(save.stages, gameId, level);
   if (!cleared) return null;
   const play = applyPlayResult(save, gameId, 0, cleared.coins, now, null, week);
+  const next: SaveData = { ...play.save, stages: cleared.progress };
   return {
-    save: { ...play.save, stages: cleared.progress },
+    save: next,
     level,
     first: cleared.first,
     coinsEarned: play.coinsEarned,
-    newAchievements: play.newAchievements,
+    // 판 수로 달성한 업적에 더해, 깬 단계로 달성한 업적까지 함께 알린다.
+    newAchievements: newlyAchieved(save, next),
     newMissions: play.newMissions,
   };
 }

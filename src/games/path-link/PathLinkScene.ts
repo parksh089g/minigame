@@ -39,6 +39,8 @@ import {
   isLinked,
   isOver,
   isSolved,
+  levelRun,
+  levelStage,
   linkedCount,
   newRun,
   nextStage,
@@ -230,6 +232,7 @@ export class PathLinkScene extends MiniGameScene {
 
     this.addPauseButton();
     this.hud = new GameHud(this, DEPTH.hud);
+    if (this.stageLevel !== null) this.hud.showStage(this.stageLevel);
     this.hud.setTime(START_SECONDS, START_SECONDS);
 
     this.bindInput();
@@ -237,7 +240,8 @@ export class PathLinkScene extends MiniGameScene {
   }
 
   override update(_time: number, deltaMs: number): void {
-    if (!this.playing) return;
+    // 단계 모드는 시간을 재지 않는다.
+    if (!this.playing || this.stageLevel !== null) return;
     // 탭이 가려졌다 돌아와도 시간이 한꺼번에 흐르지 않게 한 프레임의 길이를 제한한다.
     const dt = Math.min(deltaMs, 100) / 1000;
     if (this.grace > 0) {
@@ -267,7 +271,8 @@ export class PathLinkScene extends MiniGameScene {
   }
 
   private resetState(): void {
-    this.run = newRun(Math.random);
+    this.run =
+      this.stageLevel === null ? newRun(Math.random) : levelRun(this.stageLevel, this.levelRandom());
     this.layout = { cell: 0, left: 0, top: 0 };
     this.stroke = null;
     this.started = false;
@@ -369,7 +374,10 @@ export class PathLinkScene extends MiniGameScene {
     this.cellsLabel.setPosition(left + span, Math.round(statusY));
     this.redraw();
     this.refreshStatus();
-    this.hud.setSide(`${stage}판`, stage > 1);
+    const level = this.stageLevel;
+    if (level === null) this.hud.setSide(`${stage}판`, stage > 1);
+    // 단계 모드에서는 가장 쉬운 난이도의 단계에서만 방법을 알려 준다.
+    const guided = level === null ? stage === 1 : levelStage(level) === 1;
 
     this.tweens.add({
       targets: this.boardBox,
@@ -378,14 +386,14 @@ export class PathLinkScene extends MiniGameScene {
       duration: DEAL_MS,
       ease: 'Back.Out',
     });
-    if (stage === 1) this.showHints();
-    else sfx.pop();
+    if (guided) this.showHints();
+    else if (level === null) sfx.pop();
 
     this.time.delayedCall(DEAL_MS, () => {
       this.playing = true;
       if (stage > 1) return;
       sfx.go();
-      this.startDemo();
+      if (guided) this.startDemo();
     });
   }
 
@@ -565,13 +573,13 @@ export class PathLinkScene extends MiniGameScene {
 
   private onPause(): void {
     this.finishStroke();
-    // 끝난 뒤 결과 화면이 뜰 때는 그리던 판을 그대로 보여 준다.
-    if (this.playing) this.inkLayer.setVisible(false);
+    // 끝난 뒤 결과 화면이 뜰 때는 그리던 판을 그대로 보여 준다. 시간을 재지 않는 단계 모드에서도 가리지 않는다.
+    if (this.playing && this.stageLevel === null) this.inkLayer.setVisible(false);
   }
 
   private onResume(): void {
     this.inkLayer.setVisible(true);
-    if (!this.playing || !this.started) return;
+    if (!this.playing || !this.started || this.stageLevel !== null) return;
     this.grace = RESUME_GRACE_SECONDS;
     showBanner(this, this.boardBox.y, '준비!', LOOK.text.ready, RESUME_GRACE_SECONDS * 1000, DEPTH.banner);
   }
@@ -783,6 +791,25 @@ export class PathLinkScene extends MiniGameScene {
         ease: 'Back.Out',
       });
     });
+    if (this.stageLevel !== null) {
+      // 단계 모드는 판 하나가 한 판이다. 다음 단계는 결과 화면에서 고른다.
+      this.time.delayedCall(CLEAR_BANNER_MS, () => {
+        sfx.gold();
+        vibrate([15, 30, 15]);
+        this.sparks.explode(18, GAME_WIDTH / 2, this.boardBox.y);
+        showBanner(this, this.boardBox.y, '클리어!', LOOK.text.good, 900, DEPTH.banner);
+      });
+      const { board } = run;
+      this.finishStage(
+        true,
+        [
+          ['판 크기', `한 변 ${board.puzzle.size}칸`],
+          ['이은 쌍', `${board.paths.length}쌍`],
+        ],
+        CLEAR_BANNER_MS + 1000,
+      );
+      return;
+    }
     this.time.delayedCall(CLEAR_BANNER_MS, () => {
       sfx.gold();
       vibrate([15, 30, 15]);

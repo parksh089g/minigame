@@ -5,8 +5,8 @@ import { vibrate } from '../../core/haptics';
 import { sfx } from '../../core/sfx';
 import { StartGate } from '../../core/start-gate';
 import { addBackdrop, addText } from '../../core/ui';
-import { floatText, GameHud, HUD_HEIGHT, showBanner } from '../../scenes/GameHud';
-import { MiniGameScene } from '../../scenes/MiniGameScene';
+import { GameHud, HUD_HEIGHT, showBanner } from '../../scenes/GameHud';
+import { MiniGameScene, type ResultStat } from '../../scenes/MiniGameScene';
 import {
   CHAMBER_WIDTH,
   drawDoorPin,
@@ -29,6 +29,7 @@ import {
   TREASURE_HEIGHT,
   type Hollow,
 } from './art';
+import { levelPuzzle, levelShowsHints, levelShowsMonsterNote } from './levels';
 import {
   generatePuzzle,
   MAX_SHAFTS,
@@ -270,6 +271,7 @@ export class PinPullScene extends MiniGameScene {
 
     this.addPauseButton();
     this.hud = new GameHud(this, DEPTH.hud);
+    if (this.stageLevel !== null) this.hud.showStage(this.stageLevel);
 
     this.input.on(Phaser.Input.Events.POINTER_DOWN, this.onPointerDown, this);
     // 일시정지한 동안 시간 걱정 없이 풀이를 궁리할 수 없게 판을 가린다.
@@ -280,14 +282,15 @@ export class PinPullScene extends MiniGameScene {
       this.events.off(Phaser.Scenes.Events.RESUME, this.onResume, this);
     });
 
-    this.showHints();
+    if (this.stageLevel === null || levelShowsHints(this.stageLevel)) this.showHints();
     this.deal();
     sfx.go();
     this.playing = true;
   }
 
   override update(_time: number, deltaMs: number): void {
-    if (!this.playing || this.phase !== 'idle') return;
+    // 단계 모드는 시간을 재지 않는다.
+    if (!this.playing || this.phase !== 'idle' || this.stageLevel !== null) return;
     // 탭이 가려졌다 돌아와도 시간이 한꺼번에 흐르지 않게 한 프레임의 길이를 제한한다.
     const dt = Math.min(deltaMs, 100) / 1000;
     if (this.grace > 0) {
@@ -409,7 +412,8 @@ export class PinPullScene extends MiniGameScene {
   }
 
   private onPause(): void {
-    if (this.playing) this.board.setVisible(false);
+    // 단계 모드는 시간을 재지 않으니 가릴 까닭이 없다.
+    if (this.playing && this.stageLevel === null) this.board.setVisible(false);
   }
 
   private onResume(): void {
@@ -484,9 +488,14 @@ export class PinPullScene extends MiniGameScene {
 
   // ───────── 판 깔기 ─────────
 
-  /** 지금 단계의 새 판을 낸다. 같은 단계를 다시 할 때는 방금 그 판과 다른 판이 나온다. */
+  /**
+   * 지금 단계의 새 판을 낸다. 같은 단계를 다시 할 때는 방금 그 판과 다른 판이 나온다.
+   * 단계 모드에서는 그 단계에 정해진 판이 나오고, 지면 같은 판을 처음부터 다시 한다.
+   */
   private deal(): void {
-    const puzzle = generatePuzzle(this.stage, Math.random, this.puzzle ?? undefined);
+    const level = this.stageLevel;
+    const puzzle =
+      level === null ? generatePuzzle(this.stage, Math.random, this.puzzle ?? undefined) : levelPuzzle(level);
     this.puzzle = puzzle;
     this.state = startPuzzle(puzzle);
     this.timeLimit = puzzleSeconds(this.stage);
@@ -496,10 +505,13 @@ export class PinPullScene extends MiniGameScene {
     this.props = [];
 
     this.buildBoard(puzzle);
-    this.hud.setSide(`${this.stage}단계`, this.stage !== this.shownStage);
-    this.shownStage = this.stage;
+    if (level === null) {
+      this.hud.setSide(`${this.stage}단계`, this.stage !== this.shownStage);
+      this.shownStage = this.stage;
+    }
     this.hud.setTime(this.timeLeft, this.timeLimit);
-    if (puzzle.monster && !this.monsterSeen) {
+    // 단계 모드에서는 괴물이 나오는 처음 몇 단계에서만 알려 준다.
+    if (puzzle.monster && !this.monsterSeen && (level === null || levelShowsMonsterNote(level))) {
       this.monsterSeen = true;
       this.showNote('괴물은 용암으로 물리쳐요', LOOK.text.hint, 4000);
     }
@@ -901,11 +913,10 @@ export class PinPullScene extends MiniGameScene {
       ease: 'Quad.Out',
     });
     this.sparks.win.explode(14, treasure?.x ?? hero.x, this.layout.pit.bottom - 12);
-    floatText(
-      this,
+    this.floatPoints(
       goal,
       hero.y - FIGURE_HEIGHT * FIGURE_SCALE - 8,
-      `+${points}`,
+      points,
       LOOK.text.points,
       this.layout.rock,
       DEPTH.effect,
@@ -914,6 +925,11 @@ export class PinPullScene extends MiniGameScene {
     vibrate([12, 20, 12]);
     this.clearHints();
 
+    if (this.stageLevel !== null) {
+      // 단계 모드는 판 하나가 한 판이다. 다음 단계는 결과 화면에서 고른다.
+      this.finishStage(true, this.stageStats(), WIN_PAUSE_MS + 300);
+      return;
+    }
     this.time.delayedCall(WIN_PAUSE_MS, () => {
       this.stage += 1;
       this.deal();
@@ -958,11 +974,23 @@ export class PinPullScene extends MiniGameScene {
 
   private endRun(): void {
     this.phase = 'over';
+    if (this.stageLevel !== null) {
+      this.finishStage(false, this.stageStats());
+      return;
+    }
     showBanner(this, this.layout.rock.top + 110, '끝!', LOOK.text.over, 900, DEPTH.banner);
     this.finishMiniGame(this.score, [
       ['깬 단계', `${this.cleared}단계`],
       ['뽑은 핀', `${this.pulls}개`],
       ['남긴 시간', `${Math.floor(this.savedSeconds)}초`],
     ]);
+  }
+
+  /** 단계 모드의 결과 화면에 적는 것 */
+  private stageStats(): ResultStat[] {
+    return [
+      ['뽑은 핀', `${this.pulls}개`],
+      ['남은 기회', `${this.hearts}번`],
+    ];
   }
 }

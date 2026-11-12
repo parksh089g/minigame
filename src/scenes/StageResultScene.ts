@@ -10,7 +10,7 @@ import type { StagesData } from './StagesScene';
 
 const PANEL_WIDTH = 204;
 const STAT_ROW = 16;
-/** 처음 깨서 받은 코인이나 다 채운 주간 미션을 알리는 줄의 높이 */
+/** 처음 깨서 받은 코인, 새로 달성한 업적, 다 채운 주간 미션을 알리는 줄의 높이 */
 const EXTRA_ROW = 24;
 const BUTTON_HEIGHT = 30;
 const BUTTON_GAP = 7;
@@ -50,7 +50,8 @@ export class StageResultScene extends Phaser.Scene implements BackAware {
     const { height } = this.scale;
     const { cleared, stats } = data;
 
-    const extraRows = (data.coins > 0 ? 1 : 0) + (data.missions > 0 ? 1 : 0);
+    const achieved = data.achievements;
+    const extraRows = (data.coins > 0 ? 1 : 0) + (achieved.length > 0 ? 1 : 0) + (data.missions > 0 ? 1 : 0);
     const cardHeight = HEAD.body + stats.length * STAT_ROW + extraRows * EXTRA_ROW + 12;
     const buttonsHeight = 12 + BUTTON_HEIGHT * 2 + BUTTON_GAP + 3;
     const left = Math.round((GAME_WIDTH - PANEL_WIDTH) / 2);
@@ -82,6 +83,16 @@ export class StageResultScene extends Phaser.Scene implements BackAware {
       this.addBand(left, y + 2, THEME.butterSoft, `처음 깼어요  +${data.coins} 코인`, THEME_CSS.accent);
       y += EXTRA_ROW;
       sfx.gold();
+    }
+    if (achieved.length > 0) {
+      // 보상은 업적 화면에서 받으므로, 누르면 그 업적이 있는 탭으로 바로 간다.
+      const label = achieved.length > 1 ? `업적 ${achieved.length}개 달성!` : `업적 달성!  ${achieved[0].title}`;
+      this.addBand(left, y + 2, THEME.lilacSoft, label, THEME_CSS.inkDeep, () => {
+        this.scene.stop(data.sceneKey);
+        fadeToScene(this, SCENE.achievements, { tab: achieved[0].group } satisfies AchievementsData);
+      });
+      y += EXTRA_ROW;
+      if (data.coins <= 0) sfx.fanfare();
     }
     if (data.missions > 0) {
       const label = data.missions > 1 ? `주간 미션 ${data.missions}개 달성!` : '주간 미션 달성!';

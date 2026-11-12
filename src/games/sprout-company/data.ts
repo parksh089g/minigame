@@ -133,6 +133,8 @@ export const TIPS = {
   lead: '팀장을 두면 카드를 알아서 맡겨 줘요',
   rush: '급한 의뢰를 제때 끝내면 잎사귀를 받아요',
   backlog: '큰 게임은 맡기는 대로 다음 카드가 나와요',
+  dept: '사무실 버튼에서 부서를 세울 수 있어요',
+  queue: '게임을 예약하면 저절로 이어서 만들어요',
 } as const;
 
 export type TipId = keyof typeof TIPS;
@@ -140,6 +142,48 @@ export const TIP_IDS = Object.keys(TIPS) as TipId[];
 
 /** 이 안내들이 생기기 전부터 하던 사람에게는 띄우지 않는 것: 그때도 있던 일에 대한 안내 */
 export const OLD_HAND_TIPS: readonly TipId[] = ['income', 'gear', 'update', 'move', 'hire'];
+
+// ───────── 부서 ─────────
+
+export interface DepartmentDef {
+  name: string;
+  /** 이 부서가 맡는 업무. 부서원은 이 업무를 더 빨리 한다. */
+  kind: TaskKind;
+}
+
+/** 부서는 직원을 묶어 한 가지 업무를 더 잘하게 한다. 줄을 더하면 부서가 늘어난다. */
+export const DEPARTMENTS = {
+  plan: { name: '기획부', kind: 'plan' },
+  art: { name: '그림부', kind: 'art' },
+  code: { name: '개발부', kind: 'code' },
+  test: { name: '검사부', kind: 'test' },
+} as const satisfies Record<string, DepartmentDef>;
+
+export type DepartmentId = keyof typeof DEPARTMENTS;
+export const DEPARTMENT_ORDER = Object.keys(DEPARTMENTS) as DepartmentId[];
+
+/**
+ * 부서를 세우고 키우는 규칙. 0단계는 아직 세우지 않은 것이다.
+ * n단계에서 n+1단계로 올리는 값은 baseCost × growth^n이고, seats[n - 1]이 n단계의 자리 수다.
+ * 부서원은 그 부서의 업무를 단계마다 boost만큼 더 빨리 한다. 특기와는 곱으로 겹친다.
+ * 직원은 한 부서에만 들 수 있다.
+ */
+export const DEPARTMENT = {
+  unlockOffice: 4,
+  maxLevel: 5,
+  baseCost: 3_000_000,
+  growth: 3,
+  seats: [2, 3, 3, 4, 4],
+  boost: 0.3,
+} as const;
+
+// ───────── 예약 줄 ─────────
+
+/**
+ * 만드는 게임이 있는 동안 다음에 만들 게임을 예약해 둔다.
+ * 예약이 있으면 다 만든 게임을 저절로 출시하고 맨 앞의 예약을 시작한다. 닫아 둔 동안에도 이어진다.
+ */
+export const QUEUE = { unlockOffice: 4, slots: 3 } as const;
 
 // ───────── 사무실을 옮길 때의 코인 ─────────
 
@@ -285,6 +329,8 @@ export interface ProjectDef {
   reputation: number;
   /** 이 사무실 단계(0부터)부터 만들 수 있다. */
   unlockOffice: number;
+  /** 처음 만들 때 세워 둬야 하는 부서의 수. 한 번 낸 뒤의 업데이트에는 묻지 않는다. */
+  departments?: number;
 }
 
 export const PROJECTS = {
@@ -407,6 +453,7 @@ export const PROJECTS = {
     income: 260,
     reputation: 1500,
     unlockOffice: 4,
+    departments: 1,
   },
   'chosung-quiz': {
     title: '초성 퀴즈',
@@ -417,6 +464,7 @@ export const PROJECTS = {
     income: 340,
     reputation: 2000,
     unlockOffice: 4,
+    departments: 2,
   },
   'lantern-keeper': {
     title: '등불지기',
@@ -427,6 +475,7 @@ export const PROJECTS = {
     income: 450,
     reputation: 2500,
     unlockOffice: 4,
+    departments: 3,
   },
 } as const satisfies Record<string, ProjectDef>;
 
