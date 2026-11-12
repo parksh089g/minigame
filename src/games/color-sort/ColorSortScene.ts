@@ -6,11 +6,13 @@ import { sfx } from '../../core/sfx';
 import { store } from '../../core/store';
 import { addBackdrop, addText, drawPanel } from '../../core/ui';
 import { floatText, GameHud, HUD_HEIGHT, showBanner } from '../../scenes/GameHud';
-import { MiniGameScene } from '../../scenes/MiniGameScene';
+import { MiniGameScene, type ResultStat } from '../../scenes/MiniGameScene';
 import {
   canPour,
   clearBonus,
   dealStage,
+  levelPourBudget,
+  levelStage,
   isComplete,
   isSolved,
   isStuck,
@@ -311,7 +313,12 @@ export class ColorSortScene extends MiniGameScene {
       color: LOOK.text.stage,
       originX: 0.5,
     }).setDepth(DEPTH.panel);
-    this.hints = ['병을 누르고, 부을 병을 눌러요', '같은 색끼리 한 병에 모아요'].map((line, index) =>
+    // 단계 모드에서는 가장 쉬운 난이도의 단계에서만 방법을 알려 준다.
+    const lines =
+      this.stageLevel === null || levelStage(this.stageLevel) === 0
+        ? ['병을 누르고, 부을 병을 눌러요', '같은 색끼리 한 병에 모아요']
+        : [];
+    this.hints = lines.map((line, index) =>
       addText(this, GAME_WIDTH / 2, panelTop + 26 + index * 15, line, {
         color: LOOK.text.hint,
         originX: 0.5,
@@ -330,6 +337,7 @@ export class ColorSortScene extends MiniGameScene {
 
     this.addPauseButton();
     this.hud = new GameHud(this, DEPTH.hud);
+    if (this.stageLevel !== null) this.hud.showStage(this.stageLevel);
 
     this.input.on(Phaser.Input.Events.POINTER_DOWN, this.onPointerDown, this);
 
@@ -357,16 +365,19 @@ export class ColorSortScene extends MiniGameScene {
 
   /** 지금 단계의 병을 새로 깔고, 다 나타나면 누를 수 있게 한다. */
   private dealNext(first: boolean): void {
-    const dealt = dealStage(this.stage, Math.random);
+    // 단계 모드에서는 단계 번호로 정해진 판 하나만 나오고, 부을 수 있는 횟수가 더 넉넉하다.
+    const level = this.stageLevel;
+    const dealt =
+      level === null ? dealStage(this.stage, Math.random) : dealStage(levelStage(level), this.levelRandom());
     this.stageData = dealt;
     this.tubes = dealt.tubes;
-    this.budget = pourBudget(dealt.par, this.stage);
+    this.budget = level === null ? pourBudget(dealt.par, this.stage) : levelPourBudget(dealt.par);
     this.poursLeft = this.budget;
     this.selected = -1;
     this.busy = false;
     this.filledThisStage = 0;
 
-    this.stageLabel.setText(`${this.stage + 1}단계`);
+    this.stageLabel.setText(level === null ? `${this.stage + 1}단계` : `붓기 ${this.budget}번 안에 모아요`);
     this.showBudget(false);
     this.buildViews();
     sfx.flip();
@@ -610,7 +621,7 @@ export class ColorSortScene extends MiniGameScene {
       yoyo: true,
       ease: 'Quad.Out',
     });
-    floatText(this, view.x, view.y - 6, `+${TUBE_POINTS}`, LOOK.text.points, this.area, DEPTH.effect);
+    this.floatPoints(view.x, view.y - 6, TUBE_POINTS, LOOK.text.points, this.area, DEPTH.effect);
     sfx.hit(this.filledThisStage * 2);
     vibrate(12);
   }
@@ -622,6 +633,17 @@ export class ColorSortScene extends MiniGameScene {
     this.score += bonus;
     this.stagesCleared += 1;
     this.hud.setScore(this.score);
+
+    if (this.stageLevel !== null) {
+      // 단계 모드는 한 단계가 한 판이다. 다음 단계는 결과 화면에서 고른다.
+      this.time.delayedCall(260, () => {
+        sfx.gold();
+        vibrate([15, 30, 15]);
+        showBanner(this, this.area.centerY, '클리어!', LOOK.text.clear, 900, DEPTH.banner);
+      });
+      this.finishStage(true, this.stageStats(), 1100);
+      return;
+    }
 
     this.time.delayedCall(260, () => {
       sfx.gold();
@@ -660,11 +682,23 @@ export class ColorSortScene extends MiniGameScene {
     sfx.miss();
     vibrate([40, 30, 80]);
     showBanner(this, this.area.centerY, label, LOOK.text.over, 900, DEPTH.banner);
+    if (this.stageLevel !== null) {
+      this.finishStage(false, this.stageStats());
+      return;
+    }
     this.finishMiniGame(this.score, [
       ['깬 단계', `${this.stagesCleared}단계`],
       ['채운 병', `${this.tubesFilled}개`],
       ['부은 횟수', `${this.poursMade}번`],
     ]);
+  }
+
+  /** 단계 모드의 결과 화면에 적는 것 */
+  private stageStats(): ResultStat[] {
+    return [
+      ['부은 횟수', `${this.poursMade}번`],
+      ['남은 붓기', `${this.poursLeft}번`],
+    ];
   }
 
   /** 한 번 부어 봤으면 도움말은 더 필요 없다. */

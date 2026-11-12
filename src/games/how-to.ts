@@ -128,8 +128,54 @@ export const HOW_TO: Readonly<Record<string, readonly string[]>> = {
   ],
 };
 
-/** 그 게임의 방법. 적어 둔 것이 없으면 null. */
-export function howToFor(gameId: string): readonly string[] | null {
-  const lines = HOW_TO[gameId];
+/**
+ * 단계 모드로 할 때의 방법. 시간이 흐르지 않고 한 단계가 판 하나라서, 끝나는 조건이 점수 도전과 다르다.
+ * 단계 모드가 있는 게임(registry의 stageMode)마다 적는다.
+ */
+export const STAGE_HOW_TO: Readonly<Record<string, readonly string[]>> = {
+  'color-sort': [
+    '병을 누르고, 부을 병을 눌러요',
+    '빈 병이나 맨 위가 같은 색인 병에 부어요',
+    '병마다 한 가지 색만 남기면 단계를 깨요',
+    '정해진 횟수 안에 못 나누면 다시 해야 해요',
+    '시간은 재지 않으니 천천히 생각해요',
+  ],
+  'parking-out': [
+    '앞이 뚫린 차를 누르면 빠져나가요',
+    '차를 모두 빼내면 단계를 깨요',
+    '막힌 차를 누르면 기회가 하나 줄어요',
+    '기회 세 번을 다 쓰면 다시 해야 해요',
+    '시간은 재지 않으니 천천히 생각해요',
+  ],
+  'screw-sort': [
+    '가려지지 않은 나사를 눌러서 풀어요',
+    '나사는 같은 색 상자로 들어가요',
+    '맞는 상자가 없으면 쟁반에서 기다려요',
+    '나사를 모두 풀면 단계를 깨요',
+    '쟁반이 가득 차서 둘 곳이 없으면 다시 해야 해요',
+  ],
+  'logic-tiles': [
+    '칸을 눌러서 열어요. 첫 칸은 언제나 안전해요',
+    '숫자는 둘레 여덟 칸에 숨은 함정의 수예요',
+    '함정 자리는 길게 눌러 깃발을 꽂아요',
+    '깃발을 다 꽂은 숫자를 누르면 둘레가 열려요',
+    '함정이 아닌 칸을 모두 열면 단계를 깨요',
+    '함정을 세 번 밟으면 다시 해야 해요',
+  ],
+  'number-puzzle': [
+    '빈칸을 누르고 아래에서 숫자를 골라요',
+    '가로줄, 세로줄, 상자마다 숫자가 한 번씩만 들어가요',
+    '빈칸을 모두 채우면 단계를 깨요',
+    '틀린 숫자를 세 번 두면 다시 해야 해요',
+    '시간은 재지 않으니 천천히 생각해요',
+  ],
+};
+
+/**
+ * 그 게임의 방법. 적어 둔 것이 없으면 null.
+ * staged가 true이면 단계 모드의 방법을 주고, 따로 적어 둔 것이 없으면 여느 때의 방법을 준다.
+ */
+export function howToFor(gameId: string, staged = false): readonly string[] | null {
+  const lines = (staged ? STAGE_HOW_TO[gameId] : undefined) ?? HOW_TO[gameId];
   return lines && lines.length > 0 ? lines : null;
 }

@@ -6,13 +6,16 @@ import { sfx } from '../../core/sfx';
 import { StartGate } from '../../core/start-gate';
 import { addBackdrop, addText, drawPanel } from '../../core/ui';
 import { floatText, GameHud, HUD_HEIGHT, showBanner } from '../../scenes/GameHud';
-import { MiniGameScene } from '../../scenes/MiniGameScene';
+import { MiniGameScene, type ResultStat } from '../../scenes/MiniGameScene';
 import {
   BUMP_PENALTY_SECONDS,
   canLeave,
   carAt,
   elapse,
+  chancesLeft,
   isOver,
+  levelRun,
+  levelStage,
   isVertical,
   LONG_CAR,
   lotLayout,
@@ -429,6 +432,7 @@ export class ParkingOutScene extends MiniGameScene {
     this.addPauseButton();
     this.hud = new GameHud(this, DEPTH.hud);
     this.hud.setTime(TIME_BANK_SECONDS, TIME_BANK_SECONDS);
+    if (this.stageLevel !== null) this.hud.showStage(this.stageLevel);
 
     this.input.on(Phaser.Input.Events.POINTER_DOWN, this.onPointerDown, this);
     // 일시정지한 동안 시간을 들이지 않고 순서를 궁리할 수 없게 차를 가린다. 결과 화면이 뜰 때도 같은 길로 가려진다.
@@ -440,7 +444,8 @@ export class ParkingOutScene extends MiniGameScene {
     });
 
     this.dealLot();
-    this.showHint();
+    // 단계 모드에서는 가장 쉬운 난이도의 단계에서만 방법을 알려 준다.
+    if (this.stageLevel === null || levelStage(this.stageLevel) === 1) this.showHint();
   }
 
   override update(_time: number, deltaMs: number): void {
@@ -455,6 +460,8 @@ export class ParkingOutScene extends MiniGameScene {
       this.gate.wait(dt);
       return;
     }
+    // 단계 모드에는 시간 제한이 없다.
+    if (this.stageLevel !== null) return;
 
     this.run = elapse(this.run, dt);
     this.drawTime();
@@ -470,7 +477,8 @@ export class ParkingOutScene extends MiniGameScene {
   }
 
   private resetState(): void {
-    this.run = newRun(Math.random);
+    this.run =
+      this.stageLevel === null ? newRun(Math.random) : levelRun(this.stageLevel, this.levelRandom());
     this.layout = { cell: 0, left: 0, top: 0 };
     this.views = new Map();
     this.pointed = null;
@@ -499,13 +507,15 @@ export class ParkingOutScene extends MiniGameScene {
   }
 
   private hideCars(): void {
+    // 단계 모드는 시간이 흐르지 않으므로 멈춰 놓고 궁리해도 된다.
+    if (this.stageLevel !== null) return;
     this.carLayer.setVisible(false);
   }
 
   private onResume(): void {
     this.carLayer.setVisible(true);
     // 아직 시간이 가지 않고 있었으면 숨 고를 시간도 필요 없다.
-    if (!this.playing || !this.gate.open) return;
+    if (!this.playing || !this.gate.open || this.stageLevel !== null) return;
     this.grace = RESUME_GRACE_SECONDS;
     showBanner(this, this.lotCard.y, '준비!', LOOK.text.ready, RESUME_GRACE_SECONDS * 1000, DEPTH.banner);
   }
@@ -519,7 +529,7 @@ export class ParkingOutScene extends MiniGameScene {
         originX: 0.5,
         stroke: LOOK.text.outline,
       }),
-      addText(this, GAME_WIDTH / 2, top + 17, '막힌 차를 누르면 시간이 깎여요', {
+      addText(this, GAME_WIDTH / 2, top + 17, this.bumpHint(), {
         color: LOOK.text.hintSub,
         originX: 0.5,
         stroke: LOOK.text.outline,
@@ -527,6 +537,17 @@ export class ParkingOutScene extends MiniGameScene {
     ];
     for (const line of this.hint) line.setDepth(DEPTH.hud);
     this.fadeHint(HINT_MS);
+  }
+
+  /** 막힌 차를 누르면 무엇을 잃는지: 점수 도전에서는 시간, 단계 모드에서는 기회다. */
+  private bumpHint(): string {
+    return this.stageLevel === null ? '막힌 차를 누르면 시간이 깎여요' : '막힌 차를 누르면 기회가 줄어요';
+  }
+
+  /** 오른쪽 위에 지금 판의 번호를, 단계 모드에서는 남은 기회를 적는다. */
+  private showSide(bounce: boolean): void {
+    if (this.stageLevel === null) this.hud.setSide(`${this.run.stage}판`, bounce);
+    else this.hud.setSide(`기회 ${chancesLeft(this.run)}`, bounce);
   }
 
   /** delayMs 뒤에 도움말을 흐리게 지운다. 이미 지워지는 중이면 새로 정한 때에 맞춘다. */
@@ -562,8 +583,8 @@ export class ParkingOutScene extends MiniGameScene {
       duration: DEAL_POP_MS,
       ease: 'Back.Out',
     });
-    this.hud.setSide(`${stage}판`, stage > 1);
-    if (stage > 1) sfx.pop();
+    this.showSide(this.stageLevel === null && stage > 1);
+    if (this.stageLevel === null && stage > 1) sfx.pop();
 
     const colors = pickColors(lot);
     this.views = new Map();
@@ -656,7 +677,7 @@ export class ParkingOutScene extends MiniGameScene {
     sfx.whoosh();
     vibrate(8);
     this.hud.setScore(this.run.score);
-    floatText(this, view.x, view.y, `+${outcome.points}`, LOOK.text.points, this.playArea, DEPTH.effect);
+    this.floatPoints(view.x, view.y, outcome.points, LOOK.text.points, this.playArea, DEPTH.effect);
     if (outcome.cleared) this.onLotCleared(outcome.cleared);
   }
 
@@ -694,11 +715,13 @@ export class ParkingOutScene extends MiniGameScene {
     this.drawTime();
     vibrate([20, 30, 20]);
     this.cameras.main.shake(110, 0.004);
+    const staged = this.stageLevel !== null;
+    if (staged) this.showSide(true);
     floatText(
       this,
       view.x,
       view.y,
-      `-${BUMP_PENALTY_SECONDS}초`,
+      staged ? '기회 -1' : `-${BUMP_PENALTY_SECONDS}초`,
       LOOK.text.penalty,
       this.playArea,
       DEPTH.effect,
@@ -706,6 +729,8 @@ export class ParkingOutScene extends MiniGameScene {
     view.flash.setAlpha(1);
     this.tweens.add({ targets: view.flash, alpha: 0, duration: 420, ease: 'Quad.In' });
     this.lurch(view, outcome);
+    // 단계 모드에서 기회를 다 쓰면 그 단계는 끝이다.
+    if (staged && chancesLeft(this.run) <= 0) this.endRun();
   }
 
   /** 막힌 차가 앞차에 닿을 때까지 나아가 쿵 부딪히고 제자리로 돌아온다. 무엇에 막혔는지 보여 준다. */
@@ -761,6 +786,18 @@ export class ParkingOutScene extends MiniGameScene {
     // 더 큰 주차장이 도움말 자리까지 올라오므로, 아직 떠 있으면 치운다.
     this.fadeHint(0);
 
+    if (this.stageLevel !== null) {
+      // 단계 모드는 주차장 하나가 한 판이다. 다음 단계는 결과 화면에서 고른다.
+      this.time.delayedCall(CLEAR_BANNER_MS, () => {
+        sfx.gold();
+        vibrate([15, 30, 15]);
+        this.confetti.explode(18, GAME_WIDTH / 2, this.lotCard.y);
+        showBanner(this, this.lotCard.y, '클리어!', LOOK.text.clear, 900, DEPTH.banner);
+      });
+      this.finishStage(true, this.stageStats(), CLEAR_BANNER_MS + 1000);
+      return;
+    }
+
     this.time.delayedCall(CLEAR_BANNER_MS, () => {
       sfx.gold();
       vibrate([15, 30, 15]);
@@ -797,11 +834,24 @@ export class ParkingOutScene extends MiniGameScene {
 
   private endRun(): void {
     this.stopPointing();
+    if (this.stageLevel !== null) {
+      showBanner(this, this.lotCard.y, '기회 끝!', LOOK.text.over, 900, DEPTH.banner);
+      this.finishStage(false, this.stageStats());
+      return;
+    }
     showBanner(this, this.lotCard.y, '끝!', LOOK.text.over, 900, DEPTH.banner);
     this.finishMiniGame(this.run.score, [
       ['빼낸 차', `${this.run.carsOut}대`],
       ['깬 판', `${this.run.lotsCleared}판`],
       ['부딪힘', `${this.run.bumps}번`],
     ]);
+  }
+
+  /** 단계 모드의 결과 화면에 적는 것 */
+  private stageStats(): ResultStat[] {
+    return [
+      ['빼낸 차', `${this.run.carsOut}대`],
+      ['부딪힘', `${this.run.bumps}번`],
+    ];
   }
 }

@@ -5,7 +5,7 @@ import { vibrate } from '../../core/haptics';
 import { sfx } from '../../core/sfx';
 import { addBackdrop, addText, drawPanel } from '../../core/ui';
 import { floatText, GameHud, HUD_HEIGHT, showBanner } from '../../scenes/GameHud';
-import { MiniGameScene } from '../../scenes/MiniGameScene';
+import { MiniGameScene, type ResultStat } from '../../scenes/MiniGameScene';
 import {
   betterCandidate,
   BOARD_COLS,
@@ -13,6 +13,7 @@ import {
   BOX_POINTS,
   BOX_SIZE,
   buildStage,
+  levelStage,
   canTake,
   cellAt,
   cellPosition,
@@ -363,14 +364,20 @@ export class ScrewSortScene extends MiniGameScene {
 
     this.addPauseButton();
     this.hud = new GameHud(this, DEPTH.hud);
+    if (this.stageLevel !== null) this.hud.showStage(this.stageLevel);
     this.input.on(Phaser.Input.Events.POINTER_DOWN, this.onPointerDown, this);
 
-    this.showHint();
-    this.dealStage(buildStage(this.stageNumber, Math.random));
+    // 단계 모드에서는 단계 번호로 정해진 판 하나만 나온다.
+    if (this.stageLevel !== null) this.stageNumber = levelStage(this.stageLevel);
+    // 도움말은 작업대 아래가 비어 있는 첫 난이도에서만 적는다.
+    if (this.stageNumber === 1) this.showHint();
+    this.dealStage(buildStage(this.stageNumber, this.levelRandom()));
     sfx.go();
   }
 
   override update(): void {
+    // 단계 모드는 한 단계가 한 판이라 다음 단계를 미리 만들어 둘 일이 없다.
+    if (this.stageLevel !== null) return;
     if (this.toPropose <= 0 || !this.accepting || this.stepping) return;
     if (this.time.now - this.lastTapAt < PREP_IDLE_MS) return;
     // 손이 쉬는 틈에 다음 단계의 후보를 한 번에 하나씩만 만들어서, 화면이 끊기지 않게 한다.
@@ -579,7 +586,7 @@ export class ScrewSortScene extends MiniGameScene {
   /** 새 단계를 깐다. 판이 아래 것부터 차례로 나타나고, 다 깔린 뒤부터 누를 수 있다. */
   private dealStage(stage: Stage): void {
     this.bench = startStage(stage);
-    this.hud.setSide(`${this.stageNumber}단계`, this.stageNumber > 1);
+    if (this.stageLevel === null) this.hud.setSide(`${this.stageNumber}단계`, this.stageNumber > 1);
     this.buildBoard(stage);
     this.bench.open.forEach((box, slot) => {
       if (box) this.enterBox(slot, box.color, slot * 90);
@@ -641,6 +648,16 @@ export class ScrewSortScene extends MiniGameScene {
 
   /** 단계를 깼을 때: 보너스를 주고 잠깐 뒤에 다음 단계를 깐다. */
   private celebrateClear(): number {
+    if (this.stageLevel !== null) {
+      // 단계 모드는 여기서 끝난다. 다음 단계는 결과 화면에서 고른다.
+      sfx.gold();
+      vibrate([15, 30, 15]);
+      const { centerX, centerY } = this.benchArea;
+      showBanner(this, centerY, '클리어!', LOOK.text.clear, 900, DEPTH.banner);
+      this.sparks.explode(16, centerX, centerY);
+      this.finishStage(true, this.stageStats(), 1100);
+      return 1100;
+    }
     const bonus = stageBonus(this.stageNumber);
     this.stagesCleared += 1;
     this.score += bonus;
@@ -671,12 +688,24 @@ export class ScrewSortScene extends MiniGameScene {
     vibrate([40, 30, 80]);
     this.cameras.main.shake(180, 0.01);
     showBanner(this, this.benchArea.centerY, '꽉 찼어요!', LOOK.text.over, 900, DEPTH.banner);
+    if (this.stageLevel !== null) {
+      this.finishStage(false, this.stageStats());
+      return 0;
+    }
     this.finishMiniGame(this.score, [
       ['푼 나사', `${this.screwsOut}개`],
       ['채운 상자', `${this.boxesClosed}개`],
       ['깬 단계', `${this.stagesCleared}단계`],
     ]);
     return 0;
+  }
+
+  /** 단계 모드의 결과 화면에 적는 것 */
+  private stageStats(): ResultStat[] {
+    return [
+      ['푼 나사', `${this.screwsOut}개`],
+      ['채운 상자', `${this.boxesClosed}개`],
+    ];
   }
 
   // ───────── 입력 ─────────
@@ -916,7 +945,7 @@ export class ScrewSortScene extends MiniGameScene {
         vibrate([12, 20, 12]);
         const { x, y } = container;
         this.sparks.explode(10, x, y);
-        floatText(this, x, y - 4, `+${BOX_POINTS}`, LOOK.text.points, this.playArea, DEPTH.effect);
+        this.floatPoints(x, y - 4, BOX_POINTS, LOOK.text.points, this.playArea, DEPTH.effect);
       },
       onComplete: () => {
         this.tweens.add({

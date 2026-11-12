@@ -6,6 +6,8 @@
  * 무작위가 필요한 곳은 random(0 이상 1 미만의 수를 돌려주는 함수)을 받아서 쓴다.
  */
 
+import { difficultyOf } from '../../core/stages';
+
 /** 판의 한 변의 칸 수. 숫자도 1부터 이 수까지 쓴다. */
 export type BoardSize = 4 | 6 | 9;
 export const BOARD_SIZES: readonly BoardSize[] = [4, 6, 9];
@@ -473,9 +475,10 @@ function startStage(stage: number, random: () => number): Pick<RunState, 'stage'
   return { stage, puzzle, grid: puzzle.givens };
 }
 
-export function newRun(random: () => number): RunState {
+/** stage번째 판에서 새로 시작하는 한 판: 시간과 목숨이 가득하고 점수는 0이다. */
+function runAt(stage: number, random: () => number): RunState {
   return {
-    ...startStage(1, random),
+    ...startStage(stage, random),
     timeLeft: TIME_BANK_SECONDS,
     hearts: START_HEARTS,
     score: 0,
@@ -483,6 +486,10 @@ export function newRun(random: () => number): RunState {
     puzzlesCleared: 0,
     mistakes: 0,
   };
+}
+
+export function newRun(random: () => number): RunState {
+  return runAt(1, random);
 }
 
 /** 시간이나 목숨이 다해서 끝났는지 */
@@ -544,6 +551,25 @@ export function elapse(run: RunState, seconds: number): RunState {
 /** 다음 판으로 넘어간다. 판을 다 채운 뒤에 부른다. */
 export function nextStage(run: RunState, random: () => number): RunState {
   return { ...run, ...startStage(run.stage + 1, random) };
+}
+
+// ───────── 단계 모드 ─────────
+
+/** 단계 모드가 거치는 난이도의 수: 첫 판부터 빈칸이 MAX_BLANKS에 닿는 판까지 */
+export const LEVEL_STEPS =
+  LADDER.length + Math.ceil((MAX_BLANKS - LADDER[LADDER.length - 1].blanks) / BLANKS_STEP);
+
+/** 단계 모드의 level단계가 점수 도전의 몇째 판과 같은 크기와 빈칸 수인지 */
+export function levelStage(level: number): number {
+  return difficultyOf(level, LEVEL_STEPS);
+}
+
+/**
+ * 단계 모드의 한 단계. 시간은 흐르지 않고(elapse를 부르지 않는다), 판 하나를 다 채우면 끝난다.
+ * 목숨은 단계마다 새로 받는다. 같은 random이면 같은 판이 나온다.
+ */
+export function levelRun(level: number, random: () => number): RunState {
+  return runAt(levelStage(level), random);
 }
 
 // ───────── 고르기 ─────────

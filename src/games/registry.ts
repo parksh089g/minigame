@@ -27,6 +27,11 @@ export interface MiniGameInfo {
    * 비워 두면 "퍼즐 게임 몇 판" 같은 갈래 미션에는 들지 않고 "아무 게임이나"에만 들어간다.
    */
   genre?: Genre;
+  /**
+   * true면 퍼즐 단계 모드(시간 제한 없이 1단계부터 차례로 깨기)에 나온다.
+   * 그 게임의 씬이 MiniGameScene의 stageLevel을 보고 단계 모드로 열 줄 알아야 한다.
+   */
+  stageMode?: boolean;
   /** true면 허브 목록의 맨 앞에 놓는다. 대표로 내세울 게임에 쓴다. */
   featured?: boolean;
   /**
@@ -86,6 +91,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     coinsFor: (score) => Math.floor(score / 20),
     dailyTargets: [100, 170, 250],
     genre: 'puzzle',
+    stageMode: true,
   },
   {
     id: 'gate-run',
@@ -113,6 +119,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     coinsFor: (score) => Math.floor(score / 25),
     dailyTargets: [150, 280, 450],
     genre: 'puzzle',
+    stageMode: true,
   },
   {
     id: 'screw-sort',
@@ -122,6 +129,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     coinsFor: (score) => Math.floor(score / 40),
     dailyTargets: [250, 450, 750],
     genre: 'puzzle',
+    stageMode: true,
   },
   {
     id: 'merge-tiles',
@@ -149,6 +157,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     coinsFor: (score) => Math.floor(score / 25),
     dailyTargets: [120, 260, 420],
     genre: 'puzzle',
+    stageMode: true,
   },
   {
     id: 'number-puzzle',
@@ -158,6 +167,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     coinsFor: (score) => Math.floor(score / 25),
     dailyTargets: [100, 220, 420],
     genre: 'puzzle',
+    stageMode: true,
   },
   {
     id: 'path-link',
@@ -273,6 +283,11 @@ export function lastPlayedGame(
 
 export function getGame(id: string): MiniGameInfo | undefined {
   return GAMES.find((game) => game.id === id);
+}
+
+/** 퍼즐 단계 모드에 나오는 게임들. 적힌 순서대로 단계 화면의 탭이 된다. */
+export function stageGames(games: readonly MiniGameInfo[] = GAMES): MiniGameInfo[] {
+  return games.filter((game) => game.stageMode === true && game.sceneKey !== null);
 }
 
 /**
