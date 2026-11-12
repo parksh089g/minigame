@@ -21,13 +21,13 @@ export const TEXT = {
     symbol: { name: '같은 그림 찾기', how: '가운데와 같은 그림을 눌러요', note: '틀리면 잠깐 쉬어요' },
   } satisfies Record<Contest, { name: string; how: string; note: string }>,
   reaction: {
-    wait: '기다려요…',
+    wait: '기다려요...',
     how: '"지금!"이 뜨면 바로 눌러요',
     again: '다시 기다려요',
     go: '지금!',
   },
   tug: {
-    ready: '준비…',
+    ready: '준비...',
     live: '마구 눌러요!',
     note: '끝까지 밀면 이겨요',
     again: '이어서 해요',
@@ -35,7 +35,7 @@ export const TEXT = {
     suddenNote: '한가운데에서 시간이 끝났어요',
   },
   symbol: {
-    ready: '준비…',
+    ready: '준비...',
     again: '그림을 새로 내요',
     unknown: '?',
     how: '같은 그림을 눌러요',

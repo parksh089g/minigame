@@ -3,6 +3,7 @@ import { mascotTexture } from '../art/cosmetics';
 import { MASCOT_SIZE } from '../art/vector';
 import { APP_NAME, APP_VERSION, FONT_SIZE, GAME_WIDTH, SCENE, THEME, THEME_CSS } from '../config';
 import { claimable, statsOf } from '../core/achievements';
+import { bakedPanel } from '../core/bake';
 import { activeStreak, dateKeyOf, isCleared, recentDays, streakBonus } from '../core/daily';
 import { vibrate } from '../core/haptics';
 import { setHome } from '../core/home';
@@ -20,6 +21,7 @@ import { sfx } from '../core/sfx';
 import { clearedOf, totalCleared } from '../core/stages';
 import { store } from '../core/store';
 import { setToastAnchor } from '../core/toast';
+import { settleLastWeek } from './weekly-settle';
 import { claimableMissions } from '../core/weekly';
 import {
   addBackdrop,
@@ -128,6 +130,8 @@ export class HubScene extends Phaser.Scene {
     const { height } = this.scale;
     // 허브에서 하러 가는 게임은 끝나면 허브로 돌아온다.
     setHome(null);
+    // 주가 바뀌었으면 지난주에 받지 않은 주간 미션 보상을 먼저 넣어 준다. 아래의 코인 수에 바로 보인다.
+    settleLastWeek();
     this.backdrop = addBackdrop(this);
 
     this.addHeader();
@@ -380,6 +384,26 @@ export class HubScene extends Phaser.Scene {
     return cards;
   }
 
+  /**
+   * 게임 카드의 바탕: 둥근 카드와 그 위의 아이콘 자리. 카드가 여러 장이라, 프레임마다 다시 그리는 도형 대신
+   * 한 번 구워 둔 그림을 쓴다(core/bake). 느린 기기에서 허브가 끊기지 않게 하려는 것이다.
+   */
+  private tileTexture(pressed: boolean, iconFill: number): string {
+    return bakedPanel(this, TILE_WIDTH, TILE_HEIGHT, {
+      fill: pressed ? THEME.dim : THEME.card,
+      shadow: THEME.shadow,
+      radius: 12,
+      depth: 3,
+      extra: {
+        tag: `icon-${iconFill.toString(16)}`,
+        draw: (graphics) => {
+          graphics.fillStyle(iconFill, 1);
+          graphics.fillRoundedRect(TILE_WIDTH / 2 - TILE.iconBox / 2, TILE.iconTop, TILE.iconBox, TILE.iconBox, 10);
+        },
+      },
+    });
+  }
+
   private buildCards(): void {
     this.tweens.killTweensOf(this.cardObjects);
     for (const object of this.cardObjects) object.destroy();
@@ -408,17 +432,10 @@ export class HubScene extends Phaser.Scene {
 
     const center = TILE_WIDTH / 2;
     const tile = ICON_TILES[Math.max(0, GAMES.indexOf(game)) % ICON_TILES.length];
-    const frame = this.add.graphics();
+    const frame = this.add.image(0, 0, this.tileTexture(false, playable ? tile : THEME.dim)).setOrigin(0, 0);
     const drawFrame = (pressed: boolean): void => {
-      frame.clear();
-      drawPanel(frame, 0, 0, TILE_WIDTH, TILE_HEIGHT, {
-        fill: pressed ? THEME.dim : THEME.card,
-        radius: 12,
-      });
-      frame.fillStyle(playable ? tile : THEME.dim, 1);
-      frame.fillRoundedRect(center - TILE.iconBox / 2, TILE.iconTop, TILE.iconBox, TILE.iconBox, 10);
+      frame.setTexture(this.tileTexture(pressed, playable ? tile : THEME.dim));
     };
-    drawFrame(false);
 
     const icon = this.add
       .image(center, TILE.iconTop + TILE.iconBox / 2, game.icon)
@@ -492,14 +509,10 @@ export class HubScene extends Phaser.Scene {
     }
 
     const center = TILE_WIDTH / 2;
-    const frame = this.add.graphics();
+    const frame = this.add.image(0, 0, this.tileTexture(false, THEME.butterSoft)).setOrigin(0, 0);
     const drawFrame = (pressed: boolean): void => {
-      frame.clear();
-      drawPanel(frame, 0, 0, TILE_WIDTH, TILE_HEIGHT, { fill: pressed ? THEME.dim : THEME.card, radius: 12 });
-      frame.fillStyle(THEME.butterSoft, 1);
-      frame.fillRoundedRect(center - TILE.iconBox / 2, TILE.iconTop, TILE.iconBox, TILE.iconBox, 10);
+      frame.setTexture(this.tileTexture(pressed, THEME.butterSoft));
     };
-    drawFrame(false);
     const icon = this.add
       .image(center, TILE.iconTop + TILE.iconBox / 2, 'icon-stages')
       .setDisplaySize(TILE.iconSize, TILE.iconSize);

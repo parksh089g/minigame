@@ -11,6 +11,7 @@ import {
   buyCosmetic,
   claimAchievement,
   claimWeeklyMission,
+  settleLastWeek,
   equipCosmetic,
   createDefaultSave,
   isFavorite,
@@ -25,7 +26,7 @@ import {
   type SaveData,
   type StageClearResult,
 } from './save';
-import type { WeekContext } from './weekly';
+import type { WeekContext, WeeklyGame } from './weekly';
 
 const DB_NAME = 'pocket-arcade';
 const STORE_NAME = 'kv';
@@ -142,6 +143,15 @@ class SaveStore {
     this.data = result.save;
     this.commit();
     return result;
+  }
+
+  /** 주가 바뀌었으면 지난주에 받지 않은 미션 보상을 넣어 준다. 넣어 준 코인의 합을 돌려준다(없으면 0). */
+  settleLastWeek(weekKey: string, games: readonly WeeklyGame[]): number {
+    const result = settleLastWeek(this.data, weekKey, games);
+    if (result.coins <= 0) return 0;
+    this.data = result.save;
+    this.commit();
+    return result.coins;
   }
 
   /** 다 채운 주간 미션의 보상을 받는다. */

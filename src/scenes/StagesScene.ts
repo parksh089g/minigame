@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { FONT_SIZE, GAME_WIDTH, SCENE, THEME, THEME_CSS } from '../config';
 import type { BackAware } from '../core/app-events';
+import { bakedPanel } from '../core/bake';
 import { vibrate } from '../core/haptics';
 import { clampPage, layoutPages, pageOfIndex, type PageLayout } from '../core/paging';
 import { sfx } from '../core/sfx';
@@ -12,7 +13,6 @@ import {
   addTapZone,
   addText,
   CoinCounter,
-  drawPanel,
   fadeIn,
   fadeToScene,
   onSwipe,
@@ -143,16 +143,18 @@ export class StagesScene extends Phaser.Scene implements BackAware {
       const x = MARGIN + (index % perRow) * (width + TAB.gap);
       const top = TAB.top + Math.floor(index / perRow) * (size.height + TAB.gap);
       const selected = game === this.picked;
-      const frame = this.add.graphics();
-      const draw = (pressed: boolean): void => {
-        frame.clear();
-        drawPanel(frame, x, top, width, size.height, {
+      // 탭과 단계 칸은 수가 많아서, 프레임마다 다시 그리는 도형 대신 구워 둔 그림을 놓는다(core/bake).
+      const look = (pressed: boolean): string =>
+        bakedPanel(this, width, size.height, {
           fill: selected ? LOOK.tab.on : pressed ? THEME.dim : LOOK.tab.off,
-          shadow: selected ? LOOK.tab.onShadow : undefined,
+          shadow: selected ? LOOK.tab.onShadow : THEME.shadow,
           radius: 10,
+          depth: 3,
         });
+      const frame = this.add.image(x, top, look(false)).setOrigin(0, 0);
+      const draw = (pressed: boolean): void => {
+        frame.setTexture(look(pressed));
       };
-      draw(false);
       this.add
         .image(x + width / 2, top + size.iconTop + size.icon / 2, game.icon)
         .setDisplaySize(size.icon, size.icon);
@@ -230,22 +232,28 @@ export class StagesScene extends Phaser.Scene implements BackAware {
     const look = cleared ? LOOK.cleared : open ? LOOK.next : LOOK.locked;
 
     const cell = this.add.container(x, y);
-    const frame = this.add.graphics();
-    const draw = (pressed: boolean): void => {
-      frame.clear();
-      drawPanel(frame, 0, 0, CELL_WIDTH, CELL.height, {
+    // 열 단계마다 있는 고비는 아직 깨지 않았으면 코인을 더 준다는 뜻으로 금색 점을 찍는다.
+    const milestone = !cleared && level % MILESTONE_EVERY === 0;
+    const texture = (pressed: boolean): string =>
+      bakedPanel(this, CELL_WIDTH, CELL.height, {
         fill: pressed && open ? THEME.dim : look.fill,
         shadow: look.shadow,
         radius: 9,
         depth: 2,
+        extra: milestone
+          ? {
+              tag: 'milestone',
+              draw: (graphics) => {
+                graphics.fillStyle(LOOK.milestone, 1);
+                graphics.fillCircle(CELL_WIDTH - 7, 7, 3);
+              },
+            }
+          : undefined,
       });
-      // 열 단계마다 있는 고비는 아직 깨지 않았으면 코인을 더 준다는 뜻으로 금색 점을 찍는다.
-      if (!cleared && level % MILESTONE_EVERY === 0) {
-        frame.fillStyle(LOOK.milestone, 1);
-        frame.fillCircle(CELL_WIDTH - 7, 7, 3);
-      }
+    const frame = this.add.image(0, 0, texture(false)).setOrigin(0, 0);
+    const draw = (pressed: boolean): void => {
+      frame.setTexture(texture(pressed));
     };
-    draw(false);
     const label = addText(this, CELL_WIDTH / 2, CELL.height / 2, String(level), {
       color: look.text,
       originX: 0.5,

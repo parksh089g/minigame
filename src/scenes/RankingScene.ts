@@ -461,7 +461,7 @@ export class RankingScene extends Phaser.Scene implements BackAware {
     }
 
     if (view.kind === 'loading') {
-      this.addNote('랭킹을 불러오는 중…');
+      this.addNote('랭킹을 불러오는 중...');
       return;
     }
     if (view.kind === 'failed') {

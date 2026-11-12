@@ -15,6 +15,7 @@ import {
   MIN_COINS_PER_PLAY,
   normalizeSave,
   resetProgress,
+  settleLastWeek,
   SAVE_VERSION,
   toggleFavorite,
 } from './save';
@@ -686,6 +687,35 @@ describe('주간 미션', () => {
       claimed: [],
       pick,
     });
+  });
+
+  it('주가 바뀌면 지난주에 받지 않은 보상을 넣어 주고, 두 번 주지 않는다', () => {
+    const done = playDifferent(easy.goal).save;
+    const settled = settleLastWeek(done, NEXT_WEEK, GAMES, NOW + 500);
+    expect(settled.missions.map((mission) => mission.id)).toContain('easy');
+    expect(settled.coins).toBe(settled.missions.reduce((sum, mission) => sum + mission.reward, 0));
+    expect(settled.save.coins).toBe(done.coins + settled.coins);
+    expect(settled.save.weekly).toEqual({ ...createWeekly(), weekKey: NEXT_WEEK });
+    expect(settled.save.updatedAt).toBe(NOW + 500);
+    // 원본은 그대로이고, 한 번 더 불러도 더 주지 않는다.
+    expect(done.weekly.weekKey).toBe(WEEK);
+    const again = settleLastWeek(settled.save, NEXT_WEEK, GAMES, NOW + 900);
+    expect(again.coins).toBe(0);
+    expect(again.save).toBe(settled.save);
+  });
+
+  it('같은 주이거나, 이미 받았거나, 덜 채웠으면 넣어 줄 것이 없다', () => {
+    const done = playDifferent(easy.goal).save;
+    expect(settleLastWeek(done, WEEK, GAMES).save).toBe(done);
+    const claimed = claimWeeklyMission(done, week, 'easy', NOW);
+    if (!claimed.ok) throw new Error('보상 받기 실패');
+    const rest = settleLastWeek(claimed.save, NEXT_WEEK, GAMES);
+    expect(rest.missions.map((mission) => mission.id)).not.toContain('easy');
+    const short = playDifferent(easy.goal - 1).save;
+    expect(settleLastWeek(short, NEXT_WEEK, GAMES).missions.map((mission) => mission.id)).not.toContain('easy');
+    // 기록이 없는 세이브
+    const fresh = createDefaultSave(NOW);
+    expect(settleLastWeek(fresh, NEXT_WEEK, GAMES).save).toBe(fresh);
   });
 
   it('이번 주의 게임을 적어 두어, 주 중간에 게임이 늘어도 채우던 미션이 바뀌지 않는다', () => {
