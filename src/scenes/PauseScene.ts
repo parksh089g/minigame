@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { FONT_SIZE, GAME_WIDTH, SCENE, THEME, THEME_CSS } from '../config';
 import type { BackAware } from '../core/app-events';
+import { homeScene } from '../core/home';
 import { addPanel, addScrim, addText, fadeToScene, PixelButton, type ButtonStyle } from '../core/ui';
 import { howToFor } from '../games/how-to';
 import type { PauseData, StageStart } from './MiniGameScene';
@@ -39,7 +40,7 @@ export class PauseScene extends Phaser.Scene implements BackAware {
   private quit(): void {
     const { sceneKey, gameId, stageLevel } = this.opened;
     this.scene.stop(sceneKey);
-    if (stageLevel === undefined) fadeToScene(this, SCENE.hub);
+    if (stageLevel === undefined) fadeToScene(this, homeScene());
     else fadeToScene(this, SCENE.stages, { gameId } satisfies StagesData);
   }
 

@@ -5,6 +5,7 @@ import { FONT_SIZE, GAME_WIDTH, SCENE, THEME, THEME_CSS } from '../../config';
 import type { BackAware } from '../../core/app-events';
 import { dateKeyOf } from '../../core/daily';
 import { vibrate } from '../../core/haptics';
+import { setHome } from '../../core/home';
 import { music } from '../../core/music';
 import { sfx, tone } from '../../core/sfx';
 import { store } from '../../core/store';
@@ -16,7 +17,7 @@ import { floatText, showBanner } from '../../scenes/GameHud';
 import { makeShareImage } from '../../share/card';
 import { displayHost, shareFileName, shareNotice, shareTitle, shareUrl } from '../../share/link';
 import { sendShare } from '../../share/send';
-import { thisWeek } from '../registry';
+import { getGame, thisWeek } from '../registry';
 import { COMPUTER_SIZE, computerTexture, registerCompanyTextures, SC, TASK_COLORS, taskTexture } from './art';
 import {
   AWAY,
@@ -32,6 +33,8 @@ import {
   LEVEL_SPEED,
   OFFICE_COINS,
   OFFICES,
+  PLAY_STARS,
+  PROJECT_ORDER,
   PROJECTS,
   QUEUE,
   RUSH,
@@ -76,6 +79,7 @@ import {
   formatDuration,
   formatLeaves,
   formatRate,
+  gameIncome,
   hasFreeDesk,
   hire,
   hireBlock,
@@ -95,8 +99,10 @@ import {
   promoteLead,
   queueBlock,
   release,
+  setStars,
   skill,
   specialtyOf,
+  starsOf,
   startProject,
   train,
   trainBlock,
@@ -109,6 +115,7 @@ import {
   type Release,
 } from './rules';
 import { claimGoal, GOAL_REWARD, goalText, hasGoalToClaim, isGoalDone, rollGoals, takeReleaseCoin } from './goals';
+import { nextStarTarget, readStars } from './link';
 import { OFFICE_SONG } from './music';
 import { SOUNDS, type Note, type SoundId } from './sound';
 import { companyStore } from './store';
@@ -169,8 +176,8 @@ interface Button {
   setStyle(style: ButtonStyle): void;
 }
 
-/** 아래쪽 버튼으로 여는 창 다섯과, 사무실 창에서 여는 부서 창, 돌아왔을 때 저절로 뜨는 알림 */
-type PanelKind = 'project' | 'gear' | 'staff' | 'office' | 'goals' | 'dept' | 'away';
+/** 아래쪽 버튼으로 여는 창 다섯과, 사무실 창에서 여는 부서 창, 위쪽의 수익을 눌러 여는 출시작 창, 돌아왔을 때 저절로 뜨는 알림 */
+type PanelKind = 'project' | 'gear' | 'staff' | 'office' | 'goals' | 'dept' | 'games' | 'away';
 const PANELS: readonly { kind: PanelKind; label: string }[] = [
   { kind: 'project', label: '게임' },
   { kind: 'gear', label: '장비' },
@@ -254,6 +261,10 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
 
   private leavesText!: Phaser.GameObjects.Text;
   private rateText!: Phaser.GameObjects.Text;
+  private rateChip!: Graphics;
+  private rateStar!: Phaser.GameObjects.Image;
+  private starsText!: Phaser.GameObjects.Text;
+  private ratePressed = false;
   private reputationText!: Phaser.GameObjects.Text;
   private officeText!: Phaser.GameObjects.Text;
   private reputationBar!: Graphics;
@@ -328,6 +339,8 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     this.sharing = false;
 
     registerCompanyTextures(this);
+    // 여기서 하러 보낸 게임에서 돌아왔다. 이제부터 나가는 길은 다시 허브다.
+    setHome(null);
     addBackdrop(this);
     new PixelButton(this, {
       x: MARGIN,
@@ -415,6 +428,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     if (!companyStore.data) return;
     this.state = companyStore.data;
     this.rollDay();
+    const risen = this.syncStars();
     music.play(OFFICE_SONG);
 
     const height = this.scale.height;
@@ -445,6 +459,31 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     } else {
       this.welcomeBack();
     }
+    this.announceStars(risen);
+  }
+
+  /** 허브에 적힌 게임마다의 최고 기록으로 출시작의 별을 맞춘다. 별이 는 게임의 id를 돌려준다. */
+  private syncStars(): ProjectId[] {
+    const risen = setStars(this.state, readStars((id) => store.data.games[id]?.best ?? 0));
+    if (risen.length > 0) companyStore.set(this.state);
+    return risen;
+  }
+
+  /** 새로 딴 별을 알린다. */
+  private announceStars(risen: readonly ProjectId[]): void {
+    if (risen.length === 0) return;
+    const state = this.state;
+    let text: string;
+    if (risen.length === 1) {
+      const id = risen[0];
+      const stars = starsOf(state, id);
+      text = `${PROJECTS[id].title} 별 ${stars}개! 수익 +${Math.round(PLAY_STARS.income * stars * 100)}%`;
+    } else {
+      const total = risen.reduce((sum, id) => sum + starsOf(state, id), 0);
+      text = `게임을 직접 해서 딴 별이 ${total}개 있어요`;
+    }
+    this.play('reward');
+    this.pill(text, 2600).setDepth(DEPTH.banner);
   }
 
   /** 닫아 둔 동안의 수익과 일을 셈하고, 알릴 것이 있으면 알린다. */
@@ -482,7 +521,26 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
   private buildTop(): void {
     this.add.image(49, 16, SC.leaf).setDisplaySize(14, 14);
     this.leavesText = addText(this, 59, 6, '0', { size: 16, color: THEME_CSS.inkDeep });
-    this.rateText = addText(this, 42, 26, '', { size: FONT_SIZE.small, color: THEME_CSS.sub });
+    // 초당 수익은 누르면 출시작 창이 열리는 작은 단추다. 딴 별의 수를 옆에 적는다.
+    this.rateChip = this.add.graphics();
+    this.rateText = addText(this, 46, 26, '', { size: FONT_SIZE.small, color: THEME_CSS.sub });
+    this.rateStar = this.add.image(0, 32, 'icon-star').setDisplaySize(9, 9);
+    this.starsText = addText(this, 0, 26, '', { size: FONT_SIZE.small, color: THEME_CSS.accent });
+    addTapZone(
+      this,
+      38,
+      2,
+      100,
+      38,
+      (pressed) => {
+        this.ratePressed = pressed;
+        this.shownRate = '';
+      },
+      () => {
+        sfx.click();
+        this.openPanel('games');
+      },
+    );
     this.reputationText = addText(this, W - MARGIN, 6, '', { color: THEME_CSS.accent, originX: 1 });
     this.officeText = addText(this, W - MARGIN, 30, '', { size: FONT_SIZE.small, color: THEME_CSS.sub, originX: 1 });
     this.reputationBar = this.add.graphics();
@@ -495,10 +553,20 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
       this.shownLeaves = leaves;
       this.leavesText.setText(formatLeaves(leaves));
     }
-    const rate = formatRate(incomePerSecond(state));
+    const stars = PROJECT_ORDER.reduce((sum, id) => sum + starsOf(state, id), 0);
+    const rate = `${formatRate(incomePerSecond(state))}|${stars}`;
     if (rate !== this.shownRate) {
       this.shownRate = rate;
-      this.rateText.setText(`초마다 +${rate}`);
+      this.rateText.setText(`초마다 +${formatRate(incomePerSecond(state))}`);
+      this.rateStar.setX(this.rateText.x + this.rateText.width + 9);
+      this.starsText.setText(String(stars)).setX(this.rateStar.x + 7);
+      const width = this.starsText.x + this.starsText.width + 7 - 40;
+      this.rateChip
+        .clear()
+        .fillStyle(THEME.shadow, 1)
+        .fillRoundedRect(40, 26, width, 15, 7.5)
+        .fillStyle(this.ratePressed ? THEME.dim : THEME.white, 1)
+        .fillRoundedRect(40, this.ratePressed ? 26 : 24.5, width, 15, 7.5);
     }
     if (state.reputation !== this.shownReputation) {
       this.shownReputation = state.reputation;
@@ -1266,6 +1334,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     else if (kind === 'office') this.buildOfficePanel(panel);
     else if (kind === 'goals') this.buildGoalsPanel(panel);
     else if (kind === 'dept') this.buildDeptPanel(panel);
+    else if (kind === 'games') this.buildGamesPanel(panel);
     else this.buildAwayPanel(panel);
     // 창을 만드는 동안 쪽 번호가 맞춰지므로, 다 만든 뒤의 모습을 적어 둔다.
     this.panelSignature = this.signatureOf(kind);
@@ -1310,6 +1379,10 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
       return `${page}|${staff}|${state.leaves >= hireCost(state)}|${state.office}|${state.lead}${leadBlock(state) ?? ''}`;
     }
     if (kind === 'away') return 'away';
+    if (kind === 'games') {
+      const games = PROJECT_ORDER.map((id) => `${versionOf(state, id)}${starsOf(state, id)}`).join(',');
+      return `${page}|${games}|${formatRate(incomePerSecond(state))}`;
+    }
     if (kind === 'dept') {
       const id = this.deptShown;
       const seats = state.desks.map((desk) => `${desk.staff ?? ''}${desk.dept ?? ''}`).join(',');
@@ -1781,6 +1854,61 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     panel.add(addText(this, left + 14, below + 37, '우리 회사를 친구에게 자랑해요', { size: FONT_SIZE.small, color: THEME_CSS.sub, originY: 0.5 }));
     this.button(panel, left + width - 66, below + 25, 56, 24, '공유', 'yellow', () => this.share());
     this.prepareShare();
+  }
+
+  /**
+   * 출시작 창: 낸 게임마다 버는 수익과 딴 별을 보여 주고, 그 게임을 바로 하러 간다.
+   * 직접 해서 최고 기록을 올리면 별을 따고, 별만큼 그 게임의 수익이 는다.
+   */
+  private buildGamesPanel(panel: Container): void {
+    const state = this.state;
+    // 큰 게임이 위에 오도록 뒤에서부터 적는다.
+    const ids = [...PROJECT_ORDER].reverse().filter((id) => versionOf(state, id) > 0);
+    const percent = Math.round(PLAY_STARS.income * 100);
+    if (ids.length === 0) {
+      const { top } = this.panelFrame(panel, '우리 게임', 56);
+      panel.add(addText(this, W / 2, top + 6, '아직 낸 게임이 없어요', { color: THEME_CSS.sub, originX: 0.5 }));
+      panel.add(
+        addText(this, W / 2, top + 30, '게임을 내면 여기서 직접 해 볼 수 있어요', { size: FONT_SIZE.small, color: THEME_CSS.faint, originX: 0.5 }),
+      );
+      return;
+    }
+    const bottom = this.listPanel(panel, 'games', '우리 게임', ids, 40, 34, (id: ProjectId, middle, left, width) => {
+      const def = PROJECTS[id];
+      const stars = starsOf(state, id);
+      panel.add(this.add.image(left + 24, middle, def.icon).setDisplaySize(24, 24));
+      const title = addText(this, left + 42, middle - 15, def.title, { color: THEME_CSS.inkDeep });
+      panel.add(title);
+      for (let star = 0; star < PLAY_STARS.count; star += 1) {
+        panel.add(
+          this.add
+            .image(title.x + title.width + 9 + star * 11, middle - 8, 'icon-star')
+            .setDisplaySize(10, 10)
+            .setAlpha(star < stars ? 1 : 0.22),
+        );
+      }
+      const best = store.data.games[id]?.best ?? 0;
+      const next = nextStarTarget(id, best);
+      const record = next === null ? `기록 ${best}` : `기록 ${best}/${next}`;
+      this.rowDetail(panel, left + 42, middle + 1, left + width - 62, `초마다 +${formatRate(gameIncome(state, id))}  ${record}`);
+      const game = getGame(id);
+      if (!game?.sceneKey) return;
+      const sceneKey = game.sceneKey;
+      this.button(panel, left + width - 58, middle - 13, 48, 26, '하기', 'green', () => this.playGame(sceneKey));
+    });
+    panel.add(
+      addText(this, W / 2, bottom + 4, `직접 해서 기록을 올리면 별을 따요`, { size: FONT_SIZE.small, color: THEME_CSS.sub, originX: 0.5 }),
+    );
+    panel.add(
+      addText(this, W / 2, bottom + 18, `별 하나마다 그 게임의 수익 +${percent}%`, { size: FONT_SIZE.small, color: THEME_CSS.faint, originX: 0.5 }),
+    );
+  }
+
+  /** 출시작을 직접 하러 간다. 그 게임이 끝나거나 그만두면 허브가 아니라 회사로 돌아온다. */
+  private playGame(sceneKey: string): void {
+    this.save();
+    setHome({ scene: COMPANY_SCENE, label: '회사로 돌아가기' });
+    fadeToScene(this, sceneKey);
   }
 
   /** 부서의 그림: 그 부서가 맡는 업무의 카드 그림을 그 색의 동그라미에 넣는다. */

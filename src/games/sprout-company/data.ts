@@ -129,6 +129,7 @@ export const TIPS = {
   move: '평판이 찼어요. 잎사귀를 모아 이사해요',
   hire: '빈 자리를 누르면 새 친구를 뽑을 수 있어요',
   goals: '목표 버튼에서 오늘의 목표를 볼 수 있어요',
+  play: '수익을 누르면 낸 게임을 할 수 있어요',
   train: '직원 창에서 교육하면 그 친구가 빨라져요',
   lead: '팀장을 두면 카드를 알아서 맡겨 줘요',
   rush: '급한 의뢰를 제때 끝내면 잎사귀를 받아요',
@@ -488,6 +489,22 @@ export const PROJECT_ORDER = Object.keys(PROJECTS) as ProjectId[];
  * 평판은 처음 값의 reputation배(올림)만 오른다.
  */
 export const UPDATE_SCALE = { work: 1.3, bonus: 1.2, income: 0.4, reputation: 0.4 } as const;
+
+// ───────── 미니게임과 잇기 ─────────
+
+/**
+ * 출시작은 포켓 아케이드의 실제 게임이다. 그 게임을 직접 해서 최고 기록을 올리면 별을 따고,
+ * 별 하나마다 그 출시작이 버는 수익이 income만큼 는다. 별은 세 개까지다.
+ * 별을 따는 점수는 그 게임의 오늘의 도전 목표 세 단계를 그대로 쓰고(link.ts),
+ * 오늘의 도전에 나오지 않는 게임은 여기 targets에 따로 적는다.
+ */
+export const PLAY_STARS: { count: number; income: number; targets: Partial<Record<ProjectId, readonly number[]>> } = {
+  count: 3,
+  income: 0.2,
+  targets: {
+    'lantern-keeper': [1000, 3000, 8000],
+  },
+};
 
 // ───────── 급한 의뢰 ─────────
 

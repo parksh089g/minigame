@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
-import { CSS, GAME_WIDTH, SCENE } from '../../config';
+import { CSS, GAME_WIDTH } from '../../config';
 import { vibrate } from '../../core/haptics';
+import { homeScene } from '../../core/home';
 import { music } from '../../core/music';
 import { sfx, tone } from '../../core/sfx';
 import { addText, fadeToScene } from '../../core/ui';
@@ -160,7 +161,7 @@ export class LanternKeeperScene extends MiniGameScene {
         savedRun: metaStore.run,
         onStart: () => this.restartWith('new'),
         onResume: () => this.restartWith('resume'),
-        onBack: () => fadeToScene(this, SCENE.hub),
+        onBack: () => fadeToScene(this, homeScene()),
         // 쪽을 넘길 때는 기다림 없이 바로 다시 그린다.
         onPage: (next, nextList) => this.scene.restart({ page: next, list: nextList } satisfies StartData),
       },
@@ -606,7 +607,7 @@ export class LanternKeeperScene extends MiniGameScene {
       return;
     }
     if (this.lobbyPage !== 'main') this.scene.restart({ page: 'main' } satisfies StartData);
-    else fadeToScene(this, SCENE.hub);
+    else fadeToScene(this, homeScene());
   }
 
   protected override pauseGame(): void {
