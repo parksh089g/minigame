@@ -9,10 +9,10 @@ import { addBackdrop, addText } from '../../core/ui';
 import { GameHud, HUD_HEIGHT } from '../../scenes/GameHud';
 import { MiniGameScene } from '../../scenes/MiniGameScene';
 import {
+  addBoard,
   BLOCK_ART,
   blockColor,
   blockTexture,
-  drawBoard,
   drawTray,
   LOOK,
   registerBlockTextures,
@@ -162,8 +162,8 @@ export class BlockFillScene extends MiniGameScene {
     this.layout = layoutFor({ x: 0, y: HUD_HEIGHT, width: GAME_WIDTH, height: height - HUD_HEIGHT });
 
     addBackdrop(this);
+    addBoard(this, this.layout).setDepth(DEPTH.board);
     const table = this.add.graphics().setDepth(DEPTH.board);
-    drawBoard(table, this.layout);
     drawTray(table, this.layout);
     this.addMascot();
     this.ghost = this.add.graphics().setDepth(DEPTH.ghost);

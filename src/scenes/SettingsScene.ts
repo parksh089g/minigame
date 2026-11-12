@@ -9,6 +9,7 @@ import { getOfflineStatus, isStandalone, onOfflineStatus, type OfflineStatus } f
 import { sfx } from '../core/sfx';
 import { store } from '../core/store';
 import { addBackdrop, addPanel, addText, fadeIn, fadeToScene, PixelButton, whileBlocked } from '../core/ui';
+import { nextVolume, volumeLabel } from '../core/volume';
 import { failureText } from '../online/api';
 import { afterImport, createTransferCode, useTransferCode } from '../online/online';
 import { isJoined } from '../online/profile';
@@ -82,8 +83,14 @@ export class SettingsScene extends Phaser.Scene {
       '효과음',
       {
         isOn: () => store.data.settings.sound,
+        label: () => volumeLabel(store.data.settings.sound, store.data.volume.sound),
         toggle: () => {
-          store.update((save) => void (save.settings.sound = !save.settings.sound));
+          // 누를 때마다 꺼짐, 작게, 보통, 크게를 돈다. 바꾼 크기는 바로 나는 누름 소리로 들어 볼 수 있다.
+          store.update((save) => {
+            const next = nextVolume(save.settings.sound, save.volume.sound);
+            save.settings.sound = next.on;
+            save.volume.sound = next.level;
+          });
           sfx.click();
         },
       },
@@ -94,8 +101,13 @@ export class SettingsScene extends Phaser.Scene {
       '음악',
       {
         isOn: () => store.data.settings.music,
+        label: () => volumeLabel(store.data.settings.music, store.data.volume.music),
         toggle: () => {
-          store.update((save) => void (save.settings.music = !save.settings.music));
+          store.update((save) => {
+            const next = nextVolume(save.settings.music, save.volume.music);
+            save.settings.music = next.on;
+            save.volume.music = next.level;
+          });
           sfx.click();
         },
       },
@@ -187,7 +199,7 @@ export class SettingsScene extends Phaser.Scene {
   private addToggleRow(
     y: number,
     label: string,
-    binding: { isOn: () => boolean; toggle: () => void },
+    binding: { isOn: () => boolean; toggle: () => void; label?: () => string },
     span: { left: number; right: number; width: number } = { left: LEFT, right: RIGHT, width: 64 },
   ): void {
     if (label.includes('\n')) addText(this, span.left, y - 2, label, { lineSpacing: -1 });
@@ -206,7 +218,8 @@ export class SettingsScene extends Phaser.Scene {
     });
     const refresh = (): void => {
       const on = binding.isOn();
-      button.setLabel(on ? '켜짐' : '꺼짐').setStyle(on ? 'green' : 'neutral');
+      // label이 있으면 켜짐 대신 그 말(소리의 크기)을 적는다.
+      button.setLabel(binding.label?.() ?? (on ? '켜짐' : '꺼짐')).setStyle(on ? 'green' : 'neutral');
     };
     refresh();
   }

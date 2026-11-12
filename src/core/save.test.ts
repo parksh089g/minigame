@@ -37,7 +37,13 @@ describe('normalizeSave', () => {
       coins: 12,
       settings: { sound: false, music: false, vibration: true, colorAssist: true },
       games: { 'lightning-tap': { best: 80, plays: 4, lastPlayedAt: NOW - 1000 } },
-      daily: { lastClearedOn: '2026-11-11', streak: 3, bestStreak: 4, totalCleared: 8 },
+      daily: {
+        lastClearedOn: '2026-11-11',
+        streak: 3,
+        bestStreak: 4,
+        totalCleared: 8,
+        recent: ['2026-11-06', '2026-11-09', '2026-11-10', '2026-11-11'],
+      },
       cosmetics: {
         owned: ['runner-drop'],
         equipped: {
@@ -53,7 +59,9 @@ describe('normalizeSave', () => {
         name: '등불지기',
         sentName: '등불지기',
         sent: { 'lightning-tap': 80 },
+        week: { key: '2026-11-09', bests: { 'lightning-tap': 70 }, sent: { 'lightning-tap': 55 } },
       },
+      volume: { sound: 1, music: 3 },
       favorites: ['stack-tower', 'lightning-tap'],
       weekly: {
         weekKey: '2026-11-09',
@@ -121,6 +129,13 @@ describe('normalizeSave', () => {
     ).toHaveLength(MAX_FAVORITES);
   });
 
+  it('소리 크기 조절이 생기기 전의 세이브는 보통 크기로 읽는다', () => {
+    const old = { version: 7, coins: 3, settings: { sound: false, music: true, vibration: true } };
+    const save = normalizeSave(old, NOW);
+    expect(save.volume).toEqual({ sound: 2, music: 2 });
+    expect(save.settings.sound).toBe(false);
+  });
+
   it('온라인 기능이 생기기 전의 세이브는 랭킹에 참여하지 않은 상태로 읽는다', () => {
     const old = {
       version: 4,
@@ -130,7 +145,13 @@ describe('normalizeSave', () => {
       createdAt: NOW - 5000,
       updatedAt: NOW - 1000,
     };
-    expect(normalizeSave(old, NOW).online).toEqual({ id: null, name: null, sentName: null, sent: {} });
+    expect(normalizeSave(old, NOW).online).toEqual({
+      id: null,
+      name: null,
+      sentName: null,
+      sent: {},
+      week: null,
+    });
   });
 
   it('꾸미기가 생기기 전의 세이브는 기본 꾸미기로 읽는다', () => {
@@ -145,7 +166,8 @@ describe('normalizeSave', () => {
     };
     const save = normalizeSave(old, NOW);
     expect(save.coins).toBe(55);
-    expect(save.daily).toEqual({ ...old.daily, bestStreak: 2 });
+    // 최근에 달성한 날은 이 세이브보다 뒤에 생겼으므로, 이어지고 있는 연속으로 채운다
+    expect(save.daily).toEqual({ ...old.daily, bestStreak: 2, recent: ['2026-11-10', '2026-11-11'] });
     expect(save.cosmetics).toEqual(createCosmetics());
   });
 
@@ -164,7 +186,7 @@ describe('normalizeSave', () => {
     expect(save.games).toEqual(old.games);
     // 이 세이브보다 뒤에 생긴 설정: 배경 음악은 켠 채로, 색 구분 도우미는 꺼진 채로 읽는다
     expect(save.settings).toEqual({ ...old.settings, music: true, colorAssist: false });
-    expect(save.daily).toEqual({ lastClearedOn: null, streak: 0, bestStreak: 0, totalCleared: 0 });
+    expect(save.daily).toEqual({ lastClearedOn: null, streak: 0, bestStreak: 0, totalCleared: 0, recent: [] });
   });
 
   it('배경 음악 설정이 생기기 전의 세이브는 음악을 켠 채로 읽고, 끈 것은 그대로 둔다', () => {
@@ -225,6 +247,20 @@ describe('applyPlayResult', () => {
     expect(result.save.coins).toBe(4);
     expect(result.save.games['lightning-tap']).toEqual({ best: 42, plays: 1, lastPlayedAt: NOW + 1 });
     expect(result.save.updatedAt).toBe(NOW + 1);
+  });
+
+  it('랭킹이 있는 게임의 점수는 이번 주 랭킹에 올릴 기록으로도 적는다', () => {
+    // NOW는 한국 시각으로 2023년 11월 15일 수요일이다. 그 주의 월요일은 13일.
+    let save = applyPlayResult(createDefaultSave(NOW), 'lightning-tap', 42, 4, NOW).save;
+    expect(save.online.week).toEqual({ key: '2023-11-13', bests: { 'lightning-tap': 42 }, sent: {} });
+    save = applyPlayResult(save, 'lightning-tap', 30, 4, NOW + 1000).save;
+    save = applyPlayResult(save, 'not-ranked', 99, 4, NOW + 2000).save;
+    expect(save.online.week?.bests).toEqual({ 'lightning-tap': 42 });
+    // 다음 주에는 최고 기록보다 낮은 점수여도 그 주의 기록이 된다.
+    const week = 7 * 24 * 60 * 60 * 1000;
+    const next = applyPlayResult(save, 'lightning-tap', 10, 4, NOW + week);
+    expect(next.isNewBest).toBe(false);
+    expect(next.save.online.week).toEqual({ key: '2023-11-20', bests: { 'lightning-tap': 10 }, sent: {} });
   });
 
   it('최고 기록보다 낮은 점수는 기록을 바꾸지 않는다', () => {
@@ -300,6 +336,7 @@ describe('오늘의 도전과 한 판의 결과', () => {
       streak: 1,
       bestStreak: 1,
       totalCleared: 1,
+      recent: ['2026-11-11'],
     });
   });
 
@@ -336,6 +373,7 @@ describe('오늘의 도전과 한 판의 결과', () => {
       streak: 2,
       bestStreak: 2,
       totalCleared: 2,
+      recent: ['2026-11-11', '2026-11-12'],
     });
   });
 
@@ -488,6 +526,14 @@ describe('resetProgress', () => {
     expect(reset.settings).toEqual({ sound: false, music: true, vibration: true, colorAssist: true });
   });
 
+  it('소리 크기는 설정이라 남긴다', () => {
+    const save = createDefaultSave(NOW);
+    save.volume = { sound: 3, music: 1 };
+    const reset = resetProgress(save, NOW + 100);
+    expect(reset.volume).toEqual({ sound: 3, music: 1 });
+    expect(reset.volume).not.toBe(save.volume);
+  });
+
   it('닉네임은 남긴다(온라인 랭킹의 기록은 랭킹 화면에서 따로 뺀다)', () => {
     const save = createDefaultSave(NOW);
     save.online = {
@@ -495,6 +541,7 @@ describe('resetProgress', () => {
       name: '등불지기',
       sentName: '등불지기',
       sent: { 'lightning-tap': 80 },
+      week: { key: '2026-11-09', bests: { 'lightning-tap': 60 }, sent: { 'lightning-tap': 60 } },
     };
     const reset = resetProgress(save, NOW + 100);
     expect(reset.online).toEqual(save.online);
@@ -522,6 +569,7 @@ describe('resetProgress', () => {
       streak: 0,
       bestStreak: 0,
       totalCleared: 0,
+      recent: [],
     });
   });
 });

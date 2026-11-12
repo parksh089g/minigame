@@ -16,6 +16,9 @@ import {
   type SubmitResult,
 } from '../src/online/protocol';
 
+/** 게임 id → 점수. 앱이 보낸 것에서 쓸 수 있는 것만 고른 것이다. */
+export type Scores = Partial<Record<RankedGame, number>>;
+
 export type SqlValue = string | number | null;
 
 /** Durable Object의 `ctx.storage.sql`에서 여기서 쓰는 부분만 적은 것 */
@@ -38,6 +41,17 @@ const SCHEMA = [
    ) WITHOUT ROWID`,
   // 순위는 점수가 높은 순, 같으면 먼저 낸 순
   `CREATE INDEX IF NOT EXISTS scores_rank ON scores (game, score DESC, at ASC)`,
+  // 주간 랭킹: 주마다 게임마다 기기 하나에 한 줄. 지난 주의 줄은 새 주의 첫 기록이 올 때 지운다.
+  `CREATE TABLE IF NOT EXISTS weekly (
+     week TEXT NOT NULL,
+     game TEXT NOT NULL,
+     device TEXT NOT NULL,
+     name TEXT NOT NULL,
+     score INTEGER NOT NULL,
+     at INTEGER NOT NULL,
+     PRIMARY KEY (week, game, device)
+   ) WITHOUT ROWID`,
+  `CREATE INDEX IF NOT EXISTS weekly_rank ON weekly (week, game, score DESC, at ASC)`,
   // 다른 기기로 옮기려고 잠깐 맡겨 둔 세이브
   `CREATE TABLE IF NOT EXISTS transfers (
      code TEXT NOT NULL PRIMARY KEY,
@@ -46,14 +60,40 @@ const SCHEMA = [
    ) WITHOUT ROWID`,
 ] as const;
 
+/**
+ * 순위를 매기는 범위: 전체 랭킹의 한 게임, 또는 어느 주의 한 게임.
+ * table과 where는 여기서 정한 글자열만 쓰고, 밖에서 온 값은 모두 args로 넘긴다.
+ */
+interface Scope {
+  table: 'scores' | 'weekly';
+  where: string;
+  args: SqlValue[];
+}
+
+const allTime = (game: RankedGame): Scope => ({ table: 'scores', where: 'game = ?', args: [game] });
+const inWeek = (week: string, game: RankedGame): Scope => ({
+  table: 'weekly',
+  where: 'week = ? AND game = ?',
+  args: [week, game],
+});
+
+interface Own {
+  name: string;
+  score: number;
+  at: number;
+}
+
 export class BoardDb {
+  /** 지난 주의 줄을 마지막으로 치운 주. 서버가 깨어 있는 동안 주마다 한 번만 치운다. */
+  private sweptWeek: string | null = null;
+
   constructor(private readonly sql: SqlRunner) {
     for (const statement of SCHEMA) sql.exec(statement);
   }
 
   /** 이 기기가 이 게임의 랭킹에 이미 올라 있는지 */
   has(game: RankedGame, device: string): boolean {
-    return this.own(game, device) !== null;
+    return this.own(allTime(game), device) !== null;
   }
 
   /** 이 기기가 어느 게임에든 올라 있는지 */
@@ -61,11 +101,11 @@ export class BoardDb {
     return RANKED_GAMES.some((game) => this.has(game, device));
   }
 
-  private own(game: RankedGame, device: string): { name: string; score: number; at: number } | null {
+  private own(scope: Scope, device: string): Own | null {
     const rows = this.sql
       .exec<{ name: string; score: number; at: number }>(
-        'SELECT name, score, at FROM scores WHERE game = ? AND device = ?',
-        game,
+        `SELECT name, score, at FROM ${scope.table} WHERE ${scope.where} AND device = ?`,
+        ...scope.args,
         device,
       )
       .toArray();
@@ -73,15 +113,15 @@ export class BoardDb {
   }
 
   /** 점수와 낸 시각으로 순위를 센다. RANK_SCAN까지만 세고, 그 밖이면 RANK_SCAN + 1을 돌려준다. */
-  private rankOf(game: RankedGame, score: number, at: number): number {
+  private rankOf(scope: Scope, score: number, at: number): number {
     const rows = this.sql
       .exec<{ ahead: number }>(
         `SELECT COUNT(*) AS ahead FROM (
-           SELECT 1 FROM scores
-           WHERE game = ? AND score >= ? AND (score > ? OR at < ?)
+           SELECT 1 FROM ${scope.table}
+           WHERE ${scope.where} AND score >= ? AND (score > ? OR at < ?)
            LIMIT ?
          )`,
-        game,
+        ...scope.args,
         score,
         score,
         at,
@@ -91,12 +131,13 @@ export class BoardDb {
     return (rows[0]?.ahead ?? 0) + 1;
   }
 
-  /** 한 게임의 랭킹: 위에서부터 TOP_COUNT줄과, 물어본 기기의 순위 */
-  board(game: RankedGame, device: string | null): RankBoard {
+  /** 한 게임의 랭킹: 위에서부터 TOP_COUNT줄과, 물어본 기기의 순위. week를 주면 그 주의 랭킹이다. */
+  board(game: RankedGame, device: string | null, week: string | null = null): RankBoard {
+    const scope = week === null ? allTime(game) : inWeek(week, game);
     const rows = this.sql
       .exec<{ name: string; score: number; device: string }>(
-        'SELECT name, score, device FROM scores WHERE game = ? ORDER BY score DESC, at ASC LIMIT ?',
-        game,
+        `SELECT name, score, device FROM ${scope.table} WHERE ${scope.where} ORDER BY score DESC, at ASC LIMIT ?`,
+        ...scope.args,
         TOP_COUNT,
       )
       .toArray();
@@ -113,19 +154,23 @@ export class BoardDb {
       if (shown) {
         me = { rank: shown.rank, score: shown.score, name: shown.name };
       } else {
-        const own = this.own(game, device);
-        if (own) me = { rank: this.rankOf(game, own.score, own.at), score: own.score, name: own.name };
+        const own = this.own(scope, device);
+        if (own) me = { rank: this.rankOf(scope, own.score, own.at), score: own.score, name: own.name };
       }
     }
-    return { top, me };
+    return week === null ? { top, me } : { top, me, week };
   }
 
-  /** 이 기기가 올라 있는 모든 게임에서의 순위와 점수. 어디에도 올라 있지 않으면 비어 있다. */
-  standings(device: string): Standings {
+  /**
+   * 이 기기가 올라 있는 모든 게임에서의 순위와 점수. 어디에도 올라 있지 않으면 비어 있다.
+   * week를 주면 그 주의 랭킹에서 센다.
+   */
+  standings(device: string, week: string | null = null): Standings {
     const standings: Standings = {};
     for (const game of RANKED_GAMES) {
-      const own = this.own(game, device);
-      if (own) standings[game] = { rank: this.rankOf(game, own.score, own.at), score: own.score };
+      const scope = week === null ? allTime(game) : inWeek(week, game);
+      const own = this.own(scope, device);
+      if (own) standings[game] = { rank: this.rankOf(scope, own.score, own.at), score: own.score };
     }
     return standings;
   }
@@ -133,8 +178,15 @@ export class BoardDb {
   /**
    * 기기의 최고 점수를 올린다. 이미 있는 점수보다 낮으면 점수는 그대로 두고 닉네임만 맞춘다.
    * 닉네임은 이 기기가 올라 있는 모든 게임에서 같이 바뀐다.
+   * weekly는 이번 주(week)의 랭킹에 올릴 점수다. 어느 주가 이번 주인지는 부르는 쪽(service.ts)이 서버의 시각으로 정한다.
    */
-  submit(device: string, name: string, scores: Partial<Record<RankedGame, number>>, now: number): SubmitResult {
+  submit(
+    device: string,
+    name: string,
+    scores: Scores,
+    now: number,
+    weekly: { week: string; scores: Scores } | null = null,
+  ): SubmitResult {
     const result: SubmitResult = { bests: {}, ranks: {} };
     for (const game of RANKED_GAMES) {
       const score = scores[game];
@@ -162,19 +214,61 @@ export class BoardDb {
         score,
         now,
       );
-      const own = this.own(game, device);
+      const own = this.own(allTime(game), device);
       if (!own) continue;
       result.bests[game] = own.score;
-      result.ranks[game] = this.rankOf(game, own.score, own.at);
+      result.ranks[game] = this.rankOf(allTime(game), own.score, own.at);
     }
+    if (weekly) this.submitWeek(device, name, weekly.week, weekly.scores, now);
     return result;
   }
 
-  /** 이 기기의 기록을 모든 랭킹에서 지운다. */
+  /** 이번 주 랭킹에 점수를 올린다. 전체 랭킹과 같은 규칙이고, 닉네임도 이번 주의 줄에서 같이 바뀐다. */
+  private submitWeek(device: string, name: string, week: string, scores: Scores, now: number): void {
+    this.sweepWeeks(week);
+    for (const game of RANKED_GAMES) {
+      const score = scores[game];
+      if (score === undefined) {
+        this.sql.exec(
+          'UPDATE weekly SET name = ? WHERE week = ? AND game = ? AND device = ? AND name <> ?',
+          name,
+          week,
+          game,
+          device,
+          name,
+        );
+        continue;
+      }
+      this.sql.exec(
+        `INSERT INTO weekly (week, game, device, name, score, at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (week, game, device) DO UPDATE SET
+           name = excluded.name,
+           score = MAX(weekly.score, excluded.score),
+           at = CASE WHEN excluded.score > weekly.score THEN excluded.at ELSE weekly.at END
+         WHERE excluded.score > weekly.score OR excluded.name <> weekly.name`,
+        week,
+        game,
+        device,
+        name,
+        score,
+        now,
+      );
+    }
+  }
+
+  /** 이번 주(week)보다 앞선 주의 줄을 지운다. 주의 이름은 날짜라서 글자 순서가 곧 시간 순서다. */
+  private sweepWeeks(week: string): void {
+    if (this.sweptWeek === week) return;
+    this.sql.exec('DELETE FROM weekly WHERE week < ?', week);
+    this.sweptWeek = week;
+  }
+
+  /** 이 기기의 기록을 모든 랭킹에서 지운다. 주간 랭킹의 줄도 같이 지운다. */
   forget(device: string): void {
     for (const game of RANKED_GAMES) {
       this.sql.exec('DELETE FROM scores WHERE game = ? AND device = ?', game, device);
     }
+    this.sql.exec('DELETE FROM weekly WHERE device = ?', device);
   }
 
   /**

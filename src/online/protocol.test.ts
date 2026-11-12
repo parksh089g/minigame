@@ -10,12 +10,18 @@ import {
   deviceIdFrom,
   formatCode,
   isDeviceId,
+  hasWeeklyBoard,
   isRankedGame,
+  isRankSpan,
+  isRankWeek,
   MAX_SCORE,
   NAME_MAX,
   RANK_SCAN,
   RANKED_GAMES,
   rankLabel,
+  RANK_WEEK_MS,
+  rankWeekOf,
+  rankWeekStart,
 } from './protocol';
 
 describe('랭킹이 있는 게임', () => {
@@ -141,5 +147,74 @@ describe('옮기기 코드', () => {
       expect(cleanCode(bad), bad).toBeNull();
     }
     expect(cleanCode(12345678)).toBeNull();
+  });
+});
+
+describe('랭킹 주', () => {
+  /** 한국 시각으로 적은 때를 ms로 바꾼다 */
+  const kst = (text: string): number => Date.parse(`${text}+09:00`);
+
+  it('그 주 월요일의 날짜(한국 시각)가 주의 이름이다', () => {
+    expect(rankWeekOf(kst('2026-11-12T15:00:00'))).toBe('2026-11-09');
+    expect(rankWeekOf(kst('2026-11-09T00:00:00'))).toBe('2026-11-09');
+    expect(rankWeekOf(kst('2026-11-15T23:59:59'))).toBe('2026-11-09');
+  });
+
+  it('월요일 0시(한국 시각)에 새 주가 시작된다', () => {
+    expect(rankWeekOf(kst('2026-11-16T00:00:00') - 1)).toBe('2026-11-09');
+    expect(rankWeekOf(kst('2026-11-16T00:00:00'))).toBe('2026-11-16');
+  });
+
+  it('기기가 어느 나라에 있든 같은 순간에는 같은 주다', () => {
+    // 협정 세계시로는 아직 일요일 오후지만 한국은 월요일 새벽이다.
+    expect(rankWeekOf(Date.parse('2026-11-15T15:00:00Z'))).toBe('2026-11-16');
+    expect(rankWeekOf(Date.parse('2026-11-15T14:59:59Z'))).toBe('2026-11-09');
+  });
+
+  it('달과 해가 바뀌는 주도 월요일의 날짜로 적는다', () => {
+    expect(rankWeekOf(kst('2027-01-01T12:00:00'))).toBe('2026-12-28');
+    expect(rankWeekOf(kst('2026-03-01T12:00:00'))).toBe('2026-02-23');
+  });
+
+  it('일주일 내내 같은 이름이고, 이름은 시간 순서대로 늘어선다', () => {
+    const start = kst('2026-11-09T00:00:00');
+    const day = 24 * 60 * 60 * 1000;
+    for (let offset = 0; offset < 7; offset += 1) expect(rankWeekOf(start + offset * day)).toBe('2026-11-09');
+    const weeks = Array.from({ length: 60 }, (_, index) => rankWeekOf(start + index * 7 * day));
+    expect([...weeks].sort()).toEqual(weeks);
+    expect(new Set(weeks).size).toBe(60);
+    for (const week of weeks) {
+      expect(isRankWeek(week)).toBe(true);
+      expect(new Date(`${week}T00:00:00Z`).getUTCDay()).toBe(1);
+    }
+  });
+
+  it('주가 시작된 때는 한국 시각으로 월요일 0시다', () => {
+    const start = kst('2026-11-09T00:00:00');
+    expect(rankWeekStart(kst('2026-11-12T15:00:00'))).toBe(start);
+    expect(rankWeekStart(start)).toBe(start);
+    expect(rankWeekStart(start - 1)).toBe(start - RANK_WEEK_MS);
+    expect(rankWeekStart(start + RANK_WEEK_MS)).toBe(start + RANK_WEEK_MS);
+  });
+
+  it('점수가 계속 쌓이는 게임(이어지는 성장 게임)에만 주간 랭킹이 없다', () => {
+    for (const game of GAMES.filter((entry) => isRankedGame(entry.id))) {
+      expect(hasWeeklyBoard(game.id), game.id).toBe(game.ongoing !== true);
+    }
+    expect(hasWeeklyBoard('stack-tower')).toBe(true);
+    expect(hasWeeklyBoard('sprout-company')).toBe(false);
+    expect(hasWeeklyBoard('nope')).toBe(false);
+    expect(hasWeeklyBoard(undefined)).toBe(false);
+  });
+
+  it('주의 이름과 범위의 모양을 가린다', () => {
+    expect(isRankWeek('2026-11-09')).toBe(true);
+    for (const value of ['2026-11-9', '20261109', '이번 주', '', 3, null, undefined]) {
+      expect(isRankWeek(value)).toBe(false);
+    }
+    expect(isRankSpan('all')).toBe(true);
+    expect(isRankSpan('week')).toBe(true);
+    expect(isRankSpan('month')).toBe(false);
+    expect(isRankSpan(null)).toBe(false);
   });
 });

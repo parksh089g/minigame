@@ -6,8 +6,9 @@
 import { compile, STEPS_PER_BAR, type Compiled, type Drum, type Hit, type Song } from './score';
 import { runningAudio } from './sfx';
 import { store } from './store';
+import { volumeGain } from './volume';
 
-/** 음악 전체의 크기. 효과음(0.22) 아래에 깔리게 작게 둔다. */
+/** 음악 전체의 크기(크기 설정이 보통일 때). 효과음(0.22) 아래에 깔리게 작게 둔다. */
 const VOLUME = 0.11;
 /** 이만큼(초) 앞의 소리까지 미리 예약한다. 프레임이 잠깐 밀려도 끊기지 않을 만큼이다. */
 const AHEAD = 0.25;
@@ -33,6 +34,8 @@ class Music {
   /** rest()가 걸어 둔 타이머. tick()이 다시 불리면 푼다. */
   private resting: number | null = null;
   private noise: { ctx: AudioContext; buffer: AudioBuffer } | null = null;
+  /** 지금 통로에 맞춰 둔 크기. 설정에서 크기를 바꾸면 tick()이 알아채고 다시 맞춘다. */
+  private applied = 0;
 
   /**
    * 이 곡을 되풀이해서 튼다. 이미 틀고 있는 곡이면 그대로 둔다.
@@ -75,6 +78,7 @@ class Music {
     const ctx = runningAudio();
     if (!ctx || !this.bus) return;
     this.ramp(ctx, this.bus, this.level(), 0.25);
+    this.applied = this.level();
   }
 
   /** 프레임마다 부른다. 곧 나올 소리를 예약한다. */
@@ -97,7 +101,12 @@ class Music {
       this.bus.gain.setValueAtTime(0, ctx.currentTime);
       this.bus.connect(ctx.destination);
       this.ramp(ctx, this.bus, this.level(), RISE);
+      this.applied = this.level();
       this.nextTime = ctx.currentTime + 0.06;
+    } else if (this.applied !== this.level()) {
+      // 연주하는 사이에 설정에서 크기를 바꿨다.
+      this.ramp(ctx, this.bus, this.level(), 0.25);
+      this.applied = this.level();
     }
     // 화면이 가려졌다 돌아오면 밀린 만큼을 한꺼번에 내지 않고, 멈췄던 자리에서 이어 간다.
     if (this.nextTime < ctx.currentTime) this.nextTime = ctx.currentTime + 0.06;
@@ -115,7 +124,7 @@ class Music {
   }
 
   private level(): number {
-    return VOLUME * (this.hushed ? HUSH : 1);
+    return VOLUME * (this.hushed ? HUSH : 1) * volumeGain(store.data.volume.music);
   }
 
   private ramp(ctx: AudioContext, bus: GainNode, to: number, seconds: number): void {

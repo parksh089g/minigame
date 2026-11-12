@@ -1,4 +1,9 @@
-/** 화면 아래에 잠깐 뜨는 안내 문구. 게임 캔버스 밖(DOM)에 그려서 어느 씬에서든 보인다. */
+/**
+ * 화면 아래에 잠깐 뜨는 안내 문구. 게임 캔버스 밖(DOM)에 그려서 어느 씬에서든 보인다.
+ * 자리와 크기는 캔버스에 맞춘다(stage.ts): 캔버스의 아래쪽에 놓고, 캔버스가 크게 보이는 화면에서는 같이 키운다.
+ */
+import { placeToast } from './stage';
+import { onStageChange, stageBox } from './stage-watch';
 
 export interface ToastOptions {
   /** true면 사용자가 누를 때까지 남는다 */
@@ -23,6 +28,39 @@ let hideTimer: number | undefined;
 let waiting: ToastSpec | null = null;
 let held = false;
 let releaseTimer: number | undefined;
+/** 문구의 가운데가 올 높이(게임 화면의 논리 좌표). null이면 캔버스의 아래쪽에 놓는다. */
+let anchorY: number | null = null;
+let watching = false;
+
+/**
+ * 문구를 놓을 높이를 정한다. 화면 아래쪽에 누를 것이 있는 화면(허브)이 문구를 다른 데로 비켜 놓을 때 쓴다.
+ * null을 주면 다시 아래쪽에 놓는다.
+ */
+export function setToastAnchor(y: number | null): void {
+  anchorY = y;
+  place();
+}
+
+/** 떠 있는 문구를 캔버스에 맞춰 놓는다. 캔버스를 잴 수 없으면 style.css에 적어 둔 자리(창의 아래쪽)에 둔다. */
+function place(): void {
+  const box = stageBox();
+  if (!current || !box) return;
+  const spot = placeToast(box, window.innerHeight, anchorY);
+  const { style } = current.element;
+  style.left = `${spot.centerX}px`;
+  style.maxWidth = `${spot.maxWidth}px`;
+  if (spot.centerY === null) {
+    style.top = 'auto';
+    style.bottom = `${spot.bottom ?? 0}px`;
+    style.transformOrigin = 'center bottom';
+    style.transform = `translateX(-50%) scale(${spot.scale})`;
+  } else {
+    style.top = `${spot.centerY}px`;
+    style.bottom = 'auto';
+    style.transformOrigin = 'center';
+    style.transform = `translate(-50%, -50%) scale(${spot.scale})`;
+  }
+}
 
 export function hideToast(): void {
   window.clearTimeout(hideTimer);
@@ -73,6 +111,11 @@ export function showToast(message: string, options: ToastOptions = {}): void {
 
   document.body.appendChild(toast);
   current = { element: toast, spec: { message, options } };
+  if (!watching) {
+    watching = true;
+    onStageChange(place);
+  }
+  place();
 
   if (!options.sticky) {
     hideTimer = window.setTimeout(hideToast, options.durationMs ?? 3500);
