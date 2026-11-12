@@ -36,7 +36,7 @@ const MARGIN = 12;
 const ROW_WIDTH = GAME_WIDTH - MARGIN * 2;
 const BUY_WIDTH = 62;
 const CARD_GAP = 6;
-const HERO_CARD = { width: (ROW_WIDTH - CARD_GAP * 2) / 3, height: 62 } as const;
+const HERO_CARD = { width: (ROW_WIDTH - CARD_GAP * (HERO_ORDER.length - 1)) / HERO_ORDER.length, height: 62 } as const;
 /** 스테이지 카드: 위에는 그곳의 바닥과 그림자가 보이는 띠, 아래에는 이름. 한 줄에 스테이지 수만큼 나란히 놓는다. */
 const STAGE_CARD = {
   width: (ROW_WIDTH - CARD_GAP * (STAGE_ORDER.length - 1)) / STAGE_ORDER.length,

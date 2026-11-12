@@ -13,6 +13,7 @@ export const LK = {
   keeper: ['lk-keeper-1', 'lk-keeper-2'],
   stargazer: ['lk-stargazer-1', 'lk-stargazer-2'],
   stormer: ['lk-stormer-1', 'lk-stormer-2'],
+  ringer: ['lk-ringer-1', 'lk-ringer-2'],
   shade: ['lk-shade-1', 'lk-shade-2'],
   bat: ['lk-bat-1', 'lk-bat-2'],
   wisp: ['lk-wisp-1', 'lk-wisp-2'],
@@ -73,6 +74,7 @@ export const HERO_FRAMES: Readonly<Record<HeroId, readonly [string, string]>> = 
   keeper: LK.keeper,
   stargazer: LK.stargazer,
   stormer: LK.stormer,
+  ringer: LK.ringer,
 };
 
 /**
@@ -177,6 +179,13 @@ const STORMER_TOP: Rows = [
   '...0bbbbbb0.000.',
   ...recolor(KEEPER_TOP.slice(7), { '2': '7', '3': '6', '4': 'b' }),
 ];
+
+/** 종지기: 붉은 두건에 흰 옷, 손에는 등불 대신 종 */
+const RINGER_BELL: Rows = ['.....', '.....', '.....', '.....', '.....', '.....', '..0..', '.040.', '04440', '04c40', '00300', '..0..', '.....', '.....'];
+const RINGER_TOP: Rows = recolor(
+  KEEPER_TOP.map((row) => row.slice(0, 11)),
+  { '4': '2', '2': 'd', '3': 'c' },
+).map((row, index) => row + RINGER_BELL[index]);
 
 const BAT_1: Rows = [
   '0............0',
@@ -769,6 +778,8 @@ export function registerLanternTextures(scene: Phaser.Scene): void {
   addWithFlash(LK.stargazer[1], [...STARGAZER_TOP, ...LEGS_2]);
   addWithFlash(LK.stormer[0], [...STORMER_TOP, ...LEGS_1]);
   addWithFlash(LK.stormer[1], [...STORMER_TOP, ...LEGS_2]);
+  addWithFlash(LK.ringer[0], [...RINGER_TOP, ...LEGS_1]);
+  addWithFlash(LK.ringer[1], [...RINGER_TOP, ...LEGS_2]);
   addWithFlash(LK.bat[0], BAT_1);
   addWithFlash(LK.bat[1], BAT_2);
   // 안개나방은 박쥐와 같은 모양에 날개만 잿빛이다.
