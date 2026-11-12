@@ -5,6 +5,7 @@ import { initAppShell, untilUpright } from './core/shell';
 import { initStage } from './core/stage-watch';
 import { HiDpiPlugin, pickRenderScale, renderScale, setRenderScale } from './core/hidpi';
 import { initInstall } from './core/install-guide';
+import { initMotionGuard } from './core/motion-guard';
 import { initPwa, isStandalone } from './core/pwa';
 import { initAudioUnlock } from './core/sfx';
 import { store } from './core/store';
@@ -122,6 +123,7 @@ async function boot(): Promise<void> {
 
   document.getElementById('boot')?.remove();
   initAudioUnlock();
+  initMotionGuard();
   initPwa();
   initAppShell(game, parent);
   // 안내 문구와 입력 창의 크기를 캔버스에 맞춘다.
