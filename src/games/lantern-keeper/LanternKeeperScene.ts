@@ -281,6 +281,20 @@ export class LanternKeeperScene extends MiniGameScene {
         case 'heal':
           board.play('heal', now);
           break;
+        case 'pull':
+          board.play('pull', now);
+          break;
+        case 'blast':
+          board.play('blast', now);
+          this.effects.flash(0.4, 260);
+          this.effects.shake(200, 0.014);
+          vibrate([20, 30, 40]);
+          break;
+        case 'block':
+          this.view.burst(sim, sim.state.player.x, sim.state.player.y, 14);
+          board.play('block', now);
+          vibrate(15);
+          break;
         case 'strike':
           this.view.ring(event.x, event.y, event.radius);
           board.play('strike', now);

@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { darknessTexture, flashOf, FLOOR_OF, HERO_FRAMES, LK, LOOK } from './art';
 import { ENEMIES, STAGES } from './data';
 import { auraStats, fireflyStats, isEvolved } from './rules';
-import { AIM_LOCK_SECONDS, CHARGE_SECONDS, CHARGING, dashOf, type ShotLook, type Sim } from './sim';
+import { AIM_LOCK_SECONDS, CHARGE_SECONDS, CHARGING, dashOf, type Gem, type ShotLook, type Sim } from './sim';
 import { puddlesAround } from './terrain';
 
 const DEPTH = {
@@ -38,6 +38,23 @@ interface Flash {
 
 const RING_SECONDS = 0.22;
 const FLASH_SECONDS = 0.2;
+
+/** 등갓의 빛막: 등불지기를 두르는 고리의 반지름과, 발밑이 아니라 몸 가운데에 오도록 올리는 높이(px) */
+const GUARD = { radius: 11, lift: -2 } as const;
+
+/** 떨어져 있는 것의 그림. 빛 조각은 값이 클수록 큰 조각으로 보인다. */
+function gemKey(gem: Gem): string {
+  switch (gem.kind) {
+    case 'heal':
+      return LK.heal;
+    case 'pull':
+      return LK.pull;
+    case 'blast':
+      return LK.blast;
+    default:
+      return gem.value >= 10 ? LK.gemBig : gem.value >= 3 ? LK.gemMid : LK.gemSmall;
+  }
+}
 
 const SHOT_KEY: Record<ShotLook, string> = {
   ember: LK.ember,
@@ -286,6 +303,29 @@ export class RunView {
   }
 
   /** 맞았을 때 잠깐 하얗게 */
+  /**
+   * 등갓의 빛막. 서 있는 동안에는 등불지기를 두르는 고리로 보이고,
+   * 깨진 뒤에는 다시 차오르는 만큼만 흐린 호로 보인다.
+   */
+  private drawGuard(sim: Sim, seconds: number, g: Phaser.GameObjects.Graphics): void {
+    const charge = sim.guardCharge;
+    if (charge <= 0) return;
+    const y = this.centerY + GUARD.lift;
+    if (sim.guardReady) {
+      const glow = 0.5 + 0.5 * Math.sin(seconds * 4);
+      g.fillStyle(LOOK.guard, 0.1 + 0.05 * glow);
+      g.fillCircle(this.centerX, y, GUARD.radius);
+      g.lineStyle(1, LOOK.guard, 0.7 + 0.25 * glow);
+      g.strokeCircle(this.centerX, y, GUARD.radius);
+      return;
+    }
+    const start = -Math.PI / 2;
+    g.lineStyle(1, LOOK.guard, 0.3);
+    g.beginPath();
+    g.arc(this.centerX, y, GUARD.radius, start, start + Math.PI * 2 * charge);
+    g.strokePath();
+  }
+
   private playerKey(sim: Sim, seconds: number): string {
     const p = sim.state.player;
     const frame = p.moving ? Math.floor(this.stride / 7) % 2 : 0;
@@ -344,9 +384,7 @@ export class RunView {
       const x = gem.x + offsetX;
       const y = gem.y + offsetY;
       if (x < -marginX || x > this.width + marginX || y < -marginY || y > this.height + marginY) continue;
-      const key =
-        gem.kind === 'heal' ? LK.heal : gem.value >= 10 ? LK.gemBig : gem.value >= 3 ? LK.gemMid : LK.gemSmall;
-      this.gems.put(key, x, y);
+      this.gems.put(gemKey(gem), x, y);
     }
     this.gems.end();
 
@@ -427,6 +465,7 @@ export class RunView {
       g.lineStyle(evolved ? 2 : 1, evolved ? LOOK.auraEvoEdge : LOOK.auraEdge, evolved ? 0.7 : 0.55);
       g.strokeCircle(this.centerX, this.centerY, stats.radius);
     }
+    this.drawGuard(sim, seconds, g);
     for (const strike of s.strikes) {
       g.lineStyle(1, LOOK.strike, 0.5);
       g.strokeCircle(Math.round(strike.x + offsetX), Math.round(strike.y + offsetY), strike.radius);

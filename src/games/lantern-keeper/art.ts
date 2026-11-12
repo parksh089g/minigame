@@ -32,6 +32,8 @@ export const LK = {
   gemMid: 'lk-gem-m',
   gemBig: 'lk-gem-b',
   heal: 'lk-heal',
+  pull: 'lk-pull',
+  blast: 'lk-blast',
   heart: 'lk-heart',
   ember: 'lk-ember',
   emberEvo: 'lk-ember-evo',
@@ -80,6 +82,8 @@ export const LOOK = {
   threatCore: COLOR.white,
   /** 화면 밖의 보스를 가리키는 화살표의 테두리. 어두운 바닥에서도 보이도록 밝게 두른다. */
   pointerEdge: COLOR.white,
+  /** 등갓의 빛막 */
+  guard: COLOR.cyan,
 } as const;
 
 /**
@@ -208,6 +212,34 @@ const HEAL: Rows = [
   '0dccccd0',
   '.0dddd0.',
   '..0000..',
+];
+
+/** 자석: 주우면 빛 조각이 모두 끌려온다. 드물게 나오므로 빛 조각보다 크게 그린다. */
+const PULL: Rows = [
+  '0000..0000',
+  '0cc0..0cc0',
+  '0cc0..0cc0',
+  '0220..0220',
+  '0220..0220',
+  '0220000220',
+  '0222222220',
+  '0222222220',
+  '.02222220.',
+  '..000000..',
+];
+
+/** 불꽃 단지: 주우면 화면의 그림자가 타 버린다. */
+const BLAST: Rows = [
+  '....00....',
+  '...04c0...',
+  '...0440...',
+  '..000000..',
+  '.0dddddd0.',
+  '0334333330',
+  '0343333320',
+  '0333333220',
+  '.03332220.',
+  '..000000..',
 ];
 
 /** HUD의 체력 표시 옆에 놓는 하트. 테두리는 withOutline이 두른다. */
@@ -673,6 +705,8 @@ export function registerLanternTextures(scene: Phaser.Scene): void {
     drawDot(2, [[1.5, 12]]),
   );
   add(LK.heal, drawRows(HEAL));
+  add(LK.pull, drawRows(PULL));
+  add(LK.blast, drawRows(BLAST));
   add(LK.heart, drawRows(withOutline(HEART)));
   add(LK.floor, drawFloor());
   add(LK.floorMarsh, drawMarshFloor());

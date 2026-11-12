@@ -5,8 +5,10 @@
 import {
   ENEMIES,
   EVOLVE_LEVEL,
+  GUARD,
   MAX_DEPTH,
   MAX_LEVEL,
+  MAX_PASSIVES,
   MAX_WEAPONS,
   META,
   MID_BOSS_TIERS,
@@ -182,6 +184,8 @@ export interface Modifiers {
   regen: number;
   /** 받는 피해에 곱하는 값. 1이면 그대로 */
   taken: number;
+  /** 피해를 한 번 막는 빛막이 다시 생기는 데 걸리는 시간(초). 0이면 빛막이 없다. */
+  guard: number;
 }
 
 /** 캐릭터의 최대 체력이 아무리 깎여도 이보다 낮아지지는 않는다. */
@@ -201,6 +205,7 @@ export function modifiers(passives: Levels<PassiveId>, meta: Levels<MetaId>, tra
     maxHp: Math.max(MIN_MAX_HP, PLAYER_BASE.maxHp + 20 * p('coat') + 10 * m('vigor') + (trait.maxHp ?? 0)),
     regen: 0.1 * m('mend'),
     taken: 1 - 0.04 * m('armor'),
+    guard: guardSeconds(p('hood')),
   };
 }
 
@@ -380,6 +385,16 @@ export function ownedWeapons(weapons: Levels<WeaponId>): WeaponId[] {
   return WEAPON_ORDER.filter((id) => (weapons[id] ?? 0) > 0);
 }
 
+/** 등갓의 빛막이 깨진 뒤 다시 생기는 데 걸리는 시간(초). 등갓이 없으면(0레벨) 0 */
+export function guardSeconds(level: number): number {
+  return level > 0 ? GUARD.seconds - GUARD.perLevel * (level - 1) : 0;
+}
+
+/** 지금 가진 패시브 */
+export function ownedPassives(passives: Levels<PassiveId>): PassiveId[] {
+  return (Object.keys(PASSIVES) as PassiveId[]).filter((id) => (passives[id] ?? 0) > 0);
+}
+
 /**
  * 레벨업 때 보여 줄 선택지. 아직 덜 올린 무기와 패시브 가운데에서 겹치지 않게 count개 고른다.
  * 무기 칸이 다 찼으면 새 무기는 나오지 않는다. 모두 최대 레벨이면 회복과 불씨를 준다.
@@ -394,8 +409,11 @@ export function upgradeOptions(build: Build, rand: Rand, count = 3): Upgrade[] {
     if (level === 0 && full) continue;
     if (level < MAX_LEVEL) pool.push({ type: 'weapon', id, level: level + 1 });
   }
+  // 패시브도 칸이 다 차면 새 것은 나오지 않는다.
+  const fullPassives = ownedPassives(build.passives).length >= MAX_PASSIVES;
   for (const id of Object.keys(PASSIVES) as PassiveId[]) {
     const level = build.passives[id] ?? 0;
+    if (level === 0 && fullPassives) continue;
     if (level < MAX_LEVEL) pool.push({ type: 'passive', id, level: level + 1 });
   }
 
@@ -457,6 +475,8 @@ export function upgradeDescription(upgrade: Upgrade): string {
         ? WEAPONS[upgrade.id].evolved.description
         : WEAPONS[upgrade.id].levels[upgrade.level - 1];
     case 'passive':
+      // 등갓은 레벨마다 달라지는 것이 "몇 초마다"라서, 그 숫자를 바로 적어 준다.
+      if (upgrade.id === 'hood') return `${guardSeconds(upgrade.level)}초마다 피해를 한 번 막는 빛막`;
       return PASSIVES[upgrade.id].perLevel;
     case 'heal':
       return `체력 ${HEAL_AMOUNT} 회복`;

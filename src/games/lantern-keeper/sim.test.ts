@@ -3,11 +3,14 @@ import { playRun } from './bot';
 import {
   ENEMIES,
   EVOLVE_LEVEL,
+  GUARD,
   HERO_ORDER,
   HEROES,
   MAX_DEPTH,
   MAX_LEVEL,
+  MAX_PASSIVES,
   MAX_WEAPONS,
+  PASSIVES,
   META,
   META_ORDER,
   MID_BOSS_COUNT,
@@ -18,6 +21,7 @@ import {
   STAGES,
   SURGES,
   type EnemyKind,
+  type PassiveId,
 } from './data';
 import {
   depthRules,
@@ -388,6 +392,166 @@ describe('빛 조각과 레벨업', () => {
     sim.step(STEP, 0, 0);
     expect(sim.events).toContainEqual({ type: 'heal' });
     expect(sim.state.player.hp).toBe(BASE_HP);
+  });
+});
+
+describe('드물게 떨어지는 것', () => {
+  /** 쓰러진 적이 무엇을 떨어뜨릴지 정하는 난수를 roll로 고정한 조용한 판 */
+  const dropWith = (roll: number): string[] => {
+    const sim = new Sim(quietSim().state, () => roll);
+    sim.state.enemies.push(enemy('shade', 100, 0, 0));
+    sim.step(STEP, 0, 0);
+    return sim.state.gems.map((gem) => gem.kind);
+  };
+
+  it('그림자는 아주 가끔 회복 떡이나 자석이나 불꽃 단지를 떨어뜨린다', () => {
+    expect(dropWith(0.001)).toEqual(['xp', 'heal']);
+    expect(dropWith(0.0085)).toEqual(['xp', 'pull']);
+    expect(dropWith(0.0095)).toEqual(['xp', 'blast']);
+    expect(dropWith(0.5)).toEqual(['xp']);
+
+    // 셋을 다 합쳐도 백에 하나를 조금 넘는 정도라서, 떨어지면 반가운 일이 된다.
+    const sim = quietSim(4);
+    const kills = 20000;
+    const seen: Record<string, number> = {};
+    for (let i = 0; i < kills; i += 1) {
+      sim.state.enemies.push(enemy('shade', 9000, 0, 0));
+      sim.state.gems.length = 0;
+      sim.step(STEP, 0, 0);
+      for (const gem of sim.state.gems) seen[gem.kind] = (seen[gem.kind] ?? 0) + 1;
+    }
+    expect(seen.pull).toBeGreaterThan(5);
+    expect(seen.blast).toBeGreaterThan(5);
+    expect(seen.pull + seen.blast).toBeLessThan(kills * 0.005);
+    expect(seen.heal).toBeGreaterThan(seen.pull);
+  });
+
+  it('자석을 주우면 멀리 있는 빛 조각까지 모두 끌려온다', () => {
+    const sim = quietSim();
+    sim.state.gems.push(
+      { x: 3, y: 0, value: 0, kind: 'pull', pulled: false },
+      { x: 600, y: 0, value: 1, kind: 'xp', pulled: false },
+      { x: -500, y: 400, value: 1, kind: 'xp', pulled: false },
+      { x: 300, y: 0, value: 15, kind: 'heal', pulled: false },
+    );
+    sim.step(STEP, 0, 0);
+    expect(sim.events).toContainEqual({ type: 'pull' });
+    // 빛 조각만 끌려오고, 회복 떡은 필요할 때 주우러 갈 수 있게 그 자리에 남는다.
+    expect(sim.state.gems.map((gem) => [gem.kind, gem.pulled])).toEqual([
+      ['xp', true],
+      ['xp', true],
+      ['heal', false],
+    ]);
+    const before = sim.state.player.xp;
+    advance(sim, 6);
+    expect(sim.state.gems.map((gem) => gem.kind)).toEqual(['heal']);
+    expect(sim.state.player.xp + (sim.state.player.level - 1) * 100).toBeGreaterThan(before);
+  });
+
+  it('불꽃 단지를 주우면 화면 안의 그림자가 모두 쓰러지고, 보스는 조금만 다친다', () => {
+    const sim = quietSim();
+    const near = enemy('brute', 100, 200, 500);
+    const edge = enemy('wisp', -115, -250, 30);
+    const far = enemy('brute', 400, 0, 500);
+    const boss = enemy('giant', 60, 0, 1000);
+    sim.state.enemies.push(near, edge, far, boss);
+    sim.state.gems.push({ x: 3, y: 0, value: 0, kind: 'blast', pulled: false });
+    sim.step(STEP, 0, 0);
+    expect(sim.events).toContainEqual({ type: 'blast' });
+    expect(near.hp).toBeLessThanOrEqual(0);
+    expect(edge.hp).toBeLessThanOrEqual(0);
+    expect(far.hp).toBe(500);
+    expect(boss.hp).toBeGreaterThan(800);
+    expect(boss.hp).toBeLessThan(1000);
+
+    // 쓰러진 그림자는 다음 걸음에 치워지면서 쓰러뜨린 수에 들어가고 빛 조각을 남긴다.
+    const kills = sim.state.kills;
+    sim.step(STEP, 0, 0);
+    expect(sim.state.kills).toBe(kills + 2);
+    expect(sim.state.enemies).toHaveLength(2);
+    expect(sim.state.gems.filter((gem) => gem.kind === 'xp').length).toBe(2);
+    // 무기가 한 일이 아니므로 무기별 피해에는 들어가지 않는다.
+    expect(sim.state.dealt).toEqual({});
+  });
+});
+
+describe('등갓', () => {
+  const guarded = (): Sim => {
+    const sim = quietSim();
+    sim.applyUpgrade({ type: 'passive', id: 'hood', level: 1 });
+    return sim;
+  };
+
+  it('빛막이 피해를 한 번 막고, 다시 생길 때까지는 그대로 맞는다', () => {
+    const sim = guarded();
+    expect(sim.guardReady).toBe(true);
+    expect(sim.guardCharge).toBe(1);
+    sim.state.enemies.push(enemy('brute', 2, 0, 9999));
+    sim.step(STEP, 0, 0);
+    expect(sim.events).toContainEqual({ type: 'block' });
+    expect(sim.events).not.toContainEqual({ type: 'hurt' });
+    expect(sim.state.player.hp).toBe(BASE_HP);
+    expect(sim.guardReady).toBe(false);
+    expect(sim.guardCharge).toBeLessThan(0.01);
+
+    // 막은 뒤에도 잠깐은 무적이지만, 빛막이 없는 동안에는 다시 닿으면 다친다.
+    const events = advance(sim, 2);
+    expect(events).toContainEqual({ type: 'hurt' });
+    expect(events).not.toContainEqual({ type: 'block' });
+    expect(sim.state.player.hp).toBeLessThan(BASE_HP);
+  });
+
+  it('빛막은 시간이 지나면 다시 생긴다', () => {
+    const sim = guarded();
+    sim.state.enemies.push(enemy('brute', 2, 0, 9999));
+    sim.step(STEP, 0, 0);
+    sim.state.enemies.length = 0;
+    advance(sim, GUARD.seconds / 2);
+    expect(sim.guardReady).toBe(false);
+    expect(sim.guardCharge).toBeCloseTo(0.5, 1);
+    advance(sim, GUARD.seconds / 2 + 0.1);
+    expect(sim.guardReady).toBe(true);
+
+    const hp = sim.state.player.hp;
+    sim.state.enemies.push(enemy('brute', 2, 0, 9999));
+    sim.step(STEP, 0, 0);
+    expect(sim.events).toContainEqual({ type: 'block' });
+    expect(sim.state.player.hp).toBe(hp);
+  });
+
+  it('등갓이 없으면 빛막도 없고, 등갓이 생기기 전에 저장한 판도 그대로 이어진다', () => {
+    const plain = quietSim();
+    expect(plain.guardReady).toBe(false);
+    expect(plain.guardCharge).toBe(0);
+    plain.state.enemies.push(enemy('brute', 2, 0, 9999));
+    plain.step(STEP, 0, 0);
+    expect(plain.events).toContainEqual({ type: 'hurt' });
+
+    const old = JSON.parse(JSON.stringify(createRun(config))) as RunState;
+    delete old.player.guard;
+    const sim = newSim(1, old);
+    expect(sim.guardReady).toBe(false);
+    sim.applyUpgrade({ type: 'passive', id: 'hood', level: 1 });
+    expect(sim.guardReady).toBe(true);
+    // 깨진 빛막도 저장했다가 이어하면 남은 시간이 그대로다.
+    sim.state.player.guard = 7;
+    const resumed = newSim(2, JSON.parse(JSON.stringify(sim.state)) as RunState);
+    expect(resumed.guardReady).toBe(false);
+    expect(resumed.state.player.guard).toBe(7);
+  });
+
+  it('패시브 칸이 다 찬 뒤에는 저장돼 있던 선택지에 새 패시브가 있어도 다시 뽑는다', () => {
+    const sim = newSim();
+    const all = Object.keys(PASSIVES) as PassiveId[];
+    for (const id of all.slice(0, MAX_PASSIVES)) sim.state.passives[id] = 1;
+    const extra = all[MAX_PASSIVES];
+    sim.state.offer = [{ type: 'passive', id: extra, level: 1 }];
+    const options = sim.options();
+    expect(options.some((option) => option.type === 'passive' && option.id === extra)).toBe(false);
+    // 든 패시브를 올리는 선택지는 그대로 둔다.
+    const kept: Upgrade[] = [{ type: 'passive', id: all[0], level: 2 }];
+    sim.state.offer = kept;
+    expect(sim.options()).toEqual(kept);
   });
 });
 

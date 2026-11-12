@@ -6,6 +6,7 @@ import {
   ENEMIES,
   HEROES,
   MAX_LEVEL,
+  MAX_PASSIVES,
   MAX_WEAPONS,
   MID_BOSS_COUNT,
   MID_BOSS_EVERY,
@@ -39,6 +40,7 @@ import {
   minionKind,
   modifiers,
   oilStats,
+  ownedPassives,
   ownedWeapons,
   pickSpawnKind,
   spawnPerSecond,
@@ -108,9 +110,14 @@ export interface Shot {
 export interface Gem {
   x: number;
   y: number;
-  /** 경험치. kind가 heal이면 회복량 */
+  /** 경험치. kind가 heal이면 회복량. 자석과 불꽃 단지에서는 쓰지 않는다. */
   value: number;
-  kind: 'xp' | 'heal';
+  /**
+   * xp는 빛 조각, heal은 회복 떡.
+   * pull은 자석: 주우면 싸움터의 빛 조각이 모두 끌려온다.
+   * blast는 불꽃 단지: 주우면 화면 안의 보통 그림자가 모두 쓰러지고 보스는 조금 다친다.
+   */
+  kind: 'xp' | 'heal' | 'pull' | 'blast';
   /** 끌려오는 중인지 */
   pulled: boolean;
 }
@@ -179,6 +186,8 @@ export interface RunState {
     wading: boolean;
     level: number;
     xp: number;
+    /** 등갓의 빛막이 다시 생길 때까지 남은 시간(초). 0이거나 없으면 빛막이 서 있다(등갓이 있을 때). */
+    guard?: number;
   };
   weapons: Levels<WeaponId>;
   passives: Levels<PassiveId>;
@@ -241,6 +250,12 @@ export type SimEvent =
   | { type: 'hurt' }
   | { type: 'gem' }
   | { type: 'heal' }
+  /** 자석을 주워 빛 조각이 모두 끌려오기 시작했다 */
+  | { type: 'pull' }
+  /** 불꽃 단지를 주워 화면의 그림자가 타 버렸다 */
+  | { type: 'blast' }
+  /** 등갓의 빛막이 피해를 막았다 */
+  | { type: 'block' }
   | { type: 'levelup' }
   | { type: 'shoot' }
   | { type: 'strike'; x: number; y: number; radius: number }
@@ -289,6 +304,15 @@ const SPAWN_MARGIN = 14;
 /** 쓰러진 적이 회복 떡을 떨어뜨릴 확률 */
 const HEAL_DROP_CHANCE = 0.008;
 const HEAL_DROP_VALUE = 15;
+/** 쓰러진 적이 자석과 불꽃 단지를 떨어뜨릴 확률. 끝까지 가는 판에서 저마다 대여섯 개쯤 줍게 된다. */
+const PULL_DROP_CHANCE = 0.0012;
+const BLAST_DROP_CHANCE = 0.001;
+/** 불꽃 단지가 보스의 체력에서 덜어 내는 몫. 보통 그림자는 그 자리에서 쓰러진다. */
+const BLAST_BOSS_SHARE = 0.08;
+/** 불꽃 단지가 화면 가장자리 밖으로 닿는 거리(px). 반쯤 걸친 그림자까지 태운다. */
+const BLAST_MARGIN = 8;
+/** 빛막이 피해를 막은 뒤의 무적 시간(초). 적에게 둘러싸였을 때 빠져나올 틈을 준다. */
+const GUARD_INVULNERABLE = 0.8;
 /** 뛰는 적이 한 번 뛰는 시간과 웅크리고 쉬는 시간(초) */
 export const HOP_SECONDS = 0.38;
 export const HOP_REST = 0.44;
@@ -450,12 +474,16 @@ export class Sim {
     const s = this.state;
     if (offer.length === 0) return false;
     const full = ownedWeapons(s.weapons).length >= MAX_WEAPONS;
+    const fullPassives = ownedPassives(s.passives).length >= MAX_PASSIVES;
     return offer.every((upgrade) => {
       if (upgrade.type === 'weapon') {
         const level = s.weapons[upgrade.id] ?? 0;
         return upgrade.level === level + 1 && upgrade.level <= MAX_LEVEL && (level > 0 || !full);
       }
-      if (upgrade.type === 'passive') return upgrade.level === (s.passives[upgrade.id] ?? 0) + 1 && upgrade.level <= MAX_LEVEL;
+      if (upgrade.type === 'passive') {
+        const level = s.passives[upgrade.id] ?? 0;
+        return upgrade.level === level + 1 && upgrade.level <= MAX_LEVEL && (level > 0 || !fullPassives);
+      }
       return upgrade.type === 'heal' || upgrade.type === 'embers';
     });
   }
@@ -576,6 +604,18 @@ export class Sim {
     }
     if (p.inv > 0) p.inv -= dt;
     if (this.mods.regen > 0) p.hp = Math.min(this.mods.maxHp, p.hp + this.mods.regen * dt);
+    if (this.mods.guard > 0 && (p.guard ?? 0) > 0) p.guard = Math.max(0, (p.guard ?? 0) - dt);
+  }
+
+  /** 등갓의 빛막이 지금 서 있는지 */
+  get guardReady(): boolean {
+    return this.mods.guard > 0 && !((this.state.player.guard ?? 0) > 0);
+  }
+
+  /** 빛막이 다시 생기기까지 얼마나 찼는지(0~1). 서 있으면 1, 등갓이 없으면 0 */
+  get guardCharge(): number {
+    if (this.mods.guard <= 0) return 0;
+    return 1 - Math.min(1, Math.max(0, this.state.player.guard ?? 0) / this.mods.guard);
   }
 
   /**
@@ -585,6 +625,13 @@ export class Sim {
   private hurt(amount: number): boolean {
     const s = this.state;
     const p = s.player;
+    // 등갓의 빛막이 서 있으면 이번 피해는 막고, 빛막은 다시 생길 때까지 사라진다.
+    if (this.guardReady) {
+      p.guard = this.mods.guard;
+      p.inv = GUARD_INVULNERABLE;
+      this.events.push({ type: 'block' });
+      return false;
+    }
     p.hp -= amount * this.mods.taken;
     p.inv = PLAYER_BASE.invulnerable;
     this.events.push({ type: 'hurt' });
@@ -1304,8 +1351,12 @@ export class Sim {
           s.pendingTickets += 1;
           this.events.push({ type: 'ticket' });
         }
-      } else if (this.rand() < HEAL_DROP_CHANCE) {
-        this.dropGem(e.x, e.y, HEAL_DROP_VALUE, 'heal');
+      } else {
+        // 난수는 한 번만 뽑아서 무엇을 떨어뜨릴지 정한다.
+        const roll = this.rand();
+        if (roll < HEAL_DROP_CHANCE) this.dropGem(e.x, e.y, HEAL_DROP_VALUE, 'heal');
+        else if (roll < HEAL_DROP_CHANCE + PULL_DROP_CHANCE) this.dropGem(e.x, e.y, 0, 'pull');
+        else if (roll < HEAL_DROP_CHANCE + PULL_DROP_CHANCE + BLAST_DROP_CHANCE) this.dropGem(e.x, e.y, 0, 'blast');
       }
     }
     s.enemies.length = kept;
@@ -1355,6 +1406,23 @@ export class Sim {
     if (gem.kind === 'heal') {
       p.hp = Math.min(this.mods.maxHp, p.hp + gem.value);
       this.events.push({ type: 'heal' });
+      return;
+    }
+    if (gem.kind === 'pull') {
+      // 싸움터의 빛 조각이 어디에 있든 모두 끌려온다. 회복 떡과 다른 것은 그 자리에 남는다.
+      for (const other of s.gems) if (other.kind === 'xp') other.pulled = true;
+      this.events.push({ type: 'pull' });
+      return;
+    }
+    if (gem.kind === 'blast') {
+      // 화면에 보이는 곳까지만 닿는다. 쓰러진 그림자는 다음 걸음에 치워지며 빛 조각을 떨어뜨린다.
+      const reachX = s.viewW / 2 + BLAST_MARGIN;
+      const reachY = s.viewH / 2 + BLAST_MARGIN;
+      for (const e of s.enemies) {
+        if (e.hp <= 0 || Math.abs(e.x - p.x) > reachX || Math.abs(e.y - p.y) > reachY) continue;
+        this.damage(e, ENEMIES[e.kind].boss ? e.maxHp * BLAST_BOSS_SHARE : e.hp, null);
+      }
+      this.events.push({ type: 'blast' });
       return;
     }
     p.xp += gem.value * this.mods.xp;

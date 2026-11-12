@@ -172,7 +172,7 @@ export const MAX_DEPTH = 8;
 export const SURGES: readonly number[] = [180, 300, 420, 540];
 
 export type WeaponId = 'ember' | 'aura' | 'firefly' | 'star' | 'lance' | 'oil' | 'bolt';
-export type PassiveId = 'wick' | 'hourglass' | 'boots' | 'magnet' | 'coat' | 'lens';
+export type PassiveId = 'wick' | 'hourglass' | 'boots' | 'magnet' | 'coat' | 'lens' | 'hood';
 
 /** 레벨업으로 올릴 수 있는 무기와 패시브의 최대 레벨 */
 export const MAX_LEVEL = 5;
@@ -183,6 +183,8 @@ export const MAX_LEVEL = 5;
 export const EVOLVE_LEVEL = MAX_LEVEL + 1;
 /** 한 판에 들 수 있는 무기의 수 */
 export const MAX_WEAPONS = 4;
+/** 한 판에 가질 수 있는 패시브의 가짓수. 패시브가 이보다 많아서, 무엇을 뺄지 골라야 한다. */
+export const MAX_PASSIVES = 6;
 
 export interface WeaponInfo {
   name: string;
@@ -246,7 +248,12 @@ export const PASSIVES: Readonly<Record<PassiveId, PassiveInfo>> = {
   magnet: { name: '자석 돌', perLevel: '빛 조각 줍는 거리 +30%' },
   coat: { name: '두꺼운 외투', perLevel: '최대 체력 +20, 회복' },
   lens: { name: '유리 렌즈', perLevel: '공격 범위 +10%' },
+  // 선택 카드에는 이 글 대신 그 레벨에서 몇 초마다 다시 생기는지를 적는다(rules.ts의 upgradeDescription).
+  hood: { name: '등갓', perLevel: '피해를 한 번 막는 빛막, 다시 생기는 시간 -3초' },
 };
+
+/** 등갓의 빛막이 다시 생기는 데 걸리는 시간(초): 1레벨의 값과 레벨마다 줄어드는 값 */
+export const GUARD = { seconds: 24, perLevel: 3 } as const;
 
 export type HeroId = 'keeper' | 'stargazer' | 'stormer';
 

@@ -28,6 +28,9 @@ export type SoundId =
   | 'hurt'
   | 'heartbeat'
   | 'heal'
+  | 'pull'
+  | 'blast'
+  | 'block'
   | 'levelUp'
   | 'ticket'
   | 'evolve'
@@ -77,6 +80,22 @@ export const SOUNDS: Readonly<Record<SoundId, readonly Note[]>> = {
   heal: [
     { f: 659, d: 0.07, type: 'triangle', v: 0.3 },
     { f: 988, d: 0.16, type: 'triangle', v: 0.3, at: 0.07 },
+  ],
+  // 자석: 휘익 하고 빨려 들어오는 소리
+  pull: [
+    { f: 330, to: 1320, d: 0.28, type: 'triangle', v: 0.28 },
+    { f: 1568, d: 0.1, v: 0.14, at: 0.26 },
+  ],
+  // 불꽃 단지: 펑 하고 터진 뒤에 불길이 번진다.
+  blast: [
+    { f: 220, to: 55, d: 0.34, type: 'sawtooth', v: 0.3 },
+    { f: 880, to: 220, d: 0.22, type: 'triangle', v: 0.2 },
+    { f: 110, to: 60, d: 0.3, v: 0.16, at: 0.12 },
+  ],
+  // 빛막이 피해를 튕겨 낸다: 맑게 쨍 하는 소리
+  block: [
+    { f: 1319, d: 0.05, type: 'triangle', v: 0.3 },
+    { f: 1976, to: 1568, d: 0.18, type: 'triangle', v: 0.24, at: 0.04 },
   ],
   levelUp: [
     ...run([523, 659, 784, 1047], 0.06, 0.1, { v: 0.26 }),
