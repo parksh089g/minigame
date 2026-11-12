@@ -188,6 +188,11 @@ export interface RunState {
   midBosses: number;
   finalBoss: boolean;
   kills: number;
+  /**
+   * 마지막 보스가 나타난 순간까지 쓰러뜨린 수. 그 전에는 없다.
+   * 점수와 불씨에는 여기까지만 센다(rules.ts의 RunSummary.countedKills).
+   */
+  killsBeforeBoss?: number;
   bossKills: number;
   bonusEmbers: number;
   /** 아직 고르지 않은 레벨업 횟수. 0보다 크면 시뮬레이션이 멈춘다. */
@@ -440,6 +445,7 @@ export class Sim {
     return {
       seconds: Math.min(s.t, RUN_SECONDS),
       kills: s.kills,
+      countedKills: s.killsBeforeBoss ?? s.kills,
       level: s.player.level,
       bossKills: s.bossKills,
       cleared: s.over === 'cleared',
@@ -608,6 +614,8 @@ export class Sim {
     }
     if (!s.finalBoss && s.t >= RUN_SECONDS) {
       s.finalBoss = true;
+      // 이 뒤의 처치는 점수와 불씨에 세지 않는다. 보스를 남겨 두고 버텨도 얻는 것이 없다.
+      s.killsBeforeBoss = s.kills;
       // 마지막 보스는 가장 센 중간 보스와 같은 단계로 부하를 부른다.
       this.spawnBoss(STAGES[s.stage].finalBoss).tier = MID_BOSS_COUNT - 1;
     }

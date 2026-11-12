@@ -16,7 +16,16 @@ import {
   SURGES,
   type EnemyKind,
 } from './data';
-import { maxAlive, midBossKind, seededRandom, speedScale, xpToNext, type Upgrade } from './rules';
+import {
+  embersFor,
+  maxAlive,
+  midBossKind,
+  scoreFor,
+  seededRandom,
+  speedScale,
+  xpToNext,
+  type Upgrade,
+} from './rules';
 import {
   AIM_LOCK_SECONDS,
   CHARGE_SECONDS,
@@ -616,6 +625,39 @@ describe('보스와 끝', () => {
     advance(sim, 1.5);
     expect(sim.state.over).toBe('cleared');
     expect(sim.summary()).toMatchObject({ cleared: true, bossKills: 1, seconds: RUN_SECONDS });
+  });
+
+  it('마지막 보스가 나타난 뒤에 쓰러뜨린 그림자는 점수와 불씨에 세지 않는다', () => {
+    const state = createRun(config);
+    state.t = RUN_SECONDS - 0.01;
+    state.midBosses = MID_BOSS_COUNT;
+    state.surgeIndex = SURGES.length;
+    state.kills = 500;
+    const sim = newSim(1, state);
+    sim.step(STEP, 0, 0);
+    expect(sim.state.finalBoss).toBe(true);
+    const atBoss = sim.summary();
+    expect(atBoss).toMatchObject({ kills: 500, countedKills: 500 });
+
+    // 보스는 멀리 두고 둘레의 그림자만 쓰러뜨린다.
+    for (let i = 0; i < 6; i += 1) sim.state.enemies.push(enemy('shade', 14 + i * 6, 10, 1));
+    advance(sim, 2);
+    const later = sim.summary();
+    expect(sim.state.over).toBeNull();
+    expect(later.kills).toBeGreaterThan(500);
+    expect(later.countedKills).toBe(500);
+    expect(later.bossKills).toBe(0);
+    expect(scoreFor(later)).toBe(scoreFor(atBoss));
+    expect(embersFor(later)).toBe(embersFor(atBoss));
+  });
+
+  it('마지막 보스가 나타나기 전에는 쓰러뜨린 것을 모두 센다', () => {
+    const sim = newSim();
+    sim.state.enemies.push(enemy('shade', 30, 0, 1));
+    advance(sim, 1.5);
+    const summary = sim.summary();
+    expect(summary.kills).toBeGreaterThan(0);
+    expect(summary.countedKills).toBe(summary.kills);
   });
 
   it('밀물이 오면 적이 한꺼번에 둘러싼다', () => {

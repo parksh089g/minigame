@@ -410,7 +410,14 @@ export function upgradeDescription(upgrade: Upgrade): string {
 
 export interface RunSummary {
   seconds: number;
+  /** 쓰러뜨린 그림자 전부. 결과 화면에 보여 준다. */
   kills: number;
+  /**
+   * 점수와 불씨에 세는 처치 수: 마지막 보스가 나타나기 전까지 쓰러뜨린 것.
+   * 마지막 보스가 나온 뒤에도 그림자는 계속 몰려오므로, 그 뒤의 처치까지 세면
+   * 보스를 일부러 남겨 두고 끝없이 점수와 불씨를 올릴 수 있다.
+   */
+  countedKills: number;
   level: number;
   bossKills: number;
   cleared: boolean;
@@ -418,19 +425,19 @@ export interface RunSummary {
   bonusEmbers: number;
 }
 
-/** 허브의 최고 기록에 쓰는 점수 */
+/** 허브의 최고 기록과 랭킹에 쓰는 점수. 버틴 시간도 처치 수도 마지막 보스가 나타난 때까지만 센다. */
 export function scoreFor(run: RunSummary): number {
-  return Math.floor(run.seconds) + run.kills + 150 * run.bossKills + (run.cleared ? 1000 : 0);
+  return Math.floor(run.seconds) + run.countedKills + 150 * run.bossKills + (run.cleared ? 1000 : 0);
 }
 
 /**
- * 판이 끝나고 받는 불씨. 오래 버틸수록, 많이 쓰러뜨릴수록 많다.
+ * 판이 끝나고 받는 불씨. 오래 버틸수록, 많이 쓰러뜨릴수록 많다. 처치는 점수와 같은 수(countedKills)로 센다.
  * lucky는 영구 강화 "불씨 복"의 단계로, 한 단계에 10%씩 더 준다.
  */
 export function embersFor(run: RunSummary, lucky = 0): number {
   const minutes = Math.floor(Math.min(run.seconds, RUN_SECONDS) / 60);
   const earned =
-    minutes * 3 + Math.floor(run.kills / 40) + 8 * run.bossKills + (run.cleared ? 40 : 0) + run.bonusEmbers;
+    minutes * 3 + Math.floor(run.countedKills / 40) + 8 * run.bossKills + (run.cleared ? 40 : 0) + run.bonusEmbers;
   return Math.floor(earned * (1 + 0.1 * Math.max(0, lucky)));
 }
 

@@ -124,7 +124,15 @@ describe('늘어난 영구 강화', () => {
   });
 
   it('불씨 복은 한 판에서 얻는 불씨를 늘린다', () => {
-    const run: RunSummary = { seconds: 400, kills: 500, level: 14, cleared: false, bonusEmbers: 0, bossKills: 2 };
+    const run: RunSummary = {
+      seconds: 400,
+      kills: 500,
+      countedKills: 500,
+      level: 14,
+      cleared: false,
+      bonusEmbers: 0,
+      bossKills: 2,
+    };
     const plain = embersFor(run);
     expect(embersFor(run, 0)).toBe(plain);
     expect(embersFor(run, 3)).toBe(Math.floor(plain * 1.3));

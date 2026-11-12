@@ -58,6 +58,8 @@ const base = modifiers({}, {});
 const run = (over: Partial<RunSummary> = {}): RunSummary => ({
   seconds: 0,
   kills: 0,
+  // 따로 주지 않으면 쓰러뜨린 것을 모두 센다.
+  countedKills: over.kills ?? 0,
   level: 1,
   bossKills: 0,
   cleared: false,
@@ -316,6 +318,15 @@ describe('결과와 보상', () => {
     expect(embersFor(long)).toBeGreaterThan(embersFor(short));
     expect(embersFor(clear)).toBeGreaterThan(embersFor(long));
     expect(embersFor(run({ bonusEmbers: 10 }))).toBe(10);
+  });
+
+  it('마지막 보스가 나온 뒤에 쓰러뜨린 것은 점수와 불씨를 올리지 않는다', () => {
+    const clear = run({ seconds: 600, kills: 6300, bossKills: 5, cleared: true });
+    // 보스를 남겨 두고 오래 버텨서 처치 수만 늘린 판
+    const stalled = run({ seconds: 600, kills: 21000, countedKills: 6300, bossKills: 5, cleared: true });
+    expect(scoreFor(stalled)).toBe(scoreFor(clear));
+    expect(embersFor(stalled)).toBe(embersFor(clear));
+    expect(embersFor(stalled, 3)).toBe(embersFor(clear, 3));
   });
 
   it('첫 판을 2분쯤 버티면 가장 싼 영구 강화를 하나 살 수 있다', () => {
