@@ -12,6 +12,7 @@ import {
   RANKED_GAMES,
   type ApiError,
 } from '../src/online/protocol';
+import { placeOf } from './limiter';
 import { TOO_FAST, type BoardApi, type Scores } from './service';
 
 /**
@@ -76,8 +77,8 @@ export const busy = (): Response => fail('busy');
 
 export async function handleApi(request: Request, board: BoardApi): Promise<Response> {
   const url = new URL(request.url);
-  // 요청을 세는 데만 쓰고 저장하지 않는다.
-  const ip = request.headers.get('cf-connecting-ip') ?? 'unknown';
+  // 요청을 세는 데만 쓰고 저장하지 않는다. IPv6 주소는 앞 64비트로 묶어 센다.
+  const ip = placeOf(request.headers.get('cf-connecting-ip'));
   const path = url.pathname.replace(/\/+$/, '');
   const method = request.method;
 

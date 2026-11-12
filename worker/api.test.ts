@@ -232,6 +232,18 @@ describe('요청 한도', () => {
     expect((await call('GET', '/api/rank/stack-tower')).status).toBe(200);
   });
 
+  it('IPv6에서는 뒤쪽 주소를 바꿔 가며 보내도 같은 곳으로 센다', async () => {
+    const { call } = server();
+    const [limit] = LIMITS.read;
+    const from = (n: number): string => `2001:db8:12:3400::${(n + 1).toString(16)}`;
+    for (let n = 0; n < limit; n += 1) {
+      expect((await call('GET', '/api/rank/stack-tower', undefined, from(n))).status).toBe(200);
+    }
+    expect((await call('GET', '/api/rank/stack-tower', undefined, from(limit))).status).toBe(429);
+    // 앞 64비트가 다른 주소는 다른 곳이다.
+    expect((await call('GET', '/api/rank/stack-tower', undefined, '2001:db8:12:3401::1')).status).toBe(200);
+  });
+
   it('한곳에서 새 이름을 마구 올리는 것은 막지만, 이미 올라 있는 기기는 점수를 고칠 수 있다', async () => {
     const { call, wait } = server();
     const [limit] = LIMITS.newcomer;
