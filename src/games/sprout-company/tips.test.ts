@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { OFFICES, OLD_HAND_TIPS, TIP_IDS, TIPS } from './data';
+import { BRANCH, OFFICES, OLD_HAND_TIPS, TIP_IDS, TIPS } from './data';
 import { createGoals } from './goals';
-import { advance, createCompany, moveOffice, normalizeCompany, type CompanyState } from './rules';
+import { advance, createCompany, foundBranch, moveOffice, normalizeCompany, type CompanyState } from './rules';
 import { markTip, nextTip } from './tips';
 
 /** 뜨는 안내를 본 것으로 적어 가며 차례로 모은다. */
@@ -70,6 +70,12 @@ describe('처음 안내', () => {
     expect(drain(state)).toEqual(['dept']);
     state.project = { id: 'lightning-tap', done: 0, total: 4 };
     expect(drain(state)).toEqual(['queue']);
+
+    // 평판이 차면 자회사를, 세우고 나면 열매를 쓰는 곳을 알려 준다.
+    state.reputation = BRANCH.reputation;
+    expect(drain(state)).toEqual(['branch']);
+    expect(foundBranch(state)).not.toBeNull();
+    expect(drain(state)).toEqual(['fruit']);
     expect([...state.tips].sort()).toEqual([...TIP_IDS].sort());
   });
 

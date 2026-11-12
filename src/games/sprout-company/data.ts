@@ -136,6 +136,8 @@ export const TIPS = {
   backlog: '큰 게임은 맡기는 대로 다음 카드가 나와요',
   dept: '사무실 버튼에서 부서를 세울 수 있어요',
   queue: '게임을 예약하면 저절로 이어서 만들어요',
+  branch: '사무실 버튼에서 자회사를 세울 수 있어요',
+  fruit: '자회사 창에서 열매로 본사의 힘을 올려요',
 } as const;
 
 export type TipId = keyof typeof TIPS;
@@ -188,7 +190,7 @@ export const QUEUE = { unlockOffice: 4, slots: 3 } as const;
 
 // ───────── 사무실을 옮길 때의 코인 ─────────
 
-/** 그 사무실로 이사하면 한 번 받는 허브의 코인 */
+/** 그 사무실로 처음 이사하면 한 번 받는 허브의 코인. 자회사를 세운 뒤에 다시 지나갈 때는 받지 않는다. */
 export const OFFICE_COINS: readonly number[] = [0, 10, 20, 40, 80];
 
 // ───────── 닫아 둔 동안 ─────────
@@ -505,6 +507,75 @@ export const PLAY_STARS: { count: number; income: number; targets: Partial<Recor
     'lantern-keeper': [1000, 3000, 8000],
   },
 };
+
+// ───────── 자회사 ─────────
+
+/**
+ * 가장 큰 사무실에서 평판을 쌓으면 자회사를 세울 수 있다. 지금 회사는 자회사가 되어 남고,
+ * 옥탑방에서 새 회사를 처음부터 다시 키운다. 대신 두 가지가 영영 남는다.
+ * - 열매: 세울 때 그 회사의 평판 perFruit마다 하나씩 받는다. 본사의 힘(PERKS)을 올리는 데 쓴다.
+ * - 자회사의 몫: 자회사 한 곳마다 출시작이 버는 수익이 income만큼 는다.
+ * coins는 자회사를 세울 때마다 받는 허브의 코인이다.
+ */
+export const BRANCH = { reputation: 20_000, perFruit: 4_000, income: 0.2, coins: 30 } as const;
+
+export interface PerkDef {
+  name: string;
+  /** 한 줄 설명. 자회사 창에 보인다. */
+  description: string;
+  maxLevel: number;
+  /** n단계에서 n+1단계로 올리는 데 드는 열매: baseCost × (n + 1) */
+  baseCost: number;
+  /** 단계마다 더해지는 효과. 장비나 성격과 따로 곱해진다. */
+  effect?: Effect;
+  /** 새 회사를 시작할 때 들고 가는 잎사귀. seed[n - 1]이 n단계의 값이다. 올린 그 자리에서도 한 번 받는다. */
+  seed?: readonly number[];
+}
+
+/**
+ * 본사의 힘. 열매로 올리고, 자회사를 세워 새 회사를 시작해도 그대로 남는다.
+ * 줄을 더하면 힘이 늘어난다.
+ */
+export const PERKS = {
+  hands: {
+    name: '익숙한 손',
+    description: '모든 직원의 일 속도 +30%',
+    maxLevel: 10,
+    baseCost: 1,
+    effect: { key: 'workSpeed', amount: 0.3 },
+  },
+  fans: {
+    name: '단골 손님',
+    description: '출시작이 버는 수익 +30%',
+    maxLevel: 10,
+    baseCost: 1,
+    effect: { key: 'income', amount: 0.3 },
+  },
+  party: {
+    name: '출시 잔치',
+    description: '출시할 때 받는 잎사귀 +30%',
+    maxLevel: 10,
+    baseCost: 1,
+    effect: { key: 'bonus', amount: 0.3 },
+  },
+  word: {
+    name: '입소문',
+    description: '출시로 얻는 평판 +10%',
+    maxLevel: 10,
+    baseCost: 1,
+    effect: { key: 'reputation', amount: 0.1 },
+  },
+  seed: {
+    name: '종잣돈',
+    description: '잎사귀를 들고 새 회사를 시작',
+    maxLevel: 5,
+    baseCost: 1,
+    seed: [2_000, 20_000, 200_000, 1_500_000, 10_000_000],
+  },
+} as const satisfies Record<string, PerkDef>;
+
+export type PerkId = keyof typeof PERKS;
+export const PERK_ORDER = Object.keys(PERKS) as PerkId[];
 
 // ───────── 급한 의뢰 ─────────
 
