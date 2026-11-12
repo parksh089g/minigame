@@ -2,7 +2,9 @@
  * 등불지기의 규칙: 성장 곡선, 적 등장, 무기 성능, 레벨업 선택지, 보상.
  * 순수 함수만 두어 화면 없이 테스트하고 숫자를 맞출 수 있게 한다.
  */
+import { MAX_SCORE } from '../../online/protocol';
 import {
+  ENDLESS,
   ENEMIES,
   EVOLVE_LEVEL,
   FLINT,
@@ -92,6 +94,26 @@ export function speedScale(t: number): number {
 export function enemyHp(kind: EnemyKind, t: number): number {
   const info = ENEMIES[kind];
   return Math.round(info.boss ? info.hp : info.hp * hpScale(t));
+}
+
+/**
+ * 끝없는 밤에 들어선 지 seconds초가 지났을 때 더 얹히는 난이도.
+ * hp는 그림자와 보스의 체력에, damage는 받는 피해에, speed는 그림자의 빠르기에 곱한다. 끝없는 밤이 아니면(0초) 모두 1이다.
+ */
+export function endlessScale(seconds: number): { hp: number; damage: number; speed: number } {
+  const minutes = Math.max(0, Number.isFinite(seconds) ? seconds : 0) / 60;
+  return {
+    hp: ENDLESS.hp ** minutes,
+    damage: 1 + ENDLESS.damage * minutes,
+    speed: 1 + Math.min(ENDLESS.maxSpeed, ENDLESS.speed * minutes),
+  };
+}
+
+/** 끝없는 밤의 index번째(0부터) 보스. 그 스테이지의 중간 보스가 차례로 돌아가며 나온다. */
+export function endlessBossKind(stage: StageId, index: number): EnemyKind {
+  // 스테이지의 중간 보스 차례에서 겹치는 것을 뺀 세 가지가 돌아가며 나온다.
+  const list = [...new Set(STAGES[stage].midBosses)];
+  return list[Math.max(0, Math.floor(index)) % list.length];
 }
 
 /** index번째(0부터) 중간 보스의 세기. 표보다 뒤의 것은 마지막 줄을 쓴다. */
@@ -554,17 +576,21 @@ export function upgradeDescription(upgrade: Upgrade): string {
 // ---------------------------------------------------------------- 결과와 보상
 
 export interface RunSummary {
+  /** 버틴 시간(초). 새벽까지는 마지막 보스가 나타난 때에서 멈추고, 끝없는 밤에서 버틴 시간이 그 위에 더해진다. */
   seconds: number;
+  /** 그 가운데 끝없는 밤에서 버틴 시간(초). 끝없는 밤에 들어가지 않았으면 0 */
+  endlessSeconds: number;
   /** 쓰러뜨린 그림자 전부. 결과 화면에 보여 준다. */
   kills: number;
   /**
-   * 점수와 불씨에 세는 처치 수: 마지막 보스가 나타나기 전까지 쓰러뜨린 것.
-   * 마지막 보스가 나온 뒤에도 그림자는 계속 몰려오므로, 그 뒤의 처치까지 세면
-   * 보스를 일부러 남겨 두고 끝없이 점수와 불씨를 올릴 수 있다.
+   * 점수와 불씨에 세는 처치 수: 마지막 보스가 나타나기 전까지 쓰러뜨린 것과, 끝없는 밤에서 쓰러뜨린 것.
+   * 마지막 보스가 나온 뒤에도 그림자는 계속 몰려오므로, 보스와 싸우는 동안의 처치까지 세면
+   * 보스를 일부러 남겨 두고 끝없이 점수와 불씨를 올릴 수 있다. 끝없는 밤은 갈수록 어려워져서 그럴 수 없다.
    */
   countedKills: number;
   level: number;
   bossKills: number;
+  /** 새벽을 맞았는지. 끝없는 밤에서 쓰러져도 새벽을 맞은 것은 그대로다. */
   cleared: boolean;
   /** 레벨업에서 고른 불씨 주머니 */
   bonusEmbers: number;
@@ -573,20 +599,22 @@ export interface RunSummary {
 }
 
 /**
- * 허브의 최고 기록과 랭킹에 쓰는 점수. 버틴 시간도 처치 수도 마지막 보스가 나타난 때까지만 센다.
- * 깊은 밤에서는 단계의 배율이 통째로 곱해진다.
+ * 허브의 최고 기록과 랭킹에 쓰는 점수. 버틴 시간도 처치 수도 마지막 보스가 나타난 때까지만 세고,
+ * 끝없는 밤으로 이어 갔으면 거기서 버틴 시간과 쓰러뜨린 수가 더해진다.
+ * 깊은 밤에서는 단계의 배율이 통째로 곱해진다. 랭킹에 올릴 수 있는 가장 큰 점수를 넘지 않는다.
  */
 export function scoreFor(run: RunSummary): number {
   const base = Math.floor(run.seconds) + run.countedKills + 150 * run.bossKills + (run.cleared ? 1000 : 0);
-  return Math.floor(base * depthRules(run.depth).score);
+  return Math.min(MAX_SCORE, Math.floor(base * depthRules(run.depth).score));
 }
 
 /**
  * 판이 끝나고 받는 불씨. 오래 버틸수록, 많이 쓰러뜨릴수록 많다. 처치는 점수와 같은 수(countedKills)로 센다.
+ * 끝없는 밤에서 버틴 시간과 쓰러뜨린 것도 같은 셈으로 더해진다.
  * lucky는 영구 강화 "불씨 복"의 단계로, 한 단계에 10%씩 더 준다. 깊은 밤에서는 단계의 배율도 곱해진다.
  */
 export function embersFor(run: RunSummary, lucky = 0): number {
-  const minutes = Math.floor(Math.min(run.seconds, RUN_SECONDS) / 60);
+  const minutes = Math.floor(run.seconds / 60);
   const earned =
     minutes * 3 + Math.floor(run.countedKills / 40) + 8 * run.bossKills + (run.cleared ? 40 : 0) + run.bonusEmbers;
   return Math.floor(earned * depthRules(run.depth).embers * (1 + 0.1 * Math.max(0, lucky)));

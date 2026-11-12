@@ -314,6 +314,7 @@ describe('늘어난 영구 강화', () => {
   it('불씨 복은 한 판에서 얻는 불씨를 늘린다', () => {
     const run: RunSummary = {
       seconds: 400,
+      endlessSeconds: 0,
       kills: 500,
       countedKills: 500,
       level: 14,

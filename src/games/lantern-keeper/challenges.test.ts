@@ -98,6 +98,24 @@ describe('한 판의 기록 쌓기', () => {
     expect(stats.deepest).toBe(3);
   });
 
+  it('끝없는 밤에서 가장 오래 버틴 시간이 남는다', () => {
+    let stats = addRun(createStats(), run({ cleared: true }));
+    expect(stats.bestEndless).toBe(0);
+    stats = addRun(stats, run({ cleared: true, endlessSeconds: 200.7 }));
+    stats = addRun(stats, run({ cleared: true, endlessSeconds: 95 }));
+    expect(stats.bestEndless).toBe(200);
+    const three = must('endless-3');
+    const six = must('endless-6');
+    expect(progressOf(three, source({ bestEndless: 179 }))).toBe(2);
+    expect(isDone(three, source({ bestEndless: 179 }))).toBe(false);
+    expect(isDone(three, source({ bestEndless: 180 }))).toBe(true);
+    expect(isDone(six, source({ bestEndless: 359 }))).toBe(false);
+    expect(isDone(six, source({ bestEndless: 360 }))).toBe(true);
+    // 이 항목이 없던 예전 저장은 0으로 채운다.
+    expect(normalizeStats({ kills: 5 }).bestEndless).toBe(0);
+    expect(normalizeStats({ bestEndless: 240.5 }).bestEndless).toBe(240);
+  });
+
   it('저장된 기록에서 엉뚱한 값은 버린다', () => {
     expect(normalizeStats(undefined)).toEqual(createStats());
     expect(normalizeStats({ kills: -3, bossKills: 'x', evolved: 'ember' })).toEqual(createStats());

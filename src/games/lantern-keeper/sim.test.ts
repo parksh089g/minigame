@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { playRun, steer } from './bot';
 import {
+  ENDLESS,
   ENEMIES,
   EVOLVE_LEVEL,
   FLINT,
@@ -30,6 +31,7 @@ import {
   bellStats,
   depthRules,
   embersFor,
+  endlessBossKind,
   maxAlive,
   midBossKind,
   modifiers,
@@ -51,6 +53,7 @@ import {
   looksLikeRun,
   restoreRun,
   RUN_STATE_VERSION,
+  runDawned,
   Sim,
   WARDEN_CHARGING,
   WARDEN_REST,
@@ -1920,6 +1923,186 @@ describe('영구 강화', () => {
     sim.state.enemies.push(enemy('brute', 2, 0, 9999));
     sim.step(STEP, 0, 0);
     expect(sim.state.over).toBe('dead');
+  });
+});
+
+describe('끝없는 밤', () => {
+  /** 마지막 보스만 남은 판. 끝없는 밤으로 이어 갈 수 있다. */
+  const atDawn = (extra: Partial<Parameters<typeof createRun>[0]> = {}): Sim => {
+    const sim = quietSim(1, { endless: true, ...extra });
+    sim.state.t = RUN_SECONDS + 20;
+    sim.state.weapons = { ember: 1 };
+    sim.state.enemies.push(enemy(STAGES[sim.state.stage].finalBoss, 30, 0, 1));
+    advance(sim, 2);
+    return sim;
+  };
+
+  it('마지막 보스를 쓰러뜨리면 판이 끝나지 않고 고를 때까지 멈춘다', () => {
+    const sim = atDawn();
+    expect(sim.state.over).toBeNull();
+    expect(sim.state.pendingDawn).toBe(true);
+    expect(sim.dawned).toBe(true);
+    expect(runDawned(sim.state)).toBe(true);
+    // 고르기 전에는 시간이 흐르지 않는다.
+    const t = sim.state.t;
+    advance(sim, 3);
+    expect(sim.state.t).toBe(t);
+    // 이때 저장해도 이어서 할 수 있고, 같은 선택이 다시 나온다.
+    const copy = JSON.parse(JSON.stringify(sim.state)) as RunState;
+    expect(looksLikeRun(copy)).toBe(true);
+    expect(restoreRun(copy)?.pendingDawn).toBe(true);
+  });
+
+  it('끝없는 밤을 켜지 않은 판은 전처럼 새벽에서 바로 끝난다', () => {
+    const sim = quietSim();
+    sim.state.weapons = { ember: 1 };
+    sim.state.enemies.push(enemy(STAGES.meadow.finalBoss, 30, 0, 1));
+    advance(sim, 2);
+    expect(sim.state.over).toBe('cleared');
+    expect(sim.state.pendingDawn).toBeUndefined();
+    expect(runDawned(createRun(config))).toBe(false);
+    expect(runDawned(null)).toBe(false);
+  });
+
+  it('여기서 마치면 새벽을 맞은 판으로 끝난다', () => {
+    const sim = atDawn();
+    const before = sim.summary();
+    sim.chooseDawn(false);
+    expect(sim.state.over).toBe('cleared');
+    expect(sim.state.pendingDawn).toBe(false);
+    expect(sim.state.endless).toBeUndefined();
+    expect(sim.summary()).toEqual(before);
+    expect(before).toMatchObject({ cleared: true, seconds: RUN_SECONDS, endlessSeconds: 0 });
+    // 이미 고른 뒤에는 다시 고를 수 없다.
+    sim.chooseDawn(true);
+    expect(sim.state.endless).toBeUndefined();
+  });
+
+  it('이어 가면 시간이 다시 흐르고, 버틴 만큼 점수와 불씨가 는다', () => {
+    const sim = atDawn();
+    const dawn = sim.summary();
+    sim.chooseDawn(true);
+    expect(sim.state.over).toBeNull();
+    expect(sim.state.endless).toMatchObject({ at: sim.state.t, bosses: 0, surges: 0 });
+    sim.state.player.inv = 1e9;
+    sim.state.spawnDebt = 0;
+    advance(sim, 61);
+    const later = sim.summary();
+    expect(sim.endlessSeconds).toBeCloseTo(61, 0);
+    expect(later.endlessSeconds).toBeCloseTo(61, 0);
+    expect(later.seconds).toBeCloseTo(RUN_SECONDS + 61, 0);
+    expect(later.cleared).toBe(true);
+    // 끝없는 밤에서 쓰러뜨린 것은 다시 센다.
+    expect(sim.state.kills).toBeGreaterThan(dawn.kills);
+    expect(later.countedKills - dawn.countedKills).toBe(sim.state.kills - dawn.kills);
+    expect(scoreFor(later)).toBeGreaterThan(scoreFor(dawn));
+    expect(embersFor(later)).toBeGreaterThan(embersFor(dawn));
+  });
+
+  it('끝없는 밤에서 쓰러져도 새벽을 맞은 기록은 남는다', () => {
+    const sim = atDawn();
+    const dawn = sim.summary();
+    sim.chooseDawn(true);
+    sim.state.weapons = {};
+    sim.state.player.hp = 1;
+    sim.state.enemies.push(enemy('wisp', 0, 0, 1e6));
+    advance(sim, 2);
+    expect(sim.state.over).toBe('dead');
+    const end = sim.summary();
+    expect(end.cleared).toBe(true);
+    expect(scoreFor(end)).toBeGreaterThanOrEqual(scoreFor(dawn));
+    // 끝난 판은 마칠 것이 없다.
+    sim.settle();
+    expect(sim.state.over).toBe('dead');
+  });
+
+  it('그림자는 분마다 튼튼해진다', () => {
+    const sim = atDawn();
+    sim.chooseDawn(true);
+    sim.state.weapons = {};
+    sim.state.player.inv = 1e9;
+    sim.state.spawnDebt = 0;
+    advance(sim, 1);
+    const hpOf = (): Map<string, number> => new Map(sim.state.enemies.map((e) => [e.kind, e.maxHp]));
+    const early = hpOf();
+    // 끝없는 밤에 들어선 지 3분이 지난 것으로 친다.
+    sim.state.enemies.length = 0;
+    if (sim.state.endless) sim.state.endless.at -= 180;
+    advance(sim, 1);
+    const late = hpOf();
+    const shared = [...late.keys()].filter((kind) => early.has(kind));
+    expect(shared.length).toBeGreaterThan(0);
+    // 3분이면 체력이 ENDLESS.hp의 세제곱 배다.
+    for (const kind of shared) {
+      expect((late.get(kind) ?? 0) / (early.get(kind) ?? 1)).toBeCloseTo(ENDLESS.hp ** 3, 0);
+    }
+  });
+
+  it('보스가 정해진 간격으로 차례대로 돌아오고, 강화권을 준다', () => {
+    const sim = atDawn();
+    sim.chooseDawn(true);
+    sim.state.weapons = {};
+    sim.state.player.inv = 1e9;
+    advance(sim, ENDLESS.bossEvery - 1);
+    const bosses = (): Enemy[] => sim.state.enemies.filter((e) => ENEMIES[e.kind].boss);
+    expect(bosses()).toHaveLength(0);
+    advance(sim, 2);
+    expect(bosses().map((e) => e.kind)).toEqual([endlessBossKind('meadow', 0)]);
+    expect(sim.state.endless?.bosses).toBe(1);
+    // 끝없는 밤의 보스는 마지막 보스가 아니다. 쓰러뜨리면 새벽이 다시 오지 않고 강화권을 받는다.
+    const boss = bosses()[0];
+    boss.hp = 1;
+    boss.x = 30;
+    boss.y = 0;
+    sim.state.weapons = { ember: 1 };
+    const tickets: SimEvent[] = [];
+    for (let i = 0; i < 120 && tickets.length === 0; i += 1) {
+      sim.step(STEP, 0, 0);
+      tickets.push(...sim.events.filter((event) => event.type === 'ticket'));
+    }
+    expect(tickets).toHaveLength(1);
+    expect(sim.state.over).toBeNull();
+    expect(sim.state.pendingDawn).toBe(false);
+    // 스테이지의 중간 보스 세 가지가 돌아가며 나온다.
+    const kinds = [0, 1, 2, 3].map((index) => endlessBossKind('meadow', index));
+    expect(new Set(kinds.slice(0, 3)).size).toBe(3);
+    for (const kind of kinds) expect(STAGES.meadow.midBosses).toContain(kind);
+    expect(kinds[3]).toBe(kinds[0]);
+  });
+
+  it('하던 판을 그 자리에서 마칠 수 있다', () => {
+    // 고르는 중이던 판
+    const choosing = atDawn();
+    choosing.settle();
+    expect(choosing.state.over).toBe('cleared');
+    expect(choosing.state.pendingDawn).toBe(false);
+    // 끝없는 밤으로 이어 간 판
+    const going = atDawn();
+    going.chooseDawn(true);
+    going.state.player.inv = 1e9;
+    advance(going, 30);
+    going.settle();
+    expect(going.state.over).toBe('cleared');
+    expect(going.summary().endlessSeconds).toBeCloseTo(30, 0);
+    // 새벽을 맞지 않은 판은 그대로다.
+    const young = newSim();
+    young.settle();
+    expect(young.state.over).toBeNull();
+  });
+
+  it('끝없는 밤 도중에 저장한 판도 그대로 이어진다', () => {
+    const sim = atDawn();
+    sim.chooseDawn(true);
+    sim.state.player.inv = 1e9;
+    advance(sim, 20);
+    const copy = JSON.parse(JSON.stringify(sim.state)) as RunState;
+    expect(looksLikeRun(copy)).toBe(true);
+    const restored = restoreRun(copy);
+    expect(restored?.endless).toEqual(sim.state.endless);
+    const resumed = newSim(7, restored as RunState);
+    advance(resumed, 5);
+    expect(resumed.endlessSeconds).toBeCloseTo(25, 0);
+    expect(runDawned(resumed.state)).toBe(true);
   });
 });
 

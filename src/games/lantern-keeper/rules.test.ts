@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { MAX_SCORE } from '../../online/protocol';
 import {
+  ENDLESS,
   ENEMIES,
   EVOLVE_LEVEL,
   MAX_DEPTH,
@@ -34,6 +36,8 @@ import {
   depthName,
   depthRules,
   embersFor,
+  endlessBossKind,
+  endlessScale,
   emberStats,
   enemyHp,
   fireflyStats,
@@ -70,6 +74,7 @@ import {
 const base = modifiers({}, {});
 const run = (over: Partial<RunSummary> = {}): RunSummary => ({
   seconds: 0,
+  endlessSeconds: 0,
   kills: 0,
   // 따로 주지 않으면 쓰러뜨린 것을 모두 센다.
   countedKills: over.kills ?? 0,
@@ -448,6 +453,36 @@ describe('결과와 보상', () => {
     expect(scoreFor(stalled)).toBe(scoreFor(clear));
     expect(embersFor(stalled)).toBe(embersFor(clear));
     expect(embersFor(stalled, 3)).toBe(embersFor(clear, 3));
+  });
+
+  it('끝없는 밤에서 버틴 시간과 쓰러뜨린 것도 점수와 불씨에 든다', () => {
+    const dawn = run({ seconds: 600, kills: 6000, bossKills: 5, cleared: true });
+    const endless = run({ seconds: 900, endlessSeconds: 300, kills: 9000, bossKills: 8, cleared: true });
+    expect(scoreFor(endless) - scoreFor(dawn)).toBe(300 + 3000 + 150 * 3);
+    // 불씨는 버틴 5분(15)과 쓰러뜨린 3000(75), 보스 셋(24)만큼 는다.
+    expect(embersFor(endless) - embersFor(dawn)).toBe(15 + 75 + 24);
+  });
+
+  it('점수는 랭킹이 받는 가장 큰 값을 넘지 않는다', () => {
+    const huge = run({ seconds: 9000, kills: 5e6, bossKills: 90, cleared: true, depth: MAX_DEPTH });
+    expect(scoreFor(huge)).toBe(MAX_SCORE);
+  });
+
+  it('끝없는 밤의 그림자는 1분마다 세진다', () => {
+    expect(endlessScale(0)).toEqual({ hp: 1, damage: 1, speed: 1 });
+    expect(endlessScale(-5)).toEqual({ hp: 1, damage: 1, speed: 1 });
+    const one = endlessScale(60);
+    expect(one.hp).toBeCloseTo(ENDLESS.hp);
+    expect(one.damage).toBeCloseTo(1 + ENDLESS.damage);
+    expect(one.speed).toBeCloseTo(1 + ENDLESS.speed);
+    const five = endlessScale(300);
+    expect(five.hp).toBeCloseTo(ENDLESS.hp ** 5);
+    expect(five.hp).toBeGreaterThan(one.hp);
+    // 빠르기는 끝없이 오르지 않는다.
+    expect(endlessScale(6000).speed).toBeCloseTo(1 + ENDLESS.maxSpeed);
+    for (const id of STAGE_ORDER) {
+      expect(STAGES[id].midBosses).toContain(endlessBossKind(id, 7));
+    }
   });
 
   it('깊은 밤에서는 단계의 배율만큼 점수와 불씨가 붙는다', () => {

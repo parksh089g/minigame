@@ -37,7 +37,7 @@ import {
   type LanternMeta,
 } from './meta';
 import { depthName, depthRules, formatClock, formatTimes, isUnlocked, metaCost } from './rules';
-import type { RunState } from './sim';
+import { runDawned, type RunState } from './sim';
 
 const MARGIN = 12;
 const ROW_WIDTH = GAME_WIDTH - MARGIN * 2;
@@ -54,6 +54,9 @@ const DETAIL_HEIGHT = 56;
 const UPGRADE_BUTTON_HEIGHT = 24;
 /** 하던 판을 버리고 새로 시작할 때 한 번 더 묻는 말과, 그 물음이 살아 있는 시간 */
 const DISCARD = { label: '하던 판을 버릴까요? 한 번 더!', ms: 3000 } as const;
+/** 새벽을 맞은 판은 버리지 않고 그 자리에서 마쳐 결과를 받는다(씬이 그렇게 한다). */
+const SETTLE_LABEL = '하던 판을 마칠까요? 한 번 더!';
+const discardLabel = (saved: RunState | null): string => (runDawned(saved) ? SETTLE_LABEL : DISCARD.label);
 /** 스테이지 카드 아래의 한 줄: 스테이지 설명, 깊은 밤이 열린 스테이지에서는 단계를 고르는 줄 */
 const DEPTH_ROW = { height: 20, button: 26 } as const;
 /** 고르는 구역(누가 갈까 ~ 스테이지 설명)의 높이 */
@@ -279,9 +282,13 @@ function addMainPage(
       width: buttonWidth,
       height: 30,
       label:
-        saved.daily === undefined
-          ? `이어하기 (${formatClock(saved.t)} · Lv ${saved.player.level})`
-          : `오늘의 판 이어하기 (${formatClock(saved.t)})`,
+        saved.endless
+          ? `끝없는 밤 이어하기 (+${formatClock(saved.t - saved.endless.at)})`
+          : saved.pendingDawn
+            ? '새벽을 맞은 판 이어하기'
+            : saved.daily === undefined
+              ? `이어하기 (${formatClock(saved.t)} · Lv ${saved.player.level})`
+              : `오늘의 판 이어하기 (${formatClock(saved.t)})`,
       style: 'green',
       onTap: handlers.onResume,
     });
@@ -299,7 +306,7 @@ function addMainPage(
           return;
         }
         armed = true;
-        fresh.setLabel(DISCARD.label).setStyle('red');
+        fresh.setLabel(discardLabel(saved)).setStyle('red');
         scene.time.delayedCall(DISCARD.ms, () => {
           armed = false;
           fresh.setLabel('새로 시작').setStyle('neutral');
@@ -421,7 +428,7 @@ function addDailyPage(
         return;
       }
       armed = true;
-      go.setLabel(DISCARD.label).setStyle('red');
+      go.setLabel(discardLabel(handlers.savedRun)).setStyle('red');
       scene.time.delayedCall(DISCARD.ms, () => {
         armed = false;
         go.setLabel(record.tries > 0 ? '다시 도전!' : '도전!').setStyle('green');
