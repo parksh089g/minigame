@@ -22,6 +22,8 @@ const DIRECTIONS = 16;
 /** 빛덩이를 피할 때 두는 거리와, 얼마 뒤의 자리를 내다볼지(초) */
 const HAZARD_RANGE = 16;
 const HAZARD_AHEAD = 0.25;
+/** 부풀고 있는 적의 터질 둘레에서 이만큼(px) 더 떨어지려고 한다. 사람은 바닥의 원을 보고 비킨다. */
+const BURST_MARGIN = 8;
 /** 웅덩이에 발을 들이는 것을 꺼리는 정도. 적을 피하는 것보다는 훨씬 가볍다. */
 const MIRE_COST = 0.8;
 
@@ -34,6 +36,7 @@ export function steer(sim: Sim): [number, number] {
   const incoming = hazards.filter(
     (h) => Math.abs(h.x - player.x) < 60 && Math.abs(h.y - player.y) < 60,
   );
+  const swelling = near.filter((e) => e.mode === 1 && ENEMIES[e.kind].bursts);
   let gem: { x: number; y: number } | null = null;
   let gemDistance = 140;
   for (const candidate of gems) {
@@ -58,6 +61,11 @@ export function steer(sim: Sim): [number, number] {
     for (const e of near) {
       const d = Math.hypot(e.x - x, e.y - y) - ENEMIES[e.kind].radius;
       if (d < DANGER_RANGE) cost += ((DANGER_RANGE - d) / DANGER_RANGE) ** 2 * 10;
+    }
+    for (const e of swelling) {
+      const reach = (ENEMIES[e.kind].bursts?.radius ?? 0) + BURST_MARGIN;
+      const d = Math.hypot(e.x - x, e.y - y);
+      if (d < reach) cost += 4 + ((reach - d) / reach) * 12;
     }
     for (const h of incoming) {
       const d = Math.hypot(h.x + h.vx * HAZARD_AHEAD - x, h.y + h.vy * HAZARD_AHEAD - y);

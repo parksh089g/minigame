@@ -6,13 +6,16 @@ import {
   ENEMIES,
   HEROES,
   MAX_LEVEL,
+  MAX_PASSIVES,
   MAX_WEAPONS,
   MID_BOSS_COUNT,
   MID_BOSS_EVERY,
   PLAYER_BASE,
+  POSTS,
   RUN_SECONDS,
   STAGES,
   SURGES,
+  type BurstInfo,
   type EnemyKind,
   type HeroId,
   type MetaId,
@@ -39,6 +42,7 @@ import {
   minionKind,
   modifiers,
   oilStats,
+  ownedPassives,
   ownedWeapons,
   pickSpawnKind,
   spawnPerSecond,
@@ -73,18 +77,30 @@ export interface Enemy {
   slowTo: number;
   /** 반딧불에 다시 맞을 수 있을 때까지(초) */
   fireflyCd: number;
-  /** 보스의 다음 행동까지, 뛰는 적의 다음 뜀이나 착지까지(초) */
+  /** 보스의 다음 행동까지, 뛰는 적의 다음 뜀이나 착지까지, 쏘는 적의 다음 발사까지, 터지는 적이 터질 때까지(초) */
   timer: number;
   /**
    * 돌진하는 보스: 0 쫓기, 1 힘 모으기, 2 돌진.
    * 빛덩이를 쏘는 보스: 0 다음은 쏘기, 1 다음은 부하 부르기(늪의 어미만), 2 쏘려고 빛을 모으는 중.
    * 뛰는 적: 0 웅크림, 1 뛰는 중
+   * 쏘는 적: 0 다가오거나 기다리는 중, 1 쏘려고 숨을 들이쉬는 중
+   * 터지는 적: 0 쫓기, 1 부푸는 중
    */
   mode: number;
   /** 몇 번째 중간 보스인지(0부터). 다른 적은 0 */
   tier: number;
   vx: number;
   vy: number;
+}
+
+/** 등불 기둥. 닿으면 불이 켜지고, 켜져 있는 동안 둘레의 그림자를 태운다. */
+export interface Post {
+  x: number;
+  y: number;
+  /** 불이 꺼질 때까지 남은 시간(초). 0이면 아직 켜지 않았다. */
+  lit: number;
+  /** 다음에 둘레를 태울 때까지(초) */
+  tick: number;
 }
 
 /** 날아가는 것의 생김새. 화면에서 그림을 고를 때 쓴다. */
@@ -108,9 +124,14 @@ export interface Shot {
 export interface Gem {
   x: number;
   y: number;
-  /** 경험치. kind가 heal이면 회복량 */
+  /** 경험치. kind가 heal이면 회복량. 자석과 불꽃 단지에서는 쓰지 않는다. */
   value: number;
-  kind: 'xp' | 'heal';
+  /**
+   * xp는 빛 조각, heal은 회복 떡.
+   * pull은 자석: 주우면 싸움터의 빛 조각이 모두 끌려온다.
+   * blast는 불꽃 단지: 주우면 화면 안의 보통 그림자가 모두 쓰러지고 보스는 조금 다친다.
+   */
+  kind: 'xp' | 'heal' | 'pull' | 'blast';
   /** 끌려오는 중인지 */
   pulled: boolean;
 }
@@ -179,6 +200,8 @@ export interface RunState {
     wading: boolean;
     level: number;
     xp: number;
+    /** 등갓의 빛막이 다시 생길 때까지 남은 시간(초). 0이거나 없으면 빛막이 서 있다(등갓이 있을 때). */
+    guard?: number;
   };
   weapons: Levels<WeaponId>;
   passives: Levels<PassiveId>;
@@ -188,6 +211,10 @@ export interface RunState {
   strikes: Strike[];
   fires: Fire[];
   hazards: Hazard[];
+  /** 싸움터에 서 있는 등불 기둥. 기둥이 생기기 전에 저장한 판에는 없다. */
+  posts?: Post[];
+  /** 지금까지 나타난 등불 기둥의 수. POSTS.times의 몇 번째까지 나왔는지를 가리킨다. */
+  postsSpawned?: number;
   cd: { ember: number; aura: number; star: number; lance: number; oil: number; bolt: number };
   fireflyAngle: number;
   spawnDebt: number;
@@ -241,6 +268,22 @@ export type SimEvent =
   | { type: 'hurt' }
   | { type: 'gem' }
   | { type: 'heal' }
+  /** 자석을 주워 빛 조각이 모두 끌려오기 시작했다 */
+  | { type: 'pull' }
+  /** 불꽃 단지를 주워 화면의 그림자가 타 버렸다 */
+  | { type: 'blast' }
+  /** 등갓의 빛막이 피해를 막았다 */
+  | { type: 'block' }
+  /** 쏘는 적이 어둠 방울을 뱉었다 */
+  | { type: 'spit' }
+  /** 터지는 적이 (x, y)에서 터졌다 */
+  | { type: 'burst'; x: number; y: number; radius: number }
+  /** 등불 기둥이 (x, y)에 나타났다. first는 이 판의 첫 기둥인지 */
+  | { type: 'post'; x: number; y: number; first: boolean }
+  /** 등불 기둥에 불이 켜졌다 */
+  | { type: 'light'; x: number; y: number }
+  /** 등불 기둥이 다 타서 사라졌다 */
+  | { type: 'dim'; x: number; y: number }
   | { type: 'levelup' }
   | { type: 'shoot' }
   | { type: 'strike'; x: number; y: number; radius: number }
@@ -289,11 +332,24 @@ const SPAWN_MARGIN = 14;
 /** 쓰러진 적이 회복 떡을 떨어뜨릴 확률 */
 const HEAL_DROP_CHANCE = 0.008;
 const HEAL_DROP_VALUE = 15;
+/** 쓰러진 적이 자석과 불꽃 단지를 떨어뜨릴 확률. 끝까지 가는 판에서 저마다 대여섯 개쯤 줍게 된다. */
+const PULL_DROP_CHANCE = 0.0012;
+const BLAST_DROP_CHANCE = 0.001;
+/** 불꽃 단지가 보스의 체력에서 덜어 내는 몫. 보통 그림자는 그 자리에서 쓰러진다. */
+const BLAST_BOSS_SHARE = 0.08;
+/** 불꽃 단지가 화면 가장자리 밖으로 닿는 거리(px). 반쯤 걸친 그림자까지 태운다. */
+const BLAST_MARGIN = 8;
+/** 빛막이 피해를 막은 뒤의 무적 시간(초). 적에게 둘러싸였을 때 빠져나올 틈을 준다. */
+const GUARD_INVULNERABLE = 0.8;
 /** 뛰는 적이 한 번 뛰는 시간과 웅크리고 쉬는 시간(초) */
 export const HOP_SECONDS = 0.38;
 export const HOP_REST = 0.44;
 /** 보스가 쏘는 빛덩이 */
 const HAZARD = { speed: 56, life: 3.6, radius: 3, spread: 0.24 } as const;
+/** 쏘는 적의 어둠 방울. 보스의 빛덩이보다 느리고 멀리 가지 못해서, 옆으로 걸으면 피할 수 있다. */
+const SPIT = { speed: 46, life: 2.6, radius: 3 } as const;
+/** 날아다니는 것이 이만큼 있으면 쏘는 적은 쉬어 간다. 화면이 방울로 뒤덮이지 않게 한다. */
+const SPIT_LIMIT = 6;
 /** 되살아날 때: 채워지는 체력 비율, 무적 시간(초), 둘레의 적을 밀어내는 반경과 피해 */
 const REVIVE = { hp: 0.5, invulnerable: 2.5, radius: 64, damage: 40 } as const;
 
@@ -331,6 +387,8 @@ export function createRun(config: RunConfig): RunState {
     strikes: [],
     fires: [],
     hazards: [],
+    posts: [],
+    postsSpawned: 0,
     cd: { ember: 0.6, aura: 0, star: 1, lance: 0.8, oil: 0.5, bolt: 0.7 },
     fireflyAngle: 0,
     spawnDebt: 0,
@@ -414,6 +472,11 @@ export class Sim {
     // 무기별 피해량은 없어도 되는 항목이다. 예전 저장이나 엉뚱한 값이면 비워서 시작한다.
     const dealt: unknown = state.dealt;
     if (typeof dealt !== 'object' || dealt === null || Array.isArray(dealt)) state.dealt = {};
+    // 등불 기둥이 생기기 전에 저장한 판: 이미 지난 시각의 기둥이 한꺼번에 나타나지 않게, 지난 것은 나온 것으로 친다.
+    if (!Array.isArray(state.posts)) state.posts = [];
+    if (typeof state.postsSpawned !== 'number') {
+      state.postsSpawned = POSTS.times.filter((time) => time <= state.t).length;
+    }
   }
 
   private computeMods(): Modifiers {
@@ -450,12 +513,16 @@ export class Sim {
     const s = this.state;
     if (offer.length === 0) return false;
     const full = ownedWeapons(s.weapons).length >= MAX_WEAPONS;
+    const fullPassives = ownedPassives(s.passives).length >= MAX_PASSIVES;
     return offer.every((upgrade) => {
       if (upgrade.type === 'weapon') {
         const level = s.weapons[upgrade.id] ?? 0;
         return upgrade.level === level + 1 && upgrade.level <= MAX_LEVEL && (level > 0 || !full);
       }
-      if (upgrade.type === 'passive') return upgrade.level === (s.passives[upgrade.id] ?? 0) + 1 && upgrade.level <= MAX_LEVEL;
+      if (upgrade.type === 'passive') {
+        const level = s.passives[upgrade.id] ?? 0;
+        return upgrade.level === level + 1 && upgrade.level <= MAX_LEVEL && (level > 0 || !fullPassives);
+      }
       return upgrade.type === 'heal' || upgrade.type === 'embers';
     });
   }
@@ -550,6 +617,7 @@ export class Sim {
     this.moveShots(dt);
     this.landStrikes(dt);
     this.burnFires(dt);
+    this.tendPosts(dt);
     this.reap();
     this.moveGems(dt);
   }
@@ -576,6 +644,18 @@ export class Sim {
     }
     if (p.inv > 0) p.inv -= dt;
     if (this.mods.regen > 0) p.hp = Math.min(this.mods.maxHp, p.hp + this.mods.regen * dt);
+    if (this.mods.guard > 0 && (p.guard ?? 0) > 0) p.guard = Math.max(0, (p.guard ?? 0) - dt);
+  }
+
+  /** 등갓의 빛막이 지금 서 있는지 */
+  get guardReady(): boolean {
+    return this.mods.guard > 0 && !((this.state.player.guard ?? 0) > 0);
+  }
+
+  /** 빛막이 다시 생기기까지 얼마나 찼는지(0~1). 서 있으면 1, 등갓이 없으면 0 */
+  get guardCharge(): number {
+    if (this.mods.guard <= 0) return 0;
+    return 1 - Math.min(1, Math.max(0, this.state.player.guard ?? 0) / this.mods.guard);
   }
 
   /**
@@ -585,6 +665,13 @@ export class Sim {
   private hurt(amount: number): boolean {
     const s = this.state;
     const p = s.player;
+    // 등갓의 빛막이 서 있으면 이번 피해는 막고, 빛막은 다시 생길 때까지 사라진다.
+    if (this.guardReady) {
+      p.guard = this.mods.guard;
+      p.inv = GUARD_INVULNERABLE;
+      this.events.push({ type: 'block' });
+      return false;
+    }
     p.hp -= amount * this.mods.taken;
     p.inv = PLAYER_BASE.invulnerable;
     this.events.push({ type: 'hurt' });
@@ -625,7 +712,16 @@ export class Sim {
       slowTo: 1,
       fireflyCd: 0,
       // 보스는 나타나고 조금 뒤에 첫 행동을 한다. 뛰는 적은 저마다 다른 박자로 뛴다.
-      timer: ENEMIES[kind].boss ? (kind === 'giant' ? 5 : 3) : ENEMIES[kind].hops ? this.rand() * HOP_REST : 0,
+      // 쏘는 적은 다가온 뒤에 조금 있다가 쏘되, 여럿이 한꺼번에 쏘지 않게 번호에 따라 어긋나게 한다.
+      timer: ENEMIES[kind].boss
+        ? kind === 'giant'
+          ? 5
+          : 3
+        : ENEMIES[kind].hops
+          ? this.rand() * HOP_REST
+          : ENEMIES[kind].shoots
+            ? 1 + (s.nextUid % 5) * 0.35
+            : 0,
       mode: 0,
       tier: 0,
       vx: 0,
@@ -662,7 +758,8 @@ export class Sim {
       }
       s.spawnDebt -= 1;
       const [x, y] = this.edgePoint();
-      this.makeEnemy(pickSpawnKind(t, this.rand, s.stage), x, y);
+      const kind = pickSpawnKind(t, this.rand, s.stage);
+      this.makeEnemy(this.crowded(kind) ? STAGES[s.stage].spawns[0].kind : kind, x, y);
     }
 
     // 밀물: 화면 가장자리를 따라 둥글게 에워싼다.
@@ -695,6 +792,17 @@ export class Sim {
       // 마지막 보스는 가장 센 중간 보스와 같은 단계로 부하를 부른다.
       this.spawnBoss(STAGES[s.stage].finalBoss).tier = MID_BOSS_COUNT - 1;
     }
+  }
+
+  /** 쏘는 적이 싸움터에 이미 정해진 수만큼 있는지. 그렇다면 더 내보내지 않는다. */
+  private crowded(kind: EnemyKind): boolean {
+    const limit = ENEMIES[kind].shoots?.limit;
+    if (limit === undefined) return false;
+    let alive = 0;
+    for (const e of this.state.enemies) {
+      if (e.hp > 0 && e.kind === kind) alive += 1;
+    }
+    return alive >= limit;
   }
 
   private spawnBoss(kind: EnemyKind): Enemy {
@@ -860,6 +968,51 @@ export class Sim {
             e.timer = HOP_REST;
           }
         }
+      } else if (info.shoots) {
+        // 닿는 거리까지만 다가와서(0) 멈춰 숨을 들이쉬고(1), 그때 플레이어가 있는 쪽으로 어둠 방울을 뱉는다.
+        const shot = info.shoots;
+        if (e.mode === 1) {
+          speed = 0;
+          e.timer -= dt;
+          if (e.timer <= 0) {
+            e.mode = 0;
+            e.timer = shot.every;
+            s.hazards.push({
+              x: e.x,
+              y: e.y,
+              vx: dirX * SPIT.speed,
+              vy: dirY * SPIT.speed,
+              life: SPIT.life,
+              radius: SPIT.radius,
+              // 예고가 있는 공격은 보스의 것처럼 시간이 지나도 세지지 않고, 깊은 밤의 단계만 따른다.
+              damage: Math.round(shot.damage * this.depth.damage),
+            });
+            this.events.push({ type: 'spit' });
+          }
+        } else {
+          if (e.timer > 0) e.timer -= dt;
+          if (distance < shot.range) {
+            speed = 0;
+            if (e.timer <= 0 && s.hazards.length < SPIT_LIMIT) {
+              e.mode = 1;
+              e.timer = shot.windup;
+            }
+          }
+        }
+      } else if (info.bursts) {
+        // 가까이 오면(0) 멈춰서 부풀다가(1) 터진다. 부푸는 동안 쓰러뜨리거나 둘레 밖으로 나가면 다치지 않는다.
+        const burst = info.bursts;
+        if (e.mode === 1) {
+          speed = 0;
+          e.timer -= dt;
+          if (e.timer <= 0) {
+            if (this.burst(e, burst)) return;
+            continue;
+          }
+        } else if (distance < burst.trigger) {
+          e.mode = 1;
+          e.timer = burst.fuse;
+        }
       }
 
       e.x += dirX * speed * dt;
@@ -900,6 +1053,28 @@ export class Sim {
         if (this.hurt(Math.round(info.damage * (info.boss ? this.depth.damage : hard)))) return;
       }
     }
+  }
+
+  /**
+   * 부풀던 적이 터진다. 둘레 안의 플레이어가 다치고, 둘레 안의 다른 그림자도 함께 다친다.
+   * 터진 적은 여느 적처럼 쓰러진 것으로 친다. 판이 끝났으면 true.
+   * 피해는 쏘는 적의 방울처럼 시간이 지나도 세지지 않고, 깊은 밤의 단계만 따른다.
+   */
+  private burst(source: Enemy, burst: BurstInfo): boolean {
+    const s = this.state;
+    const p = s.player;
+    source.hp = 0;
+    this.events.push({ type: 'burst', x: source.x, y: source.y, radius: burst.radius });
+    for (const other of s.enemies) {
+      if (other === source || other.hp <= 0) continue;
+      const reach = burst.radius + ENEMIES[other.kind].radius;
+      if ((other.x - source.x) ** 2 + (other.y - source.y) ** 2 < reach * reach) this.damage(other, burst.splash, null);
+    }
+    const reach = burst.radius + PLAYER_BASE.radius;
+    if (p.inv <= 0 && (p.x - source.x) ** 2 + (p.y - source.y) ** 2 < reach * reach) {
+      return this.hurt(Math.round(burst.damage * this.depth.damage));
+    }
+    return false;
   }
 
   /** 보스가 angle 쪽을 가운데로 count갈래의 빛덩이를 쏜다. gap은 갈래 사이의 각도. */
@@ -1278,6 +1453,70 @@ export class Sim {
     s.fires.length = kept;
   }
 
+  // ------------------------------------------------------------ 등불 기둥
+
+  /** 때가 되면 등불 기둥을 세우고, 플레이어가 닿은 기둥을 켜고, 켜진 기둥의 둘레를 태운다. */
+  private tendPosts(dt: number): void {
+    const s = this.state;
+    const p = s.player;
+    const posts = (s.posts ??= []);
+    let spawned = s.postsSpawned ?? 0;
+    while (spawned < POSTS.times.length && s.t >= POSTS.times[spawned]) {
+      const angle = this.rand() * Math.PI * 2;
+      const distance = POSTS.near + this.rand() * (POSTS.far - POSTS.near);
+      // 켜지 않은 기둥이 너무 쌓이지 않게, 가장 오래된 것부터 치운다.
+      if (posts.filter((post) => post.lit <= 0).length >= POSTS.keep) {
+        posts.splice(
+          posts.findIndex((post) => post.lit <= 0),
+          1,
+        );
+      }
+      const post: Post = { x: p.x + Math.cos(angle) * distance, y: p.y + Math.sin(angle) * distance, lit: 0, tick: 0 };
+      posts.push(post);
+      spawned += 1;
+      this.events.push({ type: 'post', x: post.x, y: post.y, first: spawned === 1 });
+    }
+    s.postsSpawned = spawned;
+
+    const touch = POSTS.touch + PLAYER_BASE.radius;
+    let kept = 0;
+    for (const post of posts) {
+      if (post.lit <= 0) {
+        if ((p.x - post.x) ** 2 + (p.y - post.y) ** 2 < touch * touch) {
+          post.lit = POSTS.seconds;
+          post.tick = 0;
+          this.events.push({ type: 'light', x: post.x, y: post.y });
+        }
+      } else {
+        post.lit -= dt;
+        if (post.lit <= 0) {
+          this.events.push({ type: 'dim', x: post.x, y: post.y });
+          continue;
+        }
+        post.tick -= dt;
+        if (post.tick <= 0) {
+          post.tick += POSTS.tick;
+          this.scorch(post);
+        }
+      }
+      posts[kept] = post;
+      kept += 1;
+    }
+    posts.length = kept;
+  }
+
+  /** 켜진 기둥의 빛이 둘레 안의 그림자를 한 번 태운다. 체력의 몫으로 깎아서 언제 켜도 쓸모가 같다. */
+  private scorch(post: Post): void {
+    for (const e of this.state.enemies) {
+      if (e.hp <= 0) continue;
+      const info = ENEMIES[e.kind];
+      const reach = POSTS.radius + info.radius;
+      if ((e.x - post.x) ** 2 + (e.y - post.y) ** 2 >= reach * reach) continue;
+      this.damage(e, Math.max(1, e.maxHp * (info.boss ? POSTS.bossBurn : POSTS.burn)), null);
+      if (!info.boss) this.chill(e, POSTS.slow);
+    }
+  }
+
   // ------------------------------------------------------------ 정리와 보상
 
   /** 쓰러진 적을 치우고 빛 조각을 떨어뜨린다. 순서를 지켜 줄여서 그리는 순서가 흔들리지 않게 한다. */
@@ -1304,8 +1543,12 @@ export class Sim {
           s.pendingTickets += 1;
           this.events.push({ type: 'ticket' });
         }
-      } else if (this.rand() < HEAL_DROP_CHANCE) {
-        this.dropGem(e.x, e.y, HEAL_DROP_VALUE, 'heal');
+      } else {
+        // 난수는 한 번만 뽑아서 무엇을 떨어뜨릴지 정한다.
+        const roll = this.rand();
+        if (roll < HEAL_DROP_CHANCE) this.dropGem(e.x, e.y, HEAL_DROP_VALUE, 'heal');
+        else if (roll < HEAL_DROP_CHANCE + PULL_DROP_CHANCE) this.dropGem(e.x, e.y, 0, 'pull');
+        else if (roll < HEAL_DROP_CHANCE + PULL_DROP_CHANCE + BLAST_DROP_CHANCE) this.dropGem(e.x, e.y, 0, 'blast');
       }
     }
     s.enemies.length = kept;
@@ -1355,6 +1598,23 @@ export class Sim {
     if (gem.kind === 'heal') {
       p.hp = Math.min(this.mods.maxHp, p.hp + gem.value);
       this.events.push({ type: 'heal' });
+      return;
+    }
+    if (gem.kind === 'pull') {
+      // 싸움터의 빛 조각이 어디에 있든 모두 끌려온다. 회복 떡과 다른 것은 그 자리에 남는다.
+      for (const other of s.gems) if (other.kind === 'xp') other.pulled = true;
+      this.events.push({ type: 'pull' });
+      return;
+    }
+    if (gem.kind === 'blast') {
+      // 화면에 보이는 곳까지만 닿는다. 쓰러진 그림자는 다음 걸음에 치워지며 빛 조각을 떨어뜨린다.
+      const reachX = s.viewW / 2 + BLAST_MARGIN;
+      const reachY = s.viewH / 2 + BLAST_MARGIN;
+      for (const e of s.enemies) {
+        if (e.hp <= 0 || Math.abs(e.x - p.x) > reachX || Math.abs(e.y - p.y) > reachY) continue;
+        this.damage(e, ENEMIES[e.kind].boss ? e.maxHp * BLAST_BOSS_SHARE : e.hp, null);
+      }
+      this.events.push({ type: 'blast' });
       return;
     }
     p.xp += gem.value * this.mods.xp;

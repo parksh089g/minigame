@@ -31,10 +31,14 @@ export type EnemyKind =
   | 'bat'
   | 'brute'
   | 'wisp'
+  | 'glare'
+  | 'puff'
   | 'drip'
   | 'moth'
   | 'toad'
   | 'stump'
+  | 'squirt'
+  | 'spore'
   | 'giant'
   | 'ram'
   | 'owl'
@@ -47,6 +51,37 @@ export type EnemyKind =
  * lord 돌진한 뒤 부하를 부른다 · matron 사방으로 쏘기와 부하 부르기를 번갈아 한다
  */
 export type BossBrain = 'summon' | 'charge' | 'volley' | 'lord' | 'matron';
+
+/** 멀찍이 멈춰 서서 어둠 방울을 쏘는 적의 숫자 */
+export interface ShootInfo {
+  /** 이 거리(px) 안에 들어오면 더 다가오지 않고 쏜다 */
+  range: number;
+  /** 쏘고 나서 다음에 쏘기까지(초) */
+  every: number;
+  /** 쏘기 전에 멈춰서 숨을 들이쉬는 시간(초). 이 동안 예고가 보인다. */
+  windup: number;
+  /** 어둠 방울에 맞았을 때의 피해 */
+  damage: number;
+  /**
+   * 싸움터에 한꺼번에 있을 수 있는 수. 멀리 서서 버티는 적이라 잘 쓰러지지 않아서,
+   * 정해 두지 않으면 판이 길어질수록 쌓인다. 이만큼 있으면 그 자리에는 스테이지의 가장 흔한 적이 대신 나온다.
+   */
+  limit: number;
+}
+
+/** 가까이 와서 부풀었다가 터지는 적의 숫자 */
+export interface BurstInfo {
+  /** 이 거리(px) 안에 들어오면 멈춰서 부풀기 시작한다 */
+  trigger: number;
+  /** 부풀기 시작해서 터지기까지(초). 이 동안 터질 둘레가 바닥에 보인다. */
+  fuse: number;
+  /** 터지는 둘레의 반지름(px) */
+  radius: number;
+  /** 둘레 안에 있던 플레이어가 받는 피해 */
+  damage: number;
+  /** 둘레 안에 있던 다른 그림자가 받는 피해. 무리 속에서 터뜨리면 이득이다. */
+  splash: number;
+}
 
 export interface EnemyInfo {
   name: string;
@@ -61,6 +96,8 @@ export interface EnemyInfo {
   radius: number;
   /** 폴짝폴짝 뛰어서, 멈췄다가 한 번에 다가온다 */
   hops?: boolean;
+  shoots?: ShootInfo;
+  bursts?: BurstInfo;
   boss?: boolean;
   brain?: BossBrain;
 }
@@ -71,11 +108,47 @@ export const ENEMIES: Readonly<Record<EnemyKind, EnemyInfo>> = {
   bat: { name: '밤박쥐', hp: 5, speed: 40, damage: 4, xp: 1, radius: 5 },
   wisp: { name: '도깨비불', hp: 14, speed: 30, damage: 8, xp: 2, radius: 5 },
   brute: { name: '돌그림자', hp: 45, speed: 15, damage: 12, xp: 4, radius: 8 },
+  glare: {
+    name: '눈총 그림자',
+    hp: 10,
+    speed: 24,
+    damage: 5,
+    xp: 2,
+    radius: 6,
+    shoots: { range: 84, every: 5, windup: 0.7, damage: 4, limit: 4 },
+  },
+  puff: {
+    name: '부푼 그림자',
+    hp: 26,
+    speed: 34,
+    damage: 6,
+    xp: 3,
+    radius: 6,
+    bursts: { trigger: 24, fuse: 0.9, radius: 30, damage: 12, splash: 40 },
+  },
   // 안개 늪
   drip: { name: '늪방울', hp: 7, speed: 21, damage: 5, xp: 1, radius: 6 },
   moth: { name: '안개나방', hp: 4, speed: 44, damage: 4, xp: 1, radius: 5 },
   toad: { name: '늪두꺼비', hp: 18, speed: 58, damage: 9, xp: 2, radius: 6, hops: true },
   stump: { name: '이끼 등걸', hp: 60, speed: 13, damage: 14, xp: 5, radius: 9 },
+  squirt: {
+    name: '물총 봉오리',
+    hp: 12,
+    speed: 20,
+    damage: 5,
+    xp: 2,
+    radius: 6,
+    shoots: { range: 90, every: 5.2, windup: 0.7, damage: 4, limit: 4 },
+  },
+  spore: {
+    name: '포자 주머니',
+    hp: 30,
+    speed: 30,
+    damage: 6,
+    xp: 3,
+    radius: 7,
+    bursts: { trigger: 26, fuse: 1, radius: 34, damage: 13, splash: 45 },
+  },
   // 중간 보스의 체력은 MID_BOSS_TIERS가 정한다. 여기 적힌 값은 첫 번째 것과 같다.
   giant: { name: '어스름 거인', hp: 320, speed: 30, damage: 18, xp: 30, radius: 15, boss: true, brain: 'summon' },
   ram: { name: '뿔그림자', hp: 320, speed: 26, damage: 20, xp: 30, radius: 14, boss: true, brain: 'charge' },
@@ -134,6 +207,8 @@ export const STAGES: Readonly<Record<StageId, StageInfo>> = {
       { kind: 'bat', from: 75, weight: 6 },
       { kind: 'wisp', from: 200, weight: 5 },
       { kind: 'brute', from: 160, weight: 2 },
+      { kind: 'glare', from: 130, weight: 1 },
+      { kind: 'puff', from: 280, weight: 1.2 },
     ],
     surge: ['shade', 'wisp'],
     minions: ['bat', 'wisp'],
@@ -150,6 +225,8 @@ export const STAGES: Readonly<Record<StageId, StageInfo>> = {
       { kind: 'moth', from: 60, weight: 6 },
       { kind: 'toad', from: 120, weight: 5 },
       { kind: 'stump', from: 170, weight: 2 },
+      { kind: 'squirt', from: 120, weight: 1 },
+      { kind: 'spore', from: 270, weight: 1.2 },
     ],
     surge: ['moth', 'toad'],
     minions: ['moth', 'toad'],
@@ -168,11 +245,39 @@ export const STAGE_ORDER: readonly StageId[] = ['meadow', 'marsh'];
  */
 export const MAX_DEPTH = 8;
 
+/**
+ * 등불 기둥. 정해진 시각마다 플레이어 가까이에 하나씩 나타나고, 닿으면 불이 켜져서 한동안 둘레의 그림자를 태운다.
+ * 켜지 않은 기둥은 그 자리에 남아 있어서, 밀물이나 보스가 올 때까지 아껴 둘 수 있다.
+ */
+export const POSTS = {
+  /** 나타나는 시각(초). 첫 번째는 일찍 나와서 쓰는 법을 알려 주고, 나머지는 밀물이 오기 30초 전에 나온다. */
+  times: [50, 150, 270, 390, 510],
+  /** 플레이어에게서 이만큼(px) 떨어진 곳에 나타난다. 화면 안에 보이는 거리다. */
+  near: 70,
+  far: 100,
+  /** 이 거리(px) 안으로 다가가면 불이 켜진다 */
+  touch: 10,
+  /** 빛이 닿는 둘레의 반지름(px) */
+  radius: 46,
+  /** 켜져 있는 시간(초). 다 타면 기둥이 사라진다. */
+  seconds: 12,
+  /** 빛이 그림자를 태우는 간격(초) */
+  tick: 0.4,
+  /** 한 번 태울 때 보통 그림자가 잃는 체력의 몫. 빛 속에서 2초 남짓 버티면 쓰러진다. */
+  burn: 0.18,
+  /** 한 번 태울 때 보스가 잃는 체력의 몫. 끝까지 빛 속에 있어도 열에 하나쯤만 잃는다. */
+  bossBurn: 0.003,
+  /** 빛 속에서 보통 그림자가 느려지는 배율. 걸어오는 그림자는 가운데에 닿기 전에 거의 다 탄다. */
+  slow: 0.5,
+  /** 켜지 않은 기둥은 이만큼까지만 남는다. 넘치면 가장 오래된 것이 사라진다. */
+  keep: 3,
+} as const;
+
 /** 이 시각들에 적이 둥글게 에워싸는 "밀물"이 한 번씩 온다(초). 중간 보스와 겹치지 않게 그 사이에 둔다. */
 export const SURGES: readonly number[] = [180, 300, 420, 540];
 
 export type WeaponId = 'ember' | 'aura' | 'firefly' | 'star' | 'lance' | 'oil' | 'bolt';
-export type PassiveId = 'wick' | 'hourglass' | 'boots' | 'magnet' | 'coat' | 'lens';
+export type PassiveId = 'wick' | 'hourglass' | 'boots' | 'magnet' | 'coat' | 'lens' | 'hood';
 
 /** 레벨업으로 올릴 수 있는 무기와 패시브의 최대 레벨 */
 export const MAX_LEVEL = 5;
@@ -183,6 +288,8 @@ export const MAX_LEVEL = 5;
 export const EVOLVE_LEVEL = MAX_LEVEL + 1;
 /** 한 판에 들 수 있는 무기의 수 */
 export const MAX_WEAPONS = 4;
+/** 한 판에 가질 수 있는 패시브의 가짓수. 패시브가 이보다 많아서, 무엇을 뺄지 골라야 한다. */
+export const MAX_PASSIVES = 6;
 
 export interface WeaponInfo {
   name: string;
@@ -246,7 +353,12 @@ export const PASSIVES: Readonly<Record<PassiveId, PassiveInfo>> = {
   magnet: { name: '자석 돌', perLevel: '빛 조각 줍는 거리 +30%' },
   coat: { name: '두꺼운 외투', perLevel: '최대 체력 +20, 회복' },
   lens: { name: '유리 렌즈', perLevel: '공격 범위 +10%' },
+  // 선택 카드에는 이 글 대신 그 레벨에서 몇 초마다 다시 생기는지를 적는다(rules.ts의 upgradeDescription).
+  hood: { name: '등갓', perLevel: '피해를 한 번 막는 빛막, 다시 생기는 시간 -3초' },
 };
+
+/** 등갓의 빛막이 다시 생기는 데 걸리는 시간(초): 1레벨의 값과 레벨마다 줄어드는 값 */
+export const GUARD = { seconds: 24, perLevel: 3 } as const;
 
 export type HeroId = 'keeper' | 'stargazer' | 'stormer';
 

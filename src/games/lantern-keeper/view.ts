@@ -1,8 +1,8 @@
 import Phaser from 'phaser';
 import { darknessTexture, flashOf, FLOOR_OF, HERO_FRAMES, LK, LOOK } from './art';
-import { ENEMIES, STAGES } from './data';
+import { ENEMIES, POSTS, STAGES } from './data';
 import { auraStats, fireflyStats, isEvolved } from './rules';
-import { AIM_LOCK_SECONDS, CHARGE_SECONDS, CHARGING, dashOf, type ShotLook, type Sim } from './sim';
+import { AIM_LOCK_SECONDS, CHARGE_SECONDS, CHARGING, dashOf, type Gem, type Post, type ShotLook, type Sim } from './sim';
 import { puddlesAround } from './terrain';
 
 const DEPTH = {
@@ -10,6 +10,7 @@ const DEPTH = {
   terrain: 1,
   ground: 2,
   gem: 3,
+  post: 4,
   enemy: 5,
   boss: 5.5,
   shot: 6,
@@ -27,6 +28,8 @@ interface Ring {
   y: number;
   radius: number;
   life: number;
+  /** 적이 터진 자리면 위험한 색으로 그린다 */
+  hostile?: boolean;
 }
 
 /** 번갯불이 지나간 길. 잠깐 보였다 사라진다. */
@@ -38,6 +41,26 @@ interface Flash {
 
 const RING_SECONDS = 0.22;
 const FLASH_SECONDS = 0.2;
+
+/** 등불 기둥의 그림을 선 자리에서 이만큼(px) 올려 그린다. 받침이 그 자리에 놓인다. */
+const POST_LIFT = 6;
+
+/** 등갓의 빛막: 등불지기를 두르는 고리의 반지름과, 발밑이 아니라 몸 가운데에 오도록 올리는 높이(px) */
+const GUARD = { radius: 11, lift: -2 } as const;
+
+/** 떨어져 있는 것의 그림. 빛 조각은 값이 클수록 큰 조각으로 보인다. */
+function gemKey(gem: Gem): string {
+  switch (gem.kind) {
+    case 'heal':
+      return LK.heal;
+    case 'pull':
+      return LK.pull;
+    case 'blast':
+      return LK.blast;
+    default:
+      return gem.value >= 10 ? LK.gemBig : gem.value >= 3 ? LK.gemMid : LK.gemSmall;
+  }
+}
 
 const SHOT_KEY: Record<ShotLook, string> = {
   ember: LK.ember,
@@ -96,6 +119,7 @@ export class RunView {
   private readonly player: Phaser.GameObjects.Image;
   private readonly enemies: Pool;
   private readonly gems: Pool;
+  private readonly posts: Pool;
   private readonly shots: Pool;
   private readonly sparks: Phaser.GameObjects.Particles.ParticleEmitter;
   private readonly dark: Phaser.GameObjects.Image;
@@ -133,6 +157,7 @@ export class RunView {
     this.terrain = scene.add.graphics().setDepth(DEPTH.terrain);
     this.ground = scene.add.graphics().setDepth(DEPTH.ground);
     this.gems = new Pool(scene, DEPTH.gem);
+    this.posts = new Pool(scene, DEPTH.post);
     this.enemies = new Pool(scene, DEPTH.enemy);
     this.shots = new Pool(scene, DEPTH.shot);
     this.air = scene.add.graphics().setDepth(DEPTH.shot);
@@ -177,6 +202,17 @@ export class RunView {
     this.rings.push({ x, y, radius, life: RING_SECONDS });
   }
 
+  /** 등불 기둥이 나타난 자리에 불티가 튀고 고리가 퍼져서, 어디에 생겼는지 눈에 띄게 한다. */
+  beacon(sim: Sim, x: number, y: number): void {
+    this.ring(x, y, 26);
+    this.burst(sim, x, y - POST_LIFT, 12);
+  }
+
+  /** 적이 터진 자리에 퍼지는 붉은 고리 */
+  pop(x: number, y: number, radius: number): void {
+    this.rings.push({ x, y, radius, life: RING_SECONDS, hostile: true });
+  }
+
   /** 번갯불이 지나간 길을 잠깐 그린다. points는 세상 좌표의 x, y가 번갈아 들어 있다. */
   bolt(points: number[], evolved: boolean): void {
     this.flashes.push({ points, evolved, life: FLASH_SECONDS });
@@ -198,7 +234,7 @@ export class RunView {
       this.sparks.emitParticleAt(x, y, count);
       left -= count;
     }
-    for (const pool of [this.enemies, this.shots]) {
+    for (const pool of [this.enemies, this.shots, this.posts]) {
       pool.begin();
       pool.end();
     }
@@ -214,13 +250,39 @@ export class RunView {
     this.scene.tweens.add({ targets: this.player, alpha: 0.25, duration: ms, ease: 'Sine.In' });
   }
 
-  /** 보스의 공격 예고: 돌진할 길은 바닥에, 쏘려고 모으는 빛은 보스 위에 그린다. */
+  /**
+   * 공격 예고. 보스가 돌진할 길과 적이 터질 둘레는 바닥에, 쏘려고 모으는 빛은 그 적 위에 그린다.
+   * 예고가 보이는 동안 비키면 맞지 않는다.
+   */
   private drawThreats(sim: Sim, seconds: number, offsetX: number, offsetY: number): void {
     const g = this.ground;
     const air = this.air;
     for (const e of sim.state.enemies) {
       const info = ENEMIES[e.kind];
-      if (!info.boss || e.hp <= 0) continue;
+      if (e.hp <= 0) continue;
+      if (!info.boss) {
+        if (e.mode !== 1 || (!info.bursts && !info.shoots)) continue;
+        const x = Math.round(e.x + offsetX);
+        const y = Math.round(e.y + offsetY);
+        if (info.bursts) {
+          // 터질 둘레: 바닥의 원이 안에서부터 차오르고, 다 차면 터진다.
+          const progress = 1 - Math.max(0, e.timer) / info.bursts.fuse;
+          g.fillStyle(LOOK.threat, 0.1);
+          g.fillCircle(x, y, info.bursts.radius);
+          g.fillStyle(LOOK.threat, 0.22);
+          g.fillCircle(x, y, info.bursts.radius * progress);
+          g.lineStyle(1, LOOK.threat, 0.75);
+          g.strokeCircle(x, y, info.bursts.radius);
+        } else if (info.shoots) {
+          // 쏘기 전에 모으는 어둠: 작은 고리가 조여들고 가운데가 밝아진다.
+          const progress = 1 - Math.max(0, e.timer) / info.shoots.windup;
+          air.lineStyle(1, LOOK.threat, 0.4 + 0.5 * progress);
+          air.strokeCircle(x, y, info.radius + 2 + 7 * (1 - progress));
+          air.fillStyle(LOOK.threatCore, 0.5 + 0.4 * progress);
+          air.fillCircle(x, y, 1 + progress);
+        }
+        continue;
+      }
       const x = Math.round(e.x + offsetX);
       const y = Math.round(e.y + offsetY);
       const brain = info.brain;
@@ -283,6 +345,103 @@ export class RunView {
       g.fillStyle(LOOK.threat, 1);
       draw(size);
     }
+    this.drawPostPointer(sim, offsetX, offsetY);
+  }
+
+  /** 아껴 둔(켜지 않은) 등불 기둥이 화면 밖에 있으면, 가장 가까운 것을 가장자리의 작은 노란 화살표로 가리킨다. */
+  private drawPostPointer(sim: Sim, offsetX: number, offsetY: number): void {
+    let nearest: Post | null = null;
+    let best = Number.POSITIVE_INFINITY;
+    for (const post of sim.state.posts ?? []) {
+      if (post.lit > 0) continue;
+      const x = post.x + offsetX;
+      const y = post.y + offsetY;
+      // 하나라도 화면 안에 보이면 가리킬 필요가 없다.
+      if (x >= 0 && x <= this.width && y >= this.frame.top && y <= this.height) return;
+      const distance = (x - this.centerX) ** 2 + (y - this.centerY) ** 2;
+      if (distance < best) {
+        best = distance;
+        nearest = post;
+      }
+    }
+    if (!nearest) return;
+    const g = this.pointer;
+    const { inset } = POINTER;
+    const size = POINTER.size - 2;
+    const x = nearest.x + offsetX;
+    const y = nearest.y + offsetY;
+    const px = Math.min(this.width - inset, Math.max(inset, x));
+    const py = Math.min(this.height - inset, Math.max(this.frame.top + this.frame.bar + inset, y));
+    const angle = Math.atan2(y - py, x - px);
+    const corner = (turn: number, reach: number): [number, number] => [
+      Math.round(px + Math.cos(angle + turn) * reach),
+      Math.round(py + Math.sin(angle + turn) * reach),
+    ];
+    for (const [reach, color] of [
+      [size + 2, LOOK.postPointerEdge],
+      [size, LOOK.postLight],
+    ] as const) {
+      const [tipX, tipY] = corner(0, reach);
+      const [leftX, leftY] = corner(2.4, reach);
+      const [rightX, rightY] = corner(-2.4, reach);
+      g.fillStyle(color, 1);
+      g.fillTriangle(tipX, tipY, leftX, leftY, rightX, rightY);
+    }
+  }
+
+  /**
+   * 등불 기둥. 켜기 전에는 닿으라는 뜻으로 옅은 고리가 숨 쉬듯 커졌다 줄어들고,
+   * 켜진 뒤에는 빛이 닿는 둘레가 바닥에 보인다. 꺼지기 직전에는 둘레가 깜빡인다.
+   */
+  private drawPosts(sim: Sim, seconds: number, offsetX: number, offsetY: number, g: Phaser.GameObjects.Graphics): void {
+    this.posts.begin();
+    for (const post of sim.state.posts ?? []) {
+      const x = Math.round(post.x + offsetX);
+      const y = Math.round(post.y + offsetY);
+      const reach = POSTS.radius + 8;
+      if (x < -reach || x > this.width + reach || y < -reach || y > this.height + reach) continue;
+      const lit = post.lit > 0;
+      // 그림의 받침이 기둥이 선 자리에 오도록 올려 놓는다.
+      this.posts.put(lit ? LK.postLit : LK.post, x, y - POST_LIFT);
+      if (!lit) {
+        const breath = 0.5 + 0.5 * Math.sin(seconds * 3.4);
+        g.fillStyle(LOOK.postLight, 0.06 + 0.06 * breath);
+        g.fillCircle(x, y, POSTS.touch + 4);
+        g.lineStyle(1, LOOK.postLight, 0.45 + 0.4 * breath);
+        g.strokeCircle(x, y, POSTS.touch + 2 + 4 * breath);
+        continue;
+      }
+      const ending = post.lit < 2.5 && Math.floor(seconds * 8) % 2 === 0;
+      const flicker = 0.5 + 0.5 * Math.sin(seconds * 9 + post.x);
+      g.fillStyle(LOOK.postLight, ending ? 0.05 : 0.1 + 0.04 * flicker);
+      g.fillCircle(x, y, POSTS.radius);
+      g.lineStyle(1, LOOK.postEdge, ending ? 0.3 : 0.7);
+      g.strokeCircle(x, y, POSTS.radius);
+    }
+    this.posts.end();
+  }
+
+  /**
+   * 등갓의 빛막. 서 있는 동안에는 등불지기를 두르는 고리로 보이고,
+   * 깨진 뒤에는 다시 차오르는 만큼만 흐린 호로 보인다.
+   */
+  private drawGuard(sim: Sim, seconds: number, g: Phaser.GameObjects.Graphics): void {
+    const charge = sim.guardCharge;
+    if (charge <= 0) return;
+    const y = this.centerY + GUARD.lift;
+    if (sim.guardReady) {
+      const glow = 0.5 + 0.5 * Math.sin(seconds * 4);
+      g.fillStyle(LOOK.guard, 0.1 + 0.05 * glow);
+      g.fillCircle(this.centerX, y, GUARD.radius);
+      g.lineStyle(1, LOOK.guard, 0.7 + 0.25 * glow);
+      g.strokeCircle(this.centerX, y, GUARD.radius);
+      return;
+    }
+    const start = -Math.PI / 2;
+    g.lineStyle(1, LOOK.guard, 0.3);
+    g.beginPath();
+    g.arc(this.centerX, y, GUARD.radius, start, start + Math.PI * 2 * charge);
+    g.strokePath();
   }
 
   /** 맞았을 때 잠깐 하얗게 */
@@ -344,9 +503,7 @@ export class RunView {
       const x = gem.x + offsetX;
       const y = gem.y + offsetY;
       if (x < -marginX || x > this.width + marginX || y < -marginY || y > this.height + marginY) continue;
-      const key =
-        gem.kind === 'heal' ? LK.heal : gem.value >= 10 ? LK.gemBig : gem.value >= 3 ? LK.gemMid : LK.gemSmall;
-      this.gems.put(key, x, y);
+      this.gems.put(gemKey(gem), x, y);
     }
     this.gems.end();
 
@@ -363,7 +520,13 @@ export class RunView {
       const frame = ENEMIES[e.kind].hops ? (e.mode === 1 ? 0 : 1) : Math.floor(beat + e.uid * 0.37) % 2;
       const key = frames[frame];
       const boss = Boolean(ENEMIES[e.kind].boss);
-      const image = this.enemies.put(e.flash > 0 ? flashOf(key) : key, x, y);
+      const info = ENEMIES[e.kind];
+      // 터지려고 부푸는 적은 점점 커지면서 깜빡인다.
+      const swell = info.bursts && e.mode === 1 ? 1 - Math.max(0, e.timer) / info.bursts.fuse : 0;
+      const lit = e.flash > 0 || (swell > 0 && Math.floor(seconds * (8 + 10 * swell)) % 2 === 0);
+      const image = this.enemies.put(lit ? flashOf(key) : key, x, y);
+      const scale = 1 + 0.4 * swell;
+      if (image.scaleX !== scale) image.setScale(scale);
       const depth = boss ? DEPTH.boss : DEPTH.enemy;
       if (image.depth !== depth) image.setDepth(depth);
     }
@@ -427,6 +590,8 @@ export class RunView {
       g.lineStyle(evolved ? 2 : 1, evolved ? LOOK.auraEvoEdge : LOOK.auraEdge, evolved ? 0.7 : 0.55);
       g.strokeCircle(this.centerX, this.centerY, stats.radius);
     }
+    this.drawPosts(sim, seconds, offsetX, offsetY, g);
+    this.drawGuard(sim, seconds, g);
     for (const strike of s.strikes) {
       g.lineStyle(1, LOOK.strike, 0.5);
       g.strokeCircle(Math.round(strike.x + offsetX), Math.round(strike.y + offsetY), strike.radius);
@@ -436,7 +601,7 @@ export class RunView {
       ring.life -= dt;
       if (ring.life <= 0) continue;
       const progress = 1 - ring.life / RING_SECONDS;
-      g.fillStyle(LOOK.strike, 0.35 * (1 - progress));
+      g.fillStyle(ring.hostile ? LOOK.threat : LOOK.strike, 0.35 * (1 - progress));
       g.fillCircle(Math.round(ring.x + offsetX), Math.round(ring.y + offsetY), ring.radius * (0.5 + 0.5 * progress));
       this.rings[kept] = ring;
       kept += 1;

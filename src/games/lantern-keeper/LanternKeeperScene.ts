@@ -281,6 +281,43 @@ export class LanternKeeperScene extends MiniGameScene {
         case 'heal':
           board.play('heal', now);
           break;
+        case 'pull':
+          board.play('pull', now);
+          break;
+        case 'blast':
+          board.play('blast', now);
+          this.effects.flash(0.4, 260);
+          this.effects.shake(200, 0.014);
+          vibrate([20, 30, 40]);
+          break;
+        case 'block':
+          this.view.burst(sim, sim.state.player.x, sim.state.player.y, 14);
+          board.play('block', now);
+          vibrate(15);
+          break;
+        case 'spit':
+          board.play('spit', now);
+          break;
+        case 'post':
+          this.view.beacon(sim, event.x, event.y);
+          board.play('post', now);
+          // 이 판의 첫 기둥이면 쓰는 법을 한 줄로 알려 준다.
+          if (event.first) this.showTip('등불 기둥에 닿으면 빛이 그림자를 태워요');
+          break;
+        case 'light':
+          this.view.burst(sim, event.x, event.y, 16);
+          board.play('light', now);
+          this.effects.flash(0.18, 220);
+          vibrate(20);
+          break;
+        case 'dim':
+          board.play('dim', now);
+          break;
+        case 'burst':
+          this.view.pop(event.x, event.y, event.radius);
+          this.view.burst(sim, event.x, event.y, 10);
+          board.play('burst', now);
+          break;
         case 'strike':
           this.view.ring(event.x, event.y, event.radius);
           board.play('strike', now);
@@ -349,6 +386,18 @@ export class LanternKeeperScene extends MiniGameScene {
     this.beatIn = ratio <= HEARTBEAT.fastBelow ? HEARTBEAT.fast : HEARTBEAT.slow;
     this.board.play('heartbeat', this.time.now);
     this.effects.beat();
+  }
+
+  /** 화면 아래쪽에 한 줄 안내를 잠깐 띄운다. 움직이는 법 안내가 아직 떠 있으면 그 자리를 넘겨받는다. */
+  private showTip(label: string): void {
+    this.hint?.destroy();
+    this.hint = undefined;
+    const tip = addText(this, GAME_WIDTH / 2, this.scale.height - 54, label, {
+      color: CSS.white,
+      originX: 0.5,
+      shadow: CSS.ink,
+    }).setDepth(DEPTH.banner);
+    this.tweens.add({ targets: tip, alpha: 0, delay: 3600, duration: 500, onComplete: () => tip.destroy() });
   }
 
   private fadeHint(): void {

@@ -17,10 +17,14 @@ export const LK = {
   bat: ['lk-bat-1', 'lk-bat-2'],
   wisp: ['lk-wisp-1', 'lk-wisp-2'],
   brute: ['lk-brute-1', 'lk-brute-2'],
+  glare: ['lk-glare-1', 'lk-glare-2'],
+  puff: ['lk-puff-1', 'lk-puff-2'],
   drip: ['lk-drip-1', 'lk-drip-2'],
   moth: ['lk-moth-1', 'lk-moth-2'],
   toad: ['lk-toad-1', 'lk-toad-2'],
   stump: ['lk-stump-1', 'lk-stump-2'],
+  squirt: ['lk-squirt-1', 'lk-squirt-2'],
+  spore: ['lk-spore-1', 'lk-spore-2'],
   giant: ['lk-giant-1', 'lk-giant-2'],
   ram: ['lk-ram-1', 'lk-ram-2'],
   owl: ['lk-owl-1', 'lk-owl-2'],
@@ -32,6 +36,11 @@ export const LK = {
   gemMid: 'lk-gem-m',
   gemBig: 'lk-gem-b',
   heal: 'lk-heal',
+  pull: 'lk-pull',
+  blast: 'lk-blast',
+  /** 등불 기둥: 켜기 전과 켜진 뒤 */
+  post: 'lk-post',
+  postLit: 'lk-post-lit',
   heart: 'lk-heart',
   ember: 'lk-ember',
   emberEvo: 'lk-ember-evo',
@@ -80,6 +89,13 @@ export const LOOK = {
   threatCore: COLOR.white,
   /** 화면 밖의 보스를 가리키는 화살표의 테두리. 어두운 바닥에서도 보이도록 밝게 두른다. */
   pointerEdge: COLOR.white,
+  /** 등갓의 빛막 */
+  guard: COLOR.cyan,
+  /** 등불 기둥의 빛 */
+  postLight: COLOR.yellow,
+  postEdge: COLOR.orange,
+  /** 등불 기둥을 가리키는 화살표의 테두리 */
+  postPointerEdge: COLOR.ink,
 } as const;
 
 /**
@@ -209,6 +225,54 @@ const HEAL: Rows = [
   '.0dddd0.',
   '..0000..',
 ];
+
+/** 자석: 주우면 빛 조각이 모두 끌려온다. 드물게 나오므로 빛 조각보다 크게 그린다. */
+const PULL: Rows = [
+  '0000..0000',
+  '0cc0..0cc0',
+  '0cc0..0cc0',
+  '0220..0220',
+  '0220..0220',
+  '0220000220',
+  '0222222220',
+  '0222222220',
+  '.02222220.',
+  '..000000..',
+];
+
+/** 불꽃 단지: 주우면 화면의 그림자가 타 버린다. */
+const BLAST: Rows = [
+  '....00....',
+  '...04c0...',
+  '...0440...',
+  '..000000..',
+  '.0dddddd0.',
+  '0334333330',
+  '0343333320',
+  '0333333220',
+  '.03332220.',
+  '..000000..',
+];
+
+/** 등불 기둥의 기둥과 받침. 위에 등을 얹어 한 장을 만든다. */
+const POST_POLE: Rows = [
+  '...0e0...',
+  '...0d0...',
+  '...0e0...',
+  '...0d0...',
+  '...0e0...',
+  '...0d0...',
+  '...0e0...',
+  '..00e00..',
+  '.0eeeee0.',
+  '.0000000.',
+];
+
+/** 켜기 전의 등: 불씨만 남아 있다. */
+const POST: Rows = ['...000...', '..0ddd0..', '.0df3fd0.', '.0d343d0.', '.0df3fd0.', '..0ddd0..', ...POST_POLE];
+
+/** 켜진 등 */
+const POST_LIT: Rows = ['...000...', '..03330..', '.034c430.', '.04ccc40.', '.034c430.', '..03330..', ...POST_POLE];
 
 /** HUD의 체력 표시 옆에 놓는 하트. 테두리는 withOutline이 두른다. */
 const HEART: Rows = [
@@ -351,9 +415,14 @@ function blobRows(look: BlobLook, frame: 1 | 2): Rows {
 const BLOBS = {
   shade: { size: 12, body: 1, shade: 2, eye: 12, frill: true },
   brute: { size: 16, body: 14, shade: 13, eye: 3 },
+  // 쏘는 적은 빛덩이를 쏘는 보스(안개 올빼미)처럼 뾰족한 깃이 있고, 터지는 적은 불씨 색으로 둥글다.
+  glare: { size: 13, body: 9, shade: 10, eye: 4, ears: 'tuft' },
+  puff: { size: 13, body: 2, shade: 3, eye: 12 },
   drip: { size: 12, body: 7, shade: 6, eye: 12, frill: true },
   toad: { size: 13, body: 6, shade: 5, eye: 4 },
   stump: { size: 18, body: 14, shade: 6, eye: 5 },
+  squirt: { size: 13, body: 1, shade: 2, eye: 4, ears: 'tuft' },
+  spore: { size: 14, body: 3, shade: 4, eye: 0 },
   giant: { size: 30, body: 7, shade: 6, eye: 4, frill: true },
   ram: { size: 28, body: 3, shade: 4, eye: 0, ears: 'horn' },
   owl: { size: 28, body: 9, shade: 10, eye: 4, ears: 'tuft', frill: true },
@@ -673,6 +742,10 @@ export function registerLanternTextures(scene: Phaser.Scene): void {
     drawDot(2, [[1.5, 12]]),
   );
   add(LK.heal, drawRows(HEAL));
+  add(LK.pull, drawRows(PULL));
+  add(LK.blast, drawRows(BLAST));
+  add(LK.post, drawRows(POST));
+  add(LK.postLit, drawRows(POST_LIT));
   add(LK.heart, drawRows(withOutline(HEART)));
   add(LK.floor, drawFloor());
   add(LK.floorMarsh, drawMarshFloor());
