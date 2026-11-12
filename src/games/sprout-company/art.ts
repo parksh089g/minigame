@@ -76,6 +76,13 @@ export const SC = {
   server: 'sc-server',
   rush: 'sc-rush',
   fruit: 'sc-fruit',
+  chair: 'sc-chair',
+  printer: 'sc-printer',
+  meeting: 'sc-meeting',
+  heart: 'sc-heart',
+  sofa: 'sc-sofa',
+  snack: 'sc-snack',
+  nap: 'sc-nap',
 } as const;
 
 export const COMPUTER_SIZE = { width: 26, height: 22 } as const;
@@ -306,6 +313,99 @@ const ARTS: Record<string, Art> = {
         stroke(c, `M11 ${y + 2.1}h3.2`, '#c8b8f0', 1);
       });
       box(c, 3, 19.5, 16, 2.2, 1.1, '#4a3f66');
+    },
+  },
+  /** 편한 의자: 등받이가 둥근 바퀴 의자 */
+  'sc-chair': {
+    width: 22,
+    height: 22,
+    draw(c) {
+      box(c, 6, 1.5, 10, 10.5, 3.6, '#ff9fb5');
+      box(c, 7.6, 3.2, 6.8, 6, 2.4, '#ffc4d3');
+      box(c, 4, 11.5, 14, 4, 2, '#f07f9c');
+      box(c, 10, 15.2, 2, 3.2, 0, '#8d7aa8');
+      stroke(c, 'M5.5 19h11', '#8d7aa8', 1.6);
+      oval(c, 5.5, 20, 1.3, 1.3, '#4a3f66');
+      oval(c, 16.5, 20, 1.3, 1.3, '#4a3f66');
+    },
+  },
+  /** 복합기: 종이가 나오는 기계 */
+  'sc-printer': {
+    width: 22,
+    height: 22,
+    draw(c) {
+      box(c, 6, 1.5, 10, 7, 1, '#fffaf0');
+      stroke(c, 'M8 4h6M8 6h4', '#d9d2e6', 1);
+      box(c, 2, 7, 18, 9, 2.4, '#c8b8f0');
+      box(c, 2, 12, 18, 4, 2, '#a892e6');
+      oval(c, 16.5, 10, 1, 1, '#8fe0bd');
+      box(c, 5, 13.5, 12, 7, 1, '#fffaf0');
+      stroke(c, 'M7 16.500h8M7 18.500h5', '#d9d2e6', 1);
+    },
+  },
+  /** 회의실: 둥근 탁자와 말풍선 */
+  'sc-meeting': {
+    width: 22,
+    height: 22,
+    draw(c) {
+      box(c, 3, 1.5, 12, 8, 3, '#bfe3ff');
+      fill(c, 'M6 9l-1 3.500 4-3.500z', '#bfe3ff');
+      oval(c, 6.6, 5.5, 0.9, 0.9, '#3f86c4');
+      oval(c, 9, 5.5, 0.9, 0.9, '#3f86c4');
+      oval(c, 11.4, 5.5, 0.9, 0.9, '#3f86c4');
+      oval(c, 11, 15, 9, 3.6, '#e0b98a');
+      oval(c, 11, 14, 9, 3.6, '#f0cfa5');
+      box(c, 10, 16.5, 2, 4, 0, '#e0b98a');
+      box(c, 7, 19.6, 8, 1.8, 0.9, '#e0b98a');
+    },
+  },
+  /** 단짝이 옆자리에 앉았다 */
+  'sc-heart': {
+    width: 10,
+    height: 10,
+    view: [20, 20],
+    draw(c) {
+      fill(c, 'M10 18C4 13.500 1 10 1 6.500 1 3.500 3.300 1.500 6 1.500c1.600 0 3 .800 4 2 1-1.200 2.400-2 4-2 2.700 0 5 2 5 5 0 3.500-3 7-9 11.500z', '#ff7f9c');
+      oval(c, 6, 6, 1.6, 2.2, '#ffc4d3', -0.5);
+    },
+  },
+  /** 소파: 휴게실에서 쉬는 자리 */
+  'sc-sofa': {
+    width: 22,
+    height: 22,
+    draw(c) {
+      box(c, 4, 4, 14, 10, 4, '#8fe0bd');
+      box(c, 1.5, 9, 5, 9, 2.4, '#5cc79a');
+      box(c, 15.5, 9, 5, 9, 2.4, '#5cc79a');
+      box(c, 5, 11, 12, 6, 2, '#bdeedb');
+      box(c, 3, 18, 2.4, 2.6, 0.8, '#8d7aa8');
+      box(c, 16.6, 18, 2.4, 2.6, 0.8, '#8d7aa8');
+    },
+  },
+  /** 간식: 접시에 담긴 쿠키와 음료 */
+  'sc-snack': {
+    width: 22,
+    height: 22,
+    draw(c) {
+      box(c, 13, 5, 6.5, 12, 1.6, '#ffc4d3');
+      box(c, 13, 5, 6.5, 3.4, 1.6, '#fffaf0');
+      stroke(c, 'M16.500 5.500V2l2-1', '#8d7aa8', 1.2);
+      oval(c, 8, 17.5, 7, 2.6, '#d9d2e6');
+      oval(c, 8, 16.8, 7, 2.4, '#fffaf0');
+      oval(c, 7.5, 12.5, 4.6, 4.2, '#f0cfa5');
+      oval(c, 6, 11.4, 0.9, 0.9, '#9a7353');
+      oval(c, 8.8, 12.4, 0.9, 0.9, '#9a7353');
+      oval(c, 7, 14.2, 0.9, 0.9, '#9a7353');
+    },
+  },
+  /** 쉬는 중: 졸음 표시 */
+  'sc-nap': {
+    width: 14,
+    height: 14,
+    view: [28, 28],
+    draw(c) {
+      stroke(c, 'M4 15h8l-8 9h8', '#8d7aa8', 2.6);
+      stroke(c, 'M15 4h8l-8 9h8', '#a892e6', 2.6);
     },
   },
   /** 급한 의뢰: 자명종 */

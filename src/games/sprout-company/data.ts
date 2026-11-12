@@ -31,8 +31,12 @@ export const TASKS: Readonly<Record<TaskKind, { name: string }>> = {
  * - bonus: 출시할 때 한 번 받는 잎사귀
  * - ease: 업무 카드 한 장에 드는 일을 줄인다 (0.03이면 3% 적게)
  * - reputation: 출시로 얻는 평판
+ * - away: 닫아 둔 동안 쌓이는 수익
+ * - cheer: 응원이 이어지는 시간
+ * - rest: 휴게실에서 기운을 채우는 빠르기
+ * - stamina: 기운이 버티는 시간
  */
-export const EFFECT_KEYS = ['workSpeed', 'income', 'bonus', 'ease', 'reputation'] as const;
+export const EFFECT_KEYS = ['workSpeed', 'income', 'bonus', 'ease', 'reputation', 'away', 'cheer', 'rest', 'stamina'] as const;
 export type EffectKey = (typeof EFFECT_KEYS)[number];
 
 /** amount는 한 레벨(또는 한 사람)마다 더해지는 비율이다. 0.1이면 10%. */
@@ -75,6 +79,20 @@ export const STAFF_ORDER = Object.keys(STAFF) as StaffId[];
 
 /** 회사를 세울 때 사장 옆자리에 앉는 첫 직원. 사장과 같은 친구면 그다음 친구가 앉는다. */
 export const FIRST_HIRES: readonly StaffId[] = ['chick', 'duck'];
+
+/**
+ * 단짝: 둘이 옆자리(같은 줄의 바로 옆 책상)에 앉으면 둘 다 일이 speed만큼 빨라진다.
+ * 한 친구는 한 짝에만 든다. 자리는 직원 창의 자리 바꾸기에서 옮긴다.
+ */
+export const BUDDIES: readonly (readonly [StaffId, StaffId])[] = [
+  ['sprout', 'drop'],
+  ['duck', 'chick'],
+  ['dog', 'cat'],
+  ['ghost', 'bear'],
+  ['rabbit', 'fox'],
+  ['frog', 'penguin'],
+];
+export const BUDDY = { speed: 0.2 } as const;
 
 /** 채용할 때 한 번에 보여 주는 지원자의 수 */
 export const CANDIDATE_COUNT = 3;
@@ -132,6 +150,8 @@ export const TIPS = {
   play: '수익을 누르면 낸 게임을 할 수 있어요',
   train: '직원 창에서 교육하면 그 친구가 빨라져요',
   lead: '팀장을 두면 카드를 알아서 맡겨 줘요',
+  buddy: '단짝을 옆자리에 앉히면 더 빨라져요',
+  energy: '기운이 남은 친구는 일이 더 빨라요',
   rush: '급한 의뢰를 제때 끝내면 잎사귀를 받아요',
   backlog: '큰 게임은 맡기는 대로 다음 카드가 나와요',
   dept: '사무실 버튼에서 부서를 세울 수 있어요',
@@ -207,6 +227,18 @@ export const AWAY = { minSeconds: 60, maxSeconds: 4 * 3600, rate: 0.25 } as cons
 export const CHEER_SECONDS = 4;
 export const CHEER_BOOST = 2;
 
+// ───────── 휴게실과 기운 ─────────
+
+/**
+ * 한 층 사무실부터 휴게실이 생기고, 친구마다 기운이 생긴다.
+ * - 기운이 남아 있는 동안에는 일이 boost만큼 빠르다. 바닥나도 느려지지는 않고 보통 빠르기로 돌아갈 뿐이다.
+ * - 기운은 일하는 동안 줄어서, 쉬지 않고 workSeconds초를 일하면 바닥난다.
+ * - 기운이 바닥난 친구는 하던 일을 마치면 휴게실에 가서 restSeconds초 동안 쉬고 가득 채워 온다.
+ *   휴게실 자리는 seats개라서 한꺼번에 여럿이 자리를 비우지는 않고, 급한 의뢰가 있는 동안에는 쉬러 가지 않는다.
+ * - 일이 없어 자리에서 기다리는 동안에도 쉴 때의 idle배 빠르기로 천천히 찬다.
+ */
+export const BREAK = { unlockOffice: 2, boost: 0.25, workSeconds: 240, restSeconds: 40, seats: 3, idle: 0.25 } as const;
+
 // ───────── 장비 ─────────
 
 export interface EquipmentDef {
@@ -274,6 +306,66 @@ export const EQUIPMENT = {
     growth: 1.8,
     effect: { key: 'income', amount: 0.1 },
     unlockOffice: 3,
+  },
+  plant: {
+    name: '화분',
+    description: '응원이 25% 더 오래가요',
+    scope: 'company',
+    maxLevel: 4,
+    baseCost: 80,
+    growth: 4,
+    effect: { key: 'cheer', amount: 0.25 },
+    unlockOffice: 0,
+  },
+  chair: {
+    name: '편한 의자',
+    description: '모든 직원의 일 속도 +6%',
+    scope: 'company',
+    maxLevel: 10,
+    baseCost: 6000,
+    growth: 2.2,
+    effect: { key: 'workSpeed', amount: 0.06 },
+    unlockOffice: 2,
+  },
+  printer: {
+    name: '복합기',
+    description: '출시할 때 받는 잎사귀 +10%',
+    scope: 'company',
+    maxLevel: 10,
+    baseCost: 9000,
+    growth: 2.2,
+    effect: { key: 'bonus', amount: 0.1 },
+    unlockOffice: 2,
+  },
+  meeting: {
+    name: '회의실',
+    description: '닫아 둔 동안의 수익 +20%',
+    scope: 'company',
+    maxLevel: 10,
+    baseCost: 120000,
+    growth: 2.4,
+    effect: { key: 'away', amount: 0.2 },
+    unlockOffice: 3,
+  },
+  sofa: {
+    name: '소파',
+    description: '휴게실에서 25% 더 빨리 쉬어요',
+    scope: 'company',
+    maxLevel: 8,
+    baseCost: 5000,
+    growth: 2.2,
+    effect: { key: 'rest', amount: 0.25 },
+    unlockOffice: 2,
+  },
+  snack: {
+    name: '간식',
+    description: '기운이 20% 더 오래가요',
+    scope: 'company',
+    maxLevel: 10,
+    baseCost: 4000,
+    growth: 2.2,
+    effect: { key: 'stamina', amount: 0.2 },
+    unlockOffice: 2,
   },
 } as const satisfies Record<string, EquipmentDef>;
 
@@ -507,6 +599,51 @@ export const PLAY_STARS: { count: number; income: number; targets: Partial<Recor
     'lantern-keeper': [1000, 3000, 8000],
   },
 };
+
+// ───────── 사옥 꾸미기 ─────────
+
+/** 꾸미는 곳: 벽지, 바닥, 그리고 위쪽에 적힌 사무실 이름의 간판 */
+export const DECOR_SLOTS = ['wall', 'floor', 'sign'] as const;
+export type DecorSlot = (typeof DECOR_SLOTS)[number];
+export const DECOR_SLOT_NAMES: Readonly<Record<DecorSlot, string>> = { wall: '벽지', floor: '바닥', sign: '간판' };
+
+/** 무늬. plain은 한 가지 색이고, 나머지는 color 위에 mark 색으로 그린다. */
+export type DecorPattern = 'plain' | 'stripe' | 'dot' | 'grid' | 'check' | 'cloud' | 'plank' | 'tuft';
+
+export interface DecorDef {
+  slot: DecorSlot;
+  name: string;
+  /** 허브의 코인으로 치르는 값. 한 번 사면 자회사를 세워도 남는다. */
+  cost: number;
+  color: number;
+  mark: number;
+  pattern: DecorPattern;
+}
+
+/**
+ * 회사를 꾸미는 것들. 회사의 수치에는 아무 영향이 없고 모습만 바꾼다.
+ * 고르지 않은 곳은 사무실마다 정해진 색을 쓰고, 간판은 없다.
+ */
+export const DECOR = {
+  'wall-peach': { slot: 'wall', name: '복숭아 벽지', cost: 60, color: 0xffe1d2, mark: 0xffe1d2, pattern: 'plain' },
+  'wall-stripe': { slot: 'wall', name: '줄무늬 벽지', cost: 100, color: 0xe2f6ee, mark: 0xc9ecdc, pattern: 'stripe' },
+  'wall-dot': { slot: 'wall', name: '물방울 벽지', cost: 100, color: 0xfff3d6, mark: 0xffd98a, pattern: 'dot' },
+  'wall-check': { slot: 'wall', name: '체크 벽지', cost: 150, color: 0xe9e3ff, mark: 0xd3c8f7, pattern: 'grid' },
+  'wall-cloud': { slot: 'wall', name: '구름 벽지', cost: 200, color: 0xd3eaff, mark: 0xffffff, pattern: 'cloud' },
+  'floor-carpet': { slot: 'floor', name: '분홍 양탄자', cost: 60, color: 0xf7c4d2, mark: 0xf7c4d2, pattern: 'plain' },
+  'floor-wood': { slot: 'floor', name: '나무 바닥', cost: 100, color: 0xe9c391, mark: 0xd6a970, pattern: 'plank' },
+  'floor-tile': { slot: 'floor', name: '하늘 타일', cost: 100, color: 0xe3f2ff, mark: 0xc7e0f4, pattern: 'grid' },
+  'floor-check': { slot: 'floor', name: '바둑판 바닥', cost: 150, color: 0xf4ecf0, mark: 0xdccbd5, pattern: 'check' },
+  'floor-grass': { slot: 'floor', name: '잔디 바닥', cost: 200, color: 0xbfe6a8, mark: 0x9ccf84, pattern: 'tuft' },
+  'sign-wood': { slot: 'sign', name: '나무 간판', cost: 60, color: 0xf0cfa5, mark: 0xd6a970, pattern: 'plain' },
+  'sign-mint': { slot: 'sign', name: '민트 간판', cost: 100, color: 0xbdebd9, mark: 0x7fd3ae, pattern: 'plain' },
+  'sign-pink': { slot: 'sign', name: '분홍 간판', cost: 100, color: 0xffd3dd, mark: 0xe97f99, pattern: 'plain' },
+  'sign-sky': { slot: 'sign', name: '하늘 간판', cost: 150, color: 0xcfe6fb, mark: 0x8fbfe8, pattern: 'plain' },
+  'sign-gold': { slot: 'sign', name: '금빛 간판', cost: 200, color: 0xffe08a, mark: 0xe0a020, pattern: 'plain' },
+} as const satisfies Record<string, DecorDef>;
+
+export type DecorId = keyof typeof DECOR;
+export const DECOR_ORDER = Object.keys(DECOR) as DecorId[];
 
 // ───────── 자회사 ─────────
 

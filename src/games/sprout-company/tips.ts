@@ -3,12 +3,13 @@
  * 어떤 때에 어떤 안내가 뜨는지만 여기에 두고, 글은 data.ts에, 화면에 띄우는 일은 씬에 있다.
  * 본 안내는 회사의 세이브에 적혀서 다시 뜨지 않는다.
  */
-import { DEPARTMENT, PERK_ORDER, QUEUE, TIP_IDS, TRAINING, type TipId } from './data';
+import { BREAK, DEPARTMENT, PERK_ORDER, QUEUE, TIP_IDS, TRAINING, type TipId } from './data';
 import {
   departmentCount,
   equipmentBlock,
   foundBlock,
   hasFreeDesk,
+  hasLonelyBuddy,
   hirePool,
   leadBlock,
   moveBlock,
@@ -27,6 +28,8 @@ const WHEN: Readonly<Record<TipId, (state: CompanyState) => boolean>> = {
   goals: (state) => state.releases >= 3 && state.goals.list.length > 0,
   train: (state) => state.office >= TRAINING.unlockOffice && state.desks.some((_, index) => trainBlock(state, index) === null),
   lead: (state) => state.lead === 0 && leadBlock(state) === null,
+  buddy: (state) => hasLonelyBuddy(state),
+  energy: (state) => state.office >= BREAK.unlockOffice,
   rush: (state) => state.offer !== null,
   backlog: (state) => state.backlog.length > 0,
   play: (state) => state.releases >= 2,

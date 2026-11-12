@@ -22,8 +22,13 @@ import { COMPUTER_SIZE, computerTexture, registerCompanyTextures, SC, TASK_COLOR
 import {
   AWAY,
   BRANCH,
+  BUDDY,
   COMPANY_GAME_ID,
   COMPANY_SCENE,
+  DECOR,
+  DECOR_ORDER,
+  DECOR_SLOT_NAMES,
+  DECOR_SLOTS,
   DEPARTMENT,
   DEPARTMENT_ORDER,
   DEPARTMENTS,
@@ -45,6 +50,9 @@ import {
   TASKS,
   TIPS,
   TRAINING,
+  type DecorDef,
+  type DecorId,
+  type DecorSlot,
   type DepartmentId,
   type Effect,
   type EquipmentDef,
@@ -61,7 +69,11 @@ import {
   advance,
   assign,
   availableProjects,
+  awayRate,
   bossFor,
+  breakOpen,
+  buddyOf,
+  buyDecor,
   buyEquipment,
   buyPerk,
   candidatesFor,
@@ -69,6 +81,8 @@ import {
   catchUp,
   cheer,
   createCompany,
+  decorBlock,
+  decorOf,
   departmentBlock,
   departmentBoost,
   departmentCost,
@@ -77,6 +91,7 @@ import {
   departmentSeats,
   departmentsMissing,
   dequeue,
+  deskColumns,
   enqueue,
   equipmentBlock,
   equipmentCost,
@@ -88,6 +103,7 @@ import {
   foundBranch,
   fruitFor,
   gameIncome,
+  hasBuddy,
   hasFreeDesk,
   hire,
   hireBlock,
@@ -117,11 +133,13 @@ import {
   specialtyOf,
   starsOf,
   startProject,
+  swapDesks,
   totalReputation,
   train,
   trainBlock,
   trainCost,
   upgradeDepartment,
+  useDecor,
   versionOf,
   type Away,
   type CompanyEvent,
@@ -191,7 +209,19 @@ interface Button {
 }
 
 /** 아래쪽 버튼으로 여는 창 다섯과, 사무실 창에서 여는 부서 창, 위쪽의 수익을 눌러 여는 출시작 창, 돌아왔을 때 저절로 뜨는 알림 */
-type PanelKind = 'project' | 'gear' | 'staff' | 'office' | 'goals' | 'dept' | 'games' | 'branch' | 'found' | 'away';
+type PanelKind =
+  | 'project'
+  | 'gear'
+  | 'staff'
+  | 'seats'
+  | 'office'
+  | 'goals'
+  | 'dept'
+  | 'games'
+  | 'branch'
+  | 'found'
+  | 'decor'
+  | 'away';
 const PANELS: readonly { kind: PanelKind; label: string }[] = [
   { kind: 'project', label: '게임' },
   { kind: 'gear', label: '장비' },
@@ -212,6 +242,8 @@ interface DeskView {
   bubbleX: number;
   /** 컴퓨터를 그리는 배율 */
   gearScale: number;
+  /** 막대의 오른쪽을 줄이는 길이. 낮은 칸에서 하트를 달 자리를 낸다. */
+  barTrim: number;
   frame: Graphics;
   body: Phaser.GameObjects.Image | null;
   bodyY: number;
@@ -219,6 +251,12 @@ interface DeskView {
   bubble: Graphics;
   bubbleIcon: Phaser.GameObjects.Image;
   bar: Graphics;
+  /** 기운을 보여 주는 가는 막대. 휴게실이 있는 사무실에서만 그린다. */
+  energy: Graphics;
+  /** 지금 그려 둔 기운 막대의 모습 */
+  energyShown: string;
+  /** 쉬는 중일 때 다는 그림 */
+  nap: Phaser.GameObjects.Image;
   tag: Phaser.GameObjects.Text;
   pressed: boolean;
   /** 지금 그려 둔 모습. 달라졌을 때만 다시 그린다. */
@@ -241,7 +279,65 @@ const GEAR_TEXTURES: Partial<Record<EquipmentId, string>> = {
   tray: SC.tray,
   internet: SC.internet,
   server: SC.server,
+  plant: SC.plant,
+  chair: SC.chair,
+  printer: SC.printer,
+  meeting: SC.meeting,
+  sofa: SC.sofa,
+  snack: SC.snack,
 };
+
+/**
+ * 꾸미기의 무늬를 네모 안에 그린다. 바탕색은 이미 칠해져 있고, 여기서는 그 위의 무늬만 그린다.
+ * 그리는 것은 모두 네모 안에 들어간다.
+ */
+function paintPattern(graphics: Graphics, def: DecorDef, x: number, y: number, width: number, height: number): void {
+  if (def.pattern === 'plain' || width <= 0 || height <= 0) return;
+  graphics.fillStyle(def.mark, 1);
+  const right = x + width;
+  const bottom = y + height;
+  if (def.pattern === 'stripe') {
+    for (let left = x + 4; left < right; left += 16) graphics.fillRect(left, y, Math.min(8, right - left), height);
+  } else if (def.pattern === 'grid') {
+    for (let left = x + 6; left + 2 <= right; left += 12) graphics.fillRect(left, y, 2, height);
+    for (let top = y + 6; top + 2 <= bottom; top += 12) graphics.fillRect(x, top, width, 2);
+  } else if (def.pattern === 'check') {
+    const size = 10;
+    for (let row = 0; y + row * size < bottom; row += 1) {
+      for (let column = row % 2; x + column * size < right; column += 2) {
+        const left = x + column * size;
+        const top = y + row * size;
+        graphics.fillRect(left, top, Math.min(size, right - left), Math.min(size, bottom - top));
+      }
+    }
+  } else if (def.pattern === 'dot') {
+    for (let row = 0; y + 7 + row * 12 + 3 <= bottom; row += 1) {
+      for (let left = x + 7 + (row % 2) * 8; left + 3 <= right; left += 16) graphics.fillCircle(left, y + 7 + row * 12, 2.5);
+    }
+  } else if (def.pattern === 'cloud') {
+    for (let row = 0; y + 12 + row * 30 + 7 <= bottom; row += 1) {
+      for (let left = x + 20 + (row % 2) * 34; left + 16 <= right; left += 68) {
+        const top = y + 12 + row * 30;
+        graphics.fillCircle(left - 8, top + 2, 5).fillCircle(left, top - 1, 7).fillCircle(left + 8, top + 2, 5);
+        graphics.fillRect(left - 8, top + 2, 16, 5);
+      }
+    }
+  } else if (def.pattern === 'plank') {
+    for (let row = 0; y + row * 9 < bottom; row += 1) {
+      const top = y + row * 9;
+      if (row > 0) graphics.fillRect(x, top, width, 1.5);
+      // 널빤지의 이음매는 줄마다 엇갈린다.
+      for (let left = x + 22 + (row % 2) * 24; left + 2 <= right; left += 48) graphics.fillRect(left, top, 1.5, Math.min(9, bottom - top));
+    }
+  } else {
+    for (let row = 0; y + 4 + row * 9 + 4 <= bottom; row += 1) {
+      for (let left = x + 8 + (row % 2) * 9; left + 4 <= right; left += 18) {
+        const top = y + 4 + row * 9;
+        graphics.fillTriangle(left - 3, top + 4, left - 1.5, top, left, top + 4).fillTriangle(left, top + 4, left + 1.5, top, left + 3, top + 4);
+      }
+    }
+  }
+}
 
 /** 효과를 한 줄로 적는다. level만큼 쌓인 것을 적고, everyone이면 모두에게 걸리는 것이다. */
 function effectText(effect: Effect, level = 1, everyone = false): string {
@@ -250,6 +346,10 @@ function effectText(effect: Effect, level = 1, everyone = false): string {
   if (effect.key === 'income') return `수익 +${percent}%`;
   if (effect.key === 'ease') return `카드에 드는 일 -${percent}%`;
   if (effect.key === 'reputation') return `출시 평판 +${percent}%`;
+  if (effect.key === 'away') return `닫아 둔 동안의 수익 +${percent}%`;
+  if (effect.key === 'cheer') return `응원이 ${percent}% 더 오래가요`;
+  if (effect.key === 'rest') return `쉬는 속도 +${percent}%`;
+  if (effect.key === 'stamina') return `기운이 ${percent}% 더 오래가요`;
   return `출시 보너스 +${percent}%`;
 }
 
@@ -294,6 +394,12 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
   private awayCoins = 0;
   /** 부서 창에 띄운 부서 */
   private deptShown: DepartmentId = DEPARTMENT_ORDER[0];
+  /** 자리 바꾸기 창에서 먼저 고른 책상. 고르지 않았으면 -1 */
+  private seatPicked = -1;
+  /** 꾸미기 창에서 보고 있는 곳 */
+  private decorShown: DecorSlot = 'wall';
+  private signPlate!: Graphics;
+  private shownSign = '';
   private dots: Partial<Record<PanelKind, Phaser.GameObjects.Arc>> = {};
   /** 창마다 보고 있는 쪽 */
   private pages: Partial<Record<PanelKind, number>> = {};
@@ -334,6 +440,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     this.desks = [];
     this.dots = {};
     this.selected = 0;
+    this.seatPicked = -1;
     this.clock = 0;
     this.slowTick = 0;
     this.saveIn = SAVE_EVERY;
@@ -556,6 +663,8 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
       },
     );
     this.reputationText = addText(this, W - MARGIN, 6, '', { color: THEME_CSS.accent, originX: 1 });
+    this.signPlate = this.add.graphics();
+    this.shownSign = '';
     this.officeText = addText(this, W - MARGIN, 30, '', { size: FONT_SIZE.small, color: THEME_CSS.sub, originX: 1 });
     this.reputationBar = this.add.graphics();
   }
@@ -595,7 +704,6 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
         counting = false;
       }
       this.reputationText.setText(counting ? `평판 ${state.reputation}/${goal}` : `평판 ${state.reputation}`);
-      this.officeText.setText(OFFICES[state.office].name);
       const share = Phaser.Math.Clamp((state.reputation - from) / (goal - from), 0, 1);
       const width = 70;
       const left = W - MARGIN - width;
@@ -605,6 +713,26 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
         .fillRoundedRect(left, 22, width, 5, 2.5)
         .fillStyle(THEME.gold, 1);
       if (share > 0) this.reputationBar.fillRoundedRect(left, 22, Math.max(5, width * share), 5, 2.5);
+    }
+    const sign = `${state.office}|${state.decor.sign ?? ''}`;
+    if (sign !== this.shownSign) {
+      this.shownSign = sign;
+      // 간판을 달았으면 사무실 이름 뒤에 판을 깐다.
+      const plate = decorOf(state, 'sign');
+      this.officeText
+        .setText(OFFICES[state.office].name)
+        .setColor(plate ? THEME_CSS.inkDeep : THEME_CSS.sub)
+        .setX(W - MARGIN - (plate ? 6 : 0));
+      this.signPlate.clear();
+      if (plate) {
+        const width = Math.ceil(this.officeText.width) + 12;
+        const left = W - MARGIN - width;
+        this.signPlate
+          .fillStyle(plate.mark, 1)
+          .fillRoundedRect(left, 29.5, width, 11.5, 5.5)
+          .fillStyle(plate.color, 1)
+          .fillRoundedRect(left, 28.5, width, 11.5, 5.5);
+      }
     }
   }
 
@@ -731,9 +859,11 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
 
     const roomHeight = this.roomBottom - ROOM_TOP;
     const colors = ROOM_COLORS[Math.min(state.office, ROOM_COLORS.length - 1)];
+    const wall = decorOf(state, 'wall');
+    const floor = decorOf(state, 'floor');
     const count = state.desks.length;
     // 자리가 늘면 한 줄에 더 많이 놓고, 넷씩 놓을 때는 칸을 좁힌다.
-    const columns = count <= 4 ? 2 : count <= 9 ? 3 : 4;
+    const columns = deskColumns(count);
     const tileWidth = columns === 4 ? TILE_WIDTH.narrow : TILE_WIDTH.wide;
     const rows = Math.ceil(count / columns);
     const tileHeight = Phaser.Math.Clamp(
@@ -749,11 +879,14 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     const blockLeft = MARGIN + Math.round((INNER - blockWidth) / 2);
 
     const walls = this.add.graphics();
-    drawPanel(walls, MARGIN, ROOM_TOP, INNER, roomHeight - 3, { fill: colors.wall, depth: 3 });
+    drawPanel(walls, MARGIN, ROOM_TOP, INNER, roomHeight - 3, { fill: wall?.color ?? colors.wall, depth: 3 });
     const floorTop = blockTop + blockHeight - 30;
+    // 무늬는 둥근 모서리를 벗어나지 않게 조금 안쪽에만 그린다.
+    if (wall) paintPattern(walls, wall, MARGIN + 6, ROOM_TOP + 6, INNER - 12, floorTop - ROOM_TOP - 6);
     walls
-      .fillStyle(colors.floor, 1)
+      .fillStyle(floor?.color ?? colors.floor, 1)
       .fillRoundedRect(MARGIN, floorTop, INNER, this.roomBottom - 3 - floorTop, { tl: 0, tr: 0, bl: 12, br: 12 });
+    if (floor) paintPattern(walls, floor, MARGIN + 6, floorTop, INNER - 12, this.roomBottom - 3 - floorTop - 6);
     room.add(walls);
 
     const wallSpace = blockTop - ROOM_TOP;
@@ -798,6 +931,8 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     const bubble = this.add.graphics().setVisible(false);
     const bubbleIcon = this.add.image(bubbleX, y + 13, taskTexture('plan')).setDisplaySize(13, 13).setVisible(false);
     const bar = this.add.graphics();
+    const energy = this.add.graphics();
+    const nap = this.add.image(bubbleX, y + 13, SC.nap).setVisible(false);
     const tag = addText(this, x + 21, y + 5, '2배', { size: FONT_SIZE.small, color: THEME_CSS.accent }).setVisible(false);
     const view: DeskView = {
       index,
@@ -808,6 +943,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
       deskTop,
       bubbleX,
       gearScale: narrow ? 0.8 : 1,
+      barTrim: compact && hasBuddy(state, index) ? 8 : 0,
       frame,
       body: null,
       bodyY: 0,
@@ -815,6 +951,9 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
       bubble,
       bubbleIcon,
       bar,
+      energy,
+      energyShown: '',
+      nap,
       tag,
       pressed: false,
       shown: '',
@@ -856,7 +995,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
         .image(x + width - (narrow ? 14 : 20), deskTop + 1, computerTexture(0))
         .setOrigin(0.5, 1)
         .setDisplaySize(COMPUTER_SIZE.width * view.gearScale, COMPUTER_SIZE.height * view.gearScale);
-      room.add([view.body, table, view.computer, bubble, bubbleIcon, bar, tag]);
+      room.add([view.body, table, view.computer, bubble, bubbleIcon, bar, energy, nap, tag]);
 
       // 무엇을 잘하는지 왼쪽 위에 달아 둔다. 사장은 별이다.
       const specialty = specialtyOf(state, desk.staff);
@@ -870,8 +1009,10 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
           .image(x + 11, y + 11, specialty ? taskTexture(specialty) : 'icon-star')
           .setDisplaySize(11, 11),
       );
+      // 단짝과 옆자리에 앉은 친구는 하트를 단다.
+      if (hasBuddy(state, index)) room.add(this.add.image(x + width - 8, y + height - 8, SC.heart));
       if (!compact) {
-        // 팀장은 사장 옆자리의 첫 직원이 맡는다.
+        // 팀장은 사장 옆자리(둘째 자리)에 앉은 친구가 맡는다.
         const label = index === 1 && state.lead > 0 ? `${def.name} 팀장` : def.name;
         const name = addText(this, x + width / 2, y + height - 9, label, {
           size: FONT_SIZE.small,
@@ -917,13 +1058,14 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     if (!desk?.staff) return;
     const task = desk.task;
     const cheered = desk.cheer > 0;
+    const resting = desk.resting;
     const card = state.inbox[this.selected];
-    const calling = !task && card !== undefined;
+    const calling = !task && !resting && card !== undefined;
     // 고른 카드의 업무를 남보다 잘하는 친구(특기이거나 그 부서에 든 친구)는 얼마나 빠른지를 달아 둔다.
     const fit = calling ? skill(state, view.index, card.kind) : 1;
     const match = fit > 1;
     const rush = task?.rush === true;
-    const signature = `${task?.kind ?? ''}|${rush}|${cheered}|${calling}|${fit}|${view.pressed}`;
+    const signature = `${task?.kind ?? ''}|${rush}|${cheered}|${calling}|${fit}|${view.pressed}|${resting}`;
 
     if (signature !== view.shown) {
       view.shown = signature;
@@ -953,6 +1095,24 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
       }
       view.tag.setText(timesText(fit)).setVisible(match);
       if (view.body && staffDef(desk.staff).look) view.body.setTexture(staffTexture(desk.staff, cheered ? 'cheer' : 'idle'));
+      // 쉬러 간 친구는 자리가 흐려지고 쉬는 그림이 뜬다.
+      view.body?.setAlpha(resting ? 0.35 : 1);
+      view.nap.setVisible(resting);
+    }
+
+    if (breakOpen(state)) {
+      const inset = view.width < TILE_WIDTH.wide ? 9 : 15;
+      const left = view.x + inset;
+      const length = view.width - inset * 2 - view.barTrim;
+      const filled = Math.round(length * Phaser.Math.Clamp(desk.energy, 0, 1));
+      const shown = `${filled}|${resting}`;
+      if (shown !== view.energyShown) {
+        view.energyShown = shown;
+        const top = view.deskTop + 19;
+        view.energy.clear().fillStyle(THEME.white, 0.8).fillRoundedRect(left, top, length, 3, 1.5);
+        // 남은 기운은 금빛, 쉬면서 채우는 기운은 풀빛이다.
+        if (filled >= 3) view.energy.fillStyle(resting ? THEME.mintDeep : THEME.gold, 1).fillRoundedRect(left, top, filled, 3, 1.5);
+      }
     }
 
     const level = equipmentLevel(state, 'computer', view.index);
@@ -966,7 +1126,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     if (task) {
       const inset = view.width < TILE_WIDTH.wide ? 9 : 15;
       const left = view.x + inset;
-      const length = view.width - inset * 2;
+      const length = view.width - inset * 2 - view.barTrim;
       const share = Phaser.Math.Clamp(1 - task.left / task.total, 0, 1);
       view.bar
         .clear()
@@ -990,6 +1150,11 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     if (!desk.staff) {
       sfx.click();
       this.openPanel('staff');
+      return;
+    }
+    if (desk.resting) {
+      sfx.deny();
+      this.pill('휴게실에서 쉬는 중이에요', 1200).setDepth(DEPTH.banner);
       return;
     }
     if (desk.task) {
@@ -1217,7 +1382,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     const state = this.state;
     let text: string;
     const rush = state.rush;
-    const idle = state.desks.some((desk) => desk.staff !== null && desk.task === null);
+    const idle = state.desks.some((desk) => desk.staff !== null && desk.task === null && !desk.resting);
     if (rush) text = `급한 의뢰 ${rush.done}/${rush.total}  남은 시간 ${Math.max(0, Math.ceil(rush.left))}초`;
     else if (isReady(state)) text = '다 만들었어요! 출시하기를 눌러요';
     else if (!state.project) text = state.releases === 0 ? '게임 고르기를 눌러 첫 게임을 만들어요' : '다음에 만들 게임을 골라요';
@@ -1356,12 +1521,14 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     if (kind === 'project') this.buildProjectPanel(panel);
     else if (kind === 'gear') this.buildGearPanel(panel);
     else if (kind === 'staff') this.buildStaffPanel(panel);
+    else if (kind === 'seats') this.buildSeatsPanel(panel);
     else if (kind === 'office') this.buildOfficePanel(panel);
     else if (kind === 'goals') this.buildGoalsPanel(panel);
     else if (kind === 'dept') this.buildDeptPanel(panel);
     else if (kind === 'games') this.buildGamesPanel(panel);
     else if (kind === 'branch') this.buildBranchPanel(panel);
     else if (kind === 'found') this.buildFoundPanel(panel);
+    else if (kind === 'decor') this.buildDecorPanel(panel);
     else this.buildAwayPanel(panel);
     // 창을 만드는 동안 쪽 번호가 맞춰지므로, 다 만든 뒤의 모습을 적어 둔다.
     this.panelSignature = this.signatureOf(kind);
@@ -1375,8 +1542,9 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
 
   /** 닫기를 눌렀을 때. 부서 창과 자회사 창은 사무실 창에서 열었으니 그리로 돌아간다. */
   private dismissPanel(): void {
-    if (this.panelKind === 'dept' || this.panelKind === 'branch') this.openPanel('office');
+    if (this.panelKind === 'dept' || this.panelKind === 'branch' || this.panelKind === 'decor') this.openPanel('office');
     else if (this.panelKind === 'found') this.openPanel('branch');
+    else if (this.panelKind === 'seats') this.openPanel('staff');
     else this.closePanel();
   }
 
@@ -1406,7 +1574,12 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
       const staff = state.desks.map((desk, index) => `${desk.staff ?? ''}${desk.level}${trainBlock(state, index) ?? ''}`).join(',');
       return `${page}|${staff}|${state.leaves >= hireCost(state)}|${state.office}|${state.lead}${leadBlock(state) ?? ''}`;
     }
+    if (kind === 'seats') return `${state.desks.map((desk) => desk.staff ?? '').join(',')}|${this.seatPicked}`;
     if (kind === 'away') return 'away';
+    if (kind === 'decor') {
+      const decor = state.decor;
+      return `${this.decorShown}|${decor.owned.join(',')}|${decor.wall}|${decor.floor}|${decor.sign}|${store.data.coins}|${state.office}`;
+    }
     if (kind === 'games') {
       const games = PROJECT_ORDER.map((id) => `${versionOf(state, id)}${starsOf(state, id)}`).join(',');
       return `${page}|${games}|${formatRate(incomePerSecond(state))}`;
@@ -1701,14 +1874,18 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     const cost = hireCost(state);
     const step = Math.round(LEVEL_SPEED * 100);
 
-    const bottom = this.listPanel(panel, 'staff', '직원', rows, 38, 18, (row, middle, left, width) => {
+    const inCompany = (id: StaffId | null): boolean => id !== null && state.desks.some((desk) => desk.staff === id);
+    const bottom = this.listPanel(panel, 'staff', '직원', rows, 38, 50, (row, middle, left, width) => {
       const right = left + width - 70;
       if (row.kind === 'candidate') {
         const def = staffDef(row.id);
         panel.add(this.portrait(left + 24, middle, row.id, 28));
         panel.add(addText(this, left + 42, middle - 15, def.name, { color: THEME_CSS.inkDeep }));
         panel.add(this.add.image(left + 48, middle + 8, taskTexture(def.specialty)).setDisplaySize(11, 11));
-        this.rowDetail(panel, left + 56, middle, right, `${TASKS[def.specialty].name} 2배  ${effectText(def.trait)}`);
+        // 단짝이 이미 회사에 있으면 알려 준다.
+        const buddy = buddyOf(row.id);
+        const pal = buddy && inCompany(buddy) ? `  단짝 ${staffDef(buddy).name}` : '';
+        this.rowDetail(panel, left + 56, middle, right, `${TASKS[def.specialty].name} 2배  ${effectText(def.trait)}${pal}`);
         this.costButton(panel, left + width - 66, middle - 13, cost, hireBlock(state, row.id) === null, () => {
           if (hire(state, row.id) < 0) return;
           this.play('hire');
@@ -1760,7 +1937,9 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
       panel.add(
         this.add.image(name.x + name.width + 9, middle - 8, specialty ? taskTexture(specialty) : 'icon-star').setDisplaySize(11, 11),
       );
-      const note = addText(this, name.x + name.width + 18, middle - 13, specialty ? effectText(def.trait) : `사장  ${effectText(def.trait)}`, {
+      const paired = hasBuddy(state, row.desk);
+      if (paired) panel.add(this.add.image(name.x + name.width + 21, middle - 8, SC.heart));
+      const note = addText(this, name.x + name.width + (paired ? 29 : 18), middle - 13, specialty ? effectText(def.trait) : `사장  ${effectText(def.trait)}`, {
         size: FONT_SIZE.small,
         color: THEME_CSS.faint,
       });
@@ -1800,6 +1979,121 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
         color: candidates.length > 0 ? THEME_CSS.faint : THEME_CSS.accent,
         originX: 0.5,
       }),
+    );
+    // 단짝끼리 옆자리에 앉히려면 자리를 바꾼다.
+    const frameLeft = 10;
+    const frameWidth = W - 20;
+    this.rowLine(panel, frameLeft, bottom + 20, frameWidth);
+    panel.add(this.add.image(frameLeft + 19, bottom + 37, SC.heart));
+    panel.add(
+      addText(this, frameLeft + 28, bottom + 37, `단짝과 옆자리면 일 속도 +${Math.round(BUDDY.speed * 100)}%`, {
+        size: FONT_SIZE.small,
+        color: THEME_CSS.sub,
+        originY: 0.5,
+      }),
+    );
+    this.button(panel, frameLeft + frameWidth - 66, bottom + 25, 56, 24, '자리', 'yellow', () => {
+      this.seatPicked = -1;
+      this.openPanel('seats');
+    });
+  }
+
+  /**
+   * 자리 바꾸기 창: 사무실과 같은 차례로 책상을 늘어놓고, 둘을 차례로 누르면 자리를 맞바꾼다.
+   * 단짝끼리 같은 줄의 바로 옆에 앉으면 둘 다 빨라진다.
+   */
+  private buildSeatsPanel(panel: Container): void {
+    const state = this.state;
+    const count = state.desks.length;
+    const columns = deskColumns(count);
+    const rows = Math.ceil(count / columns);
+    const cellHeight = 46;
+    const gap = 4;
+    const { left, top, width } = this.panelFrame(panel, '자리 바꾸기', 18 + rows * (cellHeight + gap) + 36);
+    const cellWidth = Math.min(62, Math.floor((width - 20 - gap * (columns - 1)) / columns));
+    const gridWidth = columns * cellWidth + (columns - 1) * gap;
+    const gridLeft = left + Math.round((width - gridWidth) / 2);
+    const gridTop = top + 18;
+    const picked = this.seatPicked >= 0 && this.seatPicked < count ? this.seatPicked : -1;
+    const pickedStaff = picked >= 0 ? state.desks[picked].staff : null;
+    const pickedBuddy = pickedStaff ? buddyOf(pickedStaff) : null;
+
+    panel.add(
+      addText(this, W / 2, top, picked < 0 ? '옮길 친구를 눌러요' : '바꿀 자리를 눌러요', {
+        size: FONT_SIZE.small,
+        color: THEME_CSS.sub,
+        originX: 0.5,
+      }),
+    );
+    state.desks.forEach((desk, index) => {
+      const row = Math.floor(index / columns);
+      const inRow = Math.min(columns, count - row * columns);
+      const rowLeft = gridLeft + Math.round(((columns - inRow) * (cellWidth + gap)) / 2);
+      const x = rowLeft + (index % columns) * (cellWidth + gap);
+      const y = gridTop + row * (cellHeight + gap);
+      const here = index === picked;
+      // 고른 친구의 단짝이 앉은 자리는 눈에 띄게 한다.
+      const pal = pickedBuddy !== null && desk.staff === pickedBuddy;
+      const cell = this.add.graphics();
+      const draw = (pressed: boolean): void => {
+        cell
+          .clear()
+          .fillStyle(pressed ? THEME.dim : here ? THEME.pink : pal ? THEME.butter : THEME.card, 1)
+          .fillRoundedRect(x, y, cellWidth, cellHeight, 8);
+        if (here || pal) cell.lineStyle(2, here ? THEME.pinkDeep : THEME.butterDeep, 1).strokeRoundedRect(x + 1, y + 1, cellWidth - 2, cellHeight - 2, 7);
+      };
+      draw(false);
+      panel.add(cell);
+      if (desk.staff) {
+        panel.add(this.portrait(x + cellWidth / 2, y + 17, desk.staff, 26));
+        const name = addText(this, x + cellWidth / 2, y + cellHeight - 8, staffDef(desk.staff).name, {
+          size: FONT_SIZE.small,
+          color: THEME_CSS.ink,
+          originX: 0.5,
+          originY: 0.5,
+        });
+        panel.add(name.setScale(Math.min(1, (cellWidth - 4) / name.width)));
+        if (hasBuddy(state, index)) panel.add(this.add.image(x + cellWidth - 8, y + 8, SC.heart));
+      } else {
+        panel.add(
+          addText(this, x + cellWidth / 2, y + cellHeight / 2, '빈 자리', { size: FONT_SIZE.small, color: THEME_CSS.faint, originX: 0.5, originY: 0.5 }),
+        );
+      }
+      panel.add(
+        addTapZone(this, x, y, cellWidth, cellHeight, draw, () => {
+          if (picked < 0) {
+            sfx.click();
+            this.seatPicked = index;
+          } else if (picked === index) {
+            sfx.click();
+            this.seatPicked = -1;
+          } else if (swapDesks(state, picked, index)) {
+            this.play('assign');
+            vibrate(8);
+            this.seatPicked = -1;
+            this.save();
+            this.buildRoom();
+            this.refreshNow();
+          } else {
+            // 빈 자리끼리는 바꿀 것이 없으니, 새로 누른 자리를 고른 것으로 친다.
+            sfx.click();
+            this.seatPicked = index;
+          }
+          this.openPanel('seats');
+        }),
+      );
+    });
+
+    const below = gridTop + rows * (cellHeight + gap);
+    let note = `단짝끼리 옆자리에 앉으면 둘 다 일 속도 +${Math.round(BUDDY.speed * 100)}%`;
+    if (pickedStaff) {
+      note = pickedBuddy ? `${staffDef(pickedStaff).name}의 단짝: ${staffDef(pickedBuddy).name}` : `${staffDef(pickedStaff).name}의 단짝은 아직 없어요`;
+      if (pickedBuddy && !state.desks.some((desk) => desk.staff === pickedBuddy)) note += ' (아직 회사에 없어요)';
+    }
+    const line = addText(this, W / 2, below + 4, note, { size: FONT_SIZE.small, color: pickedStaff ? THEME_CSS.accent : THEME_CSS.sub, originX: 0.5 });
+    panel.add(line.setScale(Math.min(1, (width - 24) / line.width)));
+    panel.add(
+      addText(this, W / 2, below + 19, '하던 일과 컴퓨터도 함께 옮겨 가요', { size: FONT_SIZE.small, color: THEME_CSS.faint, originX: 0.5 }),
     );
   }
 
@@ -1890,9 +2184,103 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
 
     // 회사의 모습이 적힌 카드를 친구에게 보낸다.
     this.rowLine(panel, left, below + 20, width);
-    panel.add(addText(this, left + 14, below + 37, '우리 회사를 친구에게 자랑해요', { size: FONT_SIZE.small, color: THEME_CSS.sub, originY: 0.5 }));
+    panel.add(addText(this, left + 14, below + 37, '꾸미고 자랑해요', { size: FONT_SIZE.small, color: THEME_CSS.sub, originY: 0.5 }));
+    this.button(panel, left + width - 126, below + 25, 56, 24, '꾸미기', 'pink', () => this.openPanel('decor'));
     this.button(panel, left + width - 66, below + 25, 56, 24, '공유', 'yellow', () => this.share());
     this.prepareShare();
+  }
+
+  /**
+   * 꾸미기 창: 허브의 코인으로 벽지와 바닥, 간판을 사서 회사의 모습을 바꾼다.
+   * 한 번 산 것은 자회사를 세워도 남고, 언제든 기본 모습이나 다른 것으로 바꿔 쓸 수 있다.
+   */
+  private buildDecorPanel(panel: Container): void {
+    const state = this.state;
+    const slot = this.decorShown;
+    const rows: (DecorId | null)[] = [null, ...DECOR_ORDER.filter((id) => (DECOR[id] as DecorDef).slot === slot)];
+    const coins = store.data.coins;
+    const base = ROOM_COLORS[Math.min(state.office, ROOM_COLORS.length - 1)];
+    const header = {
+      height: 36,
+      draw: (top: number, left: number, width: number): void => {
+        DECOR_SLOTS.forEach((id, index) => {
+          this.button(panel, left + 12 + index * 48, top + 3, 44, 26, DECOR_SLOT_NAMES[id], id === slot ? 'yellow' : 'neutral', () => {
+            this.decorShown = id;
+            this.openPanel('decor');
+          });
+        });
+        const count = addText(this, left + width - 12, top + 15, String(coins), { color: THEME_CSS.accent, originX: 1, originY: 0.5 });
+        panel.add(count);
+        panel.add(this.add.image(count.x - count.width - 9, top + 15, 'coin').setDisplaySize(12, 12));
+      },
+    };
+    const bottom = this.listPanel(
+      panel,
+      'decor',
+      '꾸미기',
+      rows,
+      36,
+      20,
+      (id, middle, left, width) => {
+        const def: DecorDef | null = id ? DECOR[id] : null;
+        const swatch = this.add.graphics();
+        const x = left + 12;
+        const y = middle - 12;
+        if (slot === 'sign') {
+          // 간판은 이름 뒤에 까는 판의 모습 그대로 보여 준다.
+          if (def) swatch.fillStyle(def.mark, 1).fillRoundedRect(x, y + 6, 28, 13, 6).fillStyle(def.color, 1).fillRoundedRect(x, y + 5, 28, 12.5, 6);
+          else swatch.lineStyle(1.5, THEME.faint, 0.6).strokeRoundedRect(x + 1, y + 6, 26, 12, 6);
+        } else {
+          swatch.fillStyle(THEME.shadow, 1).fillRoundedRect(x, y + 2, 28, 24, 5);
+          swatch.fillStyle(def?.color ?? base[slot], 1).fillRoundedRect(x, y, 28, 24, 5);
+          // 구름은 작은 칸에 들어가지 않아서 하나만 줄여서 그린다.
+          if (def?.pattern === 'cloud') {
+            swatch.fillStyle(def.mark, 1).fillCircle(x + 9, y + 14, 3.5).fillCircle(x + 14, y + 11, 5).fillCircle(x + 19, y + 14, 3.5);
+            swatch.fillRect(x + 9, y + 13, 10, 4.5);
+          } else if (def) paintPattern(swatch, def, x + 2, y + 2, 24, 20);
+        }
+        panel.add(swatch);
+        panel.add(addText(this, left + 48, middle - 14, def?.name ?? '기본', { color: THEME_CSS.inkDeep }));
+        const using = state.decor[slot] === id;
+        const owned = id === null || state.decor.owned.includes(id);
+        const detail = !def ? (slot === 'sign' ? '간판을 달지 않아요' : '사무실마다 다른 색이에요') : owned ? '사 둔 꾸미기예요' : `코인 ${def.cost}개`;
+        this.rowDetail(panel, left + 48, middle, left + width - 70, detail);
+        if (using) {
+          this.rowState(panel, left, width, middle, '쓰는 중');
+          return;
+        }
+        if (owned) {
+          this.button(panel, left + width - 66, middle - 13, 56, 26, '쓰기', 'neutral', () => {
+            if (!useDecor(state, slot, id)) return;
+            this.afterDecor();
+          });
+          return;
+        }
+        const affordable = decorBlock(state, id, coins) === null;
+        const buy = this.button(panel, left + width - 66, middle - 13, 56, 26, `  ${def?.cost ?? 0}`, affordable ? 'green' : 'neutral', () => {
+          const paid = buyDecor(state, id, store.data.coins);
+          if (paid <= 0) return;
+          store.update((save) => {
+            save.coins -= paid;
+          });
+          this.play('upgrade');
+          this.afterDecor();
+        });
+        panel.add(this.add.image(left + width - 53, middle - 1.5, 'coin').setDisplaySize(11, 11).setAlpha(affordable ? 1 : 0.45));
+        if (!affordable) buy.setEnabled(false);
+      },
+      header,
+    );
+    panel.add(
+      addText(this, W / 2, bottom + 4, '코인은 미니게임과 오늘의 목표로 모아요', { size: FONT_SIZE.small, color: THEME_CSS.faint, originX: 0.5 }),
+    );
+  }
+
+  /** 꾸미기를 바꾼 뒤에 방과 간판을 다시 그린다. */
+  private afterDecor(): void {
+    this.save();
+    this.buildRoom();
+    this.refreshNow();
   }
 
   /**
@@ -2482,7 +2870,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
       );
       y += 16;
     }
-    const percent = Math.round(AWAY.rate * 100);
+    const percent = Math.round(awayRate(this.state) * 100);
     panel.add(
       addText(this, W / 2, y + 2, `닫아 둔 동안에는 수익의 ${percent}%가 ${formatDuration(AWAY.maxSeconds)}까지 쌓여요`, {
         size: FONT_SIZE.small,
