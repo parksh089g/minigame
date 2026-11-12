@@ -47,7 +47,10 @@ export interface GameRecord {
 }
 
 export interface Settings {
+  /** 효과음 */
   sound: boolean;
+  /** 배경 음악. 음악이 있는 게임에서만 쓰인다. */
+  music: boolean;
   vibration: boolean;
 }
 
@@ -101,7 +104,7 @@ export function createDefaultSave(now: number = Date.now()): SaveData {
   return {
     version: SAVE_VERSION,
     coins: 0,
-    settings: { sound: true, vibration: true },
+    settings: { sound: true, music: true, vibration: true },
     games: {},
     daily: createDailyState(),
     cosmetics: createCosmetics(),
@@ -165,6 +168,7 @@ export function normalizeSave(raw: unknown, now: number = Date.now()): SaveData 
     coins: toCount(raw.coins),
     settings: {
       sound: toBool(settings.sound, base.settings.sound),
+      music: toBool(settings.music, base.settings.music),
       vibration: toBool(settings.vibration, base.settings.vibration),
     },
     games,

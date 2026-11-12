@@ -41,7 +41,7 @@ interface SettingsData {
   notice?: { text: string; ok: boolean };
 }
 
-/** 소리·진동 설정, 세이브 내보내기·가져오기·초기화, 다른 기기로 옮기기, 앱 정보. */
+/** 효과음·배경 음악·진동 설정, 세이브 내보내기·가져오기·초기화, 다른 기기로 옮기기, 앱 정보. */
 export class SettingsScene extends Phaser.Scene {
   private noticeText!: Phaser.GameObjects.Text;
   private resetArmedUntil = 0;
@@ -66,13 +66,32 @@ export class SettingsScene extends Phaser.Scene {
     addText(this, GAME_WIDTH / 2, 8, '설정', { size: FONT_SIZE.large, originX: 0.5 });
 
     this.addSection(TOP.sound, '소리와 진동');
-    this.addToggleRow(TOP.sound + 16, '효과음', {
-      isOn: () => store.data.settings.sound,
-      toggle: () => {
-        store.update((save) => void (save.settings.sound = !save.settings.sound));
-        sfx.click();
+    // 효과음과 배경 음악은 한 줄에 반씩 나란히 둔다. 배경 음악은 음악이 있는 게임에서만 들린다.
+    const half = (CONTENT_WIDTH - 12) / 2;
+    this.addToggleRow(
+      TOP.sound + 16,
+      '효과음',
+      {
+        isOn: () => store.data.settings.sound,
+        toggle: () => {
+          store.update((save) => void (save.settings.sound = !save.settings.sound));
+          sfx.click();
+        },
       },
-    });
+      { left: LEFT, right: LEFT + half, width: 50 },
+    );
+    this.addToggleRow(
+      TOP.sound + 16,
+      '음악',
+      {
+        isOn: () => store.data.settings.music,
+        toggle: () => {
+          store.update((save) => void (save.settings.music = !save.settings.music));
+          sfx.click();
+        },
+      },
+      { left: RIGHT - half, right: RIGHT, width: 50 },
+    );
     if (canVibrate()) {
       this.addToggleRow(TOP.sound + 46, '진동', {
         isOn: () => store.data.settings.vibration,
@@ -104,15 +123,17 @@ export class SettingsScene extends Phaser.Scene {
     addText(this, LEFT, y, title, { color: THEME_CSS.accent });
   }
 
+  /** 이름은 왼쪽 끝에, 켜고 끄는 버튼은 오른쪽 끝에 둔다. span을 안 주면 한 줄을 다 쓴다. */
   private addToggleRow(
     y: number,
     label: string,
     binding: { isOn: () => boolean; toggle: () => void },
+    span: { left: number; right: number; width: number } = { left: LEFT, right: RIGHT, width: 64 },
   ): void {
-    addText(this, LEFT, y + 6, label);
-    const width = 64;
+    addText(this, span.left, y + 6, label);
+    const width = span.width;
     const button = new PixelButton(this, {
-      x: RIGHT - width,
+      x: span.right - width,
       y,
       width,
       height: 26,
