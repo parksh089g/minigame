@@ -25,11 +25,18 @@ export const LK = {
   stump: ['lk-stump-1', 'lk-stump-2'],
   squirt: ['lk-squirt-1', 'lk-squirt-2'],
   spore: ['lk-spore-1', 'lk-spore-2'],
+  cinder: ['lk-cinder-1', 'lk-cinder-2'],
+  soot: ['lk-soot-1', 'lk-soot-2'],
+  clinker: ['lk-clinker-1', 'lk-clinker-2'],
+  slag: ['lk-slag-1', 'lk-slag-2'],
+  smoker: ['lk-smoker-1', 'lk-smoker-2'],
+  blister: ['lk-blister-1', 'lk-blister-2'],
   giant: ['lk-giant-1', 'lk-giant-2'],
   ram: ['lk-ram-1', 'lk-ram-2'],
   owl: ['lk-owl-1', 'lk-owl-2'],
   lord: ['lk-lord-1', 'lk-lord-2'],
   matron: ['lk-matron-1', 'lk-matron-2'],
+  warden: ['lk-warden-1', 'lk-warden-2'],
   /** 보스가 쏘는 빛덩이 */
   orb: 'lk-orb',
   gemSmall: 'lk-gem-s',
@@ -54,11 +61,12 @@ export const LK = {
   moonEvo: 'lk-moon-evo',
   floor: 'lk-floor',
   floorMarsh: 'lk-floor-marsh',
+  floorRidge: 'lk-floor-ridge',
   spark: 'lk-spark',
 } as const;
 
 /** 스테이지마다 깔리는 바닥 */
-export const FLOOR_OF: Readonly<Record<StageId, string>> = { meadow: LK.floor, marsh: LK.floorMarsh };
+export const FLOOR_OF: Readonly<Record<StageId, string>> = { meadow: LK.floor, marsh: LK.floorMarsh, ridge: LK.floorRidge };
 
 /** 캐릭터의 걷는 그림 두 장 */
 export const HERO_FRAMES: Readonly<Record<HeroId, readonly [string, string]>> = {
@@ -90,6 +98,12 @@ export const LOOK = {
   puddle: COLOR.navy,
   puddleRim: COLOR.teal,
   puddleShine: COLOR.sky,
+  /** 잿빛 고개의 불구멍: 잠잠할 때의 구덩이와 테두리, 달아오를 때와 솟을 때의 불빛 */
+  vent: COLOR.ink,
+  ventRim: COLOR.plum,
+  ventWarm: COLOR.orange,
+  ventFire: COLOR.yellow,
+  ventCore: COLOR.white,
   /** 보스의 공격 예고: 돌진할 길, 쏘려고 모으는 빛 */
   threat: COLOR.red,
   threatCore: COLOR.white,
@@ -466,11 +480,18 @@ const BLOBS = {
   stump: { size: 18, body: 14, shade: 6, eye: 5 },
   squirt: { size: 13, body: 1, shade: 2, eye: 4, ears: 'tuft' },
   spore: { size: 14, body: 3, shade: 4, eye: 0 },
+  // 잿빛 고개: 재와 숯의 잿빛에 불씨 색 눈. 쏘는 적과 터지는 적은 다른 스테이지와 같은 약속을 따른다.
+  cinder: { size: 12, body: 13, shade: 14, eye: 2, frill: true },
+  clinker: { size: 14, body: 14, shade: 15, eye: 3 },
+  slag: { size: 18, body: 2, shade: 3, eye: 4 },
+  smoker: { size: 13, body: 14, shade: 13, eye: 12, ears: 'tuft' },
+  blister: { size: 13, body: 3, shade: 4, eye: 0 },
   giant: { size: 30, body: 7, shade: 6, eye: 4, frill: true },
   ram: { size: 28, body: 3, shade: 4, eye: 0, ears: 'horn' },
   owl: { size: 28, body: 9, shade: 10, eye: 4, ears: 'tuft', frill: true },
   lord: { size: 34, body: 2, shade: 3, eye: 12, crown: true, frill: true },
   matron: { size: 34, body: 6, shade: 5, eye: 4, crown: true, frill: true },
+  warden: { size: 34, body: 14, shade: 3, eye: 4, crown: true, frill: true },
 } as const satisfies Record<string, BlobLook>;
 
 function drawGem(size: number, rim: number, body: number): HTMLCanvasElement {
@@ -539,6 +560,48 @@ function drawMarshFloor(): HTMLCanvasElement {
     [44, 22],
   ]) {
     context.fillRect(x, y, 2, 1);
+  }
+  return canvas;
+}
+
+/** 잿빛 고개. 식은 재의 어두운 바탕에 갈라진 금과 꺼져 가는 불씨를 박는다. */
+function drawRidgeFloor(): HTMLCanvasElement {
+  const size = 48;
+  const [canvas, context] = canvasOf(size, size);
+  context.fillStyle = '#34292f';
+  context.fillRect(0, 0, size, size);
+  // 갈라진 금: 꺾인 가는 줄
+  context.fillStyle = '#261d23';
+  for (const [x, y, w] of [
+    [4, 9, 5],
+    [8, 10, 3],
+    [30, 26, 6],
+    [35, 27, 3],
+    [16, 40, 5],
+    [40, 6, 4],
+  ]) {
+    context.fillRect(x, y, w, 1);
+  }
+  // 자갈
+  context.fillStyle = '#4a3c44';
+  for (const [x, y, w] of [
+    [22, 14, 2],
+    [10, 28, 3],
+    [42, 38, 2],
+    [28, 44, 2],
+    [2, 20, 2],
+  ]) {
+    context.fillRect(x, y, w, 1);
+  }
+  // 꺼져 가는 불씨: 적과 빛 조각이 묻히지 않게 어둡게 둔다.
+  context.fillStyle = '#7a3b2e';
+  for (const [x, y] of [
+    [14, 6],
+    [36, 18],
+    [6, 36],
+    [26, 32],
+  ]) {
+    context.fillRect(x, y, 1, 1);
   }
   return canvas;
 }
@@ -711,6 +774,9 @@ export function registerLanternTextures(scene: Phaser.Scene): void {
   // 안개나방은 박쥐와 같은 모양에 날개만 잿빛이다.
   addWithFlash(LK.moth[0], recolor(BAT_1, { '2': 'd' }));
   addWithFlash(LK.moth[1], recolor(BAT_2, { '2': 'd' }));
+  // 검댕 날개도 같은 모양에 날개가 불씨 색이다.
+  addWithFlash(LK.soot[0], recolor(BAT_1, { '2': '3' }));
+  addWithFlash(LK.soot[1], recolor(BAT_2, { '2': '3' }));
   addWithFlash(LK.wisp[0], WISP_1);
   addWithFlash(LK.wisp[1], WISP_2);
   for (const kind of Object.keys(BLOBS) as Array<keyof typeof BLOBS>) {
@@ -794,5 +860,6 @@ export function registerLanternTextures(scene: Phaser.Scene): void {
   add(LK.heart, drawRows(withOutline(HEART)));
   add(LK.floor, drawFloor());
   add(LK.floorMarsh, drawMarshFloor());
+  add(LK.floorRidge, drawRidgeFloor());
   for (const id of ICON_IDS) add(iconKey(id), drawRows(withOutline(ICONS[id])));
 }

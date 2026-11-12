@@ -2,7 +2,7 @@
  * 등불지기의 배경 음악. 곡마다 악보를 값으로 적어 두고, 연주는 core/music.ts에 맡긴다.
  * 그래서 이 파일은 브라우저 없이도 테스트할 수 있다. 악보를 적는 법은 core/score.ts에 있다.
  *
- * 곡은 넷이다. 준비 화면의 조용한 곡, 스테이지마다 하나씩, 그리고 보스의 곡.
+ * 준비 화면의 조용한 곡, 스테이지마다 하나씩, 그리고 보스의 곡이 있다.
  * 마지막 보스는 보스의 곡을 더 빠르고 높게 연주한다.
  */
 import type { Song, Voice } from '../../core/score';
@@ -308,6 +308,97 @@ export const MARSH_SONG: Song = {
   drumVolume: 0.4,
 };
 
+// ------------------------------------------------------------ 잿빛 고개
+
+/** 발을 구르며 걷는 베이스: 길게 한 번, 짧게 두 번을 뿌리음과 다섯째 음으로 되풀이한다. */
+const march = (root: string, fifth: string): string =>
+  `${root}*3 ${root} ${root}*2 ${fifth}*2 ${root}*3 ${root} ${fifth}*2 ${root}*2`;
+
+const RIDGE_BASS = {
+  gm: march('g2', 'd3'),
+  eb: march('eb3', 'bb2'),
+  cm: march('c3', 'g2'),
+  d: march('d3', 'a2'),
+  bb: march('bb2', 'f3'),
+  f: march('f3', 'c3'),
+} as const;
+
+const RIDGE_ARP = {
+  gm: 'g3 . d4 . bb3 . d4 . g4 . d4 . bb3 . d4 .',
+  eb: 'g3 . eb4 . bb3 . eb4 . g4 . eb4 . bb3 . eb4 .',
+  cm: 'g3 . eb4 . c4 . eb4 . g4 . eb4 . c4 . eb4 .',
+  d: 'f#3 . d4 . a3 . d4 . f#4 . d4 . a3 . d4 .',
+  bb: 'f3 . d4 . bb3 . d4 . f4 . d4 . bb3 . d4 .',
+  f: 'f3 . c4 . a3 . c4 . f4 . c4 . a3 . c4 .',
+} as const;
+
+const RIDGE_DRUM = {
+  one: 'k..hs..hk.k.s..h',
+  two: 'k..hs..hk.khs.h.',
+  fill: 'k..hs..hk.k.s.ss',
+} as const;
+
+const RIDGE_FLOW = [
+  ...(['gm', 'gm', 'eb', 'eb', 'cm', 'cm', 'd', 'd'] as const),
+  ...(['bb', 'bb', 'f', 'f', 'eb', 'eb', 'd', 'd'] as const),
+  ...(['gm', 'gm', 'eb', 'eb', 'cm', 'd', 'gm', 'gm'] as const),
+] as const;
+
+/**
+ * 잿빛 고개: 발을 구르며 오르는 단조. 스물네 마디가 여덟 마디씩 세 대목이다.
+ * 낮게 맴도는 첫 대목, 밝은 화음으로 올라서는 가운데 대목, 처음으로 돌아와 길게 맺는 끝 대목.
+ */
+export const RIDGE_SONG: Song = {
+  bpm: 112,
+  bars: 24,
+  voices: [
+    { wave: 'triangle', volume: 0.39, soft: true, bars: RIDGE_FLOW.map((chord) => RIDGE_BASS[chord]) },
+    { wave: 'triangle', volume: 0.26, gate: 0.55, bars: RIDGE_FLOW.map((chord) => RIDGE_ARP[chord]) },
+    // 가락
+    {
+      wave: 'square',
+      volume: 0.075,
+      soft: true,
+      gate: 0.95,
+      bars: [
+        'd5*4 g5*4 bb5*6 a5*2',
+        'g5*8 d5*4 .*4',
+        'eb5*4 g5*4 bb5*6 g5*2',
+        'eb5*8 .*4 g5*4',
+        'c5*4 eb5*4 g5*6 f5*2',
+        'eb5*8 c5*4 .*4',
+        'd5*4 f#5*4 a5*8',
+        'f#5*4 d5*4 a4*4 .*4',
+        'bb5*6 a5*2 bb5*4 d6*4',
+        'f5*8 .*4 d5*4',
+        'c6*6 bb5*2 a5*4 f5*4',
+        'a5*8 .*8',
+        'g5*4 bb5*4 eb6*8',
+        'bb5*4 g5*4 eb5*8',
+        'f#5*4 a5*4 d6*8',
+        '.*8 d5*2 f#5*2 a5*2 c6*2',
+        'd6*4 bb5*4 g5*8',
+        '.*4 d5*4 g5*4 bb5*4',
+        'bb5*8 g5*4 eb5*4',
+        'g5*12 .*4',
+        'c5*4 eb5*4 g5*4 c6*4',
+        'a5*4 f#5*4 d5*8',
+        'g5*16',
+        REST,
+      ],
+    },
+  ],
+  drums: [
+    ...[RIDGE_DRUM.one, RIDGE_DRUM.two, RIDGE_DRUM.one, RIDGE_DRUM.two],
+    ...[RIDGE_DRUM.one, RIDGE_DRUM.two, RIDGE_DRUM.one, RIDGE_DRUM.fill],
+    ...[RIDGE_DRUM.one, RIDGE_DRUM.two, RIDGE_DRUM.one, RIDGE_DRUM.two],
+    ...[RIDGE_DRUM.one, RIDGE_DRUM.two, RIDGE_DRUM.one, RIDGE_DRUM.fill],
+    ...[RIDGE_DRUM.one, RIDGE_DRUM.two, RIDGE_DRUM.one, RIDGE_DRUM.two],
+    ...[RIDGE_DRUM.one, RIDGE_DRUM.two, RIDGE_DRUM.one, RIDGE_DRUM.fill],
+  ],
+  drumVolume: 0.4,
+};
+
 // ------------------------------------------------------------ 보스
 
 /** 셋씩 끊어 몰아치는 베이스 */
@@ -387,12 +478,14 @@ export const FINAL_SONG: Song = { ...BOSS_SONG, bpm: 164, transpose: 2 };
 export const STAGE_SONGS: Readonly<Record<StageId, Song>> = {
   meadow: MEADOW_SONG,
   marsh: MARSH_SONG,
+  ridge: RIDGE_SONG,
 };
 
 export const SONGS = {
   lobby: LOBBY_SONG,
   meadow: MEADOW_SONG,
   marsh: MARSH_SONG,
+  ridge: RIDGE_SONG,
   boss: BOSS_SONG,
   final: FINAL_SONG,
 } as const;

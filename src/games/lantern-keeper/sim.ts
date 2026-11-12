@@ -61,7 +61,7 @@ import {
   type RunSummary,
   type Upgrade,
 } from './rules';
-import { inPuddle, PUDDLE_SLOW } from './terrain';
+import { inPuddle, PUDDLE_SLOW, VENT, ventAt, ventClock, ventPhase, ventsAround } from './terrain';
 
 export const RUN_STATE_VERSION = 3;
 
@@ -256,6 +256,8 @@ export interface RunState {
     xp: number;
     /** 등갓의 빛막이 다시 생길 때까지 남은 시간(초). 0이거나 없으면 빛막이 서 있다(등갓이 있을 때). */
     guard?: number;
+    /** 불구멍에 덴 뒤 다시 데지 않는 남은 시간(초). 한 번 솟는 동안 한 번만 데게 한다. */
+    scorch?: number;
   };
   weapons: Levels<WeaponId>;
   passives: Levels<PassiveId>;
@@ -317,12 +319,19 @@ export const AIM_LOCK_SECONDS = 0.25;
 export const CHARGE_SECONDS = 0.45;
 /** 빛덩이를 쏘는 보스가 빛을 모으는 중일 때의 mode */
 export const CHARGING = 2;
+/**
+ * 고개의 문지기는 돌진과 쏘기를 번갈아 해서 mode를 더 쓴다:
+ * 0 쫓는다 · 1 힘을 모은다 · 2 내달린다 · WARDEN_REST 숨을 고른다 · WARDEN_CHARGING 빛을 모은다
+ */
+export const WARDEN_REST = 3;
+export const WARDEN_CHARGING = 4;
 
 /** 돌진하는 보스가 힘을 모으는 시간(초), 내달리는 빠르기(px/초)와 시간(초) */
 export function dashOf(kind: EnemyKind, tier: number): { windup: number; speed: number; seconds: number } {
-  return ENEMIES[kind].brain === 'lord'
-    ? { windup: 0.7, speed: 125, seconds: 0.75 }
-    : { windup: 0.6, speed: 108 + 8 * tier, seconds: 0.7 };
+  const brain = ENEMIES[kind].brain;
+  if (brain === 'lord') return { windup: 0.7, speed: 125, seconds: 0.75 };
+  if (brain === 'warden') return { windup: 0.65, speed: 118, seconds: 0.72 };
+  return { windup: 0.6, speed: 108 + 8 * tier, seconds: 0.7 };
 }
 
 export type SimEvent =
@@ -353,6 +362,8 @@ export type SimEvent =
   | { type: 'strike'; x: number; y: number; radius: number }
   /** 번갯불이 지나간 길. points는 x, y가 번갈아 들어 있다. */
   | { type: 'bolt'; points: number[]; evolved: boolean }
+  /** 화면 가까이의 불구멍에서 불길이 솟기 시작했다 */
+  | { type: 'vent'; x: number; y: number }
   /** 종소리가 울렸다 */
   | { type: 'bell'; evolved: boolean }
   /** 부싯돌: 쓰러진 그림자가 (x, y)에서 터졌다 */
@@ -406,6 +417,8 @@ const BELL_SPEED = 170;
 const BELL_GAP = 0.3;
 /** 종소리에 밀려난 그림자가 물러나는 빠르기(px/초) */
 const PUSH_SPEED = 140;
+/** 쪼개져 나온 그림자가 튀어 나가는 거리(px) */
+const SPLIT_PUSH = 9;
 const GEM_LIMIT = 220;
 const GEM_PICKUP = 7;
 const GEM_SPEED = 170;
@@ -721,6 +734,8 @@ export class Sim {
     this.landStrikes(dt);
     this.burnFires(dt);
     this.tendPosts(dt);
+    this.flareVents(dt);
+    if (s.over) return;
     this.reap();
     this.moveGems(dt);
   }
@@ -731,6 +746,45 @@ export class Sim {
   isMire(x: number, y: number): boolean {
     const s = this.state;
     return STAGES[s.stage].puddles && inPuddle(x, y, s.seed);
+  }
+
+  /**
+   * 세상 좌표 (x, y)가 달아올랐거나 불길이 솟고 있는 불구멍 위인지. 불구멍이 없는 스테이지에서는 늘 아니다.
+   * 달아오른 곳도 곧 솟으므로 함께 알려 준다.
+   */
+  isScorching(x: number, y: number): boolean {
+    const s = this.state;
+    if (!STAGES[s.stage].vents) return false;
+    const vent = ventAt(x, y, s.seed);
+    return vent !== null && ventPhase(vent, s.t) !== 'idle';
+  }
+
+  /** 불구멍: 불길이 솟는 동안 그 위의 플레이어와 그림자가 덴다. */
+  private flareVents(dt: number): void {
+    const s = this.state;
+    if (!STAGES[s.stage].vents) return;
+    const p = s.player;
+    // 화면 가까이에서 막 솟기 시작한 불구멍을 알린다.
+    for (const vent of ventsAround(p.x, p.y, s.viewW / 2 + 20, s.viewH / 2 + 20, s.seed)) {
+      const since = ventClock(vent, s.t) - VENT.warm;
+      if (since >= 0 && since < dt) this.events.push({ type: 'vent', x: vent.x, y: vent.y });
+    }
+    const under = ventAt(p.x, p.y, s.seed);
+    if ((p.scorch ?? 0) > 0) p.scorch = (p.scorch ?? 0) - dt;
+    // 한 번 솟는 동안에는 한 번만 덴다. 빛막이가 막아 줬을 때도 마찬가지다.
+    if (under && p.inv <= 0 && !((p.scorch ?? 0) > 0) && ventPhase(under, s.t) === 'erupt') {
+      p.scorch = VENT.erupt;
+      if (this.hurt(Math.round(VENT.damage * this.depth.damage))) return;
+    }
+    // 그림자는 tick마다 덴다.
+    if (Math.floor(s.t / VENT.tick) === Math.floor((s.t - dt) / VENT.tick)) return;
+    for (const e of s.enemies) {
+      if (e.hp <= 0) continue;
+      const vent = ventAt(e.x, e.y, s.seed);
+      if (!vent || ventPhase(vent, s.t) !== 'erupt') continue;
+      const boss = Boolean(ENEMIES[e.kind].boss);
+      this.damage(e, boss ? VENT.boss : Math.max(VENT.floor, e.maxHp * VENT.share), null);
+    }
   }
 
   private movePlayer(dt: number, moveX: number, moveY: number): void {
@@ -1029,6 +1083,20 @@ export class Sim {
               this.summon(e, minionKind(s.stage, e.tier), 5, 30);
             }
           }
+        } else if (brain === 'warden' && e.mode >= WARDEN_REST) {
+          // 고개의 문지기: 내달린 다음에는 숨을 고르고(3) 빛을 모아(4) 부채꼴로 쏜다.
+          if (e.mode === WARDEN_CHARGING) {
+            speed = 0;
+            if (e.timer <= 0) {
+              e.mode = 0;
+              e.timer = 2.4;
+              this.volley(e, Math.atan2(dy, dx), 7, HAZARD.spread, 13);
+            }
+          } else if (e.timer <= 0) {
+            e.mode = WARDEN_CHARGING;
+            e.timer = CHARGE_SECONDS;
+            this.events.push({ type: 'charge' });
+          }
         } else if (e.mode === 0) {
           // 돌진하는 보스: 쫓다가(0) 멈춰서 힘을 모으고(1) 겨눈 쪽으로 내달린다(2).
           if (e.timer <= 0) {
@@ -1060,6 +1128,9 @@ export class Sim {
             if (brain === 'lord') {
               e.timer = 4.2;
               this.summon(e, minionKind(s.stage, e.tier), 6, 30);
+            } else if (brain === 'warden') {
+              e.mode = WARDEN_REST;
+              e.timer = 1.5;
             } else {
               e.timer = 3.2 - 0.3 * e.tier;
             }
@@ -1834,6 +1905,8 @@ export class Sim {
     const s = this.state;
     let kept = 0;
     const sparks: number[] = [];
+    /** 쪼개질 자리와 종류. 줄이는 중인 목록에 바로 넣지 않고 다 치운 뒤에 내보낸다. */
+    const pieces: Array<{ kind: EnemyKind; x: number; y: number; count: number }> = [];
     for (const e of s.enemies) {
       if (e.hp > 0) {
         s.enemies[kept] = e;
@@ -1844,6 +1917,7 @@ export class Sim {
       s.kills += 1;
       this.events.push({ type: 'kill', x: e.x, y: e.y, boss: Boolean(info.boss) });
       if (info.xp > 0) this.dropGem(e.x, e.y, info.xp, 'xp');
+      if (info.splits) pieces.push({ kind: info.splits.into, x: e.x, y: e.y, count: info.splits.count });
       if (info.boss) {
         s.bossKills += 1;
         this.dropGem(e.x + 8, e.y, HEAL_DROP_VALUE * 2, 'heal');
@@ -1865,6 +1939,18 @@ export class Sim {
       }
     }
     s.enemies.length = kept;
+    // 쪼개지는 적: 쓰러진 자리에서 작은 것들이 양옆으로 튀어 나온다. 싸움터가 넘치면 쪼개지지 않는다.
+    if (pieces.length > 0 && !s.over) {
+      const room = Math.round(maxAlive(this.clock) * 1.25);
+      for (const piece of pieces) {
+        for (let i = 0; i < piece.count && s.enemies.length < room; i += 1) {
+          const angle = (i / piece.count) * Math.PI * 2 + piece.x * 0.37;
+          const born = this.makeEnemy(piece.kind, piece.x + Math.cos(angle) * 4, piece.y + Math.sin(angle) * 4);
+          born.kx = Math.cos(angle) * SPLIT_PUSH;
+          born.ky = Math.sin(angle) * SPLIT_PUSH;
+        }
+      }
+    }
     return sparks;
   }
 
