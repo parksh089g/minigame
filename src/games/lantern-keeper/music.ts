@@ -475,10 +475,103 @@ export const BOSS_SONG: Song = {
 /** 마지막 보스: 같은 곡을 더 빠르고 한 음 높게 연주한다. */
 export const FINAL_SONG: Song = { ...BOSS_SONG, bpm: 164, transpose: 2 };
 
+// ------------------------------------------------------------ 바람 설원
+
+/** 길게 깔리는 베이스: 뿌리음을 길게 끌다가 다섯째 음을 거쳐 돌아온다. */
+const drift = (root: string, fifth: string): string => `${root}*8 ${fifth}*4 ${root}*4`;
+
+const TUNDRA_BASS = {
+  bm: drift('b2', 'f#3'),
+  g: drift('g2', 'd3'),
+  d: drift('d3', 'a2'),
+  a: drift('a2', 'e3'),
+  em: drift('e3', 'b2'),
+  fs: drift('f#2', 'c#3'),
+} as const;
+
+/** 높은 데서 반짝이는 화음: 얼음 조각이 부딪는 것처럼 짧게 끊는다. */
+const TUNDRA_ARP = {
+  bm: 'b4 . f#5 . d5 . f#5 . b5 . f#5 . d5 . f#5 .',
+  g: 'b4 . g5 . d5 . g5 . b5 . g5 . d5 . g5 .',
+  d: 'a4 . f#5 . d5 . f#5 . a5 . f#5 . d5 . f#5 .',
+  a: 'a4 . e5 . c#5 . e5 . a5 . e5 . c#5 . e5 .',
+  em: 'b4 . g5 . e5 . g5 . b5 . g5 . e5 . g5 .',
+  fs: 'a#4 . f#5 . c#5 . f#5 . a#5 . f#5 . c#5 . f#5 .',
+} as const;
+
+const TUNDRA_DRUM = {
+  one: 'k...h...k..hh...',
+  two: 'k...h..hs...h.h.',
+  fill: 'k...h...s..hs.ss',
+} as const;
+
+const TUNDRA_FLOW = [
+  ...(['bm', 'bm', 'g', 'g', 'd', 'd', 'a', 'a'] as const),
+  ...(['em', 'em', 'bm', 'bm', 'g', 'g', 'fs', 'fs'] as const),
+  ...(['bm', 'bm', 'g', 'g', 'em', 'fs', 'bm', 'bm'] as const),
+] as const;
+
+/**
+ * 바람 설원: 느리고 차갑다. 스물네 마디가 여덟 마디씩 세 대목이다.
+ * 길게 끄는 가락이 바람처럼 내려오는 첫 대목, 높이 올라서는 가운데 대목, 처음으로 돌아와 길게 맺는 끝 대목.
+ * 북은 드문드문 쳐서 눈밭의 고요함을 남긴다.
+ */
+export const TUNDRA_SONG: Song = {
+  bpm: 104,
+  bars: 24,
+  voices: [
+    { wave: 'triangle', volume: 0.37, soft: true, bars: TUNDRA_FLOW.map((chord) => TUNDRA_BASS[chord]) },
+    { wave: 'triangle', volume: 0.2, gate: 0.45, bars: TUNDRA_FLOW.map((chord) => TUNDRA_ARP[chord]) },
+    // 가락
+    {
+      wave: 'sine',
+      volume: 0.2,
+      soft: true,
+      gate: 0.95,
+      bars: [
+        'f#5*8 d5*4 b4*4',
+        'b4*12 .*4',
+        'g5*8 d5*4 b4*4',
+        'd5*12 .*4',
+        'a5*8 f#5*4 d5*4',
+        'f#5*12 .*4',
+        'e5*8 c#5*4 a4*4',
+        'c#5*8 e5*4 a5*4',
+        'b5*8 g5*4 e5*4',
+        'g5*12 .*4',
+        'f#5*8 d5*4 b4*4',
+        'd5*8 f#5*8',
+        'g5*6 a5*2 b5*8',
+        'd6*8 b5*8',
+        'a#5*8 f#5*8',
+        'c#5*12 .*4',
+        'f#5*8 d5*4 b4*4',
+        'b4*8 d5*4 f#5*4',
+        'g5*8 b5*8',
+        'd6*6 b5*2 g5*8',
+        'e5*4 g5*4 b5*8',
+        'a#5*8 c#6*8',
+        'b5*16',
+        REST,
+      ],
+    },
+  ],
+  drums: [
+    ...[TUNDRA_DRUM.one, TUNDRA_DRUM.two, TUNDRA_DRUM.one, TUNDRA_DRUM.two],
+    ...[TUNDRA_DRUM.one, TUNDRA_DRUM.two, TUNDRA_DRUM.one, TUNDRA_DRUM.fill],
+    ...[TUNDRA_DRUM.one, TUNDRA_DRUM.two, TUNDRA_DRUM.one, TUNDRA_DRUM.two],
+    ...[TUNDRA_DRUM.one, TUNDRA_DRUM.two, TUNDRA_DRUM.one, TUNDRA_DRUM.fill],
+    ...[TUNDRA_DRUM.one, TUNDRA_DRUM.two, TUNDRA_DRUM.one, TUNDRA_DRUM.two],
+    ...[TUNDRA_DRUM.one, TUNDRA_DRUM.two, TUNDRA_DRUM.one, TUNDRA_DRUM.fill],
+  ],
+  drumVolume: 0.32,
+};
+
 export const STAGE_SONGS: Readonly<Record<StageId, Song>> = {
   meadow: MEADOW_SONG,
   marsh: MARSH_SONG,
   ridge: RIDGE_SONG,
+  tundra: TUNDRA_SONG,
 };
 
 export const SONGS = {
@@ -486,6 +579,7 @@ export const SONGS = {
   meadow: MEADOW_SONG,
   marsh: MARSH_SONG,
   ridge: RIDGE_SONG,
+  tundra: TUNDRA_SONG,
   boss: BOSS_SONG,
   final: FINAL_SONG,
 } as const;

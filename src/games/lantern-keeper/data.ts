@@ -45,23 +45,32 @@ export type EnemyKind =
   | 'slag'
   | 'smoker'
   | 'blister'
+  | 'flake'
+  | 'sleet'
+  | 'frost'
+  | 'floe'
+  | 'hail'
+  | 'bloat'
   | 'prowler'
   | 'lurker'
   | 'stoker'
+  | 'fang'
   | 'giant'
   | 'ram'
   | 'owl'
   | 'lord'
   | 'matron'
-  | 'warden';
+  | 'warden'
+  | 'blizzard';
 
 /**
  * 보스가 싸우는 방식.
  * summon 부하를 불러낸다 · charge 힘을 모았다 돌진한다 · volley 빛을 흩뿌려 쏜다
  * lord 돌진한 뒤 부하를 부른다 · matron 사방으로 쏘기와 부하 부르기를 번갈아 한다
  * warden 돌진과 부채꼴로 쏘기를 번갈아 한다
+ * blizzard 사방으로 여러 겹을 엇갈려 쏘기와 부하 부르기를 번갈아 한다
  */
-export type BossBrain = 'summon' | 'charge' | 'volley' | 'lord' | 'matron' | 'warden';
+export type BossBrain = 'summon' | 'charge' | 'volley' | 'lord' | 'matron' | 'warden' | 'blizzard';
 
 /** 멀찍이 멈춰 서서 어둠 방울을 쏘는 적의 숫자 */
 export interface ShootInfo {
@@ -111,6 +120,8 @@ export interface EnemyInfo {
   splits?: { into: EnemyKind; count: number };
   shoots?: ShootInfo;
   bursts?: BurstInfo;
+  /** 닿으면 플레이어의 발이 이만큼(초) 얼어 느려진다(CHILL_SLOW). 빛막이 막아 줬을 때는 얼지 않는다. */
+  chills?: number;
   /** 정예 그림자: 가끔 하나씩 나오는 크고 센 그림자. 쓰러지면 보물 상자를 떨어뜨린다(ELITE). */
   elite?: boolean;
   boss?: boolean;
@@ -187,10 +198,34 @@ export const ENEMIES: Readonly<Record<EnemyKind, EnemyInfo>> = {
     radius: 6,
     bursts: { trigger: 25, fuse: 0.95, radius: 32, damage: 12, splash: 42 },
   },
+  // 바람 설원
+  flake: { name: '눈방울', hp: 7, speed: 22, damage: 5, xp: 1, radius: 6 },
+  sleet: { name: '서리나비', hp: 5, speed: 42, damage: 4, xp: 1, radius: 5 },
+  frost: { name: '서릿발', hp: 17, speed: 28, damage: 7, xp: 2, radius: 6, chills: 1.5 },
+  floe: { name: '얼음 바위', hp: 58, speed: 14, damage: 13, xp: 5, radius: 9 },
+  hail: {
+    name: '우박 눈',
+    hp: 11,
+    speed: 22,
+    damage: 5,
+    xp: 2,
+    radius: 6,
+    shoots: { range: 88, every: 5.1, windup: 0.7, damage: 4, limit: 4 },
+  },
+  bloat: {
+    name: '부푼 눈꽃',
+    hp: 28,
+    speed: 31,
+    damage: 6,
+    xp: 3,
+    radius: 6,
+    bursts: { trigger: 25, fuse: 0.95, radius: 33, damage: 12, splash: 43 },
+  },
   // 정예 그림자: 스테이지마다 하나. 체력은 다른 그림자처럼 시간이 갈수록 불어난다.
   prowler: { name: '밤 사냥꾼', hp: 150, speed: 30, damage: 14, xp: 12, radius: 11, elite: true },
   lurker: { name: '늪 도사리', hp: 140, speed: 62, damage: 14, xp: 12, radius: 11, hops: true, elite: true },
   stoker: { name: '불티 대장', hp: 175, speed: 25, damage: 16, xp: 12, radius: 12, elite: true },
+  fang: { name: '서리 송곳니', hp: 150, speed: 29, damage: 14, xp: 12, radius: 11, elite: true, chills: 1.5 },
   // 중간 보스의 체력은 MID_BOSS_TIERS가 정한다. 여기 적힌 값은 첫 번째 것과 같다.
   giant: { name: '어스름 거인', hp: 320, speed: 30, damage: 18, xp: 30, radius: 15, boss: true, brain: 'summon' },
   ram: { name: '뿔그림자', hp: 320, speed: 26, damage: 20, xp: 30, radius: 14, boss: true, brain: 'charge' },
@@ -199,6 +234,7 @@ export const ENEMIES: Readonly<Record<EnemyKind, EnemyInfo>> = {
   lord: { name: '밤의 왕관', hp: 4000, speed: 27, damage: 24, xp: 0, radius: 17, boss: true, brain: 'lord' },
   matron: { name: '늪의 어미', hp: 4000, speed: 23, damage: 22, xp: 0, radius: 17, boss: true, brain: 'matron' },
   warden: { name: '고개의 문지기', hp: 4000, speed: 25, damage: 23, xp: 0, radius: 17, boss: true, brain: 'warden' },
+  blizzard: { name: '눈보라의 눈', hp: 4000, speed: 24, damage: 22, xp: 0, radius: 17, boss: true, brain: 'blizzard' },
 };
 
 export interface SpawnRow {
@@ -220,7 +256,7 @@ export const MID_BOSS_TIERS: ReadonlyArray<{ hp: number; summon: number }> = [
   { hp: 2400, summon: 8 },
 ];
 
-export type StageId = 'meadow' | 'marsh' | 'ridge';
+export type StageId = 'meadow' | 'marsh' | 'ridge' | 'tundra';
 
 export interface StageInfo {
   name: string;
@@ -241,6 +277,8 @@ export interface StageInfo {
   puddles: boolean;
   /** 때맞춰 불길이 솟는 불구멍이 있는 곳. 그 위에 있으면 플레이어도 그림자도 덴다. */
   vents: boolean;
+  /** 가끔 돌풍이 부는 곳. 부는 동안 플레이어와 그림자가 바람 부는 쪽으로 밀린다(terrain.ts의 GUST). */
+  gusts: boolean;
   /** 최고 기록이 이만큼(초) 되면 열린다. 0이면 처음부터 열려 있다. */
   unlockSeconds: number;
 }
@@ -264,6 +302,7 @@ export const STAGES: Readonly<Record<StageId, StageInfo>> = {
     finalBoss: 'lord',
     puddles: false,
     vents: false,
+    gusts: false,
     unlockSeconds: 0,
   },
   marsh: {
@@ -284,6 +323,7 @@ export const STAGES: Readonly<Record<StageId, StageInfo>> = {
     finalBoss: 'matron',
     puddles: true,
     vents: false,
+    gusts: false,
     unlockSeconds: 240,
   },
   ridge: {
@@ -304,11 +344,36 @@ export const STAGES: Readonly<Record<StageId, StageInfo>> = {
     finalBoss: 'warden',
     puddles: false,
     vents: true,
+    gusts: false,
     unlockSeconds: 420,
+  },
+  tundra: {
+    name: '바람 설원',
+    blurb: '돌풍이 그림자를 실어 온다. 바람 부는 쪽을 비워 두자',
+    spawns: [
+      { kind: 'flake', from: 0, weight: 10 },
+      { kind: 'sleet', from: 60, weight: 6 },
+      { kind: 'frost', from: 115, weight: 4.5 },
+      { kind: 'floe', from: 170, weight: 2 },
+      { kind: 'hail', from: 125, weight: 1 },
+      { kind: 'bloat', from: 270, weight: 1.2 },
+    ],
+    surge: ['sleet', 'frost'],
+    minions: ['sleet', 'flake'],
+    midBosses: ['giant', 'owl', 'ram', 'giant'],
+    elite: 'fang',
+    finalBoss: 'blizzard',
+    puddles: false,
+    vents: false,
+    gusts: true,
+    unlockSeconds: 540,
   },
 };
 
-export const STAGE_ORDER: readonly StageId[] = ['meadow', 'marsh', 'ridge'];
+export const STAGE_ORDER: readonly StageId[] = ['meadow', 'marsh', 'ridge', 'tundra'];
+
+/** 서릿발 같은 그림자에 닿아 발이 얼어 있는 동안의 이동 속도 배율 */
+export const CHILL_SLOW = 0.6;
 
 /**
  * 깊은 밤의 가장 깊은 단계. 0은 보통 밤이고, 한 스테이지를 완주할 때마다 그 스테이지의 다음 단계가 열린다.

@@ -168,3 +168,84 @@ export function ventsAround(x: number, y: number, halfW: number, halfH: number, 
   }
   return found;
 }
+
+// ------------------------------------------------------------ 돌풍
+
+/**
+ * 바람 설원의 돌풍. 자리가 아니라 때로 정해진다: period마다 한 번, warn 동안 바람이 일기 시작하고
+ * blow 동안 세게 분다. 어느 쪽으로 부는지는 그 판의 씨앗과 몇 번째 돌풍인지로 정해져서 따로 저장할 것이 없다.
+ * 부는 동안 플레이어와 보통 그림자가 바람 부는 쪽으로 밀린다. 그림자가 더 세게 밀려서,
+ * 바람이 불어오는 쪽의 그림자는 날아들고 바람이 불어 가는 쪽의 그림자는 다가오지 못한다.
+ */
+export const GUST = {
+  /** 첫 돌풍이 일기 시작하는 때(초). 그 뒤로 period마다 온다. */
+  first: 24,
+  period: 16,
+  warn: 1.6,
+  blow: 3.2,
+  /** 부는 동안 플레이어가 밀리는 빠르기(px/초). 걷는 빠르기의 넷에 하나쯤이다. */
+  player: 16,
+  /** 부는 동안 보통 그림자가 밀리는 빠르기(px/초) */
+  enemy: 46,
+  /** 크고 무거운 그림자(반지름이 heavyRadius 이상)가 밀리는 몫 */
+  heavy: 0.4,
+  heavyRadius: 8,
+} as const;
+
+export type GustPhase = 'calm' | 'warn' | 'blow';
+
+export interface Gust {
+  phase: GustPhase;
+  /** 몇 번째 돌풍인지(0부터). 잠잠할 때는 다음에 올 돌풍이다. */
+  index: number;
+  /** 바람이 부는 쪽(길이 1) */
+  dirX: number;
+  dirY: number;
+  /** 지금 단계에 들어선 지 몇 초인지 */
+  since: number;
+  /** 얼마나 세게 부는지(0~1). 불기 시작할 때와 그칠 때 조금씩 세지고 잦아든다. */
+  force: number;
+}
+
+/** 돌풍이 세지고 잦아드는 데 걸리는 시간(초) */
+const GUST_EASE = 0.4;
+const GUST_SALT = 0x2545f491;
+
+const DIAGONAL = Math.SQRT1_2;
+/** 여덟 방향. 짝수 칸은 가로세로, 홀수 칸은 대각선 */
+const GUST_DIRECTIONS: readonly [number, number][] = [
+  [1, 0],
+  [DIAGONAL, DIAGONAL],
+  [0, 1],
+  [-DIAGONAL, DIAGONAL],
+  [-1, 0],
+  [-DIAGONAL, -DIAGONAL],
+  [0, -1],
+  [DIAGONAL, -DIAGONAL],
+];
+
+/**
+ * index번째 돌풍이 부는 쪽. 여덟 방향 가운데 하나다.
+ * 짝수 번째는 가로세로, 홀수 번째는 비스듬한 쪽으로 불어서 잇달아 같은 쪽으로 불지 않는다.
+ */
+export function gustDirection(index: number, seed: number): [number, number] {
+  const slot = (mix(index, 0, seed ^ GUST_SALT) % 4) * 2 + (index % 2);
+  return GUST_DIRECTIONS[slot];
+}
+
+/** t초일 때의 돌풍 */
+export function gustAt(t: number, seed: number): Gust {
+  const elapsed = t - GUST.first;
+  const index = Math.max(0, Math.floor(elapsed / GUST.period));
+  const [dirX, dirY] = gustDirection(index, seed);
+  const clock = elapsed - index * GUST.period;
+  if (elapsed < 0) return { phase: 'calm', index: 0, dirX, dirY, since: 0, force: 0 };
+  if (clock < GUST.warn) return { phase: 'warn', index, dirX, dirY, since: clock, force: 0 };
+  const blown = clock - GUST.warn;
+  if (blown < GUST.blow) {
+    const force = Math.min(1, blown / GUST_EASE, (GUST.blow - blown) / GUST_EASE);
+    return { phase: 'blow', index, dirX, dirY, since: blown, force };
+  }
+  const [nextX, nextY] = gustDirection(index + 1, seed);
+  return { phase: 'calm', index: index + 1, dirX: nextX, dirY: nextY, since: blown - GUST.blow, force: 0 };
+}

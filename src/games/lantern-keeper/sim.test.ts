@@ -4,6 +4,7 @@ import {
   BOON_ORDER,
   BOON_VALUES,
   CHEST,
+  CHILL_SLOW,
   ELITE,
   ENDLESS,
   ENEMIES,
@@ -49,6 +50,8 @@ import {
 } from './rules';
 import {
   AIM_LOCK_SECONDS,
+  BLIZZARD,
+  BLIZZARD_FIRING,
   CHARGE_SECONDS,
   CHARGING,
   createRun,
@@ -67,7 +70,20 @@ import {
   type SimEvent,
 } from './sim';
 import { dailyPlan } from './daily';
-import { inPuddle, PUDDLE_SLOW, puddleInCell, VENT, ventAt, ventClock, ventInCell, ventPhase, type Vent } from './terrain';
+import {
+  GUST,
+  gustAt,
+  gustDirection,
+  inPuddle,
+  PUDDLE_SLOW,
+  puddleInCell,
+  VENT,
+  ventAt,
+  ventClock,
+  ventInCell,
+  ventPhase,
+  type Vent,
+} from './terrain';
 
 const config = { viewW: 240, viewH: 520, meta: {} };
 const STEP = 1 / 60;
@@ -1787,6 +1803,241 @@ describe('잿빛 고개', () => {
     }
     expect(ventAt(sim.state.player.x, sim.state.player.y, seed)).toBeNull();
     expect(sim.state.player.hp).toBe(before);
+  });
+});
+
+describe('바람 설원', () => {
+  /** 돌풍이 한창 부는 때(초): index번째 돌풍이 세게 불기 시작하고 1초 뒤 */
+  const blowing = (index = 0): number => GUST.first + index * GUST.period + GUST.warn + 1;
+  /** 돌풍이 잠잠한 때(초) */
+  const calm = (index = 0): number => GUST.first + index * GUST.period + GUST.warn + GUST.blow + 2;
+  const tundra = (seed = 3): Sim => {
+    const sim = quietSim(seed, { stage: 'tundra', seed });
+    sim.state.player.inv = 1e9;
+    sim.state.postsSpawned = POSTS.times.length;
+    return sim;
+  };
+
+  it('설원에서는 설원의 적만 나온다', () => {
+    const sim = newSim(4, createRun({ ...config, stage: 'tundra' }));
+    sim.state.weapons = {};
+    sim.state.player.hp = 1e9;
+    sim.state.midBosses = MID_BOSS_COUNT;
+    sim.state.finalBoss = true;
+    sim.state.elites = ELITE.times.length;
+    sim.state.t = 200;
+    advance(sim, 6);
+    const allowed = new Set<EnemyKind>(STAGES.tundra.spawns.map((row) => row.kind));
+    expect(sim.state.enemies.length).toBeGreaterThan(10);
+    for (const e of sim.state.enemies) expect(allowed.has(e.kind)).toBe(true);
+    // 다른 스테이지와 같은 짜임이다: 그림자 여섯, 그 가운데 쏘는 것과 터지는 것이 하나씩.
+    expect(STAGES.tundra.spawns).toHaveLength(6);
+    expect(STAGES.tundra.spawns.filter((row) => ENEMIES[row.kind].shoots)).toHaveLength(1);
+    expect(STAGES.tundra.spawns.filter((row) => ENEMIES[row.kind].bursts)).toHaveLength(1);
+    expect(STAGES.tundra.spawns[0].from).toBe(0);
+    expect(ENEMIES[STAGES.tundra.finalBoss].brain).toBe('blizzard');
+  });
+
+  it('돌풍은 정해진 박자로 일었다가 불고 잦아든다', () => {
+    const seed = 11;
+    expect(gustAt(0, seed).phase).toBe('calm');
+    expect(gustAt(GUST.first - 0.01, seed).phase).toBe('calm');
+    expect(gustAt(GUST.first + 0.01, seed)).toMatchObject({ phase: 'warn', index: 0, force: 0 });
+    expect(gustAt(GUST.first + GUST.warn + 0.01, seed).phase).toBe('blow');
+    const full = gustAt(blowing(), seed);
+    expect(full).toMatchObject({ phase: 'blow', index: 0, force: 1 });
+    // 불기 시작할 때와 그칠 때는 조금씩 세지고 잦아든다.
+    expect(gustAt(GUST.first + GUST.warn + 0.1, seed).force).toBeLessThan(0.5);
+    expect(gustAt(GUST.first + GUST.warn + GUST.blow - 0.1, seed).force).toBeLessThan(0.5);
+    expect(gustAt(calm(), seed)).toMatchObject({ phase: 'calm', index: 1, force: 0 });
+    expect(gustAt(blowing(5), seed)).toMatchObject({ phase: 'blow', index: 5 });
+    // 일기 시작할 때부터 어느 쪽으로 불지 정해져 있다.
+    const warned = gustAt(GUST.first + 0.5, seed);
+    expect([warned.dirX, warned.dirY]).toEqual([full.dirX, full.dirY]);
+    // 부는 동안이 쉬는 동안보다 훨씬 짧다.
+    expect(GUST.warn + GUST.blow).toBeLessThan(GUST.period / 2);
+  });
+
+  it('돌풍은 여덟 방향 가운데 하나로 불고, 잇달아 같은 쪽으로 불지 않는다', () => {
+    const seen = new Set<string>();
+    for (const seed of [1, 2, 3, 99]) {
+      for (let index = 0; index < 60; index += 1) {
+        const [x, y] = gustDirection(index, seed);
+        expect(gustDirection(index, seed)).toEqual([x, y]);
+        expect(Math.hypot(x, y)).toBeCloseTo(1, 6);
+        const turn = Math.atan2(y, x) / (Math.PI / 4);
+        expect(Math.abs(turn - Math.round(turn))).toBeLessThan(1e-6);
+        const [nx, ny] = gustDirection(index + 1, seed);
+        expect(Math.hypot(nx - x, ny - y)).toBeGreaterThan(0.5);
+        seen.add(`${Math.round(turn)}`);
+      }
+    }
+    expect(seen.size).toBe(8);
+    // 씨앗이 다르면 부는 차례도 다르다.
+    const order = (seed: number): string => Array.from({ length: 12 }, (_, i) => gustDirection(i, seed).join()).join(';');
+    expect(order(1)).not.toBe(order(2));
+  });
+
+  it('돌풍이 부는 동안 가만히 있어도 바람 부는 쪽으로 밀리고, 다른 스테이지에는 돌풍이 없다', () => {
+    const drift = (stage: 'meadow' | 'tundra', at: number): [number, number] => {
+      const sim = quietSim(3, { stage, seed: 3 });
+      sim.state.t = at;
+      advance(sim, 1);
+      return [sim.state.player.x, sim.state.player.y];
+    };
+    const gust = gustAt(blowing(), 3);
+    const [x, y] = drift('tundra', blowing());
+    expect(x).toBeCloseTo(gust.dirX * GUST.player, 0);
+    expect(y).toBeCloseTo(gust.dirY * GUST.player, 0);
+    expect(drift('tundra', calm())).toEqual([0, 0]);
+    expect(drift('meadow', blowing())).toEqual([0, 0]);
+    expect(quietSim(3, { stage: 'meadow' }).gust).toBeNull();
+    // 바람을 거슬러도 걸을 수 있다.
+    expect(GUST.player).toBeLessThan(PLAYER_BASE.speed * PUDDLE_SLOW * CHILL_SLOW);
+  });
+
+  it('그림자는 플레이어보다 세게 밀리고, 무거운 것은 덜 밀리고, 보스는 밀리지 않는다', () => {
+    /** 바람 부는 쪽으로 1초 동안 얼마나 더 갔는지: 돌풍이 불 때와 잠잠할 때의 차이 */
+    const pushed = (kind: EnemyKind): number => {
+      const along = (at: number): number => {
+        const sim = tundra();
+        sim.state.t = at;
+        const gust = gustAt(blowing(), 3);
+        // 바람과 직각인 쪽에 멀리 세워서, 쫓아오는 걸음이 바람 부는 쪽으로는 거의 보태지지 않게 한다.
+        const e = enemy(kind, -gust.dirY * 150, gust.dirX * 150, 1e9);
+        sim.state.enemies.push(e);
+        advance(sim, 1);
+        return (e.x - -gust.dirY * 150) * gust.dirX + (e.y - gust.dirX * 150) * gust.dirY;
+      };
+      return along(blowing()) - along(calm());
+    };
+    const light = pushed('flake');
+    const heavy = pushed('floe');
+    const elite = pushed('fang');
+    expect(light).toBeGreaterThan(GUST.enemy * 0.9);
+    expect(light).toBeLessThan(GUST.enemy * 1.1);
+    expect(heavy).toBeGreaterThan(GUST.enemy * GUST.heavy * 0.8);
+    expect(heavy).toBeLessThan(GUST.enemy * GUST.heavy * 1.25);
+    expect(elite).toBeLessThan(light * 0.6);
+    expect(Math.abs(pushed('blizzard'))).toBeLessThan(2);
+    // 그림자가 플레이어보다 훨씬 세게 밀려서, 바람이 불어오는 쪽의 그림자가 날아든다.
+    expect(GUST.enemy).toBeGreaterThan(GUST.player * 2);
+  });
+
+  it('돌풍이 일 때와 세게 불기 시작할 때 한 번씩 알린다', () => {
+    const sim = tundra();
+    sim.state.t = GUST.first - 0.5;
+    const events = advance(sim, GUST.period).filter((event) => event.type === 'gust');
+    const gust = gustAt(blowing(), 3);
+    expect(events).toEqual([
+      { type: 'gust', phase: 'warn', dirX: gust.dirX, dirY: gust.dirY },
+      { type: 'gust', phase: 'blow', dirX: gust.dirX, dirY: gust.dirY },
+    ]);
+    // 풀밭에서는 알릴 것이 없다.
+    const meadow = quietSim(3);
+    meadow.state.t = GUST.first - 0.5;
+    expect(advance(meadow, GUST.period).some((event) => event.type === 'gust')).toBe(false);
+  });
+
+  it('서릿발에 닿으면 발이 얼어 잠깐 느려진다', () => {
+    const walked = (chilled: boolean): number => {
+      const sim = quietSim(3);
+      sim.state.player.hp = 1e9;
+      if (chilled) {
+        sim.state.enemies.push(enemy('frost', 2, 0, 1e9));
+        sim.step(STEP, 0, 0);
+        expect(sim.events).toContainEqual({ type: 'chill' });
+        expect(sim.state.player.chilled).toBe(ENEMIES.frost.chills);
+        sim.state.enemies.length = 0;
+      }
+      const from = sim.state.player.x;
+      advance(sim, 1, 1, 0);
+      return sim.state.player.x - from;
+    };
+    const free = walked(false);
+    const frozen = walked(true);
+    expect(free).toBeCloseTo(PLAYER_BASE.speed, 0);
+    expect(frozen).toBeCloseTo(PLAYER_BASE.speed * CHILL_SLOW, 0);
+    // 시간이 지나면 풀린다.
+    const sim = quietSim(3);
+    sim.state.player.hp = 1e9;
+    sim.state.enemies.push(enemy('frost', 2, 0, 1e9));
+    sim.step(STEP, 0, 0);
+    sim.state.enemies.length = 0;
+    advance(sim, ENEMIES.frost.chills! + 0.1);
+    expect(sim.state.player.chilled).toBe(0);
+    // 얼리는 것은 서릿발과 설원의 정예뿐이다.
+    const chillers = (Object.keys(ENEMIES) as EnemyKind[]).filter((kind) => ENEMIES[kind].chills);
+    expect(chillers.sort()).toEqual(['fang', 'frost']);
+  });
+
+  it('등갓의 빛막이 막아 주면 얼지 않는다', () => {
+    const sim = quietSim(3);
+    sim.applyUpgrade({ type: 'passive', id: 'hood', level: 1 });
+    sim.state.enemies.push(enemy('frost', 2, 0, 1e9));
+    sim.step(STEP, 0, 0);
+    expect(sim.events).toContainEqual({ type: 'block' });
+    expect(sim.events).not.toContainEqual({ type: 'chill' });
+    expect(sim.state.player.chilled ?? 0).toBe(0);
+  });
+
+  it('눈보라의 눈은 사방으로 세 겹을 엇갈려 쏘고, 사이사이에 부하를 부른다', () => {
+    const sim = tundra();
+    const boss = enemy('blizzard', 0, -200, 99999);
+    boss.timer = 0.01;
+    boss.tier = MID_BOSS_COUNT - 1;
+    sim.state.enemies.push(boss);
+    // 쏘기 전에는 멈춰서 빛을 모은다.
+    sim.step(STEP, 0, 0);
+    expect(sim.events).toContainEqual({ type: 'charge' });
+    expect(boss.mode).toBe(CHARGING);
+    expect(sim.state.hazards).toHaveLength(0);
+    advance(sim, CHARGE_SECONDS + 0.05);
+    expect(boss.mode).toBe(BLIZZARD_FIRING);
+    expect(sim.state.hazards).toHaveLength(BLIZZARD.count);
+    const angle = (index: number): number => Math.atan2(sim.state.hazards[index].vy, sim.state.hazards[index].vx);
+    const first = angle(0);
+    // 겹과 겹 사이에는 틈이 있다.
+    advance(sim, BLIZZARD.gap - 0.1);
+    expect(sim.state.hazards).toHaveLength(BLIZZARD.count);
+    advance(sim, 0.15);
+    expect(sim.state.hazards).toHaveLength(BLIZZARD.count * 2);
+    // 다음 겹은 앞 겹의 갈래 사이로 온다: 반 칸 어긋난다.
+    const step = (Math.PI * 2) / BLIZZARD.count;
+    const off = (((angle(BLIZZARD.count) - first) % step) + step) % step;
+    expect(off).toBeCloseTo(step / 2, 5);
+    // 쏘는 동안에는 제자리에 서 있다.
+    const stood = [boss.x, boss.y];
+    advance(sim, BLIZZARD.gap - 0.1);
+    expect([boss.x, boss.y]).toEqual(stood);
+    advance(sim, 0.15);
+    expect(sim.state.hazards).toHaveLength(BLIZZARD.count * BLIZZARD.rings);
+    advance(sim, BLIZZARD.gap + 0.1);
+    expect(sim.state.hazards.length).toBeLessThanOrEqual(BLIZZARD.count * BLIZZARD.rings);
+    expect(boss.mode).toBe(1);
+    // 그다음은 부하 부르기. 모으는 틈 없이 바로 부른다.
+    boss.timer = 0.01;
+    sim.step(STEP, 0, 0);
+    expect(sim.events).not.toContainEqual({ type: 'charge' });
+    const minions = sim.state.enemies.filter((e) => e !== boss);
+    expect(minions).toHaveLength(5);
+    for (const minion of minions) expect(STAGES.tundra.minions).toContain(minion.kind);
+    // 그리고 다시 쏘기
+    boss.timer = 0.01;
+    sim.step(STEP, 0, 0);
+    expect(sim.events).toContainEqual({ type: 'charge' });
+  });
+
+  it('설원은 가장 늦게 열리고, 쓰러뜨리면 새벽이 온다', () => {
+    const times = STAGE_ORDER.map((id) => STAGES[id].unlockSeconds);
+    expect([...times].sort((a, b) => a - b)).toEqual(times);
+    expect(STAGES.tundra.unlockSeconds).toBeGreaterThan(STAGES.ridge.unlockSeconds);
+    expect(STAGES.tundra.unlockSeconds).toBeLessThan(RUN_SECONDS);
+    const sim = tundra();
+    sim.state.t = RUN_SECONDS + 5;
+    sim.state.enemies.push(enemy('blizzard', 300, 0, 0));
+    sim.step(STEP, 0, 0);
+    expect(sim.state.over).toBe('cleared');
   });
 });
 

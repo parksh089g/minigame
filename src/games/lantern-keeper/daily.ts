@@ -61,15 +61,28 @@ export interface DailyPlan {
 }
 
 /**
- * 그날의 조건. 캐릭터와 스테이지는 하루에 한 칸씩 돌아가서 이틀 내리 같은 것이 나오지 않고,
- * 모든 짝이 차례로 한 번씩 나온다. 아직 열지 못한 캐릭터와 스테이지도 여기서는 쓸 수 있다.
+ * 바람 설원이 오늘의 판에 섞이기 시작하는 날(2026년 11월 16일). 그 전의 날은 스테이지 셋이 돌던 차례 그대로다.
+ * 이미 지난 날이나 하고 있던 날의 조건이 바뀌면 그날의 랭킹에 서로 다른 판의 점수가 섞이기 때문이다.
+ */
+export const TUNDRA_DAILY_FROM = 20_773;
+/** 바람 설원이 생기기 전에 돌던 스테이지의 수 */
+const OLD_STAGES = 3;
+
+/**
+ * 그날의 조건. 캐릭터는 하루에 한 칸씩 돌아가고, 스테이지는 캐릭터가 한 바퀴 돌 때마다 한 칸 더 밀려서
+ * 이틀 내리 같은 것이 나오지 않고 모든 짝이 차례로 한 번씩 나온다.
+ * 아직 열지 못한 캐릭터와 스테이지도 여기서는 쓸 수 있다.
  */
 export function dailyPlan(day: number): DailyPlan {
   const index = Math.max(0, Math.floor(day));
+  const stage =
+    index < TUNDRA_DAILY_FROM
+      ? STAGE_ORDER[index % OLD_STAGES]
+      : STAGE_ORDER[(index + Math.floor(index / HERO_ORDER.length)) % STAGE_ORDER.length];
   return {
     day: index,
     hero: HERO_ORDER[index % HERO_ORDER.length],
-    stage: STAGE_ORDER[index % STAGE_ORDER.length],
+    stage,
     seed: mix(index) & 0x7fffffff,
   };
 }

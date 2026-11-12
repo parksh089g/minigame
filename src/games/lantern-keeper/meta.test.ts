@@ -271,7 +271,9 @@ describe('캐릭터와 스테이지 고르기', () => {
       HEROES.ringer.name,
       STAGES.marsh.name,
       STAGES.ridge.name,
+      STAGES.tundra.name,
     ]);
+    expect(newUnlocks(480, 545)).toEqual([STAGES.tundra.name]);
     expect(newUnlocks(600, 600)).toEqual([]);
   });
 

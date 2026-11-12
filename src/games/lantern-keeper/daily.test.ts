@@ -9,6 +9,7 @@ import {
   dayLabel,
   dayResetLabel,
   normalizeDaily,
+  TUNDRA_DAILY_FROM,
   withRo,
 } from './daily';
 import { rankDayOf } from '../../online/protocol';
@@ -47,7 +48,8 @@ describe('오늘의 판: 날짜', () => {
 
 describe('오늘의 판: 조건', () => {
   it('같은 날이면 누구에게나 같고, 날이 바뀌면 캐릭터와 스테이지가 모두 바뀐다', () => {
-    for (let day = 20_000; day < 20_060; day += 1) {
+    // 바람 설원이 섞이기 전의 날과 그 뒤의 날을 모두 지나간다.
+    for (let day = TUNDRA_DAILY_FROM - 30; day < TUNDRA_DAILY_FROM + 60; day += 1) {
       const plan = dailyPlan(day);
       expect(dailyPlan(day)).toEqual(plan);
       expect(HERO_ORDER).toContain(plan.hero);
@@ -64,11 +66,24 @@ describe('오늘의 판: 조건', () => {
   it('캐릭터와 스테이지의 모든 짝이 차례로 한 번씩 나온다', () => {
     const cycle = HERO_ORDER.length * STAGE_ORDER.length;
     const pairs = new Set<string>();
-    for (let day = 20_000; day < 20_000 + cycle; day += 1) {
+    for (let day = TUNDRA_DAILY_FROM + 7; day < TUNDRA_DAILY_FROM + 7 + cycle; day += 1) {
       const plan = dailyPlan(day);
       pairs.add(`${plan.hero}/${plan.stage}`);
     }
     expect(pairs.size).toBe(cycle);
+  });
+
+  it('바람 설원은 정해진 날부터 섞이고, 그 전의 날은 예전 차례 그대로다', () => {
+    // 2026년 11월 16일(한국 시각)이 그날이다.
+    expect(dayLabel(TUNDRA_DAILY_FROM)).toBe('11월 16일');
+    const before = Array.from({ length: 400 }, (_, i) => dailyPlan(TUNDRA_DAILY_FROM - 1 - i));
+    expect(before.some((plan) => plan.stage === 'tundra')).toBe(false);
+    for (const plan of before) expect(plan.stage).toBe(STAGE_ORDER[plan.day % 3]);
+    // 이미 지난 날의 조건은 바뀌지 않았다.
+    expect(dailyPlan(20_769)).toMatchObject({ hero: HERO_ORDER[20_769 % 4], stage: 'meadow' });
+    expect(dailyPlan(20_770)).toMatchObject({ hero: HERO_ORDER[20_770 % 4], stage: 'marsh' });
+    const after = Array.from({ length: 16 }, (_, i) => dailyPlan(TUNDRA_DAILY_FROM + i));
+    expect(after.filter((plan) => plan.stage === 'tundra')).toHaveLength(4);
   });
 
   it('엉뚱한 날짜가 와도 조건은 나온다', () => {
