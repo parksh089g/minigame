@@ -31,7 +31,7 @@ describe('normalizeSave', () => {
     const save = {
       version: SAVE_VERSION,
       coins: 12,
-      settings: { sound: false, vibration: true },
+      settings: { sound: false, music: false, vibration: true },
       games: { 'lightning-tap': { best: 80, plays: 4, lastPlayedAt: NOW - 1000 } },
       daily: { lastClearedOn: '2026-11-11', streak: 3, bestStreak: 4, totalCleared: 8 },
       cosmetics: {
@@ -115,8 +115,16 @@ describe('normalizeSave', () => {
     expect(save.version).toBe(SAVE_VERSION);
     expect(save.coins).toBe(30);
     expect(save.games).toEqual(old.games);
-    expect(save.settings).toEqual(old.settings);
+    // 배경 음악 설정은 이 세이브보다 뒤에 생겼으므로 켠 채로 읽는다
+    expect(save.settings).toEqual({ ...old.settings, music: true });
     expect(save.daily).toEqual({ lastClearedOn: null, streak: 0, bestStreak: 0, totalCleared: 0 });
+  });
+
+  it('배경 음악 설정이 생기기 전의 세이브는 음악을 켠 채로 읽고, 끈 것은 그대로 둔다', () => {
+    const old = { version: 5, coins: 1, settings: { sound: false, vibration: true }, games: {} };
+    expect(normalizeSave(old, NOW).settings).toEqual({ sound: false, music: true, vibration: true });
+    const off = { ...old, settings: { sound: true, music: false, vibration: true } };
+    expect(normalizeSave(off, NOW).settings.music).toBe(false);
   });
 
   it('빠지거나 잘못된 항목을 기본값으로 채운다', () => {
@@ -132,7 +140,7 @@ describe('normalizeSave', () => {
       NOW,
     );
     expect(save.coins).toBe(0);
-    expect(save.settings).toEqual({ sound: true, vibration: true });
+    expect(save.settings).toEqual({ sound: true, music: true, vibration: true });
     expect(save.games).toEqual({ a: { best: 10, plays: 0, lastPlayedAt: null } });
     expect(save.createdAt).toBe(NOW);
     expect(save.version).toBe(SAVE_VERSION);
@@ -424,7 +432,7 @@ describe('resetProgress', () => {
     const reset = resetProgress(save, NOW + 100);
     expect(reset.coins).toBe(0);
     expect(reset.games).toEqual({});
-    expect(reset.settings).toEqual({ sound: false, vibration: true });
+    expect(reset.settings).toEqual({ sound: false, music: true, vibration: true });
   });
 
   it('닉네임은 남긴다(온라인 랭킹의 기록은 랭킹 화면에서 따로 뺀다)', () => {

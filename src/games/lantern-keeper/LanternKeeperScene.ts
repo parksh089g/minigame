@@ -1,5 +1,7 @@
+import Phaser from 'phaser';
 import { CSS, GAME_WIDTH, SCENE } from '../../config';
 import { vibrate } from '../../core/haptics';
+import { music } from '../../core/music';
 import { sfx, tone } from '../../core/sfx';
 import { addText, fadeToScene } from '../../core/ui';
 import { showBanner } from '../../scenes/GameHud';
@@ -7,7 +9,7 @@ import { MiniGameScene, type PauseExtra, type ResultStat } from '../../scenes/Mi
 import { registerLanternTextures } from './art';
 import { damageRanking } from './build';
 import { newlyDone } from './challenges';
-import { ENEMIES, LANTERN_GAME_ID, LANTERN_SCENE, WEAPONS } from './data';
+import { ENEMIES, LANTERN_GAME_ID, LANTERN_SCENE, STAGES, WEAPONS } from './data';
 import { RunEffects } from './effects';
 import { BOSS_BAR_HEIGHT, HP_DANGER, HUD_HEIGHT, RunHud } from './hud';
 import { iconKey } from './icons';
@@ -15,6 +17,7 @@ import { Joystick } from './joystick';
 import { levelUpHeader, showChoices, TICKET_HEADER } from './levelup';
 import { buildLobby, type LobbyPage } from './lobby';
 import { applyRun, learnTip, metaStore, newDepth, newUnlocks } from './meta';
+import { BOSS_SONG, FINAL_SONG, LOBBY_SONG, STAGE_SONGS } from './music';
 import { pauseInfo } from './pauseinfo';
 import {
   depthName,
@@ -125,6 +128,15 @@ export class LanternKeeperScene extends MiniGameScene {
     this.tipQueue.length = 0;
     this.unseen.clear();
 
+    // 멈추거나 떠나면 음악도 잦아든다. 쪽을 넘기느라 씬을 다시 그릴 때는 끊기지 않는다.
+    music.hush(false);
+    const rest = (): void => music.rest();
+    this.events.on(Phaser.Scenes.Events.PAUSE, rest);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.events.off(Phaser.Scenes.Events.PAUSE, rest);
+      rest();
+    });
+
     void metaStore.load().then(() => {
       // 불러오는 사이에 씬을 떠났으면 아무것도 하지 않는다.
       if (!this.sys.isActive() || this.phase !== 'loading') return;
@@ -139,6 +151,7 @@ export class LanternKeeperScene extends MiniGameScene {
   private openLobby(page: LobbyPage, list?: number): void {
     this.phase = 'lobby';
     this.lobbyPage = page;
+    music.play(LOBBY_SONG);
     buildLobby(
       this,
       {
@@ -181,6 +194,7 @@ export class LanternKeeperScene extends MiniGameScene {
         });
     if (!saved) metaStore.setRun(null);
     this.sim = new Sim(state, Math.random);
+    this.pickSong();
     for (const id of TIP_IDS) if (!metaStore.data.tips.includes(id)) this.unseen.add(id);
 
     this.view = new RunView(this, centerY, this.sim, { top: HUD_HEIGHT, bar: BOSS_BAR_HEIGHT });
@@ -212,6 +226,7 @@ export class LanternKeeperScene extends MiniGameScene {
 
   private resumeRun(): void {
     this.phase = 'run';
+    music.hush(false);
     this.stick.enabled = true;
     this.stick.reset();
     this.drawHud();
@@ -235,6 +250,7 @@ export class LanternKeeperScene extends MiniGameScene {
   }
 
   override update(_time: number, delta: number): void {
+    music.tick();
     if (this.phase !== 'run') return;
     const frame = Math.min(delta / 1000, MAX_FRAME);
     this.seconds += frame;
@@ -280,6 +296,7 @@ export class LanternKeeperScene extends MiniGameScene {
             this.effects.flash(0.45, 320);
             vibrate([30, 40, 30]);
             this.effects.shake(260, 0.018);
+            this.pickSong();
           } else {
             board.play('kill', now);
           }
@@ -352,6 +369,7 @@ export class LanternKeeperScene extends MiniGameScene {
           this.time.delayedCall(420, () => this.effects.beat());
           vibrate([40, 60, 40]);
           this.effects.shake(180, 0.008);
+          this.pickSong();
           break;
         case 'surge':
           showBanner(this, this.scale.height * 0.3, '그림자 밀물!', CSS.orange, 1400, DEPTH.banner);
@@ -385,6 +403,18 @@ export class LanternKeeperScene extends MiniGameScene {
           break;
       }
     }
+  }
+
+  /**
+   * 지금 틀 곡을 고른다. 보스가 살아 있으면 보스의 곡(마지막 보스는 더 빠른 곡), 아니면 스테이지의 곡.
+   * 보스가 쓰러져 스테이지의 곡으로 돌아올 때는 떠났던 마디에서 이어 간다.
+   */
+  private pickSong(): void {
+    const s = this.sim.state;
+    if (s.over) return;
+    const boss = s.enemies.find((enemy) => ENEMIES[enemy.kind].boss && enemy.hp > 0);
+    if (!boss) music.play(STAGE_SONGS[s.stage], { resume: true });
+    else music.play(boss.kind === STAGES[s.stage].finalBoss ? FINAL_SONG : BOSS_SONG);
   }
 
   /** 체력이 위험하면 심장 소리가 뛰고, 그때마다 화면 가장자리가 붉게 뛴다. */
@@ -456,6 +486,7 @@ export class LanternKeeperScene extends MiniGameScene {
   /** again은 다시 뽑아서 같은 레벨업 화면을 새로 여는 것. 레벨업 소리를 또 내지 않는다. */
   private openLevelUp(again = false): void {
     this.phase = 'choosing';
+    music.hush(true);
     this.stick.enabled = false;
     this.stick.reset();
     if (!again) {
@@ -490,6 +521,7 @@ export class LanternKeeperScene extends MiniGameScene {
   /** 무기 강화권: 가진 무기 가운데 하나를 골라 한 레벨 올린다. */
   private openTicket(delayed: boolean): void {
     this.phase = 'choosing';
+    music.hush(true);
     this.stick.enabled = false;
     this.stick.reset();
     this.drawHud();
@@ -580,6 +612,8 @@ export class LanternKeeperScene extends MiniGameScene {
 
   private endRun(): void {
     this.phase = 'over';
+    // 음악이 잦아든 자리에 새벽 소리나 꺼지는 소리가 들어온다.
+    music.stop();
     this.stick.enabled = false;
     this.stick.reset();
     this.clearTips();
