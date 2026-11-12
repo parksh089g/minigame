@@ -612,7 +612,7 @@ export const FLINT = {
 /** 등갓의 빛막이 다시 생기는 데 걸리는 시간(초): 1레벨의 값과 레벨마다 줄어드는 값 */
 export const GUARD = { seconds: 24, perLevel: 3 } as const;
 
-export type HeroId = 'keeper' | 'stargazer' | 'stormer' | 'ringer';
+export type HeroId = 'keeper' | 'stargazer' | 'stormer' | 'ringer' | 'mooner';
 
 /** 캐릭터마다 다른 능력. 더하는 값(maxHp)과 곱하는 값(나머지)이 있다. */
 export interface HeroTrait {
@@ -622,6 +622,8 @@ export interface HeroTrait {
   cooldown?: number;
   area?: number;
   xp?: number;
+  /** 주는 피해에 곱한다 */
+  damage?: number;
   /** 받는 피해에 곱한다 */
   taken?: number;
 }
@@ -677,9 +679,19 @@ export const HEROES: Readonly<Record<HeroId, HeroInfo>> = {
     trait: { maxHp: 30, taken: 0.9, speed: 0.9, cooldown: 1.05 },
     unlockSeconds: 480,
   },
+  mooner: {
+    name: '달잡이',
+    blurb: '세게 베지만 한 대가 아프다',
+    perk: '피해 +15%',
+    flaw: '받는 피해 +15%',
+    weapon: 'moon',
+    trait: { damage: 1.15, taken: 1.15 },
+    // 새벽을 한 번 맞으면 열린다.
+    unlockSeconds: RUN_SECONDS,
+  },
 };
 
-export const HERO_ORDER: readonly HeroId[] = ['keeper', 'stargazer', 'stormer', 'ringer'];
+export const HERO_ORDER: readonly HeroId[] = ['keeper', 'stargazer', 'stormer', 'ringer', 'mooner'];
 
 /** 판 밖에서 불씨로 올리는 영구 강화 */
 export type MetaId =

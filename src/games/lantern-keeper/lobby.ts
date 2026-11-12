@@ -19,6 +19,7 @@ import {
   LANTERN_GAME_ID,
   META,
   META_ORDER,
+  RUN_SECONDS,
   STAGE_ORDER,
   STAGES,
   WEAPONS,
@@ -43,7 +44,15 @@ const MARGIN = 12;
 const ROW_WIDTH = GAME_WIDTH - MARGIN * 2;
 const BUY_WIDTH = 62;
 const CARD_GAP = 6;
-const HERO_CARD = { width: (ROW_WIDTH - CARD_GAP * (HERO_ORDER.length - 1)) / HERO_ORDER.length, height: 62 } as const;
+/** 캐릭터 카드는 다섯이 한 줄에 놓여서, 사이를 조금 좁힌다. */
+const HERO_GAP = 4;
+const HERO_CARD = { width: (ROW_WIDTH - HERO_GAP * (HERO_ORDER.length - 1)) / HERO_ORDER.length, height: 62 } as const;
+/** 잠긴 카드에 적는 여는 조건. 끝까지 버텨야 열리는 것은 새벽을 맞으라고 적는다. */
+const unlockLabel = (seconds: number): string => (seconds >= RUN_SECONDS ? '새벽 맞기' : `${formatClock(seconds)} 버티기`);
+/** 카드보다 긴 글은 카드에 맞춰 줄인다. */
+const fitText = (text: Phaser.GameObjects.Text, room: number): void => {
+  if (text.width > room) text.setScale(room / text.width);
+};
 /** 스테이지 카드: 위에는 그곳의 바닥과 그림자가 보이는 띠, 아래에는 이름. 한 줄에 스테이지 수만큼 나란히 놓는다. */
 const STAGE_CARD = {
   width: (ROW_WIDTH - CARD_GAP * (STAGE_ORDER.length - 1)) / STAGE_ORDER.length,
@@ -500,7 +509,7 @@ function addHeroCards(
 ): void {
   HERO_ORDER.forEach((id: HeroId, index) => {
     const hero = HEROES[id];
-    const x = Math.round(MARGIN + index * (HERO_CARD.width + CARD_GAP));
+    const x = Math.round(MARGIN + index * (HERO_CARD.width + HERO_GAP));
     const open = isUnlocked(hero, handlers.getMeta().bestSeconds);
     const frame = scene.add.graphics();
     const draw = (pressed: boolean): void => {
@@ -515,16 +524,19 @@ function addHeroCards(
     const centerX = x + HERO_CARD.width / 2;
     const sprite = scene.add.image(centerX, top + 24, HERO_FRAMES[id][0]).setScale(2);
     if (open) {
-      addText(scene, centerX, top + 43, hero.name, { color: CSS.white, bold: true, originX: 0.5 });
+      fitText(addText(scene, centerX, top + 43, hero.name, { color: CSS.white, bold: true, originX: 0.5 }), HERO_CARD.width - 4);
     } else {
       // 잠긴 캐릭터는 그림자로만 보이고, 여는 조건을 적어 둔다.
       sprite.setTint(COLOR.ink).setTintMode(Phaser.TintModes.FILL).setAlpha(0.7);
       scene.add.image(centerX, top + 24, 'icon-lock');
-      addText(scene, centerX, top + 45, `${formatClock(hero.unlockSeconds)} 버티기`, {
-        color: CSS.silver,
-        size: FONT_SIZE.small,
-        originX: 0.5,
-      });
+      fitText(
+        addText(scene, centerX, top + 45, unlockLabel(hero.unlockSeconds), {
+          color: CSS.silver,
+          size: FONT_SIZE.small,
+          originX: 0.5,
+        }),
+        HERO_CARD.width - 4,
+      );
     }
     refreshers.push(() => draw(false));
     addTapZone(scene, x, top, HERO_CARD.width, HERO_CARD.height, draw, () => {
@@ -616,14 +628,11 @@ function addStageCards(
         // 띠보다 큰 그림은 띠에 맞춰 줄인다.
         if (image.height > strip.height - 2) image.setScale((strip.height - 2) / image.height);
       });
-      const name = addText(scene, centerX, top + 22, stage.name, { color: CSS.white, bold: true, originX: 0.5 });
-      // 이름이 카드보다 길면 카드에 맞춰 줄인다.
-      const room = STAGE_CARD.width - 4;
-      if (name.width > room) name.setScale(room / name.width);
+      fitText(addText(scene, centerX, top + 22, stage.name, { color: CSS.white, bold: true, originX: 0.5 }), STAGE_CARD.width - 4);
     } else {
       // 잠긴 곳: 캐릭터 카드처럼 띠에는 자물쇠만, 아래에는 여는 조건
       scene.add.image(Math.round(centerX), strip.y + strip.height / 2, 'icon-lock').setScale(0.75);
-      addText(scene, centerX, top + 23, `${formatClock(stage.unlockSeconds)} 버티기`, {
+      addText(scene, centerX, top + 23, unlockLabel(stage.unlockSeconds), {
         color: CSS.silver,
         size: FONT_SIZE.small,
         originX: 0.5,

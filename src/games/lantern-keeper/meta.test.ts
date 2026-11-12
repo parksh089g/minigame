@@ -269,10 +269,13 @@ describe('캐릭터와 스테이지 고르기', () => {
       HEROES.stargazer.name,
       HEROES.stormer.name,
       HEROES.ringer.name,
+      HEROES.mooner.name,
       STAGES.marsh.name,
       STAGES.ridge.name,
       STAGES.tundra.name,
     ]);
+    // 새벽을 맞아야 달잡이가 열린다.
+    expect(newUnlocks(599, 600)).toEqual([HEROES.mooner.name]);
     expect(newUnlocks(480, 545)).toEqual([STAGES.tundra.name]);
     expect(newUnlocks(600, 600)).toEqual([]);
   });
