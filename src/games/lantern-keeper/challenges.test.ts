@@ -139,7 +139,7 @@ describe('도전 과제 달성', () => {
     expect(isDone(must('deep-max'), source({ deepest: MAX_DEPTH + 1 }))).toBe(true);
   });
 
-  it('세 캐릭터와 일곱 무기는 모두 채워야 이루어진다', () => {
+  it('세 캐릭터와 아홉 무기는 모두 채워야 이루어진다', () => {
     expect(isDone(must('heroes-all'), source({ heroes: ['keeper', 'stormer'] }))).toBe(false);
     expect(isDone(must('heroes-all'), source({ heroes: [...HERO_ORDER] }))).toBe(true);
     expect(progressOf(must('evolve-all'), source({ evolved: ['ember', 'aura'] }))).toBe(2);

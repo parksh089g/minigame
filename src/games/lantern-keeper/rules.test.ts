@@ -25,6 +25,7 @@ import {
 } from './data';
 import {
   auraStats,
+  bellStats,
   boltStats,
   clampDepth,
   COIN_CAP,
@@ -45,12 +46,14 @@ import {
   metaCost,
   midBossTier,
   modifiers,
+  moonStats,
   oilStats,
   ownedPassives,
   ownedWeapons,
   pickSpawnKind,
   scoreFor,
   seededRandom,
+  sparkChance,
   spawnPerSecond,
   speedScale,
   starStats,
@@ -127,8 +130,8 @@ describe('데이터', () => {
     for (const passive of Object.values(PASSIVES)) expect(passive.perLevel).not.toBe('');
   });
 
-  it('무기는 일곱 가지이고, 늘어놓는 순서에 빠진 것이 없다', () => {
-    expect(WEAPON_ORDER).toHaveLength(7);
+  it('무기는 아홉 가지이고, 늘어놓는 순서에 빠진 것이 없다', () => {
+    expect(WEAPON_ORDER).toHaveLength(9);
     expect([...WEAPON_ORDER].sort()).toEqual(Object.keys(WEAPONS).sort());
     expect(MAX_WEAPONS).toBeLessThan(WEAPON_ORDER.length);
   });
@@ -246,6 +249,15 @@ describe('성장', () => {
       expect((b1.damage * b1.jumps * b1.chains) / b1.cooldown).toBeGreaterThanOrEqual(
         (b0.damage * b0.jumps * b0.chains) / b0.cooldown,
       );
+      const [r0, r1] = [bellStats(level - 1, base), bellStats(level, base)];
+      expect((r1.damage * r1.radius * r1.rings) / r1.cooldown).toBeGreaterThanOrEqual(
+        (r0.damage * r0.radius * r0.rings) / r0.cooldown,
+      );
+      expect(r1.push).toBeGreaterThanOrEqual(r0.push);
+      const [m0, m1] = [moonStats(level - 1, base), moonStats(level, base)];
+      expect((m1.damage * m1.count * m1.reach) / m1.cooldown).toBeGreaterThanOrEqual(
+        (m0.damage * m0.count * m0.reach) / m0.cooldown,
+      );
     }
   });
 
@@ -258,6 +270,10 @@ describe('성장', () => {
       const l = lanceStats(level, base);
       const o = oilStats(level, base);
       const b = boltStats(level, base);
+      const r = bellStats(level, base);
+      const m = moonStats(level, base);
+      // 초승달은 가는 길과 오는 길에 한 번씩, 보름달은 나는 동안 rehit초마다 벤다.
+      const cuts = m.rehit > 0 ? (2 * m.reach) / m.speed / m.rehit : 2;
       return [
         (e.damage * e.count * (1 + e.pierce)) / e.cooldown,
         (a.damage * a.radius ** 2) / a.tick,
@@ -266,6 +282,8 @@ describe('성장', () => {
         (l.damage * l.count * l.radius) / l.cooldown,
         (o.damage * o.radius ** 2 * o.duration) / o.cooldown,
         (b.damage * b.jumps * b.chains) / b.cooldown,
+        (r.damage * r.radius ** 2 * r.rings) / r.cooldown,
+        (m.damage * m.count * cuts) / m.cooldown,
       ];
     };
     const before = power(MAX_LEVEL);
@@ -281,6 +299,25 @@ describe('성장', () => {
     expect(strong.cooldown).toBeCloseTo(0.93);
     expect(strong.maxHp).toBe(base.maxHp + 20 + 30);
     expect(emberStats(1, strong).damage).toBeGreaterThan(emberStats(1, base).damage);
+  });
+
+  it('약초 주머니는 올릴수록 빨리 낫고, 영구 강화의 회복과 더해진다', () => {
+    expect(base.regen).toBe(0);
+    expect(modifiers({ herb: 1 }, {}).regen).toBeCloseTo(0.2);
+    expect(modifiers({ herb: MAX_LEVEL }, {}).regen).toBeCloseTo(1);
+    expect(modifiers({ herb: 2 }, { mend: 3 }).regen).toBeCloseTo(0.4 + 0.3);
+  });
+
+  it('부싯돌은 올릴수록 자주 터지지만, 다 올려도 절반을 넘지 않는다', () => {
+    expect(base.spark).toBe(0);
+    expect(sparkChance(0)).toBe(0);
+    for (let level = 1; level <= MAX_LEVEL; level += 1) {
+      expect(modifiers({ flint: level }, {}).spark).toBeCloseTo(sparkChance(level));
+      expect(sparkChance(level)).toBeGreaterThan(sparkChance(level - 1));
+    }
+    expect(sparkChance(MAX_LEVEL)).toBeLessThan(0.5);
+    // 선택 카드에는 그 레벨에서 터질 확률이 적힌다.
+    expect(upgradeDescription({ type: 'passive', id: 'flint', level: 3 })).toContain('21%');
   });
 
   it('등갓은 올릴수록 빛막이 빨리 다시 생기고, 없으면 빛막도 없다', () => {

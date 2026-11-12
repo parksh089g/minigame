@@ -3,6 +3,7 @@ import { playRun, steer } from './bot';
 import {
   ENEMIES,
   EVOLVE_LEVEL,
+  FLINT,
   GUARD,
   HERO_ORDER,
   HEROES,
@@ -26,10 +27,13 @@ import {
   type PassiveId,
 } from './data';
 import {
+  bellStats,
   depthRules,
   embersFor,
   maxAlive,
   midBossKind,
+  modifiers,
+  moonStats,
   scoreFor,
   seededRandom,
   speedScale,
@@ -325,6 +329,123 @@ describe('무기', () => {
     expect(sim.state.enemies.map((e) => e.hp < 500)).toEqual([true, true, true, false, false]);
   });
 
+  it('종소리는 둘레의 적을 한 번씩 때리고 바깥으로 밀어내며, 멀리 있는 적에게는 닿지 않는다', () => {
+    const ring = (weapons: RunState['weapons']): Sim => {
+      const sim = quietSim();
+      sim.state.weapons = weapons;
+      sim.state.cd.bell = 0;
+      sim.state.enemies.push(enemy('brute', 30, 0, 500), enemy('brute', 200, 0, 500));
+      return sim;
+    };
+    const sim = ring({ bell: 1 });
+    const events = advance(sim, 0.6);
+    expect(events.filter((e) => e.type === 'bell')).toEqual([{ type: 'bell', evolved: false }]);
+    const [near, far] = sim.state.enemies;
+    expect(near.hp).toBe(500 - bellStats(1, modifiers({}, {})).damage);
+    expect(far.hp).toBe(500);
+    // 다 퍼진 고리는 사라진다.
+    expect(sim.state.waves).toHaveLength(0);
+    // 종이 없을 때보다 밀려난 만큼 멀리 있다.
+    const calm = ring({});
+    advance(calm, 0.6);
+    expect(near.x - calm.state.enemies[0].x).toBeGreaterThan(10);
+    expect(far.x).toBeCloseTo(calm.state.enemies[1].x, 5);
+  });
+
+  it('종소리는 둘레에 아무도 없으면 울리지 않고, 보스는 밀려나지 않는다', () => {
+    const sim = quietSim();
+    sim.state.weapons = { bell: 1 };
+    sim.state.cd.bell = 0;
+    sim.state.enemies.push(enemy('brute', 200, 0, 500));
+    expect(advance(sim, 1).some((e) => e.type === 'bell')).toBe(false);
+    expect(sim.state.waves).toHaveLength(0);
+
+    const boss = enemy('giant', 30, 0, 5000);
+    sim.state.enemies = [boss];
+    advance(sim, 0.6);
+    expect(boss.hp).toBeLessThan(5000);
+    expect(boss.kx ?? 0).toBe(0);
+    expect(boss.ky ?? 0).toBe(0);
+  });
+
+  it('새벽 종은 두 번 울리고, 닿은 적이 굼떠진다', () => {
+    const sim = quietSim();
+    sim.state.weapons = { bell: EVOLVE_LEVEL };
+    sim.state.cd.bell = 0;
+    const foe = enemy('brute', 30, 0, 5000);
+    sim.state.enemies.push(foe);
+    sim.step(STEP, 0, 0);
+    expect(sim.events).toContainEqual({ type: 'bell', evolved: true });
+    expect(sim.state.waves).toHaveLength(2);
+    advance(sim, 0.2);
+    const once = 5000 - foe.hp;
+    expect(once).toBeGreaterThan(0);
+    expect(foe.slow).toBeGreaterThan(0);
+    expect(foe.slowTo).toBeLessThan(1);
+    advance(sim, 0.7);
+    expect(5000 - foe.hp).toBeCloseTo(once * 2);
+  });
+
+  it('초승달은 가까운 적 쪽으로 날아갔다 돌아오며 가는 길과 오는 길에 한 번씩 벤다', () => {
+    const sim = quietSim();
+    sim.state.weapons = { moon: 1 };
+    sim.state.cd.moon = 0;
+    const foe = enemy('brute', 40, 0, 500);
+    sim.state.enemies.push(foe, enemy('brute', 0, 300, 500));
+    sim.step(STEP, 0, 0);
+    expect(sim.state.moons).toHaveLength(1);
+    expect(sim.state.moons[0]).toMatchObject({ dx: 1, dy: 0, back: false, evolved: false });
+    // 적을 지나쳐 더 멀리까지 날아간다.
+    let farthest = 0;
+    let turnedAt = 0;
+    for (let i = 0; i < 120 && sim.state.moons.length > 0; i += 1) {
+      sim.step(STEP, 0, 0);
+      const moon = sim.state.moons[0];
+      if (moon) farthest = Math.max(farthest, moon.x);
+      if (moon?.back && turnedAt === 0) turnedAt = 500 - foe.hp;
+    }
+    expect(farthest).toBeGreaterThan(60);
+    // 돌아서기 전에 한 번, 돌아오면서 한 번
+    const cut = moonStats(1, modifiers({}, {})).damage;
+    expect(turnedAt).toBe(cut);
+    expect(foe.hp).toBe(500 - cut * 2);
+    // 손에 돌아오면 사라지고, 멀리 있는 적은 겨누지 않는다.
+    expect(sim.state.moons).toHaveLength(0);
+    expect(sim.state.enemies[1].hp).toBe(500);
+  });
+
+  it('초승달은 플레이어가 움직여도 따라와서 돌아오고, 겨눌 적이 없으면 던지지 않는다', () => {
+    const sim = quietSim();
+    sim.state.weapons = { moon: 1 };
+    sim.state.cd.moon = 0;
+    advance(sim, 0.5);
+    expect(sim.state.moons).toHaveLength(0);
+    sim.state.enemies.push(enemy('brute', 40, 0, 500));
+    sim.step(STEP, 0, 0);
+    expect(sim.state.moons).toHaveLength(1);
+    // 던진 쪽의 반대로 달아나도 따라잡는다.
+    sim.state.cd.moon = 99;
+    advance(sim, 3.5, -1, 0);
+    expect(sim.state.moons).toHaveLength(0);
+  });
+
+  it('보름달은 셋이 날아가고, 지나는 동안 같은 적을 거듭 벤다', () => {
+    const sim = quietSim();
+    sim.state.weapons = { moon: EVOLVE_LEVEL };
+    sim.state.cd.moon = 0;
+    const foe = enemy('brute', 40, 0, 5000);
+    sim.state.enemies.push(foe);
+    sim.step(STEP, 0, 0);
+    expect(sim.state.moons).toHaveLength(3);
+    expect(sim.state.moons.every((moon) => moon.evolved && moon.rehit > 0)).toBe(true);
+    const each = sim.state.moons[0].damage;
+    sim.state.cd.moon = 99;
+    advance(sim, 3);
+    expect(sim.state.moons).toHaveLength(0);
+    // 가운데 달 하나만으로도 두 번보다 많이 벤다.
+    expect(5000 - foe.hp).toBeGreaterThan(each * 2);
+  });
+
   it('진화한 무기는 다른 모습으로 나간다', () => {
     const sim = newSim();
     sim.state.weapons = { ember: EVOLVE_LEVEL, lance: EVOLVE_LEVEL };
@@ -554,6 +675,97 @@ describe('등갓', () => {
     const kept: Upgrade[] = [{ type: 'passive', id: all[0], level: 2 }];
     sim.state.offer = kept;
     expect(sim.options()).toEqual(kept);
+  });
+});
+
+describe('약초 주머니와 부싯돌', () => {
+  it('약초 주머니는 체력을 천천히 채우고, 최대 체력을 넘기지 않는다', () => {
+    const sim = quietSim();
+    sim.applyUpgrade({ type: 'passive', id: 'herb', level: 1 });
+    sim.applyUpgrade({ type: 'passive', id: 'herb', level: 2 });
+    sim.state.player.hp = 50;
+    advance(sim, 10);
+    expect(sim.state.player.hp).toBeCloseTo(54, 1);
+    sim.state.player.hp = sim.maxHp - 0.01;
+    advance(sim, 5);
+    expect(sim.state.player.hp).toBe(sim.maxHp);
+  });
+
+  /** 난수가 늘 0이라 부싯돌이 반드시 터지는 판 */
+  const sparky = (level: number): Sim => {
+    const state = createRun(config);
+    const sim = new Sim(state, () => 0);
+    state.weapons = {};
+    state.spawnDebt = -1e6;
+    state.surgeIndex = SURGES.length;
+    state.midBosses = MID_BOSS_COUNT;
+    state.finalBoss = true;
+    for (let i = 1; i <= level; i += 1) sim.applyUpgrade({ type: 'passive', id: 'flint', level: i });
+    return sim;
+  };
+
+  it('부싯돌이 있으면 쓰러진 그림자가 터져서 둘레의 그림자가 다친다', () => {
+    const sim = sparky(1);
+    const near = enemy('brute', 110, 0, 500);
+    const far = enemy('brute', 160, 0, 500);
+    const fallen = enemy('shade', 100, 0, 0);
+    fallen.maxHp = 20;
+    sim.state.enemies.push(fallen, near, far);
+    sim.step(STEP, 0, 0);
+    expect(sim.events).toContainEqual({ type: 'spark', x: 100, y: 0, radius: expect.any(Number) });
+    expect(near.hp).toBe(500 - (FLINT.damage + FLINT.share * 20));
+    expect(far.hp).toBe(500);
+    expect(sim.state.kills).toBe(1);
+  });
+
+  it('튼튼한 그림자일수록 세게 터진다', () => {
+    const lost = (maxHp: number): number => {
+      const sim = sparky(1);
+      const near = enemy('brute', 110, 0, 5000);
+      const fallen = enemy('brute', 100, 0, 0);
+      fallen.maxHp = maxHp;
+      sim.state.enemies.push(fallen, near);
+      sim.step(STEP, 0, 0);
+      return 5000 - near.hp;
+    };
+    expect(lost(200)).toBeGreaterThan(lost(20) * 3);
+  });
+
+  it('부싯돌로 쓰러진 그림자는 다시 터지지 않고, 그 자리에서 바로 치워진다', () => {
+    const sim = sparky(MAX_LEVEL);
+    // 한 줄로 늘어선 약한 그림자: 연달아 터진다면 끝까지 다 쓰러진다.
+    sim.state.enemies.push(
+      enemy('shade', 100, 0, 0),
+      enemy('shade', 115, 0, 1),
+      enemy('shade', 130, 0, 1),
+      enemy('shade', 145, 0, 1),
+    );
+    sim.step(STEP, 0, 0);
+    expect(sim.events.filter((e) => e.type === 'spark')).toHaveLength(1);
+    expect(sim.state.kills).toBe(2);
+    expect(sim.state.enemies.map((e) => e.hp)).toEqual([1, 1]);
+  });
+
+  it('부싯돌이 없으면 터지지 않고, 난수도 더 뽑지 않는다', () => {
+    let calls = 0;
+    const state = createRun(config);
+    const sim = new Sim(state, () => {
+      calls += 1;
+      return 0.5;
+    });
+    state.weapons = {};
+    state.spawnDebt = -1e6;
+    state.surgeIndex = SURGES.length;
+    state.midBosses = MID_BOSS_COUNT;
+    state.finalBoss = true;
+    sim.step(STEP, 0, 0);
+    const before = calls;
+    state.enemies.push(enemy('shade', 100, 0, 0), enemy('brute', 110, 0, 500));
+    sim.step(STEP, 0, 0);
+    expect(sim.events.some((e) => e.type === 'spark')).toBe(false);
+    expect(state.enemies[0].hp).toBe(500);
+    // 무엇을 떨어뜨릴지 정하는 한 번뿐이다.
+    expect(calls - before).toBe(1);
   });
 });
 
@@ -1447,6 +1659,24 @@ describe('저장과 이어하기', () => {
     expect(restoreRun(null)).toBeNull();
     expect(restoreRun({ version: 1 })).toBeNull();
     expect(restoreRun({ ...old, over: 'dead' })).toBeNull();
+  });
+
+  it('종소리와 초승달이 생기기 전에 저장한 판도 그대로 이어진다', () => {
+    const state = createRun(config);
+    const old = JSON.parse(JSON.stringify(state)) as Record<string, unknown> & { cd: Record<string, number> };
+    delete old.waves;
+    delete old.moons;
+    delete old.cd.bell;
+    delete old.cd.moon;
+    const restored = restoreRun(old);
+    expect(restored).not.toBeNull();
+    const sim = newSim(1, restored as RunState);
+    expect(sim.state.waves).toEqual([]);
+    expect(sim.state.moons).toEqual([]);
+    sim.state.weapons = { bell: 1, moon: 1 };
+    expect(() => advance(sim, 5)).not.toThrow();
+    expect(Number.isFinite(sim.state.cd.bell)).toBe(true);
+    expect(Number.isFinite(sim.state.cd.moon)).toBe(true);
   });
 
   it('끝난 판이나 엉뚱한 값은 이어하지 않는다', () => {
