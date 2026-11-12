@@ -4,7 +4,10 @@
  * 서버는 앱이 보낸 것을 믿지 않고 여기 있는 함수로 다시 확인한다.
  */
 
-/** 랭킹이 있는 게임의 id. games/registry.ts의 목록과 같아야 한다(protocol.test.ts가 확인한다). */
+/**
+ * 랭킹이 있는 게임의 id. games/registry.ts의 목록에서 승패로 끝나는 게임(versus)을 뺀 것과 같아야 한다
+ * (protocol.test.ts가 확인한다).
+ */
 export const RANKED_GAMES = [
   'lightning-tap',
   'memory-cards',
@@ -19,6 +22,9 @@ export const RANKED_GAMES = [
   'tail-chase',
   'logic-tiles',
   'number-puzzle',
+  'path-link',
+  'block-fill',
+  'chosung-quiz',
   'lantern-keeper',
 ] as const;
 

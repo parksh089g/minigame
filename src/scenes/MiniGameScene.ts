@@ -152,4 +152,19 @@ export abstract class MiniGameScene extends Phaser.Scene implements BackAware {
       this.scene.launch(SCENE.result, data);
     });
   }
+
+  /**
+   * 점수 없이 승패로 끝나는 게임(registry의 versus)이 한 판을 마쳤을 때 부른다.
+   * 한 판 한 것으로 기록하고 코인을 준 뒤 그 결과를 돌려준다. 공용 결과 화면은 띄우지 않으므로,
+   * 누가 이겼는지와 "다시 하기", "나가기"는 그 게임이 자기 화면에서 보여 준다.
+   * 두 번 불러도 한 번만 기록하고, 두 번째부터는 null을 돌려준다.
+   */
+  protected finishVersusMatch(): PlayResult | null {
+    if (this.finished) return null;
+    this.finished = true;
+    this.playing = false;
+    this.playFinishSound();
+    const game = getGame(this.gameId);
+    return store.recordPlay(this.gameId, 0, game?.coinsFor(0) ?? 0, null);
+  }
 }

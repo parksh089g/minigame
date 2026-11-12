@@ -646,6 +646,37 @@ const ICONS: Record<string, Art> = {
         }
       }
     },
+  },  /** 길 잇기: (자리만 잡아 둔 그림. 이 게임을 만들 때 새로 그린다.) */
+  'icon-path': {
+    width: 32,
+    height: 32,
+    draw(c) {
+      roundRect(c, 4, 4, 24, 24, 7, '#9dd6ff');
+    },
+  },
+  /** 블록 채우기: (자리만 잡아 둔 그림. 이 게임을 만들 때 새로 그린다.) */
+  'icon-block': {
+    width: 32,
+    height: 32,
+    draw(c) {
+      roundRect(c, 4, 4, 24, 24, 7, '#ffe9a8');
+    },
+  },
+  /** 초성 퀴즈: (자리만 잡아 둔 그림. 이 게임을 만들 때 새로 그린다.) */
+  'icon-chosung': {
+    width: 32,
+    height: 32,
+    draw(c) {
+      roundRect(c, 4, 4, 24, 24, 7, '#c9bcf8');
+    },
+  },
+  /** 둘이서 대결: (자리만 잡아 둔 그림. 이 게임을 만들 때 새로 그린다.) */
+  'icon-duel': {
+    width: 32,
+    height: 32,
+    draw(c) {
+      roundRect(c, 4, 4, 24, 24, 7, '#ff9fb5');
+    },
   },
 };
 
