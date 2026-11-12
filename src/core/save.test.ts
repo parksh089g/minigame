@@ -59,6 +59,7 @@ describe('normalizeSave', () => {
         sent: { 'lightning-tap': 80 },
         week: { key: '2026-11-09', bests: { 'lightning-tap': 70 }, sent: { 'lightning-tap': 55 } },
       },
+      volume: { sound: 1, music: 3 },
       favorites: ['stack-tower', 'lightning-tap'],
       weekly: {
         weekKey: '2026-11-09',
@@ -101,6 +102,13 @@ describe('normalizeSave', () => {
     expect(
       normalizeSave({ version: SAVE_VERSION, games: {}, favorites: many }, NOW).favorites,
     ).toHaveLength(MAX_FAVORITES);
+  });
+
+  it('소리 크기 조절이 생기기 전의 세이브는 보통 크기로 읽는다', () => {
+    const old = { version: 7, coins: 3, settings: { sound: false, music: true, vibration: true } };
+    const save = normalizeSave(old, NOW);
+    expect(save.volume).toEqual({ sound: 2, music: 2 });
+    expect(save.settings.sound).toBe(false);
   });
 
   it('온라인 기능이 생기기 전의 세이브는 랭킹에 참여하지 않은 상태로 읽는다', () => {
@@ -485,6 +493,14 @@ describe('resetProgress', () => {
     expect(reset.coins).toBe(0);
     expect(reset.games).toEqual({});
     expect(reset.settings).toEqual({ sound: false, music: true, vibration: true });
+  });
+
+  it('소리 크기는 설정이라 남긴다', () => {
+    const save = createDefaultSave(NOW);
+    save.volume = { sound: 3, music: 1 };
+    const reset = resetProgress(save, NOW + 100);
+    expect(reset.volume).toEqual({ sound: 3, music: 1 });
+    expect(reset.volume).not.toBe(save.volume);
   });
 
   it('닉네임은 남긴다(온라인 랭킹의 기록은 랭킹 화면에서 따로 뺀다)', () => {

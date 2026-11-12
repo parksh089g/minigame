@@ -24,6 +24,7 @@ import {
 } from './daily';
 import { createOnline, normalizeOnline, withWeekScore, type OnlineState } from '../online/profile';
 import { rankWeekOf } from '../online/protocol';
+import { createVolume, normalizeVolume, type VolumeState } from './volume';
 import {
   createCosmetics,
   equip,
@@ -80,6 +81,8 @@ export interface SaveData {
   achievements: AchievementsState;
   /** 온라인 랭킹에서 쓰는 닉네임과, 서버에 어디까지 올렸는지. 닉네임을 정하기 전에는 비어 있다. */
   online: OnlineState;
+  /** 효과음과 배경 음악의 크기. 켜고 끄는 것은 settings에 있다. */
+  volume: VolumeState;
   /** 허브에서 별을 눌러 즐겨찾기에 넣은 게임의 id. 허브 목록의 앞쪽에 놓인다. */
   favorites: string[];
   /** 주간 미션: 이번 주에 한 판 수와 얻은 코인, 보상을 받은 미션. 주가 바뀌면 처음부터 다시 센다. */
@@ -126,6 +129,7 @@ export function createDefaultSave(now: number = Date.now()): SaveData {
     cosmetics: createCosmetics(),
     achievements: createAchievements(),
     online: createOnline(),
+    volume: createVolume(),
     favorites: [],
     weekly: createWeekly(),
     createdAt: now,
@@ -193,6 +197,7 @@ export function normalizeSave(raw: unknown, now: number = Date.now()): SaveData 
     cosmetics: normalizeCosmetics(raw.cosmetics),
     achievements: normalizeAchievements(raw.achievements),
     online: normalizeOnline(raw.online),
+    volume: normalizeVolume(raw.volume),
     favorites: normalizeFavorites(raw.favorites),
     weekly: normalizeWeekly(raw.weekly),
     createdAt: toTimestamp(raw.createdAt, now),
@@ -397,6 +402,8 @@ export function resetProgress(save: SaveData, now: number = Date.now()): SaveDat
     settings: { ...save.settings },
     // 서버에 올라간 기록은 그대로이므로, 무엇을 올렸는지도(이번 주의 기록까지) 그대로 둔다.
     online: structuredClone(save.online),
+    // 소리 크기도 설정이라 남긴다.
+    volume: { ...save.volume },
     // 즐겨찾기는 기록이 아니라 취향이라 설정처럼 남긴다.
     favorites: [...save.favorites],
   };
