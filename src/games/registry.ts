@@ -4,6 +4,7 @@
  */
 import { SCENE } from '../config';
 import { challengeFor, dateKeyOf, type DailyChallenge } from '../core/daily';
+import { weekContext, type Genre, type WeekContext, type WeeklyGame, type WeeklyState } from '../core/weekly';
 import type { SpriteKey } from '../art/sprites';
 import { LANTERN_GAME_ID, LANTERN_SCENE } from './lantern-keeper/data';
 import { coinsFor as lanternCoins } from './lantern-keeper/rules';
@@ -20,6 +21,11 @@ export interface MiniGameInfo {
   coinsFor: (score: number) => number;
   /** 오늘의 도전에 쓰는 목표 점수. 쉬운 것부터 어려운 것 순서로 세 단계. 비워 두면 오늘의 도전에 나오지 않는다. */
   dailyTargets: readonly number[];
+  /**
+   * 주간 미션이 게임을 묶는 갈래: 머리를 쓰는 'puzzle'과 손이 빨라야 하는 'action'.
+   * 비워 두면 "퍼즐 게임 몇 판" 같은 갈래 미션에는 들지 않고 "아무 게임이나"에만 들어간다.
+   */
+  genre?: Genre;
   /** true면 허브 목록의 맨 앞에 놓는다. 대표로 내세울 게임에 쓴다. */
   featured?: boolean;
   /**
@@ -37,6 +43,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     sceneKey: SCENE.lightningTap,
     coinsFor: (score) => Math.floor(score / 10),
     dailyTargets: [50, 80, 110],
+    genre: 'action',
   },
   {
     id: 'memory-cards',
@@ -45,6 +52,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     sceneKey: SCENE.memoryCards,
     coinsFor: (score) => Math.floor(score / 15),
     dailyTargets: [100, 160, 220],
+    genre: 'puzzle',
   },
   {
     id: 'jump-runner',
@@ -53,6 +61,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     sceneKey: SCENE.jumpRunner,
     coinsFor: (score) => Math.floor(score / 20),
     dailyTargets: [80, 140, 200],
+    genre: 'action',
   },
   {
     id: 'stack-tower',
@@ -61,6 +70,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     sceneKey: SCENE.stackTower,
     coinsFor: (score) => Math.floor(score / 12),
     dailyTargets: [70, 110, 150],
+    genre: 'action',
   },
   {
     id: 'color-sort',
@@ -69,6 +79,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     sceneKey: SCENE.colorSort,
     coinsFor: (score) => Math.floor(score / 20),
     dailyTargets: [100, 170, 250],
+    genre: 'puzzle',
   },
   {
     id: 'gate-run',
@@ -77,6 +88,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     sceneKey: SCENE.gateRun,
     coinsFor: (score) => Math.floor(score / 12),
     dailyTargets: [80, 150, 250],
+    genre: 'action',
   },
   {
     id: 'pin-pull',
@@ -85,6 +97,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     sceneKey: SCENE.pinPull,
     coinsFor: (score) => Math.floor(score / 15),
     dailyTargets: [70, 130, 220],
+    genre: 'puzzle',
   },
   {
     id: 'parking-out',
@@ -93,6 +106,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     sceneKey: SCENE.parkingOut,
     coinsFor: (score) => Math.floor(score / 25),
     dailyTargets: [150, 280, 450],
+    genre: 'puzzle',
   },
   {
     id: 'screw-sort',
@@ -101,6 +115,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     sceneKey: SCENE.screwSort,
     coinsFor: (score) => Math.floor(score / 40),
     dailyTargets: [250, 450, 750],
+    genre: 'puzzle',
   },
   {
     id: 'merge-tiles',
@@ -109,6 +124,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     sceneKey: SCENE.mergeTiles,
     coinsFor: (score) => Math.floor(score / 35),
     dailyTargets: [200, 380, 600],
+    genre: 'puzzle',
   },
   {
     id: 'tail-chase',
@@ -117,6 +133,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     sceneKey: SCENE.tailChase,
     coinsFor: (score) => Math.floor(score / 20),
     dailyTargets: [100, 200, 300],
+    genre: 'action',
   },
   {
     id: 'logic-tiles',
@@ -125,6 +142,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     sceneKey: SCENE.logicTiles,
     coinsFor: (score) => Math.floor(score / 25),
     dailyTargets: [120, 260, 420],
+    genre: 'puzzle',
   },
   {
     id: 'number-puzzle',
@@ -133,6 +151,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     sceneKey: SCENE.numberPuzzle,
     coinsFor: (score) => Math.floor(score / 25),
     dailyTargets: [100, 220, 420],
+    genre: 'puzzle',
   },
   {
     id: 'path-link',
@@ -141,6 +160,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     sceneKey: SCENE.pathLink,
     coinsFor: (score) => Math.floor(score / 25),
     dailyTargets: [90, 300, 500],
+    genre: 'puzzle',
   },
   {
     id: 'block-fill',
@@ -149,6 +169,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     sceneKey: SCENE.blockFill,
     coinsFor: (score) => Math.floor(score / 50),
     dailyTargets: [300, 700, 1100],
+    genre: 'puzzle',
   },
   {
     id: 'chosung-quiz',
@@ -157,6 +178,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     sceneKey: SCENE.chosungQuiz,
     coinsFor: (score) => Math.floor(score / 35),
     dailyTargets: [150, 450, 750],
+    genre: 'puzzle',
   },
   {
     id: 'duel',
@@ -235,6 +257,29 @@ export function lastPlayedGame(
 
 export function getGame(id: string): MiniGameInfo | undefined {
   return GAMES.find((game) => game.id === id);
+}
+
+/**
+ * 주간 미션이 보는 게임 목록. 플레이할 수 있는 게임만 들어가고, 오늘의 도전에 나오는 게임
+ * (한 판이 짧고 혼자 하는 게임)만 "이 게임 몇 판" 미션으로 낸다.
+ */
+export function weeklyGames(games: readonly MiniGameInfo[] = GAMES): WeeklyGame[] {
+  return games
+    .filter((game) => game.sceneKey !== null)
+    .map((game) => ({
+      id: game.id,
+      title: game.title,
+      genre: game.genre ?? null,
+      quick: game.dailyTargets.length > 0,
+    }));
+}
+
+/**
+ * 이번 주(기기의 현지 날짜)의 미션. 세이브의 주간 기록을 함께 넘겨야 하는 것은,
+ * 기기 시계가 뒤로 돌아가 있을 때 기록이 있는 주를 그대로 따르기 위해서다.
+ */
+export function thisWeek(weekly: WeeklyState, now: Date = new Date()): WeekContext | null {
+  return weekContext(weekly, dateKeyOf(now), weeklyGames());
 }
 
 /** 오늘(기기의 현지 날짜)의 도전. 플레이할 수 있는 게임 가운데에서 날짜로 정해진다. */

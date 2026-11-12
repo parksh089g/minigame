@@ -15,6 +15,7 @@ import {
 import { getRecord, isFavorite } from '../core/save';
 import { sfx } from '../core/sfx';
 import { store } from '../core/store';
+import { claimableMissions } from '../core/weekly';
 import {
   addBackdrop,
   addTapZone,
@@ -28,7 +29,14 @@ import {
   PAGER_HEIGHT,
   PixelButton,
 } from '../core/ui';
-import { GAMES, getGame, personalHubOrder, todaysChallenge, type MiniGameInfo } from '../games/registry';
+import {
+  GAMES,
+  getGame,
+  personalHubOrder,
+  thisWeek,
+  todaysChallenge,
+  type MiniGameInfo,
+} from '../games/registry';
 
 const MARGIN = 12;
 const CARD_WIDTH = GAME_WIDTH - MARGIN * 2;
@@ -143,8 +151,11 @@ export class HubScene extends Phaser.Scene {
       onTap: () => fadeToScene(this, SCENE.settings),
     });
 
-    // 설정 옆: 업적. 받을 보상이 있으면 노랗게 바뀌고 산호색 점이 붙는다.
-    const waiting = claimable(store.data.achievements, statsOf(store.data)).length;
+    // 설정 옆: 업적. 받을 보상(업적이나 주간 미션)이 있으면 노랗게 바뀌고 산호색 점이 붙는다.
+    const week = thisWeek(store.data.weekly);
+    const waiting =
+      claimable(store.data.achievements, statsOf(store.data)).length +
+      (week ? claimableMissions(store.data.weekly, week).length : 0);
     new PixelButton(this, {
       x: 40,
       y: 8,

@@ -31,8 +31,19 @@ import {
   type CosmeticItem,
   type CosmeticsState,
 } from './shop';
+import {
+  claimMission,
+  createWeekly,
+  missionProgress,
+  normalizeWeekly,
+  recordWeeklyPlay,
+  weeklyFor,
+  type WeekContext,
+  type WeeklyMission,
+  type WeeklyState,
+} from './weekly';
 
-export const SAVE_VERSION = 6;
+export const SAVE_VERSION = 7;
 
 /** 점수를 냈으면 한 판에 적어도 이만큼은 코인을 준다. 처음 하는 사람이 빈손으로 끝나지 않게 한다. */
 export const MIN_COINS_PER_PLAY = 1;
@@ -70,6 +81,8 @@ export interface SaveData {
   online: OnlineState;
   /** 허브에서 별을 눌러 즐겨찾기에 넣은 게임의 id. 허브 목록의 앞쪽에 놓인다. */
   favorites: string[];
+  /** 주간 미션: 이번 주에 한 판 수와 얻은 코인, 보상을 받은 미션. 주가 바뀌면 처음부터 다시 센다. */
+  weekly: WeeklyState;
   createdAt: number;
   updatedAt: number;
 }
@@ -98,6 +111,8 @@ export interface PlayResult {
   daily: DailyOutcome | null;
   /** 이번 판으로 새로 달성한 업적. 보상은 업적 화면에서 받는다. */
   newAchievements: Achievement[];
+  /** 이번 판으로 다 채운 주간 미션. 보상은 업적 화면의 주간 탭에서 받는다. */
+  newMissions: WeeklyMission[];
 }
 
 export function createDefaultSave(now: number = Date.now()): SaveData {
@@ -111,6 +126,7 @@ export function createDefaultSave(now: number = Date.now()): SaveData {
     achievements: createAchievements(),
     online: createOnline(),
     favorites: [],
+    weekly: createWeekly(),
     createdAt: now,
     updatedAt: now,
   };
@@ -177,6 +193,7 @@ export function normalizeSave(raw: unknown, now: number = Date.now()): SaveData 
     achievements: normalizeAchievements(raw.achievements),
     online: normalizeOnline(raw.online),
     favorites: normalizeFavorites(raw.favorites),
+    weekly: normalizeWeekly(raw.weekly),
     createdAt: toTimestamp(raw.createdAt, now),
     updatedAt: toTimestamp(raw.updatedAt, now),
   };
@@ -196,6 +213,7 @@ export function getRecord(save: SaveData, gameId: string): GameRecord {
  * 1점이라도 냈으면 코인을 적어도 MIN_COINS_PER_PLAY개 준다. 0점이면 받은 코인 수 그대로다.
  * challenge에 오늘의 도전을 넘기면, 이 판으로 달성했는지도 함께 따져 보상을 더한다.
  * 이미 달성한 날이거나 기기 시계가 마지막 달성일보다 앞으로 돌아가 있으면 도전은 따지지 않는다.
+ * week에 이번 주의 미션을 넘기면, 이 판을 주간 기록에 더하고 이 판으로 다 채운 미션을 알려 준다.
  */
 export function applyPlayResult(
   save: SaveData,
@@ -204,6 +222,7 @@ export function applyPlayResult(
   rawCoins: number,
   now: number = Date.now(),
   challenge: DailyChallenge | null = null,
+  week: WeekContext | null = null,
 ): PlayResult {
   const score = toCount(rawScore);
   const coinsEarned =
@@ -228,6 +247,23 @@ export function applyPlayResult(
     }
   }
 
+  // 주간 미션은 보상을 뺀, 이 판에서 얻은 것만 센다. 넘겨받은 주가 기록보다 앞선 주이면 건드리지 않는다.
+  let weekly = save.weekly;
+  let newMissions: WeeklyMission[] = [];
+  const weekBefore = week ? weeklyFor(save.weekly, week.weekKey) : null;
+  if (week && weekBefore) {
+    const weekAfter = recordWeeklyPlay(weekBefore, week.weekKey, {
+      gameId,
+      coins: coinsEarned + (daily?.reward ?? 0),
+      dailyCleared: daily?.cleared === true,
+    });
+    weekly = weekAfter;
+    newMissions = week.missions.filter(
+      (mission) =>
+        !missionProgress(mission, weekBefore).complete && missionProgress(mission, weekAfter).complete,
+    );
+  }
+
   const next: SaveData = {
     ...save,
     coins: save.coins + coinsEarned + (daily?.reward ?? 0),
@@ -236,6 +272,7 @@ export function applyPlayResult(
       [gameId]: { best, plays: previous.plays + 1, lastPlayedAt: now },
     },
     daily: dailyState,
+    weekly,
     updatedAt: now,
   };
 
@@ -255,6 +292,7 @@ export function applyPlayResult(
     coinsEarned,
     daily,
     newAchievements,
+    newMissions,
   };
 }
 
@@ -318,6 +356,31 @@ export function claimAchievement(
       updatedAt: now,
     },
     achievement: result.achievement,
+  };
+}
+
+export type ClaimMissionSaveResult =
+  | { ok: true; save: SaveData; mission: WeeklyMission }
+  | { ok: false; reason: 'unknown' | 'incomplete' | 'claimed' };
+
+/** 다 채운 주간 미션의 보상 코인을 받은 새 세이브를 돌려준다. 받을 수 없으면 이유를 알려 준다. */
+export function claimWeeklyMission(
+  save: SaveData,
+  week: WeekContext,
+  missionId: string,
+  now: number = Date.now(),
+): ClaimMissionSaveResult {
+  const result = claimMission(save.weekly, week, missionId);
+  if (!result.ok) return result;
+  return {
+    ok: true,
+    save: {
+      ...save,
+      coins: save.coins + result.mission.reward,
+      weekly: result.state,
+      updatedAt: now,
+    },
+    mission: result.mission,
   };
 }
 
