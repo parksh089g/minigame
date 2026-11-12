@@ -25,6 +25,10 @@ import {
   BUDDY,
   COMPANY_GAME_ID,
   COMPANY_SCENE,
+  DECOR,
+  DECOR_ORDER,
+  DECOR_SLOT_NAMES,
+  DECOR_SLOTS,
   DEPARTMENT,
   DEPARTMENT_ORDER,
   DEPARTMENTS,
@@ -46,6 +50,9 @@ import {
   TASKS,
   TIPS,
   TRAINING,
+  type DecorDef,
+  type DecorId,
+  type DecorSlot,
   type DepartmentId,
   type Effect,
   type EquipmentDef,
@@ -66,6 +73,7 @@ import {
   bossFor,
   breakOpen,
   buddyOf,
+  buyDecor,
   buyEquipment,
   buyPerk,
   candidatesFor,
@@ -73,6 +81,8 @@ import {
   catchUp,
   cheer,
   createCompany,
+  decorBlock,
+  decorOf,
   departmentBlock,
   departmentBoost,
   departmentCost,
@@ -129,6 +139,7 @@ import {
   trainBlock,
   trainCost,
   upgradeDepartment,
+  useDecor,
   versionOf,
   type Away,
   type CompanyEvent,
@@ -198,7 +209,19 @@ interface Button {
 }
 
 /** 아래쪽 버튼으로 여는 창 다섯과, 사무실 창에서 여는 부서 창, 위쪽의 수익을 눌러 여는 출시작 창, 돌아왔을 때 저절로 뜨는 알림 */
-type PanelKind = 'project' | 'gear' | 'staff' | 'seats' | 'office' | 'goals' | 'dept' | 'games' | 'branch' | 'found' | 'away';
+type PanelKind =
+  | 'project'
+  | 'gear'
+  | 'staff'
+  | 'seats'
+  | 'office'
+  | 'goals'
+  | 'dept'
+  | 'games'
+  | 'branch'
+  | 'found'
+  | 'decor'
+  | 'away';
 const PANELS: readonly { kind: PanelKind; label: string }[] = [
   { kind: 'project', label: '게임' },
   { kind: 'gear', label: '장비' },
@@ -262,6 +285,58 @@ const GEAR_TEXTURES: Partial<Record<EquipmentId, string>> = {
   snack: SC.snack,
 };
 
+/**
+ * 꾸미기의 무늬를 네모 안에 그린다. 바탕색은 이미 칠해져 있고, 여기서는 그 위의 무늬만 그린다.
+ * 그리는 것은 모두 네모 안에 들어간다.
+ */
+function paintPattern(graphics: Graphics, def: DecorDef, x: number, y: number, width: number, height: number): void {
+  if (def.pattern === 'plain' || width <= 0 || height <= 0) return;
+  graphics.fillStyle(def.mark, 1);
+  const right = x + width;
+  const bottom = y + height;
+  if (def.pattern === 'stripe') {
+    for (let left = x + 4; left < right; left += 16) graphics.fillRect(left, y, Math.min(8, right - left), height);
+  } else if (def.pattern === 'grid') {
+    for (let left = x + 6; left + 2 <= right; left += 12) graphics.fillRect(left, y, 2, height);
+    for (let top = y + 6; top + 2 <= bottom; top += 12) graphics.fillRect(x, top, width, 2);
+  } else if (def.pattern === 'check') {
+    const size = 10;
+    for (let row = 0; y + row * size < bottom; row += 1) {
+      for (let column = row % 2; x + column * size < right; column += 2) {
+        const left = x + column * size;
+        const top = y + row * size;
+        graphics.fillRect(left, top, Math.min(size, right - left), Math.min(size, bottom - top));
+      }
+    }
+  } else if (def.pattern === 'dot') {
+    for (let row = 0; y + 7 + row * 12 + 3 <= bottom; row += 1) {
+      for (let left = x + 7 + (row % 2) * 8; left + 3 <= right; left += 16) graphics.fillCircle(left, y + 7 + row * 12, 2.5);
+    }
+  } else if (def.pattern === 'cloud') {
+    for (let row = 0; y + 12 + row * 30 + 7 <= bottom; row += 1) {
+      for (let left = x + 20 + (row % 2) * 34; left + 16 <= right; left += 68) {
+        const top = y + 12 + row * 30;
+        graphics.fillCircle(left - 8, top + 2, 5).fillCircle(left, top - 1, 7).fillCircle(left + 8, top + 2, 5);
+        graphics.fillRect(left - 8, top + 2, 16, 5);
+      }
+    }
+  } else if (def.pattern === 'plank') {
+    for (let row = 0; y + row * 9 < bottom; row += 1) {
+      const top = y + row * 9;
+      if (row > 0) graphics.fillRect(x, top, width, 1.5);
+      // 널빤지의 이음매는 줄마다 엇갈린다.
+      for (let left = x + 22 + (row % 2) * 24; left + 2 <= right; left += 48) graphics.fillRect(left, top, 1.5, Math.min(9, bottom - top));
+    }
+  } else {
+    for (let row = 0; y + 4 + row * 9 + 4 <= bottom; row += 1) {
+      for (let left = x + 8 + (row % 2) * 9; left + 4 <= right; left += 18) {
+        const top = y + 4 + row * 9;
+        graphics.fillTriangle(left - 3, top + 4, left - 1.5, top, left, top + 4).fillTriangle(left, top + 4, left + 1.5, top, left + 3, top + 4);
+      }
+    }
+  }
+}
+
 /** 효과를 한 줄로 적는다. level만큼 쌓인 것을 적고, everyone이면 모두에게 걸리는 것이다. */
 function effectText(effect: Effect, level = 1, everyone = false): string {
   const percent = Math.round(effect.amount * level * 100);
@@ -319,6 +394,10 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
   private deptShown: DepartmentId = DEPARTMENT_ORDER[0];
   /** 자리 바꾸기 창에서 먼저 고른 책상. 고르지 않았으면 -1 */
   private seatPicked = -1;
+  /** 꾸미기 창에서 보고 있는 곳 */
+  private decorShown: DecorSlot = 'wall';
+  private signPlate!: Graphics;
+  private shownSign = '';
   private dots: Partial<Record<PanelKind, Phaser.GameObjects.Arc>> = {};
   /** 창마다 보고 있는 쪽 */
   private pages: Partial<Record<PanelKind, number>> = {};
@@ -582,6 +661,8 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
       },
     );
     this.reputationText = addText(this, W - MARGIN, 6, '', { color: THEME_CSS.accent, originX: 1 });
+    this.signPlate = this.add.graphics();
+    this.shownSign = '';
     this.officeText = addText(this, W - MARGIN, 30, '', { size: FONT_SIZE.small, color: THEME_CSS.sub, originX: 1 });
     this.reputationBar = this.add.graphics();
   }
@@ -621,7 +702,6 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
         counting = false;
       }
       this.reputationText.setText(counting ? `평판 ${state.reputation}/${goal}` : `평판 ${state.reputation}`);
-      this.officeText.setText(OFFICES[state.office].name);
       const share = Phaser.Math.Clamp((state.reputation - from) / (goal - from), 0, 1);
       const width = 70;
       const left = W - MARGIN - width;
@@ -631,6 +711,26 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
         .fillRoundedRect(left, 22, width, 5, 2.5)
         .fillStyle(THEME.gold, 1);
       if (share > 0) this.reputationBar.fillRoundedRect(left, 22, Math.max(5, width * share), 5, 2.5);
+    }
+    const sign = `${state.office}|${state.decor.sign ?? ''}`;
+    if (sign !== this.shownSign) {
+      this.shownSign = sign;
+      // 간판을 달았으면 사무실 이름 뒤에 판을 깐다.
+      const plate = decorOf(state, 'sign');
+      this.officeText
+        .setText(OFFICES[state.office].name)
+        .setColor(plate ? THEME_CSS.inkDeep : THEME_CSS.sub)
+        .setX(W - MARGIN - (plate ? 6 : 0));
+      this.signPlate.clear();
+      if (plate) {
+        const width = Math.ceil(this.officeText.width) + 12;
+        const left = W - MARGIN - width;
+        this.signPlate
+          .fillStyle(plate.mark, 1)
+          .fillRoundedRect(left, 29.5, width, 12.5, 6)
+          .fillStyle(plate.color, 1)
+          .fillRoundedRect(left, 28.5, width, 12, 6);
+      }
     }
   }
 
@@ -757,6 +857,8 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
 
     const roomHeight = this.roomBottom - ROOM_TOP;
     const colors = ROOM_COLORS[Math.min(state.office, ROOM_COLORS.length - 1)];
+    const wall = decorOf(state, 'wall');
+    const floor = decorOf(state, 'floor');
     const count = state.desks.length;
     // 자리가 늘면 한 줄에 더 많이 놓고, 넷씩 놓을 때는 칸을 좁힌다.
     const columns = deskColumns(count);
@@ -775,11 +877,14 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     const blockLeft = MARGIN + Math.round((INNER - blockWidth) / 2);
 
     const walls = this.add.graphics();
-    drawPanel(walls, MARGIN, ROOM_TOP, INNER, roomHeight - 3, { fill: colors.wall, depth: 3 });
+    drawPanel(walls, MARGIN, ROOM_TOP, INNER, roomHeight - 3, { fill: wall?.color ?? colors.wall, depth: 3 });
     const floorTop = blockTop + blockHeight - 30;
+    // 무늬는 둥근 모서리를 벗어나지 않게 조금 안쪽에만 그린다.
+    if (wall) paintPattern(walls, wall, MARGIN + 6, ROOM_TOP + 6, INNER - 12, floorTop - ROOM_TOP - 6);
     walls
-      .fillStyle(colors.floor, 1)
+      .fillStyle(floor?.color ?? colors.floor, 1)
       .fillRoundedRect(MARGIN, floorTop, INNER, this.roomBottom - 3 - floorTop, { tl: 0, tr: 0, bl: 12, br: 12 });
+    if (floor) paintPattern(walls, floor, MARGIN + 6, floorTop, INNER - 12, this.roomBottom - 3 - floorTop - 6);
     room.add(walls);
 
     const wallSpace = blockTop - ROOM_TOP;
@@ -1420,6 +1525,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     else if (kind === 'games') this.buildGamesPanel(panel);
     else if (kind === 'branch') this.buildBranchPanel(panel);
     else if (kind === 'found') this.buildFoundPanel(panel);
+    else if (kind === 'decor') this.buildDecorPanel(panel);
     else this.buildAwayPanel(panel);
     // 창을 만드는 동안 쪽 번호가 맞춰지므로, 다 만든 뒤의 모습을 적어 둔다.
     this.panelSignature = this.signatureOf(kind);
@@ -1433,7 +1539,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
 
   /** 닫기를 눌렀을 때. 부서 창과 자회사 창은 사무실 창에서 열었으니 그리로 돌아간다. */
   private dismissPanel(): void {
-    if (this.panelKind === 'dept' || this.panelKind === 'branch') this.openPanel('office');
+    if (this.panelKind === 'dept' || this.panelKind === 'branch' || this.panelKind === 'decor') this.openPanel('office');
     else if (this.panelKind === 'found') this.openPanel('branch');
     else if (this.panelKind === 'seats') this.openPanel('staff');
     else this.closePanel();
@@ -1467,6 +1573,10 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
     }
     if (kind === 'seats') return `${state.desks.map((desk) => desk.staff ?? '').join(',')}|${this.seatPicked}`;
     if (kind === 'away') return 'away';
+    if (kind === 'decor') {
+      const decor = state.decor;
+      return `${this.decorShown}|${decor.owned.join(',')}|${decor.wall}|${decor.floor}|${decor.sign}|${store.data.coins}|${state.office}`;
+    }
     if (kind === 'games') {
       const games = PROJECT_ORDER.map((id) => `${versionOf(state, id)}${starsOf(state, id)}`).join(',');
       return `${page}|${games}|${formatRate(incomePerSecond(state))}`;
@@ -2071,9 +2181,99 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware {
 
     // 회사의 모습이 적힌 카드를 친구에게 보낸다.
     this.rowLine(panel, left, below + 20, width);
-    panel.add(addText(this, left + 14, below + 37, '우리 회사를 친구에게 자랑해요', { size: FONT_SIZE.small, color: THEME_CSS.sub, originY: 0.5 }));
+    panel.add(addText(this, left + 14, below + 37, '꾸미고 자랑해요', { size: FONT_SIZE.small, color: THEME_CSS.sub, originY: 0.5 }));
+    this.button(panel, left + width - 126, below + 25, 56, 24, '꾸미기', 'pink', () => this.openPanel('decor'));
     this.button(panel, left + width - 66, below + 25, 56, 24, '공유', 'yellow', () => this.share());
     this.prepareShare();
+  }
+
+  /**
+   * 꾸미기 창: 허브의 코인으로 벽지와 바닥, 간판을 사서 회사의 모습을 바꾼다.
+   * 한 번 산 것은 자회사를 세워도 남고, 언제든 기본 모습이나 다른 것으로 바꿔 쓸 수 있다.
+   */
+  private buildDecorPanel(panel: Container): void {
+    const state = this.state;
+    const slot = this.decorShown;
+    const rows: (DecorId | null)[] = [null, ...DECOR_ORDER.filter((id) => (DECOR[id] as DecorDef).slot === slot)];
+    const coins = store.data.coins;
+    const base = ROOM_COLORS[Math.min(state.office, ROOM_COLORS.length - 1)];
+    const header = {
+      height: 36,
+      draw: (top: number, left: number, width: number): void => {
+        DECOR_SLOTS.forEach((id, index) => {
+          this.button(panel, left + 12 + index * 48, top + 3, 44, 26, DECOR_SLOT_NAMES[id], id === slot ? 'yellow' : 'neutral', () => {
+            this.decorShown = id;
+            this.openPanel('decor');
+          });
+        });
+        const count = addText(this, left + width - 12, top + 15, String(coins), { color: THEME_CSS.accent, originX: 1, originY: 0.5 });
+        panel.add(count);
+        panel.add(this.add.image(count.x - count.width - 9, top + 15, 'coin').setDisplaySize(12, 12));
+      },
+    };
+    const bottom = this.listPanel(
+      panel,
+      'decor',
+      '꾸미기',
+      rows,
+      36,
+      20,
+      (id, middle, left, width) => {
+        const def: DecorDef | null = id ? DECOR[id] : null;
+        const swatch = this.add.graphics();
+        const x = left + 12;
+        const y = middle - 12;
+        if (slot === 'sign') {
+          // 간판은 이름 뒤에 까는 판의 모습 그대로 보여 준다.
+          if (def) swatch.fillStyle(def.mark, 1).fillRoundedRect(x, y + 6, 28, 13, 6).fillStyle(def.color, 1).fillRoundedRect(x, y + 5, 28, 12.5, 6);
+          else swatch.lineStyle(1.5, THEME.faint, 0.6).strokeRoundedRect(x + 1, y + 6, 26, 12, 6);
+        } else {
+          swatch.fillStyle(THEME.shadow, 1).fillRoundedRect(x, y + 2, 28, 24, 5);
+          swatch.fillStyle(def?.color ?? base[slot], 1).fillRoundedRect(x, y, 28, 24, 5);
+          if (def) paintPattern(swatch, def, x + 2, y + 2, 24, 20);
+        }
+        panel.add(swatch);
+        panel.add(addText(this, left + 48, middle - 14, def?.name ?? '기본', { color: THEME_CSS.inkDeep }));
+        const using = state.decor[slot] === id;
+        const owned = id === null || state.decor.owned.includes(id);
+        const detail = !def ? (slot === 'sign' ? '간판을 달지 않아요' : '사무실마다 다른 색이에요') : owned ? '사 둔 꾸미기예요' : `코인 ${def.cost}개`;
+        this.rowDetail(panel, left + 48, middle, left + width - 70, detail);
+        if (using) {
+          this.rowState(panel, left, width, middle, '쓰는 중');
+          return;
+        }
+        if (owned) {
+          this.button(panel, left + width - 66, middle - 13, 56, 26, '쓰기', 'neutral', () => {
+            if (!useDecor(state, slot, id)) return;
+            this.afterDecor();
+          });
+          return;
+        }
+        const affordable = decorBlock(state, id, coins) === null;
+        const buy = this.button(panel, left + width - 66, middle - 13, 56, 26, `  ${def?.cost ?? 0}`, affordable ? 'green' : 'neutral', () => {
+          const paid = buyDecor(state, id, store.data.coins);
+          if (paid <= 0) return;
+          store.update((save) => {
+            save.coins -= paid;
+          });
+          this.play('upgrade');
+          this.afterDecor();
+        });
+        panel.add(this.add.image(left + width - 53, middle - 1.5, 'coin').setDisplaySize(11, 11).setAlpha(affordable ? 1 : 0.45));
+        if (!affordable) buy.setEnabled(false);
+      },
+      header,
+    );
+    panel.add(
+      addText(this, W / 2, bottom + 4, '코인은 미니게임과 오늘의 목표로 모아요', { size: FONT_SIZE.small, color: THEME_CSS.faint, originX: 0.5 }),
+    );
+  }
+
+  /** 꾸미기를 바꾼 뒤에 방과 간판을 다시 그린다. */
+  private afterDecor(): void {
+    this.save();
+    this.buildRoom();
+    this.refreshNow();
   }
 
   /**

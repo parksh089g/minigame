@@ -8,6 +8,9 @@ import {
   BRANCH,
   BREAK,
   BUDDIES,
+  DECOR,
+  DECOR_ORDER,
+  DECOR_SLOTS,
   BUDDY,
   CANDIDATE_COUNT,
   CHEER_BOOST,
@@ -39,6 +42,9 @@ import {
   TIPS,
   TRAINING,
   UPDATE_SCALE,
+  type DecorDef,
+  type DecorId,
+  type DecorSlot,
   type DepartmentId,
   type EffectKey,
   type EquipmentDef,
@@ -166,6 +172,8 @@ export interface CompanyState {
   perks: Partial<Record<PerkId, number>>;
   /** 지금까지 가 본 가장 큰 사무실. 처음 이사할 때만 코인을 주려고 적어 둔다. */
   topOffice: number;
+  /** 사 둔 꾸미기와 지금 쓰는 것. 자회사를 세워도 남는다. */
+  decor: Decor;
   /** 이미 본 처음 안내의 id */
   tips: string[];
   /** 마지막으로 저장한 때(ms). 닫아 둔 시간을 재는 데 쓴다. */
@@ -215,6 +223,7 @@ export function createCompany(boss: StaffId, now = 0): CompanyState {
     fruit: 0,
     perks: {},
     topOffice: 0,
+    decor: { owned: [], wall: null, floor: null, sign: null },
     tips: [],
     savedAt: now,
   };
@@ -1238,6 +1247,7 @@ export function foundBranch(state: CompanyState): Founding | null {
     fruit: state.fruit + fruit,
     perks: state.perks,
     topOffice: state.topOffice,
+    decor: state.decor,
     stars: state.stars,
     releases: state.releases,
     goals: state.goals,
@@ -1247,6 +1257,60 @@ export function foundBranch(state: CompanyState): Founding | null {
   const seed = seedLeaves(state);
   state.leaves = seed;
   return { fruit, branches: state.branches, seed };
+}
+
+// ───────── 사옥 꾸미기 ─────────
+
+/** 사 둔 꾸미기(owned)와 곳마다 지금 쓰는 것. 쓰는 것이 없으면 null */
+export interface Decor extends Record<DecorSlot, DecorId | null> {
+  owned: DecorId[];
+}
+
+/** 이 곳에 지금 쓰는 꾸미기. 기본 모습이면 null */
+export function decorOf(state: CompanyState, slot: DecorSlot): DecorDef | null {
+  const id = state.decor[slot];
+  return id ? DECOR[id] : null;
+}
+
+/** 이 꾸미기를 살 수 없는 까닭. coins는 가진 허브의 코인이다. 살 수 있으면 null */
+export function decorBlock(state: CompanyState, id: DecorId, coins: number): 'owned' | 'poor' | null {
+  if (state.decor.owned.includes(id)) return 'owned';
+  if (!(coins >= DECOR[id].cost)) return 'poor';
+  return null;
+}
+
+/** 꾸미기를 사서 바로 쓴다. 치를 코인을 돌려주고, 못 샀으면 0이다. 코인을 빼는 일은 부른 쪽이 한다. */
+export function buyDecor(state: CompanyState, id: DecorId, coins: number): number {
+  if (decorBlock(state, id, coins) !== null) return 0;
+  const def: DecorDef = DECOR[id];
+  state.decor.owned.push(id);
+  state.decor[def.slot] = id;
+  return def.cost;
+}
+
+/** 사 둔 꾸미기로 바꾼다. id가 null이면 기본 모습으로 돌린다. */
+export function useDecor(state: CompanyState, slot: DecorSlot, id: DecorId | null): boolean {
+  if (id !== null && (!state.decor.owned.includes(id) || (DECOR[id] as DecorDef).slot !== slot)) return false;
+  if (state.decor[slot] === id) return false;
+  state.decor[slot] = id;
+  return true;
+}
+
+function normalizeDecor(raw: unknown): Decor {
+  const decor: Decor = { owned: [], wall: null, floor: null, sign: null };
+  if (!isObject(raw)) return decor;
+  if (Array.isArray(raw.owned)) {
+    // 산 차례를 그대로 둔다.
+    for (const entry of raw.owned as unknown[]) {
+      const id = DECOR_ORDER.find((known) => known === entry);
+      if (id && !decor.owned.includes(id)) decor.owned.push(id);
+    }
+  }
+  for (const slot of DECOR_SLOTS) {
+    const id = decor.owned.find((owned) => owned === raw[slot]);
+    if (id && (DECOR[id] as DecorDef).slot === slot) decor[slot] = id;
+  }
+  return decor;
 }
 
 /** n단계에서 n+1단계로 올리는 데 드는 열매 */
@@ -1355,6 +1419,7 @@ export function normalizeCompany(raw: unknown): CompanyState | null {
   // 자회사를 세운 적이 있으면 가장 큰 사무실까지 가 본 것이다.
   const reached = state.branches > 0 ? OFFICES.length - 1 : state.office;
   state.topOffice = Math.max(reached, toCount(raw.topOffice, OFFICES.length - 1));
+  state.decor = normalizeDecor(raw.decor);
   state.gear = normalizeLevels(raw.gear, 'company');
   if (DEPARTMENT.unlockOffice <= state.office && isObject(raw.departments)) {
     for (const id of DEPARTMENT_ORDER) {
