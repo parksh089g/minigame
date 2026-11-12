@@ -78,6 +78,12 @@ describe('게임마다의 줄', () => {
     expect(by('b')?.versus).toBe(false);
   });
 
+  it('이어지는 성장 게임은 기록이 평판이라는 것을 알려 준다', () => {
+    const stats = gameStats([game('grow', { ongoing: true }), game('a')], source({ grow: record(3, 40), a: record(1, 7) }));
+    expect(stats[0]).toMatchObject({ id: 'grow', best: 40, ongoing: true });
+    expect(stats[1]).toMatchObject({ id: 'a', best: 7, ongoing: false });
+  });
+
   it('목록에 없는 게임의 기록은 버린다', () => {
     const stats = gameStats(SAMPLE, source({ gone: record(50, 999), a: record(1, 5) }));
     expect(stats.map((stat) => stat.id)).toEqual(['a', 'b', 'c', 'pair', 'd']);
