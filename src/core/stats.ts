@@ -12,6 +12,8 @@ export interface StatGame {
   sceneKey: string | null;
   /** 승패로 끝나서 점수가 없는 게임 */
   versus?: boolean;
+  /** 판이 끝나지 않고 이어져서, 점수 대신 평판이 쌓이는 게임 */
+  ongoing?: boolean;
 }
 
 /** 통계가 읽는 세이브의 부분 */
@@ -28,6 +30,8 @@ export interface GameStat {
   /** 최고 점수. 점수가 없는 게임이거나 한 번도 안 했으면 null */
   best: number | null;
   versus: boolean;
+  /** true면 best는 최고 점수가 아니라 지금까지 쌓은 평판이다. */
+  ongoing: boolean;
 }
 
 export interface StatSummary {
@@ -66,6 +70,7 @@ export function gameStats(games: readonly StatGame[], save: StatSource): GameSta
           plays,
           best: versus || plays === 0 ? null : (record?.best ?? 0),
           versus,
+          ongoing: game.ongoing === true,
         } satisfies GameStat,
       };
     })
@@ -101,6 +106,7 @@ export const STATS_TEXT = {
   columnPlays: '판 수',
   columnBest: '최고 점수',
   versus: '둘이서',
+  reputation: '평판',
   none: '-',
 } as const;
 
