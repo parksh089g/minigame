@@ -110,6 +110,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     coinsFor: (score) => Math.floor(score / 15),
     dailyTargets: [70, 130, 220],
     genre: 'puzzle',
+    stageMode: true,
   },
   {
     id: 'parking-out',
@@ -177,6 +178,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     coinsFor: (score) => Math.floor(score / 25),
     dailyTargets: [90, 300, 500],
     genre: 'puzzle',
+    stageMode: true,
   },
   {
     id: 'block-fill',

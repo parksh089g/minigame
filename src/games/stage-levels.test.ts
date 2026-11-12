@@ -4,6 +4,9 @@ import * as colorSort from './color-sort/rules';
 import * as logicTiles from './logic-tiles/rules';
 import * as numberPuzzle from './number-puzzle/rules';
 import * as parkingOut from './parking-out/rules';
+import * as pathLink from './path-link/rules';
+import * as pinPullLevels from './pin-pull/levels';
+import * as pinPull from './pin-pull/rules';
 import { GAMES, stageGames } from './registry';
 import * as screwSort from './screw-sort/rules';
 
@@ -17,13 +20,15 @@ const ALL_LEVELS = Array.from({ length: STAGE_LEVELS }, (_, index) => index + 1)
 const SAMPLE_LEVELS = [1, 2, 3, 5, 8, 13, 21, 34, 50, 67, 84, 99, STAGE_LEVELS];
 
 describe('단계 모드를 하는 게임', () => {
-  it('다섯 게임이고 모두 플레이할 수 있다', () => {
+  it('일곱 게임이고 모두 플레이할 수 있다', () => {
     expect(stageGames().map((game) => game.id)).toEqual([
       'color-sort',
+      'pin-pull',
       'parking-out',
       'screw-sort',
       'logic-tiles',
       'number-puzzle',
+      'path-link',
     ]);
     expect(stageGames().every((game) => game.sceneKey !== null && !game.versus)).toBe(true);
   });
@@ -208,4 +213,63 @@ describe('숫자 퍼즐의 단계', () => {
       expect(run).toMatchObject({ hearts: numberPuzzle.START_HEARTS, score: 0, mistakes: 0, cellsFilled: 0 });
     }
   });
+});
+
+describe('핀 뽑기의 단계', () => {
+  // 판은 그 자리에서 만들지 않고 적어 둔 표에서 꺼낸다. 표의 내용은 pin-pull/levels.test.ts가 살핀다.
+  it('단계마다 정해진 판이 있고, 기회는 다른 게임과 같이 세 번이다', () => {
+    expect(pinPullLevels.LEVEL_CODES).toHaveLength(STAGE_LEVELS);
+    expect(pinPull.START_HEARTS).toBe(STAGE_HEARTS);
+    for (const level of SAMPLE_LEVELS) {
+      expect(pinPullLevels.levelPuzzle(level)).toEqual(pinPullLevels.levelPuzzle(level));
+    }
+    expect(pinPullLevels.levelPuzzle(1)).not.toEqual(pinPullLevels.levelPuzzle(2));
+  });
+});
+
+describe('길 잇기의 단계', () => {
+  const start = (level: number): pathLink.RunState => pathLink.levelRun(level, stageRandom('path-link', level));
+
+  it('가장 작은 판에서 시작해 가장 큰 판으로 끝나고, 쌍은 모양의 가짓수를 넘지 않는다', () => {
+    expect(pathLink.levelPlan(1)).toEqual(pathLink.LEVEL_PLANS[0]);
+    expect(pathLink.levelPlan(STAGE_LEVELS)).toEqual(pathLink.LEVEL_PLANS[pathLink.LEVEL_PLANS.length - 1]);
+    for (const [index, plan] of pathLink.LEVEL_PLANS.entries()) {
+      const [fewest, most] = pathLink.pairRange(plan.size);
+      expect(plan.pairs).toBeGreaterThanOrEqual(fewest);
+      expect(plan.pairs).toBeLessThanOrEqual(Math.min(most, 8));
+      if (index === 0) continue;
+      // 판이 커지거나, 같은 크기에서 쌍이 줄어든다.
+      const before = pathLink.LEVEL_PLANS[index - 1];
+      expect(plan.size > before.size || (plan.size === before.size && plan.pairs < before.pairs)).toBe(true);
+    }
+  });
+
+  it('같은 단계는 언제나 같은 판이다', () => {
+    for (const level of SAMPLE_LEVELS) expect(start(level)).toEqual(start(level));
+    expect(start(1).board.puzzle.dots).not.toEqual(start(2).board.puzzle.dots);
+  });
+
+  it('어느 단계든 정해 둔 판이 아니라 새로 만든 판이고, 그 난이도의 크기와 쌍의 수를 지킨다', () => {
+    for (const level of ALL_LEVELS) {
+      const { puzzle } = start(level).board;
+      const plan = pathLink.levelPlan(level);
+      expect(puzzle.size, `${level}단계`).toBe(plan.size);
+      expect(puzzle.dots, `${level}단계`).toHaveLength(plan.pairs);
+      expect(puzzle.solution, `${level}단계`).not.toEqual(pathLink.fallbackPartition(plan.size));
+    }
+  }, 60_000);
+
+  it('어느 단계든 적어 둔 풀이대로 그으면 풀린다', () => {
+    for (const level of ALL_LEVELS) {
+      const run = start(level);
+      let board = run.board;
+      board.puzzle.solution.forEach((path, pair) => {
+        board = pathLink.startStroke(board, path[0])?.board ?? board;
+        for (const cell of path.slice(1)) board = pathLink.dragTo(board, pair, cell).board;
+        board = pathLink.endStroke(board, pair);
+      });
+      expect(pathLink.isSolved(board), `${level}단계`).toBe(true);
+      expect(run).toMatchObject({ timeLeft: pathLink.START_SECONDS, score: 0, boardsCleared: 0 });
+    }
+  }, 60_000);
 });

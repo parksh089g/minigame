@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { SCENE } from '../config';
+import type { Achievement } from '../core/achievements';
 import { APP_EVENT, type BackAware } from '../core/app-events';
 import type { PlayResult } from '../core/save';
 import { sfx } from '../core/sfx';
@@ -59,6 +60,8 @@ export interface StageResultData {
   next: number | null;
   /** 이번 단계로 다 채운 주간 미션의 수 */
   missions: number;
+  /** 이번 단계로 새로 달성한 업적. 보상은 업적 화면에서 받는다. */
+  achievements: readonly Achievement[];
   stats: readonly ResultStat[];
 }
 
@@ -256,6 +259,7 @@ export abstract class MiniGameScene extends Phaser.Scene implements BackAware {
       coins: result?.coinsEarned ?? 0,
       next: cleared ? (level < STAGE_LEVELS ? level + 1 : null) : nextLevel(store.data.stages, this.gameId),
       missions: result?.newMissions.length ?? 0,
+      achievements: result?.newAchievements ?? [],
       stats,
     };
     this.time.delayedCall(resultDelayMs, () => {
