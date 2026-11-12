@@ -72,6 +72,14 @@ Project name은 `wrangler.jsonc`의 `name`과 같아야 합니다. 다르면 빌
 
 `main`이 아닌 브랜치를 올리면 Cloudflare가 미리보기를 따로 만들고, PR에 미리보기 주소를 댓글로 남깁니다. 합치기 전에 휴대폰에서 먼저 해 볼 수 있습니다. 이 기능은 `wrangler.jsonc`의 `previews` 블록이 있어야 동작합니다.
 
+### 합쳤는데 배포되지 않을 때
+
+`main`에 합친 뒤 몇 분이 지나도 배포된 주소가 예전 그대로라면, 먼저 Cloudflare가 빌드를 했는지 봅니다. 대시보드에서 **Workers & Pages**, `minigame`, **Deployments** 순서로 들어가 맨 아래의 **View Build History**를 엽니다.
+
+- **합친 커밋의 빌드가 실패로 나와 있을 때**: 그 빌드를 열어 로그 끝의 오류를 봅니다. 고칠 것이 없는 일시적인 실패라면 **Retry build**로 다시 돌립니다.
+- **합친 커밋의 빌드가 목록에 아예 없을 때**: Cloudflare가 그 푸시를 놓친 것입니다(GitHub의 커밋 옆에도 검사 표시가 없습니다). `main`에 다음 커밋이 들어가면 그때 최신 상태로 빌드합니다. 새 커밋 없이 바로 돌리려면 **Settings**, **Builds**, **Deploy Hooks**에서 브랜치를 `main`으로 고른 훅을 만들고, 나온 주소로 `curl -X POST "<훅 주소>"`를 보냅니다. 훅 주소는 아는 사람 누구나 빌드를 시작할 수 있으므로 비밀번호처럼 다룹니다.
+- **빌드가 계속 시작되지 않을 때**: GitHub의 [설치된 앱 설정](https://github.com/settings/installations)에서 **Cloudflare Workers and Pages**가 이 저장소에 접근할 수 있는지 확인합니다.
+
 ### 설치
 
 1. 휴대폰 브라우저에서 배포된 주소를 열고 메뉴에서 **홈 화면에 추가**를 누르면 앱처럼 설치됩니다.
