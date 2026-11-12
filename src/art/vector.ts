@@ -646,12 +646,21 @@ const ICONS: Record<string, Art> = {
         }
       }
     },
-  },  /** 길 잇기: (자리만 잡아 둔 그림. 이 게임을 만들 때 새로 그린다.) */
+  },  /** 길 잇기: 같은 색 점 두 쌍을 서로 겹치지 않는 굽은 선으로 이은 모습 */
   'icon-path': {
     width: 32,
     height: 32,
     draw(c) {
-      roundRect(c, 4, 4, 24, 24, 7, '#9dd6ff');
+      const dot = (x: number, y: number, color: string, shine: string): void => {
+        oval(c, x, y, 4.400, 4.400, color);
+        oval(c, x - 1.300, y - 1.500, 1.500, 1, shine, -0.6);
+      };
+      strokePath(c, 'M6.500 6.500H25.500V25.500', '#7dbef2', 4.600);
+      strokePath(c, 'M6.500 25.500V16H16', '#ff9fb5', 4.600);
+      dot(6.500, 6.500, '#5fa3dc', '#b9dcf7');
+      dot(25.500, 25.500, '#5fa3dc', '#b9dcf7');
+      dot(6.500, 25.500, '#e97f99', '#ffd0db');
+      dot(16, 16, '#e97f99', '#ffd0db');
     },
   },
   /** 블록 채우기: 네 칸씩 네 줄인 판에 놓인 말랑한 블록 세 개. 맨 아랫줄이 가득 찼다 */
