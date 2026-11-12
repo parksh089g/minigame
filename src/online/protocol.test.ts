@@ -20,12 +20,12 @@ import {
 
 describe('랭킹이 있는 게임', () => {
   it('허브에 있는 플레이할 수 있는 게임 가운데 점수가 있는 것과 같다', () => {
-    const scored = GAMES.filter((game) => game.sceneKey !== null && !game.versus).map((game) => game.id);
+    const scored = GAMES.filter((game) => game.sceneKey !== null && !game.versus && !game.ongoing).map((game) => game.id);
     expect([...RANKED_GAMES].sort()).toEqual([...scored].sort());
   });
 
-  it('승패로 끝나는 게임은 랭킹에 없다', () => {
-    for (const game of GAMES.filter((entry) => entry.versus)) {
+  it('승패로 끝나는 게임과 이어지는 성장 게임은 랭킹에 없다', () => {
+    for (const game of GAMES.filter((entry) => entry.versus || entry.ongoing)) {
       expect(isRankedGame(game.id)).toBe(false);
       expect(game.dailyTargets).toEqual([]);
     }

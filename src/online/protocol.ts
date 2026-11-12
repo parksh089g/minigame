@@ -5,7 +5,7 @@
  */
 
 /**
- * 랭킹이 있는 게임의 id. games/registry.ts의 목록에서 승패로 끝나는 게임(versus)을 뺀 것과 같아야 한다
+ * 랭킹이 있는 게임의 id. games/registry.ts의 목록에서 승패로 끝나는 게임(versus)과 이어지는 성장 게임(ongoing)을 뺀 것과 같아야 한다
  * (protocol.test.ts가 확인한다).
  */
 export const RANKED_GAMES = [

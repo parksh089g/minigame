@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { HOW_TO, HOW_TO_LINE_CHARS, HOW_TO_MAX_LINES, howToFor } from './how-to';
 import { LANTERN_GAME_ID } from './lantern-keeper/data';
 import { GAMES } from './registry';
+import { COMPANY_GAME_ID } from './sprout-company/data';
 
 /**
  * 주아 글꼴에 들어 있는 한글: KS X 1001의 완성형 2,350자.
@@ -18,8 +19,8 @@ function fontSyllables(): Set<string> {
   return syllables;
 }
 
-/** 방법을 따로 적지 않는 게임. 등불지기는 제 화면에서 따로 안내한다. */
-const WITHOUT_HOW_TO = new Set([LANTERN_GAME_ID]);
+/** 방법을 따로 적지 않는 게임. 등불지기와 새싹 컴퍼니는 제 화면에서 따로 안내한다. */
+const WITHOUT_HOW_TO = new Set<string>([LANTERN_GAME_ID, COMPANY_GAME_ID]);
 
 describe('게임 방법', () => {
   const playable = GAMES.filter((game) => game.sceneKey !== null);

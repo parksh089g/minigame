@@ -8,6 +8,7 @@ import { weekContext, type Genre, type WeekContext, type WeeklyGame, type Weekly
 import type { SpriteKey } from '../art/sprites';
 import { LANTERN_GAME_ID, LANTERN_SCENE } from './lantern-keeper/data';
 import { coinsFor as lanternCoins } from './lantern-keeper/rules';
+import { COMPANY_GAME_ID, COMPANY_SCENE } from './sprout-company/data';
 
 export interface MiniGameInfo {
   /** 세이브에 쓰이는 고유 id. 한 번 정하면 바꾸지 않는다. */
@@ -33,6 +34,11 @@ export interface MiniGameInfo {
    * 온라인 랭킹과 오늘의 도전에서 빠지며, 결과도 공용 결과 화면이 아니라 그 게임의 화면에서 보여 준다.
    */
   versus?: boolean;
+  /**
+   * true면 판이 끝나지 않고 이어지는 성장 게임이다. 점수 대신 평판이 쌓여서 허브 카드에 최고 기록 대신 "평판"이 보이고,
+   * 온라인 랭킹과 오늘의 도전에서 빠지며, 공용 결과 화면도 쓰지 않는다.
+   */
+  ongoing?: boolean;
 }
 
 export const GAMES: readonly MiniGameInfo[] = [
@@ -200,6 +206,16 @@ export const GAMES: readonly MiniGameInfo[] = [
     dailyTargets: [],
     // 이 앱의 대표 게임이라 허브 목록의 맨 앞에 놓는다.
     featured: true,
+  },
+  {
+    id: COMPANY_GAME_ID,
+    title: '새싹 컴퍼니',
+    icon: 'icon-company',
+    sceneKey: COMPANY_SCENE,
+    // 게임 하나를 출시할 때마다 한 판으로 치고 이만큼 준다.
+    coinsFor: () => 1,
+    dailyTargets: [],
+    ongoing: true,
   },
 ];
 

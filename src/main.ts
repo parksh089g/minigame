@@ -15,6 +15,7 @@ import { DuelScene } from './games/duel/DuelScene';
 import { GateRunScene } from './games/gate-run/GateRunScene';
 import { JumpRunnerScene } from './games/jump-runner/JumpRunnerScene';
 import { LanternKeeperScene } from './games/lantern-keeper/LanternKeeperScene';
+import { SproutCompanyScene } from './games/sprout-company/SproutCompanyScene';
 import { LightningTapScene } from './games/lightning-tap/LightningTapScene';
 import { LogicTilesScene } from './games/logic-tiles/LogicTilesScene';
 import { MemoryCardsScene } from './games/memory-cards/MemoryCardsScene';
@@ -112,6 +113,7 @@ async function boot(): Promise<void> {
       ChosungQuizScene,
       DuelScene,
       LanternKeeperScene,
+      SproutCompanyScene,
       PauseScene,
       ResultScene,
     ],

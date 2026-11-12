@@ -4,6 +4,7 @@
  */
 import {
   ENEMIES,
+  FLINT,
   HEROES,
   MAX_LEVEL,
   MAX_PASSIVES,
@@ -25,6 +26,7 @@ import {
 } from './data';
 import {
   auraStats,
+  bellStats,
   boltStats,
   clampDepth,
   damageScale,
@@ -41,6 +43,7 @@ import {
   midBossTier,
   minionKind,
   modifiers,
+  moonStats,
   oilStats,
   ownedPassives,
   ownedWeapons,
@@ -91,6 +94,11 @@ export interface Enemy {
   tier: number;
   vx: number;
   vy: number;
+  /** 종소리에 밀려 더 물러날 거리(px). 조금씩 줄어든다. 없으면 밀리는 중이 아니다. */
+  kx?: number;
+  ky?: number;
+  /** 부싯돌이 터져서 쓰러진 것. 다시 터지지 않는다. */
+  sparked?: boolean;
 }
 
 /** 등불 기둥. 닿으면 불이 켜지고, 켜져 있는 동안 둘레의 그림자를 태운다. */
@@ -174,6 +182,52 @@ export interface Fire {
   evolved: boolean;
 }
 
+/** 종소리: 울린 자리에서 둘레로 퍼져 나가는 고리 */
+export interface Wave {
+  x: number;
+  y: number;
+  /** 지금의 반지름(px) */
+  radius: number;
+  /** 이만큼 퍼지면 사라진다 */
+  max: number;
+  /** 울리기까지 남은 시간(초). 두 번째 종소리는 조금 뒤에 울린다. */
+  delay: number;
+  damage: number;
+  /** 닿은 보통 그림자가 밀려나는 거리(px) */
+  push: number;
+  /** 닿은 적의 이동 속도 배율 */
+  slow: number;
+  /** 이미 닿은 적. 한 번의 종소리는 같은 적을 한 번만 때린다. */
+  hit: number[];
+  evolved: boolean;
+}
+
+/** 초승달: 겨눈 쪽으로 날아갔다가 플레이어에게 돌아온다 */
+export interface Moon {
+  x: number;
+  y: number;
+  /** 날아가는 쪽(길이 1) */
+  dx: number;
+  dy: number;
+  /** 가는 길에 더 날아갈 거리(px). 다 가면 돌아선다. */
+  left: number;
+  /** 돌아오는 중인지 */
+  back: boolean;
+  speed: number;
+  damage: number;
+  /** 판정 반지름(px) */
+  radius: number;
+  /** 0이면 가는 길과 오는 길에 한 번씩만 벤다. 아니면 이 간격(초)마다 같은 적을 다시 벤다. */
+  rehit: number;
+  /** 다시 벨 수 있게 될 때까지 남은 시간(초). rehit이 있을 때만 쓴다. */
+  sweep: number;
+  /** 이미 벤 적. 돌아설 때 비운다. */
+  hit: number[];
+  /** 남은 시간(초). 돌아오지 못하고 떠도는 일이 없게 한다. */
+  life: number;
+  evolved: boolean;
+}
+
 export interface RunState {
   version: number;
   /** 지난 시간(초) */
@@ -211,6 +265,9 @@ export interface RunState {
   strikes: Strike[];
   fires: Fire[];
   hazards: Hazard[];
+  /** 퍼지고 있는 종소리와 날고 있는 초승달. 이 무기들이 생기기 전에 저장한 판에는 없어서, 이어 할 때 채운다. */
+  waves: Wave[];
+  moons: Moon[];
   /** 싸움터에 서 있는 등불 기둥. 기둥이 생기기 전에 저장한 판에는 없다. */
   posts?: Post[];
   /** 지금까지 나타난 등불 기둥의 수. POSTS.times의 몇 번째까지 나왔는지를 가리킨다. */
@@ -220,7 +277,7 @@ export interface RunState {
    * 판이 끝나면 도감에 적힌다. 도감이 생기기 전에 저장한 판에는 없다.
    */
   seen?: string[];
-  cd: { ember: number; aura: number; star: number; lance: number; oil: number; bolt: number };
+  cd: { ember: number; aura: number; star: number; lance: number; oil: number; bolt: number; bell: number; moon: number };
   fireflyAngle: number;
   spawnDebt: number;
   surgeIndex: number;
@@ -296,6 +353,10 @@ export type SimEvent =
   | { type: 'strike'; x: number; y: number; radius: number }
   /** 번갯불이 지나간 길. points는 x, y가 번갈아 들어 있다. */
   | { type: 'bolt'; points: number[]; evolved: boolean }
+  /** 종소리가 울렸다 */
+  | { type: 'bell'; evolved: boolean }
+  /** 부싯돌: 쓰러진 그림자가 (x, y)에서 터졌다 */
+  | { type: 'spark'; x: number; y: number; radius: number }
   | { type: 'boss'; kind: EnemyKind }
   | { type: 'ticket' }
   /** 보스가 빛덩이를 쏘려고 빛을 모으기 시작했다 */
@@ -332,6 +393,19 @@ const EMBER_RANGE = 130;
 const LANCE_RANGE = 170;
 /** 꿰뚫는 화살은 사라질 때까지 몇이든 꿰뚫는다. */
 const PIERCE_ALL = 9999;
+/** 초승달이 겨누는 거리(px) */
+const MOON_RANGE = 120;
+/** 초승달이 여럿일 때 벌어지는 각도(라디안) */
+const MOON_SPREAD = 0.5;
+/** 돌아온 초승달을 받아 드는 거리(px) */
+const MOON_CATCH = 8;
+/** 초승달이 날아다닐 수 있는 가장 긴 시간(초) */
+const MOON_LIFE = 4;
+/** 종소리가 퍼지는 빠르기(px/초)와, 두 번 울릴 때의 사이(초) */
+const BELL_SPEED = 170;
+const BELL_GAP = 0.3;
+/** 종소리에 밀려난 그림자가 물러나는 빠르기(px/초) */
+const PUSH_SPEED = 140;
 const GEM_LIMIT = 220;
 const GEM_PICKUP = 7;
 const GEM_SPEED = 170;
@@ -394,10 +468,12 @@ export function createRun(config: RunConfig): RunState {
     strikes: [],
     fires: [],
     hazards: [],
+    waves: [],
+    moons: [],
     posts: [],
     postsSpawned: 0,
     seen: [],
-    cd: { ember: 0.6, aura: 0, star: 1, lance: 0.8, oil: 0.5, bolt: 0.7 },
+    cd: { ember: 0.6, aura: 0, star: 1, lance: 0.8, oil: 0.5, bolt: 0.7, bell: 0.9, moon: 0.7 },
     fireflyAngle: 0,
     spawnDebt: 0,
     surgeIndex: 0,
@@ -485,6 +561,11 @@ export class Sim {
     if (typeof state.postsSpawned !== 'number') {
       state.postsSpawned = POSTS.times.filter((time) => time <= state.t).length;
     }
+    // 종소리와 초승달이 생기기 전에 저장한 판: 빈 채로 채워서 이어 간다.
+    if (!Array.isArray(state.waves)) state.waves = [];
+    if (!Array.isArray(state.moons)) state.moons = [];
+    if (typeof state.cd.bell !== 'number') state.cd.bell = 0.9;
+    if (typeof state.cd.moon !== 'number') state.cd.moon = 0.7;
     // 도감이 생기기 전에 저장한 판: 지금 싸움터에 있는 것부터 만난 것으로 적는다.
     if (!Array.isArray(state.seen)) {
       state.seen = [];
@@ -635,6 +716,8 @@ export class Sim {
     if (s.over) return;
     this.fireWeapons(dt);
     this.moveShots(dt);
+    this.spreadWaves(dt);
+    this.moveMoons(dt);
     this.landStrikes(dt);
     this.burnFires(dt);
     this.tendPosts(dt);
@@ -872,6 +955,18 @@ export class Sim {
       if (e.flash > 0) e.flash -= dt;
       if (e.slow > 0) e.slow -= dt;
       if (e.fireflyCd > 0) e.fireflyCd -= dt;
+      // 종소리에 밀려나는 중이면 남은 거리를 조금씩 물러난다.
+      if (e.kx || e.ky) {
+        const kx = e.kx ?? 0;
+        const ky = e.ky ?? 0;
+        const left = Math.hypot(kx, ky);
+        const move = Math.min(left, PUSH_SPEED * dt);
+        e.x += (kx / left) * move;
+        e.y += (ky / left) * move;
+        const rest = left - move < 0.01 ? 0 : (left - move) / left;
+        e.kx = kx * rest;
+        e.ky = ky * rest;
+      }
 
       let dx = p.x - e.x;
       let dy = p.y - e.y;
@@ -1379,6 +1474,171 @@ export class Sim {
         s.cd.bolt = struck.length > 0 ? stats.cooldown : 0.15;
       }
     }
+
+    if (w.bell) {
+      s.cd.bell -= dt;
+      if (s.cd.bell <= 0) {
+        const stats = bellStats(w.bell, this.mods);
+        // 둘레에 아무도 없으면 울리지 않고 기다린다.
+        const reach = stats.radius + 10;
+        const near = enemies.some((e) => e.hp > 0 && (e.x - p.x) ** 2 + (e.y - p.y) ** 2 < reach * reach);
+        if (!near) {
+          s.cd.bell = 0.2;
+        } else {
+          const evolved = isEvolved(w.bell);
+          for (let i = 0; i < stats.rings; i += 1) {
+            s.waves.push({
+              x: p.x,
+              y: p.y,
+              radius: 0,
+              max: stats.radius,
+              delay: i * BELL_GAP,
+              damage: stats.damage,
+              push: stats.push,
+              slow: stats.slow,
+              hit: [],
+              evolved,
+            });
+          }
+          s.cd.bell = stats.cooldown;
+          this.events.push({ type: 'bell', evolved });
+        }
+      }
+    }
+
+    if (w.moon) {
+      s.cd.moon -= dt;
+      if (s.cd.moon <= 0) {
+        let target: Enemy | null = null;
+        let best = MOON_RANGE * MOON_RANGE;
+        for (const e of enemies) {
+          if (e.hp <= 0) continue;
+          const d2 = (e.x - p.x) ** 2 + (e.y - p.y) ** 2;
+          if (d2 < best) {
+            best = d2;
+            target = e;
+          }
+        }
+        if (target) {
+          const stats = moonStats(w.moon, this.mods);
+          const base = Math.atan2(target.y - p.y, target.x - p.x);
+          for (let i = 0; i < stats.count; i += 1) {
+            const angle = base + (i - (stats.count - 1) / 2) * MOON_SPREAD;
+            s.moons.push({
+              x: p.x,
+              y: p.y,
+              dx: Math.cos(angle),
+              dy: Math.sin(angle),
+              left: stats.reach,
+              back: false,
+              speed: stats.speed,
+              damage: stats.damage,
+              radius: stats.radius,
+              rehit: stats.rehit,
+              sweep: stats.rehit,
+              hit: [],
+              life: MOON_LIFE,
+              evolved: isEvolved(w.moon),
+            });
+          }
+          s.cd.moon = stats.cooldown;
+          this.events.push({ type: 'shoot' });
+        } else {
+          s.cd.moon = 0.15;
+        }
+      }
+    }
+  }
+
+  /** 종소리가 퍼지면서, 고리가 닿은 적을 한 번씩 때리고 바깥으로 밀어낸다. */
+  private spreadWaves(dt: number): void {
+    const s = this.state;
+    let kept = 0;
+    for (const wave of s.waves) {
+      if (wave.delay > 0) {
+        wave.delay -= dt;
+        s.waves[kept] = wave;
+        kept += 1;
+        continue;
+      }
+      wave.radius = Math.min(wave.max, wave.radius + BELL_SPEED * dt);
+      for (const e of s.enemies) {
+        if (e.hp <= 0 || wave.hit.includes(e.uid)) continue;
+        const info = ENEMIES[e.kind];
+        const dx = e.x - wave.x;
+        const dy = e.y - wave.y;
+        const distance = Math.hypot(dx, dy);
+        if (distance > wave.radius + info.radius) continue;
+        wave.hit.push(e.uid);
+        this.damage(e, wave.damage, 'bell');
+        this.chill(e, wave.slow);
+        // 보스는 밀리지 않는다.
+        if (!info.boss) {
+          const scale = distance > 0.001 ? wave.push / distance : 0;
+          e.kx = (e.kx ?? 0) + (distance > 0.001 ? dx * scale : wave.push);
+          e.ky = (e.ky ?? 0) + dy * scale;
+        }
+      }
+      if (wave.radius < wave.max) {
+        s.waves[kept] = wave;
+        kept += 1;
+      }
+    }
+    s.waves.length = kept;
+  }
+
+  /** 초승달이 날아갔다가 돌아온다. 가는 길에 한 번, 오는 길에 한 번 벤다. */
+  private moveMoons(dt: number): void {
+    const s = this.state;
+    const p = s.player;
+    let kept = 0;
+    for (const moon of s.moons) {
+      moon.life -= dt;
+      let alive = moon.life > 0;
+      if (!moon.back) {
+        // 끝에 가까울수록 느려졌다가 돌아선다.
+        const ease = Math.max(0.35, Math.min(1, moon.left / 24));
+        const move = Math.min(moon.left, moon.speed * ease * dt);
+        moon.x += moon.dx * move;
+        moon.y += moon.dy * move;
+        moon.left -= move;
+        if (moon.left <= 0.01) {
+          moon.back = true;
+          moon.hit.length = 0;
+        }
+      } else {
+        const dx = p.x - moon.x;
+        const dy = p.y - moon.y;
+        const distance = Math.hypot(dx, dy);
+        if (distance < MOON_CATCH) {
+          alive = false;
+        } else {
+          // 돌아올 때는 조금 더 빨라서, 달아나는 플레이어도 따라잡는다.
+          const move = Math.min(distance, moon.speed * 1.25 * dt);
+          moon.x += (dx / distance) * move;
+          moon.y += (dy / distance) * move;
+        }
+      }
+      if (alive && moon.rehit > 0) {
+        moon.sweep -= dt;
+        if (moon.sweep <= 0) {
+          moon.sweep = moon.rehit;
+          moon.hit.length = 0;
+        }
+      }
+      if (alive) {
+        for (const e of s.enemies) {
+          if (e.hp <= 0 || moon.hit.includes(e.uid)) continue;
+          const reach = moon.radius + ENEMIES[e.kind].radius;
+          if ((e.x - moon.x) ** 2 + (e.y - moon.y) ** 2 >= reach * reach) continue;
+          moon.hit.push(e.uid);
+          this.damage(e, moon.damage, 'moon');
+        }
+        s.moons[kept] = moon;
+        kept += 1;
+      }
+    }
+    s.moons.length = kept;
   }
 
   private moveShots(dt: number): void {
@@ -1542,10 +1802,38 @@ export class Sim {
 
   // ------------------------------------------------------------ 정리와 보상
 
-  /** 쓰러진 적을 치우고 빛 조각을 떨어뜨린다. 순서를 지켜 줄여서 그리는 순서가 흔들리지 않게 한다. */
+  /** 쓰러진 적을 치우고 빛 조각을 떨어뜨린다. 부싯돌이 터져서 더 쓰러진 적도 이 자리에서 마저 치운다. */
   private reap(): void {
     const s = this.state;
+    const sparks = this.sweep();
+    if (sparks.length === 0) return;
+    // 부싯돌: 쓰러진 자리가 터져서 둘레의 그림자가 다친다. 이렇게 쓰러진 그림자는 다시 터지지 않는다.
+    const radius = FLINT.radius * this.mods.area;
+    for (let i = 0; i < sparks.length; i += 3) {
+      const x = sparks[i];
+      const y = sparks[i + 1];
+      // 튼튼한 그림자일수록 세게 터진다.
+      const damage = (FLINT.damage + FLINT.share * sparks[i + 2]) * this.mods.damage;
+      for (const e of s.enemies) {
+        if (e.hp <= 0) continue;
+        const reach = radius + ENEMIES[e.kind].radius;
+        if ((e.x - x) ** 2 + (e.y - y) ** 2 >= reach * reach) continue;
+        this.damage(e, damage, null);
+        if (e.hp <= 0) e.sparked = true;
+      }
+      this.events.push({ type: 'spark', x, y, radius });
+    }
+    this.sweep();
+  }
+
+  /**
+   * 체력이 다한 적을 치우고 빛 조각을 떨어뜨린다. 순서를 지켜 줄여서 그리는 순서가 흔들리지 않게 한다.
+   * 부싯돌로 터질 자리를 x, y, 그 그림자의 최대 체력이 차례로 든 배열로 돌려준다.
+   */
+  private sweep(): number[] {
+    const s = this.state;
     let kept = 0;
+    const sparks: number[] = [];
     for (const e of s.enemies) {
       if (e.hp > 0) {
         s.enemies[kept] = e;
@@ -1572,9 +1860,12 @@ export class Sim {
         if (roll < HEAL_DROP_CHANCE) this.dropGem(e.x, e.y, HEAL_DROP_VALUE, 'heal');
         else if (roll < HEAL_DROP_CHANCE + PULL_DROP_CHANCE) this.dropGem(e.x, e.y, 0, 'pull');
         else if (roll < HEAL_DROP_CHANCE + PULL_DROP_CHANCE + BLAST_DROP_CHANCE) this.dropGem(e.x, e.y, 0, 'blast');
+        // 부싯돌이 있을 때만 난수를 더 뽑는다. 없는 판의 흐름은 달라지지 않는다.
+        if (this.mods.spark > 0 && !e.sparked && this.rand() < this.mods.spark) sparks.push(e.x, e.y, e.maxHp);
       }
     }
     s.enemies.length = kept;
+    return sparks;
   }
 
   private dropGem(x: number, y: number, value: number, kind: Gem['kind']): void {

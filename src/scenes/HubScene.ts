@@ -413,10 +413,11 @@ export class HubScene extends Phaser.Scene {
 
     if (playable) {
       // 승패로 끝나는 게임은 최고 기록이 없으므로, 둘이 하는 게임이라는 것을 대신 알린다.
+      // 이어지는 성장 게임은 최고 기록 자리에 지금까지 쌓은 평판을 보여 준다.
       const line = game.versus
         ? { text: '둘이서', color: THEME_CSS.lilacDeep }
         : record.plays > 0
-          ? { text: `최고 ${record.best}`, color: THEME_CSS.accent }
+          ? { text: `${game.ongoing ? '평판' : '최고'} ${record.best}`, color: THEME_CSS.accent }
           : { text: '새 게임', color: THEME_CSS.faint };
       const best = addText(this, center, TILE.recordY, line.text, {
         size: FONT_SIZE.small,

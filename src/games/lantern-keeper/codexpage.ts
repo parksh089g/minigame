@@ -12,8 +12,8 @@ import { readEntries } from './meta';
 /** 준비 화면의 다른 쪽과 같은 여백 */
 const MARGIN = 12;
 const TAB = { top: 70, height: 22, gap: 4 } as const;
-/** 격자의 칸. 한 줄에 일곱 칸이 들어간다(스테이지의 그림자 여섯과 마지막 보스). */
-const TILE = { size: 28, gap: 3, perRow: 7, art: 22 } as const;
+/** 격자의 칸. 한 줄에 일곱 칸까지 들어간다(스테이지의 그림자 여섯과 마지막 보스). */
+const TILE = { size: 28, gap: 3, art: 22 } as const;
 const GRID_TOP = TAB.top + TAB.height + 8;
 /** 고른 항목을 크게 보여 주는 아래 칸 */
 const DETAIL = { height: 110, art: 40 } as const;
@@ -88,7 +88,9 @@ export function addCodexPage(scene: Phaser.Scene, handlers: LobbyHandlers, tabIn
   });
 
   const rows = Math.max(...entries.map((entry) => entry.row)) + 1;
-  const gridLeft = MARGIN + Math.floor((width - (TILE.size * TILE.perRow + TILE.gap * (TILE.perRow - 1))) / 2);
+  // 가장 긴 줄이 가운데에 오도록 놓는다.
+  const perRow = Math.max(...Array.from({ length: rows }, (_, row) => entries.filter((entry) => entry.row === row).length));
+  const gridLeft = MARGIN + Math.floor((width - (TILE.size * perRow + TILE.gap * (perRow - 1))) / 2);
   const detailTop = GRID_TOP + rows * (TILE.size + TILE.gap) + 3;
 
   // 처음에는 새로 열린 것 가운데 첫 항목을, 없으면 첫 항목을 고른다.
