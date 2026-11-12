@@ -40,6 +40,15 @@ export function initAudioUnlock(): void {
   window.addEventListener('keydown', unlock, { capture: true, passive: true });
 }
 
+/**
+ * 지금 소리를 낼 수 있는 오디오 컨텍스트. 아직 화면을 건드리지 않았거나 브라우저가 막고 있으면 null.
+ * 배경 음악(music.ts)이 효과음과 같은 컨텍스트를 쓰려고 받아 간다.
+ */
+export function runningAudio(): AudioContext | null {
+  const ctx = getContext();
+  return ctx && ctx.state === 'running' ? ctx : null;
+}
+
 export interface ToneOptions {
   type?: OscillatorType;
   /** 0~1 */
