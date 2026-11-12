@@ -36,6 +36,7 @@ export const NAME_MAX = 10;
 /**
  * 닉네임을 다듬는다. 쓸 수 없는 닉네임이면 null.
  * 글자와 숫자, 띄어쓰기, 밑줄, 붙임표만 받고 글자 수(2~10자)를 센다. 그림 문자와 겹쳐 쓰는 기호는 받지 않는다.
+ * 한글 채움 문자(U+3164 등)처럼 글자로 분류되지만 눈에 보이지 않는 것도 받지 않는다. 랭킹에 빈 줄로 보이기 때문이다.
  */
 export function cleanName(raw: unknown): string | null {
   if (typeof raw !== 'string' || raw.length > NAME_MAX * 8) return null;
@@ -43,6 +44,7 @@ export function cleanName(raw: unknown): string | null {
   const length = [...name].length;
   if (length < NAME_MIN || length > NAME_MAX) return null;
   if (!/^[\p{L}\p{N} _-]+$/u.test(name)) return null;
+  if (/\p{Default_Ignorable_Code_Point}/u.test(name)) return null;
   return name;
 }
 

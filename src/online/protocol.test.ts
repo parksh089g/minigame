@@ -54,6 +54,15 @@ describe('닉네임', () => {
     expect(cleanName('가\n나')).toBe('가 나');
   });
 
+  it('글자로 분류되지만 눈에 보이지 않는 채움 문자는 받지 않는다', () => {
+    // 한글 채움 문자, 반각 한글 채움 문자, 첫소리 채움 문자, 가운뎃소리 채움 문자
+    for (const filler of ['\u3164', '\uffa0', '\u115f', '\u1160']) {
+      expect(cleanName(filler.repeat(3)), `U+${filler.codePointAt(0)?.toString(16)}`).toBeNull();
+      expect(cleanName(`가${filler}나`), `U+${filler.codePointAt(0)?.toString(16)}`).toBeNull();
+    }
+    expect(cleanName('\u115f\u1160')).toBeNull();
+  });
+
   it('풀어 쓴 한글은 모아서 센다', () => {
     const decomposed = '한글'.normalize('NFD');
     expect(decomposed.length).toBeGreaterThan(2);
