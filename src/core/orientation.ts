@@ -9,8 +9,10 @@ import { APP_EVENT } from './app-events';
 /**
  * 가로로 눕힌 휴대폰. style.css의 #rotate 미디어 쿼리와 같아야 한다.
  * 태블릿과 컴퓨터는 가로여도 세로 길이가 넉넉해서 게임이 읽을 만한 크기로 들어가므로 빼 둔다.
+ * 폭 조건은 세로로 든 휴대폰에서 자판이 올라와 높이만 줄어든 경우를 빼려는 것이다(style.css의 설명 참고).
  */
-const SIDEWAYS_PHONE = '(orientation: landscape) and (max-height: 500px) and (pointer: coarse)';
+const SIDEWAYS_PHONE =
+  '(orientation: landscape) and (min-width: 520px) and (max-height: 500px) and (pointer: coarse)';
 
 const sidewaysQuery = (): MediaQueryList | null => window.matchMedia?.(SIDEWAYS_PHONE) ?? null;
 

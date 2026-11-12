@@ -25,6 +25,13 @@ let parent: HTMLElement | null = null;
 /** 화면 크기가 바뀌어서 다음 기회에 세로 길이를 다시 맞춰야 하는지 */
 let pending = false;
 
+/**
+ * 글자를 입력받는 창(core/dialog.ts)이 떠 있는지.
+ * 자판이 올라오면 화면 높이가 줄어드는 브라우저가 있는데, 그것은 화면 크기가 바뀐 것으로 치지 않는다.
+ * 창을 닫아 자판이 내려가면 크기가 되돌아오고, 그때 다시 판단한다.
+ */
+const dialogOpen = (): boolean => document.querySelector('dialog[open]') !== null;
+
 const wantedHeight = (): number =>
   parent ? computeGameHeight(parent.clientWidth, parent.clientHeight) : 0;
 
@@ -47,7 +54,7 @@ export function initRefit(
   parent = element;
   window.addEventListener('resize', () => {
     // 가로로 눕힌 동안에는 안내가 화면을 덮고 있다. 다시 세웠을 때의 크기로 판단한다.
-    if (isSideways()) return;
+    if (isSideways() || dialogOpen()) return;
     pending = wantedHeight() * renderScale() !== game.scale.height;
   });
 
