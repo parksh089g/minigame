@@ -217,6 +217,22 @@ export function personalHubOrder<T extends { id: string; featured?: boolean }>(
   return [...featured, ...favorite, ...played, ...fresh];
 }
 
+/**
+ * ids 가운데 가장 최근에 한 게임의 id. 해 본 게임이 하나도 없으면 null.
+ * 같은 때에 한 것이 여럿이면 ids에 먼저 적힌 것을 고른다.
+ */
+export function lastPlayedGame(
+  ids: readonly string[],
+  lastPlayedAt: (gameId: string) => number | null,
+): string | null {
+  let latest: { id: string; at: number } | null = null;
+  for (const id of ids) {
+    const at = lastPlayedAt(id);
+    if (at !== null && (latest === null || at > latest.at)) latest = { id, at };
+  }
+  return latest?.id ?? null;
+}
+
 export function getGame(id: string): MiniGameInfo | undefined {
   return GAMES.find((game) => game.id === id);
 }

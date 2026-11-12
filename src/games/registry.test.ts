@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { SPRITES } from '../art/sprites';
 import { dateKeyOf } from '../core/daily';
-import { GAMES, getGame, HUB_GAMES, orderForHub, personalHubOrder, todaysChallenge } from './registry';
+import {
+  GAMES,
+  getGame,
+  HUB_GAMES,
+  lastPlayedGame,
+  orderForHub,
+  personalHubOrder,
+  todaysChallenge,
+} from './registry';
 
 describe('게임 목록', () => {
   it('id가 겹치지 않는다', () => {
@@ -107,5 +115,25 @@ describe('게임 목록', () => {
   it('id로 게임을 찾는다', () => {
     expect(getGame('lightning-tap')?.title).toBe('번개 탭');
     expect(getGame('없는-게임')).toBeUndefined();
+  });
+});
+
+describe('가장 최근에 한 게임', () => {
+  const played: Record<string, number> = { a: 100, c: 300, d: 300 };
+  const at = (id: string): number | null => played[id] ?? null;
+
+  it('마지막으로 한 때가 가장 가까운 게임을 고른다', () => {
+    expect(lastPlayedGame(['a', 'b', 'c'], at)).toBe('c');
+    expect(lastPlayedGame(['a', 'b'], at)).toBe('a');
+  });
+
+  it('같은 때에 한 것이 여럿이면 먼저 적힌 것을 고른다', () => {
+    expect(lastPlayedGame(['d', 'c'], at)).toBe('d');
+    expect(lastPlayedGame(['c', 'd'], at)).toBe('c');
+  });
+
+  it('해 본 게임이 없으면 null이다', () => {
+    expect(lastPlayedGame(['b', 'x'], at)).toBeNull();
+    expect(lastPlayedGame([], at)).toBeNull();
   });
 });
