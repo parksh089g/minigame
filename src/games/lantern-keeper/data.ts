@@ -276,8 +276,8 @@ export const POSTS = {
 /** 이 시각들에 적이 둥글게 에워싸는 "밀물"이 한 번씩 온다(초). 중간 보스와 겹치지 않게 그 사이에 둔다. */
 export const SURGES: readonly number[] = [180, 300, 420, 540];
 
-export type WeaponId = 'ember' | 'aura' | 'firefly' | 'star' | 'lance' | 'oil' | 'bolt';
-export type PassiveId = 'wick' | 'hourglass' | 'boots' | 'magnet' | 'coat' | 'lens' | 'hood';
+export type WeaponId = 'ember' | 'aura' | 'firefly' | 'star' | 'lance' | 'oil' | 'bolt' | 'bell' | 'moon';
+export type PassiveId = 'wick' | 'hourglass' | 'boots' | 'magnet' | 'coat' | 'lens' | 'hood' | 'herb' | 'flint';
 
 /** 레벨업으로 올릴 수 있는 무기와 패시브의 최대 레벨 */
 export const MAX_LEVEL = 5;
@@ -335,10 +335,20 @@ export const WEAPONS: Readonly<Record<WeaponId, WeaponInfo>> = {
     levels: ['적에서 적으로 튀는 번개', '피해 +4', '두 번 더 튄다', '재사용 -20%', '피해 +5, 두 번 더'],
     evolved: { name: '뇌우', description: '두 줄기가 훨씬 멀리 튄다' },
   },
+  bell: {
+    name: '종소리',
+    levels: ['종소리가 둘레로 퍼져 적을 밀어낸다', '피해 +4', '범위 +8', '재사용 -20%', '피해 +5, 더 멀리 밀어낸다'],
+    evolved: { name: '새벽 종', description: '두 번 울리고, 닿은 적이 한동안 굼떠진다' },
+  },
+  moon: {
+    name: '초승달',
+    levels: ['가까운 적 쪽으로 날아갔다 돌아오며 두 번 벤다', '피해 +5', '더 멀리 날아간다', '한 개 더', '피해 +6, 재사용 -20%'],
+    evolved: { name: '보름달', description: '크고 묵직한 달 셋이 지나는 길을 거듭 벤다' },
+  },
 };
 
 /** 선택지와 화면에 늘어놓는 순서 */
-export const WEAPON_ORDER: readonly WeaponId[] = ['ember', 'aura', 'firefly', 'star', 'lance', 'oil', 'bolt'];
+export const WEAPON_ORDER: readonly WeaponId[] = ['ember', 'aura', 'firefly', 'star', 'lance', 'oil', 'bolt', 'bell', 'moon'];
 
 export interface PassiveInfo {
   name: string;
@@ -355,7 +365,28 @@ export const PASSIVES: Readonly<Record<PassiveId, PassiveInfo>> = {
   lens: { name: '유리 렌즈', perLevel: '공격 범위 +10%' },
   // 선택 카드에는 이 글 대신 그 레벨에서 몇 초마다 다시 생기는지를 적는다(rules.ts의 upgradeDescription).
   hood: { name: '등갓', perLevel: '피해를 한 번 막는 빛막, 다시 생기는 시간 -3초' },
+  herb: { name: '약초 주머니', perLevel: '1초마다 체력 +0.2' },
+  // 선택 카드에는 이 글 대신 그 레벨에서의 확률을 적는다(rules.ts의 upgradeDescription).
+  flint: { name: '부싯돌', perLevel: '쓰러진 그림자가 터질 확률 +7%' },
 };
+
+/** 약초 주머니가 레벨 하나당 1초에 채워 주는 체력 */
+export const HERB_REGEN = 0.2;
+
+/**
+ * 부싯돌: 쓰러진 보통 그림자가 가끔 터져서 둘레의 그림자를 다치게 한다.
+ * 그렇게 터져서 쓰러진 그림자는 다시 터지지 않는다(끝없이 이어지지 않게).
+ */
+export const FLINT = {
+  /** 레벨 하나당 터질 확률 */
+  chance: 0.07,
+  /** 터지는 둘레의 반지름(px). 공격 범위 강화가 붙는다. */
+  radius: 20,
+  /** 둘레 안의 그림자가 받는 피해: 이만큼에 쓰러진 그림자의 최대 체력의 share배를 더한다. 피해 강화가 붙는다. */
+  damage: 8,
+  /** 튼튼한 그림자일수록 세게 터져서, 뒤로 갈수록 약해지지 않는다. */
+  share: 0.4,
+} as const;
 
 /** 등갓의 빛막이 다시 생기는 데 걸리는 시간(초): 1레벨의 값과 레벨마다 줄어드는 값 */
 export const GUARD = { seconds: 24, perLevel: 3 } as const;

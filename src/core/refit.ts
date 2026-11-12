@@ -9,6 +9,7 @@
  */
 import Phaser from 'phaser';
 import { computeGameHeight, GAME_WIDTH, SCENE } from '../config';
+import { COMPANY_SCENE } from '../games/sprout-company/data';
 import { isSideways } from './orientation';
 import { renderScale } from './render-scale';
 
@@ -19,6 +20,8 @@ const MENU_SCENES: readonly string[] = [
   SCENE.shop,
   SCENE.achievements,
   SCENE.ranking,
+  // 새싹 컴퍼니는 진행이 따로 저장되어 있어서 화면을 다시 만들어도 그대로 이어진다.
+  COMPANY_SCENE,
 ];
 
 let parent: HTMLElement | null = null;

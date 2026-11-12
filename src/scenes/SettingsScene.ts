@@ -4,7 +4,8 @@ import { exportBundleText, importBundleText } from '../core/bundle';
 import { promptText, showCode } from '../core/dialog';
 import { dateStamp, downloadText, pickTextFile } from '../core/files';
 import { canVibrate, vibrate } from '../core/haptics';
-import { getOfflineStatus, onOfflineStatus, type OfflineStatus } from '../core/pwa';
+import { showInstallGuide } from '../core/install-guide';
+import { getOfflineStatus, isStandalone, onOfflineStatus, type OfflineStatus } from '../core/pwa';
 import { sfx } from '../core/sfx';
 import { store } from '../core/store';
 import { addBackdrop, addPanel, addText, fadeIn, fadeToScene, PixelButton, whileBlocked } from '../core/ui';
@@ -45,7 +46,7 @@ interface SettingsData {
   notice?: { text: string; ok: boolean };
 }
 
-/** 효과음·배경 음악·진동·색 구분 도우미 설정, 세이브 내보내기·가져오기·초기화, 다른 기기로 옮기기, 앱 정보. */
+/** 효과음·배경 음악·진동·색 구분 도우미 설정, 세이브 내보내기·가져오기·초기화, 다른 기기로 옮기기, 앱 정보. 통계와 설치 안내로 가는 버튼도 있다. */
 export class SettingsScene extends Phaser.Scene {
   private noticeText!: Phaser.GameObjects.Text;
   private resetArmedUntil = 0;
@@ -67,6 +68,7 @@ export class SettingsScene extends Phaser.Scene {
       hitPadding: 6,
       onTap: () => fadeToScene(this, SCENE.hub),
     });
+    this.addHeaderButtons();
     addText(this, GAME_WIDTH / 2, 8, '설정', { size: FONT_SIZE.large, originX: 0.5 });
 
     this.addSection(TOP.sound, '소리, 진동, 화면');
@@ -148,6 +150,30 @@ export class SettingsScene extends Phaser.Scene {
     this.addInfoRows(TOP.info + 20);
 
     fadeIn(this);
+  }
+
+  /**
+   * 제목 오른쪽의 작은 버튼들: 통계 화면과, 홈 화면에 추가하는 방법.
+   * 아래 구역들은 가장 짧은 화면에 꼭 맞게 차 있어서 자리를 더 쓰지 않는 제목 줄에 둔다.
+   * 이미 홈 화면에서 연 경우에는 설치 안내가 필요 없으니 통계만 보인다.
+   */
+  private addHeaderButtons(): void {
+    const button = { y: 8, width: 38, height: 26, hitPadding: 2 } as const;
+    const right = GAME_WIDTH - 8 - button.width;
+    new PixelButton(this, {
+      ...button,
+      x: right,
+      label: '통계',
+      onTap: () => fadeToScene(this, SCENE.stats),
+    });
+    if (isStandalone()) return;
+    new PixelButton(this, {
+      ...button,
+      x: right - button.width - 4,
+      label: '설치',
+      style: 'yellow',
+      onTap: () => void whileBlocked(this, showInstallGuide),
+    });
   }
 
   private addSection(y: number, title: string): void {

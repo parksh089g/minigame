@@ -361,6 +361,15 @@ export class LanternKeeperScene extends MiniGameScene {
           }
           board.play('bolt', now);
           break;
+        case 'bell':
+          board.play('bell', now);
+          // 새벽 종은 두 번 울린다.
+          if (event.evolved) board.play('bell', now, 0.3);
+          break;
+        case 'spark':
+          this.view.flint(sim, event.x, event.y, event.radius);
+          board.play('flint', now);
+          break;
         case 'boss':
           showBanner(this, this.scale.height * 0.3, ENEMIES[event.kind].name, CSS.red, 1800, DEPTH.banner);
           board.play('boss', now);

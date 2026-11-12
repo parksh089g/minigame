@@ -30,6 +30,8 @@ interface Ring {
   life: number;
   /** 적이 터진 자리면 위험한 색으로 그린다 */
   hostile?: boolean;
+  /** 부싯돌이 터진 자리면 불꽃 색으로 그린다 */
+  flint?: boolean;
 }
 
 /** 번갯불이 지나간 길. 잠깐 보였다 사라진다. */
@@ -211,6 +213,12 @@ export class RunView {
   /** 적이 터진 자리에 퍼지는 붉은 고리 */
   pop(x: number, y: number, radius: number): void {
     this.rings.push({ x, y, radius, life: RING_SECONDS, hostile: true });
+  }
+
+  /** 부싯돌이 터진 자리에 퍼지는 불꽃 고리 */
+  flint(sim: Sim, x: number, y: number, radius: number): void {
+    this.rings.push({ x, y, radius, life: RING_SECONDS, flint: true });
+    this.burst(sim, x, y, 5);
   }
 
   /** 번갯불이 지나간 길을 잠깐 그린다. points는 세상 좌표의 x, y가 번갈아 들어 있다. */
@@ -555,6 +563,13 @@ export class RunView {
     for (const hazard of s.hazards) {
       this.shots.put(LK.orb, hazard.x + offsetX, hazard.y + offsetY).setRotation(0).setScale(throb);
     }
+    // 초승달은 빙글빙글 돌면서 날고, 보름달은 천천히 돈다.
+    for (const moon of s.moons) {
+      this.shots
+        .put(moon.evolved ? LK.moonEvo : LK.moon, moon.x + offsetX, moon.y + offsetY)
+        .setRotation(seconds * (moon.evolved ? 5 : 16))
+        .setScale(1);
+    }
     for (const strike of s.strikes) {
       // 비스듬히 떨어져 내려온다.
       const fall = strike.delay * 260;
@@ -596,13 +611,32 @@ export class RunView {
       g.lineStyle(1, LOOK.strike, 0.5);
       g.strokeCircle(Math.round(strike.x + offsetX), Math.round(strike.y + offsetY), strike.radius);
     }
+    // 종소리: 퍼져 나가면서 옅어지는 고리
+    for (const wave of s.waves) {
+      if (wave.delay > 0 || wave.radius <= 0) continue;
+      const fade = 1 - wave.radius / wave.max;
+      const x = Math.round(wave.x + offsetX);
+      const y = Math.round(wave.y + offsetY);
+      g.lineStyle(3, wave.evolved ? LOOK.bellEvo : LOOK.bell, 0.25 + 0.5 * fade);
+      g.strokeCircle(x, y, wave.radius);
+      g.lineStyle(1, LOOK.bolt, 0.3 + 0.6 * fade);
+      g.strokeCircle(x, y, wave.radius);
+    }
     let kept = 0;
     for (const ring of this.rings) {
       ring.life -= dt;
       if (ring.life <= 0) continue;
       const progress = 1 - ring.life / RING_SECONDS;
-      g.fillStyle(ring.hostile ? LOOK.threat : LOOK.strike, 0.35 * (1 - progress));
-      g.fillCircle(Math.round(ring.x + offsetX), Math.round(ring.y + offsetY), ring.radius * (0.5 + 0.5 * progress));
+      const ringX = Math.round(ring.x + offsetX);
+      const ringY = Math.round(ring.y + offsetY);
+      const reach = ring.radius * (0.5 + 0.5 * progress);
+      g.fillStyle(ring.hostile ? LOOK.threat : ring.flint ? LOOK.flint : LOOK.strike, 0.35 * (1 - progress));
+      g.fillCircle(ringX, ringY, reach);
+      // 부싯돌이 터진 자리는 작아서, 가장자리를 밝게 둘러 눈에 띄게 한다.
+      if (ring.flint) {
+        g.lineStyle(1, LOOK.strike, 0.7 * (1 - progress));
+        g.strokeCircle(ringX, ringY, reach);
+      }
       this.rings[kept] = ring;
       kept += 1;
     }

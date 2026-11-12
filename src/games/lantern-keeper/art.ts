@@ -50,6 +50,8 @@ export const LK = {
   starEvo: 'lk-star-evo',
   lance: 'lk-lance',
   lanceEvo: 'lk-lance-evo',
+  moon: 'lk-moon',
+  moonEvo: 'lk-moon-evo',
   floor: 'lk-floor',
   floorMarsh: 'lk-floor-marsh',
   spark: 'lk-spark',
@@ -77,6 +79,10 @@ export const LOOK = {
   fire: COLOR.orange,
   fireCore: COLOR.yellow,
   fireEvo: COLOR.red,
+  /** 종소리의 고리와, 부싯돌이 터진 자리 */
+  bell: COLOR.yellow,
+  bellEvo: COLOR.cyan,
+  flint: COLOR.orange,
   bolt: COLOR.white,
   boltGlow: COLOR.cyan,
   boltEvoGlow: COLOR.yellow,
@@ -212,6 +218,43 @@ const LANCE_EVO: Rows = [
   '.3444444444cccc.',
   '..33333333cccc..',
   '...........cc...',
+];
+
+/** 초승달. 빙글빙글 돌면서 날아간다. */
+const MOON: Rows = [
+  '.....cdd.....',
+  '...ccd.......',
+  '..ccd........',
+  '.ccd.........',
+  '.ccd.........',
+  'cccd.........',
+  'cccd.........',
+  'cccd.........',
+  '.cccd........',
+  '.cccdd.......',
+  '..cccdd......',
+  '...cccccdd...',
+  '.....ccc.....',
+];
+/** 보름달. 가장자리가 노랗게 빛난다. */
+const MOON_EVO: Rows = [
+  '.......444.......',
+  '....444ccc444....',
+  '...44ccccccc44...',
+  '..4ccccccccccc4..',
+  '.44ccccccdcccc44.',
+  '.4cccddcccccccc4.',
+  '.4cccddcccccdcc4.',
+  '4ccccccccccccccc4',
+  '4ccccccccccccccc4',
+  '4ccccccccccccccc4',
+  '.4ccdcccccddccc4.',
+  '.4ccccccccddccc4.',
+  '.44ccccdcccccc44.',
+  '..4ccccccccccc4..',
+  '...44ccccccc44...',
+  '....444ccc444....',
+  '.......444.......',
 ];
 
 /** 회복 떡 */
@@ -737,6 +780,8 @@ export function registerLanternTextures(scene: Phaser.Scene): void {
   );
   add(LK.lance, drawRows(LANCE));
   add(LK.lanceEvo, drawRows(LANCE_EVO));
+  add(LK.moon, drawRows(MOON));
+  add(LK.moonEvo, drawRows(MOON_EVO));
   add(
     LK.spark,
     drawDot(2, [[1.5, 12]]),

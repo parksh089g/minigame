@@ -6,6 +6,7 @@
  */
 import {
   ENEMIES,
+  FLINT,
   GUARD,
   MAX_LEVEL,
   MAX_PASSIVES,
@@ -117,45 +118,64 @@ function passiveText(id: PassiveId): string {
   if (id === 'hood') {
     return `피해를 한 번 막는 빛막을 두른다. 깨지면 ${GUARD.seconds}초 뒤에 다시 생기고, 레벨마다 ${GUARD.perLevel}초씩 빨라진다`;
   }
+  if (id === 'flint') {
+    return `쓰러진 그림자가 가끔 터져서 둘레의 그림자를 다치게 한다. 튼튼한 그림자일수록 세게 터진다. 레벨마다 터질 확률 +${Math.round(FLINT.chance * 100)}%. 이렇게 쓰러진 그림자는 다시 터지지 않는다`;
+  }
   return `레벨마다 ${PASSIVES[id].perLevel}`;
+}
+
+/** 도감의 격자 한 줄에 들어가는 칸 수. 화면 너비에 맞춘 값이다. */
+export const CODEX_ROW_MAX = 7;
+
+/**
+ * count개를 한 줄에 CODEX_ROW_MAX개가 넘지 않게, 줄마다 비슷한 수로 나눠 놓을 때 index번째가 놓이는 줄.
+ * 아홉 개는 일곱과 둘이 아니라 다섯과 넷으로 나뉜다.
+ */
+export function wrapRow(index: number, count: number): number {
+  const rows = Math.max(1, Math.ceil(count / CODEX_ROW_MAX));
+  return Math.floor(index / Math.ceil(count / rows));
 }
 
 function buildCodex(): CodexEntry[] {
   const entries: CodexEntry[] = [];
-  for (const id of WEAPON_ORDER) {
+  const weaponCount = WEAPON_ORDER.length;
+  // 무기가 차지하는 줄 수. 진화형은 그 아래에 같은 모양으로 놓여서, 무기와 그 진화형이 같은 자리에 온다.
+  const weaponRows = wrapRow(weaponCount - 1, weaponCount) + 1;
+  WEAPON_ORDER.forEach((id, index) => {
     const weapon = WEAPONS[id];
     entries.push({
       id,
       tab: 'weapons',
-      row: 0,
+      row: wrapRow(index, weaponCount),
       name: weapon.name,
       note: `한 판에 ${MAX_WEAPONS}개까지 · ${MAX_LEVEL}레벨 뒤에 진화`,
       text: `${weapon.levels[0]}. 오를 때마다: ${weapon.levels.slice(1).join(' · ')}`,
     });
-  }
-  for (const id of WEAPON_ORDER) {
+  });
+  WEAPON_ORDER.forEach((id, index) => {
     const weapon = WEAPONS[id];
     entries.push({
       id: evolvedId(id),
       tab: 'weapons',
-      row: 1,
+      row: weaponRows + wrapRow(index, weaponCount),
       name: weapon.evolved.name,
       note: `${weapon.name}의 진화`,
       text: weapon.evolved.description,
       secret: 'evolved',
       hint: `${MAX_LEVEL}레벨 ${weapon.name}에 무기 강화권을 쓰면 진화해요. 강화권은 중간 보스가 줘요`,
     });
-  }
-  for (const id of Object.keys(PASSIVES) as PassiveId[]) {
+  });
+  const passiveIds = Object.keys(PASSIVES) as PassiveId[];
+  passiveIds.forEach((id, index) => {
     entries.push({
       id,
       tab: 'passives',
-      row: 0,
+      row: wrapRow(index, passiveIds.length),
       name: PASSIVES[id].name,
       note: `${MAX_LEVEL}레벨까지 · 한 판에 ${MAX_PASSIVES}개까지`,
       text: passiveText(id),
     });
-  }
+  });
   // 그림자: 스테이지마다 한 줄(나오는 차례대로, 끝에 마지막 보스), 그 아래에 중간 보스 한 줄
   STAGE_ORDER.forEach((stageId, row) => {
     const stage = STAGES[stageId];

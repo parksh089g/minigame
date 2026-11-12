@@ -167,6 +167,7 @@ export const SCENE = {
   boot: 'Boot',
   hub: 'Hub',
   settings: 'Settings',
+  stats: 'Stats',
   shop: 'Shop',
   achievements: 'Achievements',
   ranking: 'Ranking',

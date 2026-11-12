@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CODEX,
   CODEX_IDS,
+  CODEX_ROW_MAX,
   CODEX_TABS,
   discover,
   entriesOf,
@@ -11,6 +12,7 @@ import {
   MET_IDS,
   normalizeCodex,
   unreadIn,
+  wrapRow,
   type CodexProgress,
 } from './codex';
 import { ENEMIES, PASSIVES, STAGE_ORDER, STAGES, WEAPON_ORDER } from './data';
@@ -50,11 +52,33 @@ describe('도감의 내용', () => {
     });
   });
 
+  it('한 줄에 다 들어가지 않으면 줄마다 비슷한 수로 나뉜다', () => {
+    const rows = (count: number): number[] => Array.from({ length: count }, (_, index) => wrapRow(index, count));
+    expect(rows(7)).toEqual([0, 0, 0, 0, 0, 0, 0]);
+    expect(rows(9)).toEqual([0, 0, 0, 0, 0, 1, 1, 1, 1]);
+    expect(rows(14)).toEqual([0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1]);
+    expect(Math.max(...rows(15))).toBe(2);
+  });
+
+  it('진화형은 무기와 같은 모양으로 그 아래에 놓여서, 무기와 그 진화형이 같은 칸에 온다', () => {
+    const weapons = entriesOf('weapons');
+    const place = (id: string): { row: number; column: number } => {
+      const item = weapons.find((other) => other.id === id)!;
+      const line = weapons.filter((other) => other.row === item.row);
+      return { row: item.row, column: line.indexOf(item) };
+    };
+    const depth = Math.max(...WEAPON_ORDER.map((id) => place(id).row)) + 1;
+    for (const id of WEAPON_ORDER) {
+      expect(place(evolvedId(id))).toEqual({ row: place(id).row + depth, column: place(id).column });
+    }
+  });
+
   it('한 줄에는 일곱 칸까지만 놓인다', () => {
     for (const tab of CODEX_TABS) {
       const rows = new Map<number, number>();
       for (const item of entriesOf(tab.id)) rows.set(item.row, (rows.get(item.row) ?? 0) + 1);
-      expect(Math.max(...rows.values())).toBeLessThanOrEqual(7);
+      expect(Math.max(...rows.values())).toBeLessThanOrEqual(CODEX_ROW_MAX);
+      expect(CODEX_ROW_MAX).toBe(7);
     }
   });
 
