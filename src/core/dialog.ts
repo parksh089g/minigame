@@ -1,6 +1,7 @@
 /**
- * 게임 캔버스 밖(DOM)에 띄우는 작은 창: 글자를 입력받는 창과 코드를 보여 주는 창.
- * 캔버스 안에서는 한글 입력기와 휴대폰 자판이 동작하지 않아서, 글자를 받을 때만 이 창을 쓴다.
+ * 게임 캔버스 밖(DOM)에 띄우는 작은 창: 글자를 입력받는 창, 코드를 보여 주는 창, 할 일을 차례로 알려 주는 창.
+ * 캔버스 안에서는 한글 입력기와 휴대폰 자판이 동작하지 않아서 글자는 이 창으로 받는다.
+ * 길게 읽는 안내도 글꼴에 없는 글자와 기호를 쓸 수 있고 줄이 알아서 바뀌는 이 창에 적는다.
  * 창이 떠 있는 동안에는 뒤의 게임 화면이 눌리지 않는다. 뒤로 가기나 Esc, 바깥을 누르면 닫힌다.
  */
 
@@ -175,5 +176,55 @@ export function showCode(options: { title: string; code: string; hint?: string }
     row.append(copy, close);
     card.appendChild(row);
     return close;
+  });
+}
+
+export interface GuideOptions {
+  title: string;
+  /** 순서 위에 보이는 설명 */
+  hint?: string;
+  /** 차례대로 할 일. 번호를 붙여 보여 준다. */
+  steps: readonly string[];
+  /** 닫기 옆에 두는 버튼의 글자. 누르면 창이 닫히고 'action'이 답이 된다. */
+  action?: string;
+  /** 아래에 따로 두는 복사 버튼. 누르면 text를 복사하고 창은 그대로 있다. */
+  copy?: { label: string; text: string };
+}
+
+/** 차례대로 할 일을 번호를 붙여 보여 준다. 닫을 때까지 기다린다. */
+export function showGuide(options: GuideOptions): Promise<'action' | 'close'> {
+  return open<'action' | 'close'>('close', (card, finish) => {
+    card.appendChild(element('h2', 'dialog-title', options.title));
+    if (options.hint) card.appendChild(element('p', 'dialog-hint', options.hint));
+
+    const list = element('ol', 'dialog-steps');
+    for (const step of options.steps) list.appendChild(element('li', 'dialog-step', step));
+    card.appendChild(list);
+
+    const row = element('div', 'dialog-buttons');
+    const close = button('닫기', options.action ? '' : 'dialog-primary');
+    close.addEventListener('click', () => finish('close'));
+    row.appendChild(close);
+    let first = close;
+    if (options.action) {
+      const action = button(options.action, 'dialog-primary');
+      action.addEventListener('click', () => finish('action'));
+      row.appendChild(action);
+      first = action;
+    }
+    card.appendChild(row);
+
+    if (options.copy) {
+      const { label, text } = options.copy;
+      const copy = element('button', 'dialog-link', label);
+      copy.type = 'button';
+      copy.addEventListener('click', () => {
+        void copyText(text).then((copied) => {
+          copy.textContent = copied ? '복사했어요' : '복사하지 못했어요';
+        });
+      });
+      card.appendChild(copy);
+    }
+    return first;
   });
 }

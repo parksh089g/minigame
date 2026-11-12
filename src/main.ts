@@ -3,6 +3,7 @@ import './style.css';
 import { computeGameHeight, FONT_FAMILY, FONT_SIZE, GAME_WIDTH, THEME } from './config';
 import { initAppShell, untilUpright } from './core/shell';
 import { HiDpiPlugin, pickRenderScale, renderScale, setRenderScale } from './core/hidpi';
+import { initInstall } from './core/install-guide';
 import { initPwa, isStandalone } from './core/pwa';
 import { initAudioUnlock } from './core/sfx';
 import { store } from './core/store';
@@ -33,6 +34,7 @@ import { RankingScene } from './scenes/RankingScene';
 import { ResultScene } from './scenes/ResultScene';
 import { SettingsScene } from './scenes/SettingsScene';
 import { ShopScene } from './scenes/ShopScene';
+import { StatsScene } from './scenes/StatsScene';
 
 declare global {
   interface Window {
@@ -51,6 +53,8 @@ async function loadFonts(): Promise<void> {
 }
 
 async function boot(): Promise<void> {
+  // 브라우저가 "설치할 수 있다"고 알리는 것은 페이지를 연 직후 한 번뿐이라, 기다리는 일보다 먼저 들을 준비를 한다.
+  initInstall();
   // 휴대폰을 가로로 눕힌 채 켰으면, 세로로 돌린 뒤에 화면 크기를 잰다(core/orientation.ts).
   await Promise.all([loadFonts(), store.load(), untilUpright()]);
 
@@ -85,6 +89,7 @@ async function boot(): Promise<void> {
       BootScene,
       HubScene,
       SettingsScene,
+      StatsScene,
       ShopScene,
       AchievementsScene,
       RankingScene,

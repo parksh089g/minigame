@@ -6,6 +6,7 @@ import {
   createDailyState,
   DAILY_REWARDS,
   dateKeyOf,
+  dateKeyOfDay,
   dayNumber,
   isCleared,
   normalizeDaily,
@@ -41,6 +42,14 @@ describe('날짜', () => {
   it('형식이 틀리거나 없는 날짜는 받아들이지 않는다', () => {
     for (const bad of ['', '2026-1-5', '2026/01/05', '2026-02-30', '2026-13-01', 'today']) {
       expect(dayNumber(bad), bad).toBeNull();
+    }
+  });
+
+  it('날짜 수를 다시 날짜로 되돌릴 수 있다', () => {
+    expect(dateKeyOfDay(0)).toBe('1970-01-01');
+    expect(dateKeyOfDay(-3)).toBe('1969-12-29');
+    for (const key of ['2026-01-05', '2026-11-12', '2026-12-31', '2028-02-29', '2031-03-01']) {
+      expect(dateKeyOfDay(dayNumber(key)!), key).toBe(key);
     }
   });
 });

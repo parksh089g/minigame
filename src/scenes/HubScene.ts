@@ -5,6 +5,8 @@ import { APP_NAME, APP_VERSION, FONT_SIZE, GAME_WIDTH, SCENE, THEME, THEME_CSS }
 import { claimable, statsOf } from '../core/achievements';
 import { activeStreak, dateKeyOf, isCleared, streakBonus } from '../core/daily';
 import { vibrate } from '../core/haptics';
+import { installTip } from '../core/install';
+import { currentPlatform, showInstallGuide } from '../core/install-guide';
 import { clampPage, layoutPages, pageSlice, type PageLayout } from '../core/paging';
 import {
   getOfflineStatus,
@@ -15,6 +17,7 @@ import {
 import { getRecord, isFavorite } from '../core/save';
 import { sfx } from '../core/sfx';
 import { store } from '../core/store';
+import { claimableMissions } from '../core/weekly';
 import {
   addBackdrop,
   addTapZone,
@@ -27,8 +30,16 @@ import {
   Pager,
   PAGER_HEIGHT,
   PixelButton,
+  whileBlocked,
 } from '../core/ui';
-import { GAMES, getGame, personalHubOrder, todaysChallenge, type MiniGameInfo } from '../games/registry';
+import {
+  GAMES,
+  getGame,
+  personalHubOrder,
+  thisWeek,
+  todaysChallenge,
+  type MiniGameInfo,
+} from '../games/registry';
 
 const MARGIN = 12;
 const CARD_WIDTH = GAME_WIDTH - MARGIN * 2;
@@ -143,8 +154,11 @@ export class HubScene extends Phaser.Scene {
       onTap: () => fadeToScene(this, SCENE.settings),
     });
 
-    // 설정 옆: 업적. 받을 보상이 있으면 노랗게 바뀌고 산호색 점이 붙는다.
-    const waiting = claimable(store.data.achievements, statsOf(store.data)).length;
+    // 설정 옆: 업적. 받을 보상(업적이나 주간 미션)이 있으면 노랗게 바뀌고 산호색 점이 붙는다.
+    const week = thisWeek(store.data.weekly);
+    const waiting =
+      claimable(store.data.achievements, statsOf(store.data)).length +
+      (week ? claimableMissions(store.data.weekly, week).length : 0);
     new PixelButton(this, {
       x: 40,
       y: 8,
@@ -460,8 +474,10 @@ export class HubScene extends Phaser.Scene {
   /** 카드 아래 빈자리에 짧은 도움말을 둔다. 화면이 짧아 카드와 겹치면 생략한다. */
   private addTip(height: number): void {
     const plays = Object.values(store.data.games).reduce((sum, record) => sum + record.plays, 0);
-    const message = !isStandalone()
-      ? "앱처럼 쓰려면 브라우저 메뉴에서 '홈 화면에 추가'를 눌러 주세요."
+    // 아직 홈 화면에 추가하지 않았으면 그것부터 권한다. 방법은 기기마다 달라서, 누르면 그 기기에 맞는 순서가 나온다.
+    const toInstall = !isStandalone();
+    const message = toInstall
+      ? installTip(currentPlatform())
       : plays > 0 && store.data.favorites.length === 0
         ? '카드의 별을 누르면 그 게임이 앞쪽에 놓여요. 그다음은 최근에 한 순서예요.'
         : plays > 0
@@ -483,8 +499,21 @@ export class HubScene extends Phaser.Scene {
       return;
     }
     const panel = this.add.graphics();
-    drawPanel(panel, MARGIN, top, CARD_WIDTH, panelHeight, { fill: THEME.dim, shadow: null });
+    const drawTip = (pressed: boolean): void => {
+      panel.clear();
+      drawPanel(panel, MARGIN, top, CARD_WIDTH, panelHeight, {
+        fill: pressed ? THEME.shadow : THEME.dim,
+        shadow: null,
+      });
+    };
+    drawTip(false);
     text.setY(top + 7).setDepth(1);
+    if (toInstall) {
+      addTapZone(this, MARGIN, top, CARD_WIDTH, panelHeight, drawTip, () => {
+        sfx.click();
+        void whileBlocked(this, showInstallGuide);
+      });
+    }
   }
 
   private addFooter(height: number): void {

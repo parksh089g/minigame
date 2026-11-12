@@ -10,6 +10,7 @@ import { store } from '../core/store';
 import { addPanel, addScrim, addTapZone, addText, fadeToScene, PixelButton } from '../core/ui';
 import type { Achievement } from '../core/achievements';
 import type { DailyOutcome } from '../core/save';
+import type { WeeklyMission } from '../core/weekly';
 import { getGame } from '../games/registry';
 import { loadBoard, scoreSync, syncScores } from '../online/online';
 import { isJoined } from '../online/profile';
@@ -17,13 +18,14 @@ import { isRankedGame, rankLabel } from '../online/protocol';
 import { makeShareImage } from '../share/card';
 import { displayHost, shareFileName, shareNotice, shareText, shareTitle, shareUrl } from '../share/link';
 import { sendShare } from '../share/send';
+import type { AchievementsData } from './AchievementsScene';
 import type { ResultData, ResultStrip } from './MiniGameScene';
 import { askNickname } from './nickname';
 import type { RankingData } from './RankingScene';
 
 const PANEL_WIDTH = 204;
 const STAT_ROW = 16;
-/** 오늘의 도전 결과나 새로 달성한 업적을 알리는 줄의 높이 */
+/** 오늘의 도전 결과나 새로 달성한 업적, 다 채운 주간 미션을 알리는 줄의 높이 */
 const EXTRA_ROW = 24;
 /** 기록 아래에 덧붙는 아이콘 한 줄: 작은 설명 글씨의 높이와 아이콘 줄의 높이, 아이콘과 글자 사이, 칸 사이(넓을 때와 좁을 때) */
 const STRIP = { caption: 13, row: 20, icon: 18, gap: 2, between: 12, tight: 2 } as const;
@@ -65,9 +67,11 @@ export class ResultScene extends Phaser.Scene implements BackAware {
     const { height } = this.scale;
     const daily = result.daily;
     const achieved = result.newAchievements;
+    const missions = result.newMissions;
     // 점수를 낸 적이 있으면 온라인 랭킹 줄을 둔다. 닉네임을 정하기 전에는 참여를 권하는 줄이 된다.
     const ranked = result.best > 0 && isRankedGame(data.gameId);
-    const extraRows = (daily ? 1 : 0) + (achieved.length > 0 ? 1 : 0) + (ranked ? 1 : 0);
+    const extraRows =
+      (daily ? 1 : 0) + (achieved.length > 0 ? 1 : 0) + (missions.length > 0 ? 1 : 0) + (ranked ? 1 : 0);
     const buttonsHeight = 12 + BUTTON_HEIGHT * 2 + BUTTON_GAP + 3;
     const strip = data.strip && data.strip.chips.length > 0 ? data.strip : undefined;
     const sizeWith = (withStrip: boolean): { statsHeight: number; cardHeight: number } => {
@@ -194,6 +198,11 @@ export class ResultScene extends Phaser.Scene implements BackAware {
     }
     if (achieved.length > 0) {
       this.addAchievementRow(achieved, innerLeft, innerRight, y, extraDelay);
+      extraDelay += 450;
+      y += EXTRA_ROW;
+    }
+    if (missions.length > 0) {
+      this.addMissionRow(missions, innerLeft, innerRight, y, extraDelay);
       y += EXTRA_ROW;
     }
     if (ranked) this.addOnlineRow(data.gameId, innerLeft, innerRight, y);
@@ -445,6 +454,55 @@ export class ResultScene extends Phaser.Scene implements BackAware {
       sfx.fanfare();
       vibrate([15, 30, 15]);
     });
+  }
+
+  /**
+   * 이번 판으로 다 채운 주간 미션을 알린다. 보상은 업적 화면의 주간 탭에서 받으므로,
+   * 누르면 그 탭으로 바로 간다.
+   */
+  private addMissionRow(
+    missions: readonly WeeklyMission[],
+    left: number,
+    right: number,
+    y: number,
+    delay: number,
+  ): void {
+    const band = this.addBand(left, right, y, THEME.mintSoft);
+    const label = addText(
+      this,
+      left + 2,
+      y + 3,
+      missions.length === 1 ? '주간 미션 달성!' : `주간 미션 ${missions.length}개 달성!`,
+    );
+    const go = addText(this, right - 2, y + 3, '받으러 가기', { color: THEME_CSS.accent, originX: 1 });
+
+    const parts = [band, label, go];
+    parts.forEach((part) => part.setAlpha(0));
+    let shown = false;
+    this.time.delayedCall(delay, () => {
+      shown = true;
+      this.tweens.add({ targets: parts, alpha: 1, duration: 160 });
+      sfx.gold();
+      vibrate([15, 30, 15]);
+    });
+
+    addTapZone(
+      this,
+      left - 6,
+      y,
+      right - left + 12,
+      EXTRA_ROW - 4,
+      (pressed) => {
+        if (shown) band.setAlpha(pressed ? 0.55 : 1);
+      },
+      () => {
+        // 아직 나타나지 않은 줄은 눌리지 않는다.
+        if (!shown) return;
+        sfx.click();
+        this.scene.stop(this.gameKey);
+        fadeToScene(this, SCENE.achievements, { tab: 'weekly' } satisfies AchievementsData);
+      },
+    );
   }
 
   /** 이번 판이 오늘의 도전이었을 때, 달성했는지 또는 몇 점이 모자랐는지 알린다. */
