@@ -2,15 +2,21 @@ import Phaser from 'phaser';
 import { COLOR, CSS, FONT_SIZE, GAME_WIDTH } from '../../config';
 import { clampPage, layoutPages, pageOfIndex, pageSlice } from '../../core/paging';
 import { sfx } from '../../core/sfx';
+import { store } from '../../core/store';
 import { addTapZone, addText, drawPanel, Pager, PAGER_HEIGHT, PixelButton } from '../../core/ui';
+import { knownDayRank, loadDayBoard } from '../../online/online';
+import { isJoined } from '../../online/profile';
+import { rankLabel } from '../../online/protocol';
 import { DARK_PANEL, FLOOR_OF, HERO_FRAMES, LK } from './art';
 import { CHALLENGES, claimable, isDone, progressOf, type Challenge } from './challenges';
 import { foundCount } from './codex';
 import { DAILY_REWARD, dailyPlan, dailyToday, dayLabel, withRo } from './daily';
 import { addCodexPage, startingTab } from './codexpage';
+import { addRankPage } from './rankpage';
 import {
   HERO_ORDER,
   HEROES,
+  LANTERN_GAME_ID,
   META,
   META_ORDER,
   STAGE_ORDER,
@@ -31,7 +37,7 @@ import {
   type LanternMeta,
 } from './meta';
 import { depthName, depthRules, formatClock, formatTimes, isUnlocked, metaCost } from './rules';
-import type { RunState } from './sim';
+import { runDawned, type RunState } from './sim';
 
 const MARGIN = 12;
 const ROW_WIDTH = GAME_WIDTH - MARGIN * 2;
@@ -48,6 +54,9 @@ const DETAIL_HEIGHT = 56;
 const UPGRADE_BUTTON_HEIGHT = 24;
 /** 하던 판을 버리고 새로 시작할 때 한 번 더 묻는 말과, 그 물음이 살아 있는 시간 */
 const DISCARD = { label: '하던 판을 버릴까요? 한 번 더!', ms: 3000 } as const;
+/** 새벽을 맞은 판은 버리지 않고 그 자리에서 마쳐 결과를 받는다(씬이 그렇게 한다). */
+const SETTLE_LABEL = '하던 판을 마칠까요? 한 번 더!';
+const discardLabel = (saved: RunState | null): string => (runDawned(saved) ? SETTLE_LABEL : DISCARD.label);
 /** 스테이지 카드 아래의 한 줄: 스테이지 설명, 깊은 밤이 열린 스테이지에서는 단계를 고르는 줄 */
 const DEPTH_ROW = { height: 20, button: 26 } as const;
 /** 고르는 구역(누가 갈까 ~ 스테이지 설명)의 높이 */
@@ -58,16 +67,23 @@ const MAX_SPREAD = 30;
 /** 영구 강화, 도전 과제, 오늘의 판으로 가는 버튼 셋 사이의 틈 */
 const LINK_GAP = 4;
 /** 오늘의 판 쪽: 가장 짧은 화면에서의 미리보기와 기록 칸의 높이 */
-const DAILY = { showcase: 70, record: 46 } as const;
+const DAILY = { showcase: 70, record: 46, rank: 24, gap: 6 } as const;
 
 /** 긴 화면에서만 보이는 미리보기 띠: 이만큼 남아야 넣고, 이 높이까지 키운다. */
 const SHOWCASE = { needs: 64, max: 84, gap: 6 } as const;
 
 /**
  * 준비 화면의 쪽. main은 캐릭터와 스테이지를 고르는 곳, upgrades는 영구 강화를 사는 곳,
- * challenges는 도전 과제를 보는 곳, codex는 무기와 그림자와 줍는 것을 모아 보는 도감.
+ * challenges는 도전 과제를 보는 곳, codex는 무기와 그림자와 줍는 것을 모아 보는 도감,
+ * daily는 오늘의 판을 시작하는 곳, rank는 오늘의 판 점수를 다른 사람과 견주는 오늘의 랭킹.
  */
-export type LobbyPage = 'main' | 'upgrades' | 'challenges' | 'codex' | 'daily';
+export type LobbyPage = 'main' | 'upgrades' | 'challenges' | 'codex' | 'daily' | 'rank';
+
+/** 그 쪽에서 뒤로 가면 나오는 쪽. 첫 쪽에서는 등불지기를 나간다. */
+export function parentPage(page: LobbyPage): LobbyPage | null {
+  if (page === 'main') return null;
+  return page === 'rank' ? 'daily' : 'main';
+}
 
 const PAGE_TITLE: Record<LobbyPage, string> = {
   main: '등불지기',
@@ -75,6 +91,7 @@ const PAGE_TITLE: Record<LobbyPage, string> = {
   challenges: '도전 과제',
   codex: '도감',
   daily: '오늘의 판',
+  rank: '오늘의 랭킹',
 };
 /** 첫 쪽의 오른쪽 위에 놓이는 도감 버튼 */
 const CODEX_BUTTON = { width: 50, height: 26 } as const;
@@ -116,7 +133,11 @@ export function buildLobby(
     height: 26,
     icon: 'icon-back',
     hitPadding: 6,
-    onTap: page === 'main' ? handlers.onBack : () => handlers.onPage('main'),
+    onTap: () => {
+      const parent = parentPage(page);
+      if (parent === null) handlers.onBack();
+      else handlers.onPage(parent);
+    },
   });
   addText(scene, GAME_WIDTH / 2, 6, PAGE_TITLE[page], {
     size: FONT_SIZE.large,
@@ -136,7 +157,7 @@ export function buildLobby(
   const record =
     page === 'codex'
       ? `찾은 것 ${found.found}/${found.total}`
-      : page === 'daily'
+      : page === 'daily' || page === 'rank'
         ? dayLabel(handlers.today)
         : meta.runs === 0
         ? '첫 밤을 기다려요'
@@ -158,6 +179,7 @@ export function buildLobby(
   else if (page === 'challenges') addChallengeRows(scene, handlers, refreshers, refresh, list);
   else if (page === 'codex') addCodexPage(scene, handlers, startingTab(handlers, list));
   else if (page === 'daily') addDailyPage(scene, handlers, refreshers, height);
+  else if (page === 'rank') addRankPage(scene, handlers.today, height);
   else addMainPage(scene, handlers, refreshers, refresh, height);
   refresh();
 }
@@ -260,9 +282,13 @@ function addMainPage(
       width: buttonWidth,
       height: 30,
       label:
-        saved.daily === undefined
-          ? `이어하기 (${formatClock(saved.t)} · Lv ${saved.player.level})`
-          : `오늘의 판 이어하기 (${formatClock(saved.t)})`,
+        saved.endless
+          ? `끝없는 밤 이어하기 (+${formatClock(saved.t - saved.endless.at)})`
+          : saved.pendingDawn
+            ? '새벽을 맞은 판 이어하기'
+            : saved.daily === undefined
+              ? `이어하기 (${formatClock(saved.t)} · Lv ${saved.player.level})`
+              : `오늘의 판 이어하기 (${formatClock(saved.t)})`,
       style: 'green',
       onTap: handlers.onResume,
     });
@@ -280,7 +306,7 @@ function addMainPage(
           return;
         }
         armed = true;
-        fresh.setLabel(DISCARD.label).setStyle('red');
+        fresh.setLabel(discardLabel(saved)).setStyle('red');
         scene.time.delayedCall(DISCARD.ms, () => {
           armed = false;
           fresh.setLabel('새로 시작').setStyle('neutral');
@@ -362,6 +388,31 @@ function addDailyPage(
     { color: record.tries > 0 ? CSS.silver : CSS.orange, size: FONT_SIZE.small, originX: 0.5 },
   );
 
+  // 오늘의 랭킹으로 가는 버튼. 내 순위를 알고 있으면 같이 적는다.
+  const rankButton = new PixelButton(scene, {
+    x: MARGIN + 12,
+    y: height - 50 - DAILY.gap - DAILY.rank,
+    width: ROW_WIDTH - 24,
+    height: DAILY.rank,
+    label: '',
+    onTap: () => handlers.onPage('rank'),
+  });
+  const showRank = (): void => {
+    const rank = isJoined(store.data.online) ? knownDayRank(LANTERN_GAME_ID, handlers.today) : null;
+    rankButton.setLabel(rank === null ? '오늘의 랭킹 보기' : `오늘의 랭킹 · ${rankLabel(rank)}`);
+  };
+  showRank();
+  // 랭킹에 참여하고 있으면 지금의 내 순위를 물어 와서 버튼에 적는다. 인터넷이 없으면 그대로 둔다.
+  if (isJoined(store.data.online)) {
+    let alive = true;
+    scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      alive = false;
+    });
+    void loadDayBoard(LANTERN_GAME_ID).then(() => {
+      if (alive) showRank();
+    });
+  }
+
   // 하던 판이 있으면 그 판이 사라지므로 한 번 더 누르게 한다.
   let armed = !handlers.savedRun;
   const go = new PixelButton(scene, {
@@ -377,7 +428,7 @@ function addDailyPage(
         return;
       }
       armed = true;
-      go.setLabel(DISCARD.label).setStyle('red');
+      go.setLabel(discardLabel(handlers.savedRun)).setStyle('red');
       scene.time.delayedCall(DISCARD.ms, () => {
         armed = false;
         go.setLabel(record.tries > 0 ? '다시 도전!' : '도전!').setStyle('green');

@@ -25,10 +25,12 @@ export interface LanternStats {
   stages: StageId[];
   /** 오늘의 판을 한 날 수 */
   dailyDays: number;
+  /** 끝없는 밤에서 가장 오래 버틴 시간(초) */
+  bestEndless: number;
 }
 
 export function createStats(): LanternStats {
-  return { kills: 0, bossKills: 0, bestLevel: 0, bestEvolved: 0, deepest: 0, evolved: [], heroes: [], stages: [], dailyDays: 0 };
+  return { kills: 0, bossKills: 0, bestLevel: 0, bestEvolved: 0, deepest: 0, evolved: [], heroes: [], stages: [], dailyDays: 0, bestEndless: 0 };
 }
 
 const count = (value: unknown): number =>
@@ -53,6 +55,7 @@ export function normalizeStats(raw: unknown): LanternStats {
   stats.heroes = known(data.heroes, HERO_ORDER);
   stats.stages = known(data.stages, STAGE_ORDER);
   stats.dailyDays = count(data.dailyDays);
+  stats.bestEndless = count(data.bestEndless);
   return stats;
 }
 
@@ -70,6 +73,8 @@ export interface RunFeats {
   evolved: readonly WeaponId[];
   /** 그날 처음 마친 오늘의 판인지 */
   dailyFirst?: boolean;
+  /** 끝없는 밤에서 버틴 시간(초). 끝없는 밤에 들어가지 않았으면 0이거나 없다. */
+  endlessSeconds?: number;
 }
 
 const withItem = <T extends string>(list: readonly T[], item: T, order: readonly T[]): T[] =>
@@ -88,6 +93,7 @@ export function addRun(stats: LanternStats, run: RunFeats): LanternStats {
     heroes: run.cleared ? withItem(stats.heroes, run.hero, HERO_ORDER) : stats.heroes,
     stages: run.cleared ? withItem(stats.stages, run.stage, STAGE_ORDER) : stats.stages,
     dailyDays: stats.dailyDays + (run.dailyFirst ? 1 : 0),
+    bestEndless: Math.max(stats.bestEndless, count(run.endlessSeconds)),
   };
 }
 
@@ -133,9 +139,11 @@ export const CHALLENGES: readonly Challenge[] = [
   { id: 'heroes-all', title: '모두의 새벽', description: '세 캐릭터로 새벽 맞기', goal: 3, reward: 100, measure: (s) => s.stats.heroes.length },
   { id: 'heroes-every', title: '넷의 새벽', description: '네 캐릭터 모두로 새벽 맞기', goal: HERO_ORDER.length, reward: 120, measure: (s) => s.stats.heroes.length },
   { id: 'daily-7', title: '일곱 밤의 약속', description: '오늘의 판을 일곱 날 하기', goal: 7, reward: 100, measure: (s) => s.stats.dailyDays },
+  { id: 'endless-3', title: '밤을 넘어서', description: '끝없는 밤에서 3분 버티기', goal: 3, reward: 120, measure: (s) => s.stats.bestEndless / 60 },
   { id: 'evolve-all', title: '무기 수집가', description: '무기 아홉 가지 모두 진화', goal: WEAPON_ORDER.length, reward: 150, measure: (s) => s.stats.evolved.length },
   { id: 'deep-3', title: '칠흑 속의 등불', description: '깊은 밤 3에서 새벽 맞기', goal: 1, reward: 150, measure: clearedDepth(3) },
   { id: 'kills-100k', title: '밤을 쓸어 낸 자', description: '그림자 10만 마리 쓰러뜨리기', goal: 100_000, reward: 200, measure: (s) => s.stats.kills },
+  { id: 'endless-6', title: '새벽을 미룬 자', description: '끝없는 밤에서 6분 버티기', goal: 6, reward: 250, measure: (s) => s.stats.bestEndless / 60 },
   { id: 'deep-5', title: '밤의 끝자락', description: '깊은 밤 5에서 새벽 맞기', goal: 1, reward: 300, measure: clearedDepth(5) },
   { id: 'deep-max', title: '가장 깊은 밤', description: `깊은 밤 ${MAX_DEPTH}에서 새벽 맞기`, goal: 1, reward: 600, measure: clearedDepth(MAX_DEPTH) },
 ];

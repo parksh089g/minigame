@@ -40,11 +40,20 @@ const isRow = (value: unknown): value is RankRow =>
 
 function asBoard(value: unknown): RankBoard | null {
   if (!isObject(value) || !Array.isArray(value.top) || !value.top.every(isRow)) return null;
-  const week = typeof value.week === 'string' ? { week: value.week } : {};
+  const when = {
+    ...(typeof value.week === 'string' ? { week: value.week } : {}),
+    ...(isCount(value.day) ? { day: value.day } : {}),
+  };
   const me = value.me;
-  if (me === null || me === undefined) return { top: value.top, me: null, ...week };
+  if (me === null || me === undefined) return { top: value.top, me: null, ...when };
   if (!isObject(me) || !isCount(me.rank) || !isCount(me.score) || typeof me.name !== 'string') return null;
-  return { top: value.top, me: { rank: me.rank, score: me.score, name: me.name }, ...week };
+  return { top: value.top, me: { rank: me.rank, score: me.score, name: me.name }, ...when };
+}
+
+/** 오늘의 랭킹으로 온 답인지 확인하며 읽는다. 답에는 서버가 보는 오늘이 적혀 있다. */
+function asDayBoard(value: unknown): RankBoard | null {
+  const board = asBoard(value);
+  return board && board.day !== undefined ? board : null;
 }
 
 /**
@@ -132,6 +141,9 @@ export function createApi(
       const path = `/api/rank/${game}${query.length > 0 ? `?${query.join('&')}` : ''}`;
       return call(path, span === 'week' ? asWeekBoard : asBoard);
     },
+    /** 한 게임의 오늘의 랭킹: 그날의 판에서 낸 점수만 겨룬다. me를 주면 그 기기의 순위도 같이 온다. */
+    daily: (game: RankedGame, me: string | null): Promise<ApiResult<RankBoard>> =>
+      call(`/api/daily/${game}${me ? `?me=${encodeURIComponent(me)}` : ''}`, asDayBoard),
     /** 이 기기가 올라 있는 모든 게임의 순위를 한 번에 받는다. span이 week면 이번 주의 순위다. */
     standings: (me: string, span: RankSpan = 'all'): Promise<ApiResult<Standings>> =>
       span === 'week'

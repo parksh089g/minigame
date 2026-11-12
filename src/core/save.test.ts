@@ -60,6 +60,7 @@ describe('normalizeSave', () => {
         sentName: '등불지기',
         sent: { 'lightning-tap': 80 },
         week: { key: '2026-11-09', bests: { 'lightning-tap': 70 }, sent: { 'lightning-tap': 55 } },
+        day: { key: 20767, bests: { 'lantern-keeper': 700 }, sent: {} },
       },
       volume: { sound: 1, music: 3 },
       favorites: ['stack-tower', 'lightning-tap'],
@@ -151,6 +152,7 @@ describe('normalizeSave', () => {
       sentName: null,
       sent: {},
       week: null,
+      day: null,
     });
   });
 
@@ -542,6 +544,7 @@ describe('resetProgress', () => {
       sentName: '등불지기',
       sent: { 'lightning-tap': 80 },
       week: { key: '2026-11-09', bests: { 'lightning-tap': 60 }, sent: { 'lightning-tap': 60 } },
+      day: null,
     };
     const reset = resetProgress(save, NOW + 100);
     expect(reset.online).toEqual(save.online);

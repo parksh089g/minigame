@@ -30,6 +30,20 @@ const json = (body: unknown, status = 200) => ({ status, body: JSON.stringify(bo
 const ID = '01112131-4151-6171-8191-a1b1c1d1e1f1';
 
 describe('서버 부르기', () => {
+  it('오늘의 랭킹을 받아 온다. 서버가 보는 오늘이 적혀 있지 않은 답은 받지 않는다', async () => {
+    const board = { top: [{ rank: 1, name: '하나', score: 5, mine: true }], me: { rank: 1, score: 5, name: '하나' } };
+    const { api, calls } = fakeServer(() => json({ ...board, day: 20_770 }));
+    expect(await api.daily('lantern-keeper', ID)).toEqual({ ok: true, data: { ...board, day: 20_770 } });
+    expect(calls[0]).toEqual({ path: `/api/daily/lantern-keeper?me=${ID}`, method: 'GET', body: undefined });
+    await api.daily('lantern-keeper', null);
+    expect(calls[1].path).toBe('/api/daily/lantern-keeper');
+    const odd = fakeServer(() => json(board));
+    expect(await odd.api.daily('lantern-keeper', ID)).toEqual({ ok: false, reason: 'offline' });
+    // 오늘의 랭킹이 생기기 전의 서버는 이 주소를 모른다.
+    const old = fakeServer(() => json({ error: 'notfound' }, 404));
+    expect(await old.api.daily('lantern-keeper', ID)).toEqual({ ok: false, reason: 'notfound' });
+  });
+
   it('랭킹을 받아 온다. 내 id는 주소에 실어 보낸다', async () => {
     const board = { top: [{ rank: 1, name: '하나', score: 5, mine: true }], me: { rank: 1, score: 5, name: '하나' } };
     const { api, calls } = fakeServer(() => json(board));

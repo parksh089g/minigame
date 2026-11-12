@@ -6,8 +6,10 @@ import {
   cleanCode,
   cleanName,
   cleanScore,
+  hasDailyBoard,
   hasWeeklyBoard,
   isDeviceId,
+  isRankDay,
   isRankedGame,
   isRankSpan,
   isRankWeek,
@@ -17,7 +19,7 @@ import {
   type RankSpan,
 } from '../src/online/protocol';
 import { placeOf } from './limiter';
-import { TOO_FAST, type BoardApi, type Scores, type WeekEntry } from './service';
+import { TOO_FAST, type BoardApi, type DayEntry, type Scores, type WeekEntry } from './service';
 
 /**
  * 요청 본문으로 받는 가장 큰 크기(글자 수).
@@ -90,6 +92,20 @@ function readWeekly(raw: unknown): WeekEntry | null | 'invalid' {
   return { week: raw.week, scores };
 }
 
+/**
+ * 오늘의 랭킹에 올릴 것을 읽는다. 보내지 않았으면 null, 보냈는데 이상하면 'invalid'.
+ * 오늘의 랭킹이 생기기 전의 앱은 이것을 보내지 않는다.
+ */
+function readDaily(raw: unknown): DayEntry | null | 'invalid' {
+  if (raw === undefined || raw === null) return null;
+  if (!isObject(raw) || !isRankDay(raw.day)) return 'invalid';
+  const scores = readScores(raw.scores ?? {});
+  if (scores === null) return 'invalid';
+  // 오늘의 랭킹이 없는 게임의 점수는 받지 않고 흘려보낸다.
+  for (const game of RANKED_GAMES) if (!hasDailyBoard(game)) delete scores[game];
+  return { day: raw.day, scores };
+}
+
 /** 주소에 적힌 랭킹의 범위. 적지 않았으면 전체 랭킹이고, 모르는 값이면 null. */
 function readSpan(url: URL): RankSpan | null {
   const span = url.searchParams.get('span') ?? 'all';
@@ -117,6 +133,16 @@ export async function handleApi(request: Request, board: BoardApi): Promise<Resp
     return result === TOO_FAST ? fail('slow') : json(result);
   }
 
+  // GET /api/daily/<게임>?me=<기기 id>: 오늘의 랭킹. 오늘의 랭킹이 없는 게임이면 받지 않는다.
+  const today = /^\/api\/daily\/([a-z-]+)$/.exec(path);
+  if (today && method === 'GET') {
+    const game = today[1];
+    const me = url.searchParams.get('me');
+    if (!hasDailyBoard(game) || (me !== null && !isDeviceId(me))) return fail('invalid');
+    const result = await board.daily(ip, game, me);
+    return result === TOO_FAST ? fail('slow') : json(result);
+  }
+
   // GET /api/rank?me=<기기 id>&span=<all|week>: 그 기기가 올라 있는 모든 게임의 순위. 누구의 것인지 적지 않은 요청은 받지 않는다.
   const whose = url.searchParams.get('me');
   if (path === '/api/rank' && method === 'GET' && whose !== null) {
@@ -137,8 +163,9 @@ export async function handleApi(request: Request, board: BoardApi): Promise<Resp
     const name = cleanName(body.name);
     const scores = readScores(body.scores ?? {});
     const weekly = readWeekly(body.weekly);
-    if (name === null || scores === null || weekly === 'invalid') return fail('invalid');
-    const result = await board.submit(ip, body.device, name, scores, weekly);
+    const daily = readDaily(body.daily);
+    if (name === null || scores === null || weekly === 'invalid' || daily === 'invalid') return fail('invalid');
+    const result = await board.submit(ip, body.device, name, scores, weekly, daily);
     return result === TOO_FAST ? fail('slow') : json(result);
   }
 

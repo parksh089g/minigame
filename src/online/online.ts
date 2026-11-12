@@ -5,12 +5,14 @@
 import { exportBundleText, importBundleText } from '../core/bundle';
 import { store } from '../core/store';
 import { api, type ApiFailure, type ApiResult } from './api';
-import { isJoined, withName, withoutName } from './profile';
+import { isJoined, withDayScore, withName, withoutName } from './profile';
 import {
   cleanCode,
   deviceIdFrom,
+  hasDailyBoard,
   isRankedGame,
   MAX_BUNDLE_CHARS,
+  rankDayOf,
   RANKED_GAMES,
   type RankBoard,
   type RankSpan,
@@ -35,6 +37,8 @@ const boards = new Map<string, { at: number; me: string | null; board: RankBoard
 const standingsSeen = new Map<RankSpan, { at: number; me: string }>();
 /** 게임 id → 마지막으로 알게 된 이번 주의 내 순위. 전체 랭킹의 순위는 scoreSync가 들고 있다. */
 const weekRanks = new Map<string, number>();
+/** 게임 id → 마지막으로 알게 된 오늘의 랭킹에서의 내 순위와, 그것이 어느 날의 것인지 */
+const dayRanks = new Map<string, { day: number; rank: number }>();
 
 /** 봐 둔 랭킹과 순위가 낡았을 때 버린다. 다음에 볼 때 새로 불러온다. */
 function forgetBoards(): void {
@@ -46,6 +50,7 @@ function forgetBoards(): void {
 function forgetRanks(): void {
   scoreSync.forgetRanks();
   weekRanks.clear();
+  dayRanks.clear();
 }
 
 /** 마지막으로 알게 된 내 순위. 모르면 null. */
@@ -79,6 +84,50 @@ export async function loadBoard(
     if (me !== null && store.data.online.id === me) noteRank(gameId, span, result.data.me?.rank ?? null);
   }
   return result;
+}
+
+/**
+ * 한 게임의 오늘의 랭킹을 불러온다. 내 순위를 알게 되면 적어 둔다.
+ * 오늘이 어느 날인지는 서버가 정한다. 기기의 날과 다르면(시계가 틀렸거나 막 날이 바뀐 때) 답의 day로 알 수 있다.
+ */
+export async function loadDayBoard(gameId: string, now: number = Date.now()): Promise<ApiResult<RankBoard>> {
+  if (!hasDailyBoard(gameId)) return { ok: false, reason: 'invalid' };
+  const online = store.data.online;
+  const me = isJoined(online) ? online.id : null;
+  const key = `day:${gameId}`;
+  const cached = boards.get(key);
+  // 봐 둔 것이 지난 날의 것이면 다시 묻는다.
+  if (cached && cached.me === me && now - cached.at < BOARD_FRESH_MS && cached.board.day === rankDayOf(now)) {
+    return { ok: true, data: cached.board };
+  }
+  const result = await api.daily(gameId, me);
+  if (result.ok) {
+    boards.set(key, { at: now, me, board: result.data });
+    if (me !== null && store.data.online.id === me) {
+      const rank = result.data.me?.rank ?? null;
+      if (rank === null || result.data.day === undefined) dayRanks.delete(gameId);
+      else dayRanks.set(gameId, { day: result.data.day, rank });
+    }
+  }
+  return result;
+}
+
+/** 마지막으로 알게 된 오늘(day)의 랭킹에서의 내 순위. 모르거나 다른 날의 것이면 null. */
+export function knownDayRank(gameId: string, day: number): number | null {
+  const known = dayRanks.get(gameId);
+  return known && known.day === day ? known.rank : null;
+}
+
+/**
+ * 방금 끝난 오늘의 판의 점수를 그날(day)의 랭킹에 올릴 기록으로 적어 둔다. 닉네임을 정하기 전이어도 적어 둔다.
+ * 서버에는 다음 syncScores()에서 올라간다.
+ */
+export function noteDayScore(gameId: string, score: number, day: number): void {
+  const next = withDayScore(store.data.online, gameId, score, day);
+  if (next === store.data.online) return;
+  store.update((save) => {
+    save.online = next;
+  });
 }
 
 /**

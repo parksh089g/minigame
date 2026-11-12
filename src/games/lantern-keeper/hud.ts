@@ -170,10 +170,11 @@ export class RunHud {
       this.shownLevel = p.level;
       this.levelText.setText(`Lv ${p.level}`);
     }
-    const clock = formatClock(Math.min(s.t, RUN_SECONDS));
+    // 끝없는 밤에서는 새벽 뒤로 얼마나 더 버텼는지를 보여 준다.
+    const clock = s.endless ? `+${formatClock(s.t - s.endless.at)}` : formatClock(Math.min(s.t, RUN_SECONDS));
     if (clock !== this.shownClock) {
       this.shownClock = clock;
-      this.clockText.setText(clock).setColor(s.t >= RUN_SECONDS ? CSS.orange : CSS.white);
+      this.clockText.setText(clock).setColor(s.endless ? CSS.sky : s.t >= RUN_SECONDS ? CSS.orange : CSS.white);
     }
     if (s.kills !== this.shownKills) {
       this.shownKills = s.kills;
