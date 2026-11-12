@@ -17,6 +17,7 @@ import { iconKey } from './icons';
 import { Joystick } from './joystick';
 import { levelUpHeader, showChoices, TICKET_HEADER } from './levelup';
 import { buildLobby, type LobbyPage } from './lobby';
+import { DAILY_REWARD, dailyPlan, dailyToday, dayIndexOf } from './daily';
 import { applyRun, learnTip, metaStore, newDepth, newUnlocks } from './meta';
 import { BOSS_SONG, FINAL_SONG, LOBBY_SONG, STAGE_SONGS } from './music';
 import { pauseInfo } from './pauseinfo';
@@ -29,6 +30,7 @@ import {
   isEvolved,
   ownedWeapons,
   scoreFor,
+  seededRandom,
   type Upgrade,
 } from './rules';
 import { createRun, Sim, type SimEvent } from './sim';
@@ -38,7 +40,8 @@ import { RunView } from './view';
 
 /** 씬을 시작할 때 넘기는 값. 없으면 준비 화면부터 연다. */
 interface StartData {
-  mode?: 'new' | 'resume';
+  /** daily는 오늘의 판을 새로 시작한다. */
+  mode?: 'new' | 'resume' | 'daily';
   /** 준비 화면의 어느 쪽을 열지 */
   page?: LobbyPage;
   /** 그 쪽의 목록이 여러 묶음으로 나뉘었을 때 보일 묶음(0부터) */
@@ -142,6 +145,7 @@ export class LanternKeeperScene extends MiniGameScene {
       // 불러오는 사이에 씬을 떠났으면 아무것도 하지 않는다.
       if (!this.sys.isActive() || this.phase !== 'loading') return;
       if (mode === 'new') this.startRun(false);
+      else if (mode === 'daily') this.startRun(false, true);
       else if (mode === 'resume' && metaStore.run) this.startRun(true);
       else this.openLobby(page, list);
     });
@@ -159,7 +163,9 @@ export class LanternKeeperScene extends MiniGameScene {
         getMeta: () => metaStore.data,
         setMeta: (meta) => metaStore.set(meta),
         savedRun: metaStore.run,
+        today: dayIndexOf(new Date()),
         onStart: () => this.restartWith('new'),
+        onDaily: () => this.restartWith('daily'),
         onResume: () => this.restartWith('resume'),
         onBack: () => fadeToScene(this, homeScene()),
         // 쪽을 넘길 때는 기다림 없이 바로 다시 그린다.
@@ -176,25 +182,33 @@ export class LanternKeeperScene extends MiniGameScene {
 
   // ------------------------------------------------------------ 한 판
 
-  private startRun(resume: boolean): void {
+  /** daily면 오늘의 판: 캐릭터와 스테이지, 씨앗이 그날로 정해지고 영구 강화 없이 시작한다. */
+  private startRun(resume: boolean, daily = false): void {
     const { height } = this.scale;
     const centerY = Math.round(height / 2) + PLAYER_DROP;
     // 캐릭터가 아래로 내려간 만큼 위쪽이 더 넓게 보이므로, 그 넓은 쪽에 맞춰 적이 화면 밖에서 나오게 한다.
     const view = { viewW: GAME_WIDTH, viewH: height + PLAYER_DROP * 2 };
 
     const saved = resume ? metaStore.run : null;
+    const plan = daily ? dailyPlan(dayIndexOf(new Date())) : null;
     const state = saved
       ? { ...structuredClone(saved), ...view }
-      : createRun({
-          ...view,
-          meta: metaStore.data.upgrades,
-          hero: metaStore.data.hero,
-          stage: metaStore.data.stage,
-          depth: metaStore.data.depth,
-          seed: Math.floor(Math.random() * 0x7fffffff),
-        });
+      : plan
+        ? createRun({ ...view, meta: {}, hero: plan.hero, stage: plan.stage, depth: 0, seed: plan.seed, daily: plan.day })
+        : createRun({
+            ...view,
+            meta: metaStore.data.upgrades,
+            hero: metaStore.data.hero,
+            stage: metaStore.data.stage,
+            depth: metaStore.data.depth,
+            seed: Math.floor(Math.random() * 0x7fffffff),
+          });
     if (!saved) metaStore.setRun(null);
-    this.sim = new Sim(state, Math.random);
+    // 오늘의 판은 적이 나오는 차례와 강화 선택지도 씨앗을 따른다. 이어서 할 때는 멈춘 시각을 섞어 새로 뽑는다.
+    this.sim = new Sim(
+      state,
+      state.daily === undefined ? Math.random : seededRandom(state.seed + Math.floor(state.t) * 7919),
+    );
     this.pickSong();
     for (const id of TIP_IDS) if (!metaStore.data.tips.includes(id)) this.unseen.add(id);
 
@@ -247,7 +261,8 @@ export class LanternKeeperScene extends MiniGameScene {
       shadow: CSS.ink,
     }).setDepth(DEPTH.banner);
     const depth = this.sim.state.depth;
-    if (depth) showBanner(this, height * 0.3, depthName(depth), CSS.sky, 1600, DEPTH.banner);
+    if (this.sim.state.daily !== undefined) showBanner(this, height * 0.3, '오늘의 판', CSS.yellow, 1600, DEPTH.banner);
+    else if (depth) showBanner(this, height * 0.3, depthName(depth), CSS.sky, 1600, DEPTH.banner);
   }
 
   override update(_time: number, delta: number): void {
@@ -636,9 +651,13 @@ export class LanternKeeperScene extends MiniGameScene {
     const before = metaStore.data;
     const state = this.sim.state;
     const stage = state.stage;
+    // 오늘 시작한 오늘의 판만 그날의 기록에 남는다. 날이 넘어간 뒤에 이어서 끝낸 판은 보통 판으로 친다.
+    const today = dayIndexOf(new Date());
+    const daily = state.daily === today ? { day: today, score: scoreFor(summary) } : undefined;
     metaStore.setRun(null);
     metaStore.set(
       applyRun(before, {
+        daily,
         embers,
         seconds: summary.seconds,
         cleared: summary.cleared,
@@ -681,12 +700,26 @@ export class LanternKeeperScene extends MiniGameScene {
       DEPTH.banner,
     );
 
+    const was = dailyToday(before.daily, today);
+    const firstDaily = daily !== undefined && was.tries === 0;
     const stats: ResultStat[] = [
       ['버틴 시간', formatClock(summary.seconds)],
       ['쓰러뜨린 그림자', String(summary.kills)],
       ['레벨', String(summary.level)],
-      ['얻은 불씨', `+${embers}`],
+      ['얻은 불씨', `+${embers + (firstDaily ? DAILY_REWARD : 0)}`],
     ];
+    // 오늘의 판: 오늘 처음이면 보너스와 이어 온 날 수를, 아니면 오늘의 최고 기록과 견준 결과를 보여 준다.
+    if (daily) {
+      const now = metaStore.data.daily;
+      stats.unshift([
+        '오늘의 판',
+        firstDaily
+          ? `${now.streak}일째 · 보너스 +${DAILY_REWARD}`
+          : daily.score > was.best
+            ? '오늘의 최고 기록!'
+            : `오늘 최고 ${was.best}점`,
+      ]);
+    }
     // 이번 판으로 이룬 도전 과제가 있으면 알려 준다. 보상은 준비 화면에서 받는다.
     const feats = newlyDone(before, metaStore.data);
     if (feats.length > 0) {

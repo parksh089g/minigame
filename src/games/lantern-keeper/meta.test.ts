@@ -15,6 +15,7 @@ import {
   type LanternMeta,
   type RunResult,
 } from './meta';
+import { DAILY_REWARD } from './daily';
 import { embersFor, isUnlocked, metaCost, type RunSummary } from './rules';
 import { OLD_HAND_TIPS } from './tips';
 
@@ -58,6 +59,60 @@ describe('판 결과 반영', () => {
     meta = applyRun(meta, result({ embers: 60, seconds: 600, cleared: true }));
     meta = applyRun(meta, result({ embers: 5, seconds: 90 }));
     expect(meta).toMatchObject({ embers: 85, runs: 3, clears: 1, bestSeconds: 600 });
+  });
+});
+
+describe('오늘의 판', () => {
+  const today = 20_769;
+
+  it('그날 처음 마친 판에는 불씨가 더 붙고, 그날의 기록과 한 날 수가 남는다', () => {
+    const before = { ...createDefaultMeta(), embers: 10 };
+    const first = applyRun(before, result({ embers: 7, seconds: 130, daily: { day: today, score: 420 } }));
+    expect(first.embers).toBe(10 + 7 + DAILY_REWARD);
+    expect(first.daily).toEqual({ day: today, best: 420, seconds: 130, cleared: false, tries: 1, streak: 1 });
+    expect(first.stats.dailyDays).toBe(1);
+    expect(first.runs).toBe(1);
+    expect(first.bestSeconds).toBe(130);
+
+    // 같은 날 다시 하면 보너스는 없고, 더 좋은 기록만 바뀐다.
+    const second = applyRun(first, result({ embers: 5, seconds: 300, cleared: true, daily: { day: today, score: 900 } }));
+    expect(second.embers).toBe(first.embers + 5);
+    expect(second.daily).toEqual({ day: today, best: 900, seconds: 300, cleared: true, tries: 2, streak: 1 });
+    expect(second.stats.dailyDays).toBe(1);
+
+    // 다음 날 하면 보너스가 다시 붙고 이어 온 날 수가 는다.
+    const next = applyRun(second, result({ embers: 1, seconds: 50, daily: { day: today + 1, score: 30 } }));
+    expect(next.embers).toBe(second.embers + 1 + DAILY_REWARD);
+    expect(next.daily).toMatchObject({ day: today + 1, best: 30, tries: 1, streak: 2 });
+    expect(next.stats.dailyDays).toBe(2);
+  });
+
+  it('보통 판은 오늘의 판의 기록을 건드리지 않는다', () => {
+    const played = applyRun(createDefaultMeta(), result({ daily: { day: today, score: 100 } }));
+    const after = applyRun(played, result({ embers: 3, seconds: 999 }));
+    expect(after.daily).toBe(played.daily);
+    expect(after.stats.dailyDays).toBe(1);
+    expect(after.embers).toBe(played.embers + 3);
+  });
+
+  it('일곱 날을 하면 도전 과제가 이뤄진다', () => {
+    let meta = createDefaultMeta();
+    for (let day = 0; day < 7; day += 1) {
+      expect(claimChallenge(meta, 'daily-7')).toBe(meta);
+      // 하루를 걸러도 한 날 수는 쌓인다.
+      meta = applyRun(meta, result({ daily: { day: today + day * 2, score: 1 } }));
+    }
+    expect(meta.stats.dailyDays).toBe(7);
+    expect(claimChallenge(meta, 'daily-7').embers).toBeGreaterThan(meta.embers);
+  });
+
+  it('저장했다가 읽어도 그대로이고, 예전 저장에는 빈 기록이 채워진다', () => {
+    const played = applyRun(createDefaultMeta(), result({ seconds: 60, daily: { day: today, score: 100 } }));
+    expect(normalizeMeta(JSON.parse(JSON.stringify(played))).daily).toEqual(played.daily);
+    expect(normalizeMeta(JSON.parse(JSON.stringify(played))).stats.dailyDays).toBe(1);
+    const old = normalizeMeta({ embers: 5, runs: 2 });
+    expect(old.daily).toEqual({ day: 0, best: 0, seconds: 0, cleared: false, tries: 0, streak: 0 });
+    expect(old.stats.dailyDays).toBe(0);
   });
 });
 

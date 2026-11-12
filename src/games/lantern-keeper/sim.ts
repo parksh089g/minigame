@@ -242,6 +242,8 @@ export interface RunState {
   depth?: number;
   /** 지형을 정하는 씨앗. 같은 값이면 웅덩이가 같은 자리에 있다. */
   seed: number;
+  /** 오늘의 판이면 그날(daily.ts의 dayIndexOf). 보통 판에는 없다. */
+  daily?: number;
   player: {
     x: number;
     y: number;
@@ -394,6 +396,8 @@ export interface RunConfig {
   depth?: number;
   /** 지형 씨앗. 안 주면 1 */
   seed?: number;
+  /** 오늘의 판이면 그날(daily.ts의 dayIndexOf) */
+  daily?: number;
 }
 
 const CELL = 20;
@@ -462,6 +466,7 @@ export function createRun(config: RunConfig): RunState {
     stage: config.stage ?? 'meadow',
     depth: clampDepth(config.depth),
     seed: config.seed ?? 1,
+    ...(config.daily !== undefined ? { daily: config.daily } : {}),
     player: {
       x: 0,
       y: 0,
