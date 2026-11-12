@@ -32,15 +32,23 @@ export const LK = {
   slag: ['lk-slag-1', 'lk-slag-2'],
   smoker: ['lk-smoker-1', 'lk-smoker-2'],
   blister: ['lk-blister-1', 'lk-blister-2'],
+  flake: ['lk-flake-1', 'lk-flake-2'],
+  sleet: ['lk-sleet-1', 'lk-sleet-2'],
+  frost: ['lk-frost-1', 'lk-frost-2'],
+  floe: ['lk-floe-1', 'lk-floe-2'],
+  hail: ['lk-hail-1', 'lk-hail-2'],
+  bloat: ['lk-bloat-1', 'lk-bloat-2'],
   prowler: ['lk-prowler-1', 'lk-prowler-2'],
   lurker: ['lk-lurker-1', 'lk-lurker-2'],
   stoker: ['lk-stoker-1', 'lk-stoker-2'],
+  fang: ['lk-fang-1', 'lk-fang-2'],
   giant: ['lk-giant-1', 'lk-giant-2'],
   ram: ['lk-ram-1', 'lk-ram-2'],
   owl: ['lk-owl-1', 'lk-owl-2'],
   lord: ['lk-lord-1', 'lk-lord-2'],
   matron: ['lk-matron-1', 'lk-matron-2'],
   warden: ['lk-warden-1', 'lk-warden-2'],
+  blizzard: ['lk-blizzard-1', 'lk-blizzard-2'],
   /** 보스가 쏘는 빛덩이 */
   orb: 'lk-orb',
   gemSmall: 'lk-gem-s',
@@ -68,11 +76,17 @@ export const LK = {
   floor: 'lk-floor',
   floorMarsh: 'lk-floor-marsh',
   floorRidge: 'lk-floor-ridge',
+  floorTundra: 'lk-floor-tundra',
   spark: 'lk-spark',
 } as const;
 
 /** 스테이지마다 깔리는 바닥 */
-export const FLOOR_OF: Readonly<Record<StageId, string>> = { meadow: LK.floor, marsh: LK.floorMarsh, ridge: LK.floorRidge };
+export const FLOOR_OF: Readonly<Record<StageId, string>> = {
+  meadow: LK.floor,
+  marsh: LK.floorMarsh,
+  ridge: LK.floorRidge,
+  tundra: LK.floorTundra,
+};
 
 /** 캐릭터의 걷는 그림 두 장 */
 export const HERO_FRAMES: Readonly<Record<HeroId, readonly [string, string]>> = {
@@ -111,6 +125,9 @@ export const LOOK = {
   ventWarm: COLOR.orange,
   ventFire: COLOR.yellow,
   ventCore: COLOR.white,
+  /** 바람 설원의 돌풍: 바람결과, 발이 얼었을 때 캐릭터에 도는 빛 */
+  wind: COLOR.white,
+  chill: COLOR.cyan,
   /** 보스의 공격 예고: 돌진할 길, 쏘려고 모으는 빛 */
   threat: COLOR.red,
   threatCore: COLOR.white,
@@ -515,16 +532,24 @@ const BLOBS = {
   slag: { size: 18, body: 2, shade: 3, eye: 4 },
   smoker: { size: 13, body: 14, shade: 13, eye: 12, ears: 'tuft' },
   blister: { size: 13, body: 3, shade: 4, eye: 0 },
+  // 바람 설원: 눈과 얼음의 흰빛과 하늘빛. 쏘는 적과 터지는 적은 다른 스테이지와 같은 약속을 따른다.
+  flake: { size: 12, body: 12, shade: 13, eye: 9, frill: true },
+  frost: { size: 13, body: 10, shade: 11, eye: 12, frill: true },
+  floe: { size: 18, body: 9, shade: 10, eye: 12 },
+  hail: { size: 13, body: 14, shade: 13, eye: 11, ears: 'tuft' },
+  bloat: { size: 13, body: 3, shade: 4, eye: 0 },
   // 정예 그림자: 그 스테이지의 흔한 그림자를 크게 키운 모습에 금빛 뿔이 솟았다.
   prowler: { size: 22, body: 1, shade: 2, eye: 4, ears: 'horn', horn: 4, frill: true },
   lurker: { size: 22, body: 6, shade: 5, eye: 4, ears: 'horn', horn: 4 },
   stoker: { size: 23, body: 14, shade: 13, eye: 3, ears: 'horn', horn: 4, frill: true },
+  fang: { size: 22, body: 10, shade: 11, eye: 12, ears: 'horn', horn: 4, frill: true },
   giant: { size: 30, body: 7, shade: 6, eye: 4, frill: true },
   ram: { size: 28, body: 3, shade: 4, eye: 0, ears: 'horn' },
   owl: { size: 28, body: 9, shade: 10, eye: 4, ears: 'tuft', frill: true },
   lord: { size: 34, body: 2, shade: 3, eye: 12, crown: true, frill: true },
   matron: { size: 34, body: 6, shade: 5, eye: 4, crown: true, frill: true },
   warden: { size: 34, body: 14, shade: 3, eye: 4, crown: true, frill: true },
+  blizzard: { size: 34, body: 12, shade: 13, eye: 9, crown: true, frill: true },
 } as const satisfies Record<string, BlobLook>;
 
 function drawGem(size: number, rim: number, body: number): HTMLCanvasElement {
@@ -633,6 +658,51 @@ function drawRidgeFloor(): HTMLCanvasElement {
     [36, 18],
     [6, 36],
     [26, 32],
+  ]) {
+    context.fillRect(x, y, 1, 1);
+  }
+  return canvas;
+}
+
+/** 바람 설원. 해 진 뒤의 눈밭처럼 푸르스름하게 어두운 바탕에 바람이 쓸고 간 결과 눈송이를 박는다. */
+function drawTundraFloor(): HTMLCanvasElement {
+  const size = 48;
+  const [canvas, context] = canvasOf(size, size);
+  context.fillStyle = '#374660';
+  context.fillRect(0, 0, size, size);
+  // 바람이 쓸고 간 결: 비스듬히 이어지는 어두운 줄
+  context.fillStyle = '#2c3950';
+  for (const [x, y, w] of [
+    [3, 8, 6],
+    [9, 9, 4],
+    [26, 20, 7],
+    [33, 21, 3],
+    [12, 34, 6],
+    [38, 40, 5],
+    [43, 41, 3],
+  ]) {
+    context.fillRect(x, y, w, 1);
+  }
+  // 쌓인 눈의 밝은 등성이. 적과 빛 조각이 묻히지 않게 바탕보다 조금만 밝다.
+  context.fillStyle = '#4a5c7a';
+  for (const [x, y, w] of [
+    [18, 5, 5],
+    [36, 12, 4],
+    [4, 24, 5],
+    [22, 44, 5],
+    [40, 30, 4],
+  ]) {
+    context.fillRect(x, y, w, 1);
+  }
+  // 눈송이
+  context.fillStyle = '#9fb2cc';
+  for (const [x, y] of [
+    [10, 16],
+    [30, 6],
+    [44, 24],
+    [20, 28],
+    [6, 42],
+    [34, 36],
   ]) {
     context.fillRect(x, y, 1, 1);
   }
@@ -812,6 +882,9 @@ export function registerLanternTextures(scene: Phaser.Scene): void {
   // 검댕 날개도 같은 모양에 날개가 불씨 색이다.
   addWithFlash(LK.soot[0], recolor(BAT_1, { '2': '3' }));
   addWithFlash(LK.soot[1], recolor(BAT_2, { '2': '3' }));
+  // 서리나비도 같은 모양에 날개가 얼음빛이다.
+  addWithFlash(LK.sleet[0], recolor(BAT_1, { '2': 'b' }));
+  addWithFlash(LK.sleet[1], recolor(BAT_2, { '2': 'b' }));
   addWithFlash(LK.wisp[0], WISP_1);
   addWithFlash(LK.wisp[1], WISP_2);
   for (const kind of Object.keys(BLOBS) as Array<keyof typeof BLOBS>) {
@@ -897,5 +970,6 @@ export function registerLanternTextures(scene: Phaser.Scene): void {
   add(LK.floor, drawFloor());
   add(LK.floorMarsh, drawMarshFloor());
   add(LK.floorRidge, drawRidgeFloor());
+  add(LK.floorTundra, drawTundraFloor());
   for (const id of ICON_IDS) add(iconKey(id), drawRows(withOutline(ICONS[id])));
 }

@@ -49,6 +49,8 @@ const STAGE_CARD = {
   width: (ROW_WIDTH - CARD_GAP * (STAGE_ORDER.length - 1)) / STAGE_ORDER.length,
   height: 38,
   strip: 16,
+  /** 띠에 보이는 그림자의 수 */
+  foes: 2,
 } as const;
 const DETAIL_HEIGHT = 56;
 const UPGRADE_BUTTON_HEIGHT = 24;
@@ -603,7 +605,8 @@ function addStageCards(
     rim.lineStyle(1, COLOR.ink, 1).strokeRect(strip.x - 0.5, strip.y - 0.5, strip.width + 1, strip.height + 1);
     const centerX = x + STAGE_CARD.width / 2;
     if (open) {
-      const kinds = [...stage.spawns].sort((a, b) => a.from - b.from).slice(0, 3);
+      // 카드가 좁아서 그림자는 둘만 놓는다.
+      const kinds = [...stage.spawns].sort((a, b) => a.from - b.from).slice(0, STAGE_CARD.foes);
       kinds.forEach((spawn, slot) => {
         const image = scene.add.image(
           Math.round(strip.x + ((slot + 1) * strip.width) / (kinds.length + 1)),
@@ -613,11 +616,13 @@ function addStageCards(
         // 띠보다 큰 그림은 띠에 맞춰 줄인다.
         if (image.height > strip.height - 2) image.setScale((strip.height - 2) / image.height);
       });
-      addText(scene, centerX, top + 22, stage.name, { color: CSS.white, bold: true, originX: 0.5 });
+      const name = addText(scene, centerX, top + 22, stage.name, { color: CSS.white, bold: true, originX: 0.5 });
+      // 이름이 카드보다 길면 카드에 맞춰 줄인다.
+      const room = STAGE_CARD.width - 4;
+      if (name.width > room) name.setScale(room / name.width);
     } else {
-      // 잠긴 곳: 띠에는 자물쇠와 이름, 아래에는 여는 조건
-      scene.add.image(strip.x + 8, strip.y + strip.height / 2, 'icon-lock').setScale(0.75);
-      addText(scene, strip.x + 16, strip.y + 2, stage.name, { color: CSS.silver, size: FONT_SIZE.small });
+      // 잠긴 곳: 캐릭터 카드처럼 띠에는 자물쇠만, 아래에는 여는 조건
+      scene.add.image(Math.round(centerX), strip.y + strip.height / 2, 'icon-lock').setScale(0.75);
       addText(scene, centerX, top + 23, `${formatClock(stage.unlockSeconds)} 버티기`, {
         color: CSS.silver,
         size: FONT_SIZE.small,

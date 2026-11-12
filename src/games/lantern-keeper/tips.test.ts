@@ -52,6 +52,8 @@ describe('처음 겪는 일의 안내', () => {
       { type: 'blast' },
       { type: 'block' },
       { type: 'vent', x: 0, y: 0 },
+      { type: 'gust', phase: 'warn', dirX: 1, dirY: 0 },
+      { type: 'chill' },
       { type: 'elite', kind: 'prowler' },
       { type: 'chest', upgrade: null },
     ];

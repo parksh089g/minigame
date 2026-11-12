@@ -418,6 +418,14 @@ export class LanternKeeperScene extends MiniGameScene {
         case 'vent':
           board.play('vent', now);
           break;
+        case 'gust':
+          // 일기 시작할 때 한 번 운다. 세게 불기 시작하면 화면이 살짝 흔들린다.
+          if (event.phase === 'warn') board.play('gust', now);
+          else this.effects.shake(140, 0.004);
+          break;
+        case 'chill':
+          board.play('chill', now);
+          break;
         case 'spark':
           this.view.flint(sim, event.x, event.y, event.radius);
           board.play('flint', now);

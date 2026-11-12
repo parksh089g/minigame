@@ -14,7 +14,7 @@ import {
   type ShotLook,
   type Sim,
 } from './sim';
-import { puddlesAround, VENT, ventClock, ventsAround } from './terrain';
+import { GUST, puddlesAround, VENT, ventClock, ventsAround } from './terrain';
 
 const DEPTH = {
   floor: 0,
@@ -26,6 +26,8 @@ const DEPTH = {
   boss: 5.5,
   shot: 6,
   player: 7,
+  /** 돌풍의 바람결은 캐릭터와 그림자 위로 지나간다. */
+  wind: 7.5,
   dark: 8,
   pointer: 8.5,
   spark: 9,
@@ -85,6 +87,9 @@ const SHOT_KEY: Record<ShotLook, string> = {
 };
 
 /** 스프라이트를 미리 만들어 두고 돌려쓴다. 프레임마다 앞에서부터 차례로 내준다. */
+/** 돌풍의 바람결: 줄의 수, 기본 길이(px), 가장 셀 때 흘러가는 빠르기(px/초), 화면 밖으로 두는 여유(px) */
+const WIND = { count: 34, length: 9, speed: 300, margin: 24 } as const;
+
 /** 화면 밖의 보물 상자를 알리는 그림이 가장자리에서 이만큼(px) 안쪽에 선다. */
 const CHEST_EDGE = 10;
 
@@ -152,6 +157,10 @@ export class RunView {
   private readonly puddles: boolean;
   /** 불구멍이 있는 스테이지인지 */
   private readonly vents: boolean;
+  /** 돌풍의 바람결을 그리는 판. 돌풍이 없는 스테이지에는 없다. */
+  private readonly wind?: Phaser.GameObjects.Graphics;
+  /** 바람결이 지금까지 흘러간 거리(px). 바람이 셀수록 빨리 는다. */
+  private windTravel = 0;
   private stride = 0;
 
   constructor(
@@ -182,6 +191,7 @@ export class RunView {
     this.enemies = new Pool(scene, DEPTH.enemy);
     this.shots = new Pool(scene, DEPTH.shot);
     this.air = scene.add.graphics().setDepth(DEPTH.shot);
+    if (STAGES[stage].gusts) this.wind = scene.add.graphics().setDepth(DEPTH.wind);
     this.player = scene.add.image(this.centerX, this.centerY, this.frames[0]).setDepth(DEPTH.player);
 
     // 어둠 덮개는 플레이어를 중심으로 화면 전체를 덮을 만큼 크게 만든다.
@@ -326,7 +336,7 @@ export class RunView {
         g.lineStyle(1, locked ? LOOK.threatCore : LOOK.threat, locked ? 0.85 : 0.5);
         g.lineBetween(x, y, endX, endY);
       } else if (
-        ((brain === 'volley' || brain === 'matron') && e.mode === CHARGING) ||
+        ((brain === 'volley' || brain === 'matron' || brain === 'blizzard') && e.mode === CHARGING) ||
         (brain === 'warden' && e.mode === WARDEN_CHARGING)
       ) {
         // 모으는 빛: 고리가 보스 쪽으로 조여들고 가운데가 밝아진다.
@@ -564,6 +574,33 @@ export class RunView {
     }
   }
 
+  /**
+   * 돌풍의 바람결: 바람 부는 쪽으로 흘러가는 짧은 줄들. 일기 시작할 때는 옅고 느리게 흘러서 어느 쪽에서 불지 알려 주고,
+   * 세게 불 때는 짙고 빠르다. 줄의 자리는 번호로 정해 두고 흘러간 거리만큼 옮겨서, 화면을 벗어나면 맞은편에서 다시 들어온다.
+   */
+  private drawWind(sim: Sim, dt: number): void {
+    const g = this.wind;
+    const gust = sim.gust;
+    if (!g || !gust) return;
+    g.clear();
+    if (gust.phase === 'calm') return;
+    const warn = gust.phase === 'warn';
+    const strength = warn ? 0.2 + 0.3 * Math.min(1, gust.since / GUST.warn) : 0.5 + 0.5 * gust.force;
+    this.windTravel += WIND.speed * strength * dt;
+    const spanX = this.width + WIND.margin * 2;
+    const spanY = this.height + WIND.margin * 2;
+    for (let i = 0; i < WIND.count; i += 1) {
+      // 줄마다 자리와 길이, 빠르기가 조금씩 다르다.
+      const pace = 0.7 + ((i * 37) % 10) / 16;
+      const length = (WIND.length + ((i * 13) % 9)) * (0.5 + 0.5 * strength);
+      const travel = this.windTravel * pace;
+      const x = ((((i * 97) % spanX) + gust.dirX * travel) % spanX + spanX) % spanX - WIND.margin;
+      const y = ((((i * 211) % spanY) + gust.dirY * travel) % spanY + spanY) % spanY - WIND.margin;
+      g.lineStyle(1, LOOK.wind, (0.3 + 0.45 * strength) * (i % 3 === 0 ? 1 : 0.65));
+      g.lineBetween(x, y, x - gust.dirX * length, y - gust.dirY * length);
+    }
+  }
+
   sync(sim: Sim, seconds: number, dt: number): void {
     const s = sim.state;
     const p = s.player;
@@ -576,12 +613,19 @@ export class RunView {
 
     if (this.puddles) this.drawPuddles(sim, seconds);
     if (this.vents) this.drawVents(sim, seconds);
+    if (this.wind) this.drawWind(sim, dt);
 
     // 웅덩이에서는 발이 무거워 걸음도 느려진다.
     if (p.moving) this.stride += (p.wading ? 36 : 60) * dt;
     const playerKey = this.playerKey(sim, seconds);
     if (this.player.texture.key !== playerKey) this.player.setTexture(playerKey);
     this.player.setFlipX(p.face < 0);
+    // 발이 얼어 있는 동안에는 얼음빛이 돈다.
+    const chilled = (p.chilled ?? 0) > 0;
+    if (chilled !== this.player.isTinted) {
+      if (chilled) this.player.setTint(LOOK.chill);
+      else this.player.clearTint();
+    }
 
     // 빛 조각
     this.gems.begin();

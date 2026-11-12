@@ -6,6 +6,7 @@ import {
   BOON_VALUES,
   BOONS,
   CHEST,
+  CHILL_SLOW,
   ELITE,
   ENDLESS,
   ENEMIES,
@@ -72,7 +73,7 @@ import {
   type RunSummary,
   type Upgrade,
 } from './rules';
-import { inPuddle, PUDDLE_SLOW, VENT, ventAt, ventClock, ventPhase, ventsAround } from './terrain';
+import { GUST, gustAt, inPuddle, PUDDLE_SLOW, VENT, ventAt, ventClock, ventPhase, ventsAround, type Gust } from './terrain';
 
 export const RUN_STATE_VERSION = 3;
 
@@ -272,6 +273,8 @@ export interface RunState {
     guard?: number;
     /** 불구멍에 덴 뒤 다시 데지 않는 남은 시간(초). 한 번 솟는 동안 한 번만 데게 한다. */
     scorch?: number;
+    /** 서릿발 같은 그림자에 닿아 발이 얼어 있는 남은 시간(초). 그동안 느리게 걷는다. */
+    chilled?: number;
   };
   weapons: Levels<WeaponId>;
   passives: Levels<PassiveId>;
@@ -362,6 +365,13 @@ export const CHARGING = 2;
  */
 export const WARDEN_REST = 3;
 export const WARDEN_CHARGING = 4;
+/** 눈보라의 눈이 사방으로 여러 겹을 쏘고 있는 상태. 그 앞에 CHARGING으로 빛을 모은다. */
+export const BLIZZARD_FIRING = 5;
+/**
+ * 눈보라의 눈이 쏘는 겹: rings겹을 gap초 간격으로, 한 겹에 count갈래.
+ * 겹마다 반 칸씩 어긋나서, 앞 겹의 틈으로 피한 자리에 다음 겹이 온다.
+ */
+export const BLIZZARD = { rings: 3, count: 9, gap: 0.6, damage: 12 } as const;
 
 /** 돌진하는 보스가 힘을 모으는 시간(초), 내달리는 빠르기(px/초)와 시간(초) */
 export function dashOf(kind: EnemyKind, tier: number): { windup: number; speed: number; seconds: number } {
@@ -401,6 +411,10 @@ export type SimEvent =
   | { type: 'bolt'; points: number[]; evolved: boolean }
   /** 화면 가까이의 불구멍에서 불길이 솟기 시작했다 */
   | { type: 'vent'; x: number; y: number }
+  /** 돌풍이 일기 시작했거나(warn) 세게 불기 시작했다(blow). dirX, dirY는 바람이 부는 쪽 */
+  | { type: 'gust'; phase: 'warn' | 'blow'; dirX: number; dirY: number }
+  /** 서릿발 같은 그림자에 닿아 발이 얼었다 */
+  | { type: 'chill' }
   /** 종소리가 울렸다 */
   | { type: 'bell'; evolved: boolean }
   /** 부싯돌: 쓰러진 그림자가 (x, y)에서 터졌다 */
@@ -885,6 +899,7 @@ export class Sim {
     this.tendPosts(dt);
     this.flareVents(dt);
     if (s.over) return;
+    this.tellGusts(dt);
     this.reap();
     this.moveGems(dt);
   }
@@ -906,6 +921,19 @@ export class Sim {
     if (!STAGES[s.stage].vents) return false;
     const vent = ventAt(x, y, s.seed);
     return vent !== null && ventPhase(vent, s.t) !== 'idle';
+  }
+
+  /** 지금의 돌풍. 돌풍이 없는 스테이지에서는 null */
+  get gust(): Gust | null {
+    const s = this.state;
+    return STAGES[s.stage].gusts ? gustAt(s.t, s.seed) : null;
+  }
+
+  /** 돌풍이 일기 시작할 때와 세게 불기 시작할 때를 알린다. 미는 일은 플레이어와 적이 움직일 때 한다. */
+  private tellGusts(dt: number): void {
+    const gust = this.gust;
+    if (!gust || gust.phase === 'calm' || gust.since >= dt) return;
+    this.events.push({ type: 'gust', phase: gust.phase, dirX: gust.dirX, dirY: gust.dirY });
   }
 
   /** 불구멍: 불길이 솟는 동안 그 위의 플레이어와 그림자가 덴다. */
@@ -943,8 +971,16 @@ export class Sim {
     const length = Math.hypot(moveX, moveY);
     p.moving = length > 0.05;
     p.wading = this.isMire(p.x, p.y);
+    if ((p.chilled ?? 0) > 0) p.chilled = Math.max(0, (p.chilled ?? 0) - dt);
+    // 돌풍이 부는 동안에는 가만히 있어도 바람 부는 쪽으로 밀린다.
+    const gust = this.gust;
+    if (gust && gust.phase === 'blow') {
+      p.x += gust.dirX * GUST.player * gust.force * dt;
+      p.y += gust.dirY * GUST.player * gust.force * dt;
+    }
     if (p.moving) {
-      const speed = PLAYER_BASE.speed * this.mods.speed * (p.wading ? PUDDLE_SLOW : 1);
+      const slow = (p.wading ? PUDDLE_SLOW : 1) * ((p.chilled ?? 0) > 0 ? CHILL_SLOW : 1);
+      const speed = PLAYER_BASE.speed * this.mods.speed * slow;
       const scale = (speed * dt) / Math.max(1, length);
       p.x += moveX * scale;
       p.y += moveY * scale;
@@ -1192,6 +1228,11 @@ export class Sim {
     const recycle = Math.max(s.viewW, s.viewH) * 0.5 + 90;
     const fast = speedScale(this.clock) * this.depth.speed * this.late.speed;
     const hard = damageScale(this.clock) * this.harm;
+    // 돌풍: 보통 그림자는 플레이어보다 세게 밀린다. 크고 무거운 것은 덜 밀리고 보스는 밀리지 않는다.
+    const gust = this.gust;
+    const wind = gust && gust.phase === 'blow' ? GUST.enemy * gust.force * dt : 0;
+    const windX = gust ? gust.dirX * wind : 0;
+    const windY = gust ? gust.dirY * wind : 0;
 
     for (let i = 0; i < gridCount; i += 1) {
       const e = enemies[i];
@@ -1211,6 +1252,12 @@ export class Sim {
         const rest = left - move < 0.01 ? 0 : (left - move) / left;
         e.kx = kx * rest;
         e.ky = ky * rest;
+      }
+
+      if (wind > 0 && !info.boss) {
+        const share = info.radius >= GUST.heavyRadius ? GUST.heavy : 1;
+        e.x += windX * share;
+        e.y += windY * share;
       }
 
       let dx = p.x - e.x;
@@ -1271,6 +1318,40 @@ export class Sim {
             } else {
               e.mode = 0;
               e.timer = 3.4 - CHARGE_SECONDS;
+              this.summon(e, minionKind(s.stage, e.tier), 5, 30);
+            }
+          }
+        } else if (brain === 'blizzard') {
+          // 눈보라의 눈: 빛을 모았다가(2) 사방으로 여러 겹을 엇갈려 쏘고, 쫓다가 부하를 부른다.
+          // 쏘는 동안 vx는 남은 겹의 수, vy는 다음 겹이 향하는 각도다.
+          if (e.mode === CHARGING) {
+            speed = 0;
+            if (e.timer <= 0) {
+              e.mode = BLIZZARD_FIRING;
+              e.vx = BLIZZARD.rings;
+              e.vy = this.rand() * Math.PI * 2;
+            }
+          } else if (e.mode === BLIZZARD_FIRING) {
+            speed = 0;
+            if (e.timer <= 0) {
+              const gap = (Math.PI * 2) / BLIZZARD.count;
+              this.volley(e, e.vy, BLIZZARD.count, gap, BLIZZARD.damage);
+              e.vy += gap / 2;
+              e.vx -= 1;
+              if (e.vx > 0) e.timer = BLIZZARD.gap;
+              else {
+                e.mode = 1;
+                e.timer = 3.2;
+              }
+            }
+          } else if (e.timer <= 0) {
+            if (e.mode === 0) {
+              e.mode = CHARGING;
+              e.timer = CHARGE_SECONDS;
+              this.events.push({ type: 'charge' });
+            } else {
+              e.mode = 0;
+              e.timer = 3.2 - CHARGE_SECONDS;
               this.summon(e, minionKind(s.stage, e.tier), 5, 30);
             }
           }
@@ -1429,7 +1510,13 @@ export class Sim {
       const px = p.x - e.x;
       const py = p.y - e.y;
       if (p.inv <= 0 && px * px + py * py < reach * reach) {
+        const guarded = this.guardReady;
         if (this.hurt(Math.round(info.damage * (info.boss ? this.harm : hard)))) return;
+        // 서릿발: 닿으면 발이 얼어 잠깐 느려진다. 빛막이 막아 줬으면 얼지 않는다.
+        if (info.chills && !guarded && !s.pendingDawn) {
+          p.chilled = Math.max(p.chilled ?? 0, info.chills);
+          this.events.push({ type: 'chill' });
+        }
       }
     }
   }

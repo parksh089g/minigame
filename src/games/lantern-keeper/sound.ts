@@ -52,6 +52,8 @@ export type SoundId =
   | 'bell'
   | 'flint'
   | 'vent'
+  | 'gust'
+  | 'chill'
   | 'revive'
   | 'clear'
   | 'death';
@@ -151,6 +153,14 @@ export const SOUNDS: Readonly<Record<SoundId, readonly Note[]>> = {
     { f: 104, d: 0.5, type: 'sawtooth', v: 0.34, at: 0.2 },
     { f: 55, d: 0.7, v: 0.16 },
   ],
+  // 돌풍: 낮은 데서 쓸려 올라갔다가 잦아드는 바람 소리
+  gust: [
+    { f: 170, to: 520, d: 0.55, type: 'sine', v: 0.16 },
+    { f: 240, to: 760, d: 0.6, type: 'triangle', v: 0.08, at: 0.08 },
+    { f: 520, to: 210, d: 0.5, type: 'sine', v: 0.1, at: 0.5 },
+  ],
+  // 발이 얼 때: 얼음이 맺히듯 높은 음이 짧게 내려온다.
+  chill: run([1568, 1319, 988], 0.05, 0.08, { type: 'triangle', v: 0.2 }),
   // 정예 그림자: 보스보다 짧고 가벼운 으르렁 소리
   elite: [
     { f: 147, d: 0.22, type: 'sawtooth', v: 0.28 },
