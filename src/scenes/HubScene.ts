@@ -17,6 +17,7 @@ import {
 import { getRecord, isFavorite } from '../core/save';
 import { sfx } from '../core/sfx';
 import { store } from '../core/store';
+import { setToastAnchor } from '../core/toast';
 import { claimableMissions } from '../core/weekly';
 import {
   addBackdrop,
@@ -42,6 +43,8 @@ import {
 } from '../games/registry';
 
 const MARGIN = 12;
+/** 안내 문구(core/toast.ts)의 가운데가 올 높이. 제목 줄의 한가운데다. */
+const TOAST_Y = 56;
 const CARD_WIDTH = GAME_WIDTH - MARGIN * 2;
 /** 게임 카드는 한 줄에 세 개씩 격자로 놓는다. 한 화면에 많이 보여야 원하는 게임을 바로 찾는다. */
 const COLUMNS = 3;
@@ -124,7 +127,12 @@ export class HubScene extends Phaser.Scene {
     this.addFooter(height);
 
     const unsubscribe = onOfflineStatus((status) => this.showOfflineStatus(status));
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, unsubscribe);
+    // 이 화면은 아래쪽에 누르는 도움말과 상태 표시가 있어서, 안내 문구는 제목 자리에 띄운다.
+    setToastAnchor(TOAST_Y);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      unsubscribe();
+      setToastAnchor(null);
+    });
 
     fadeIn(this);
   }
