@@ -9,6 +9,7 @@ import {
   applyPlayResult,
   buyCosmetic,
   claimAchievement,
+  claimWeeklyMission,
   equipCosmetic,
   createDefaultSave,
   isFavorite,
@@ -18,9 +19,11 @@ import {
   toggleFavorite,
   type BuyResult,
   type ClaimAchievementResult,
+  type ClaimMissionSaveResult,
   type PlayResult,
   type SaveData,
 } from './save';
+import type { WeekContext } from './weekly';
 
 const DB_NAME = 'pocket-arcade';
 const STORE_NAME = 'kv';
@@ -68,14 +71,18 @@ class SaveStore {
     this.commit();
   }
 
-  /** 한 판의 결과(점수, 얻은 코인)를 기록한다. challenge를 주면 오늘의 도전 달성도 함께 따진다. */
+  /**
+   * 한 판의 결과(점수, 얻은 코인)를 기록한다. challenge를 주면 오늘의 도전 달성도 함께 따지고,
+   * week를 주면 이 판을 주간 미션에도 센다.
+   */
   recordPlay(
     gameId: string,
     score: number,
     coins: number,
     challenge: DailyChallenge | null = null,
+    week: WeekContext | null = null,
   ): PlayResult {
-    const result = applyPlayResult(this.data, gameId, score, coins, Date.now(), challenge);
+    const result = applyPlayResult(this.data, gameId, score, coins, Date.now(), challenge, week);
     this.data = result.save;
     this.commit();
     // 한 판이라도 했으면 지켜야 할 기록이 생긴 것이다.
@@ -119,6 +126,16 @@ class SaveStore {
   /** 달성한 업적의 보상을 받는다. */
   claimAchievement(achievementId: string): ClaimAchievementResult {
     const result = claimAchievement(this.data, achievementId);
+    if (result.ok) {
+      this.data = result.save;
+      this.commit();
+    }
+    return result;
+  }
+
+  /** 다 채운 주간 미션의 보상을 받는다. */
+  claimWeeklyMission(week: WeekContext, missionId: string): ClaimMissionSaveResult {
+    const result = claimWeeklyMission(this.data, week, missionId);
     if (result.ok) {
       this.data = result.save;
       this.commit();

@@ -64,8 +64,16 @@ export function dayNumber(dateKey: string): number | null {
   return Math.round(time / DAY_MS);
 }
 
+/** dayNumber의 반대: 하루에 1씩 늘어나는 수를 YYYY-MM-DD로 바꾼다. */
+export function dateKeyOfDay(day: number): string {
+  const date = new Date(day * DAY_MS);
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const dayOfMonth = String(date.getUTCDate()).padStart(2, '0');
+  return `${String(date.getUTCFullYear()).padStart(4, '0')}-${month}-${dayOfMonth}`;
+}
+
 /** 문자열에서 0 이상 1 미만의 수를 만든다. 같은 문자열이면 언제나 같은 수가 나온다. */
-function seededUnit(text: string): number {
+export function seededUnit(text: string): number {
   // FNV-1a로 섞은 뒤 mulberry32를 한 번 돌린다.
   let hash = 0x811c9dc5;
   for (let i = 0; i < text.length; i += 1) {

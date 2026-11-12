@@ -4,6 +4,7 @@ import {
   applyPlayResult,
   buyCosmetic,
   claimAchievement,
+  claimWeeklyMission,
   createDefaultSave,
   equipCosmetic,
   getRecord,
@@ -17,6 +18,7 @@ import {
   toggleFavorite,
 } from './save';
 import { createCosmetics } from './shop';
+import { createWeekly, missionsFor, type WeekContext, type WeeklyGame } from './weekly';
 
 const NOW = 1_700_000_000_000;
 
@@ -51,10 +53,30 @@ describe('normalizeSave', () => {
         sent: { 'lightning-tap': 80 },
       },
       favorites: ['stack-tower', 'lightning-tap'],
+      weekly: {
+        weekKey: '2026-11-09',
+        plays: { 'lightning-tap': 2 },
+        coins: 14,
+        dailyClears: 1,
+        claimed: ['easy'],
+      },
       createdAt: NOW - 5000,
       updatedAt: NOW - 1000,
     };
     expect(normalizeSave(save, NOW)).toEqual(save);
+  });
+
+  it('주간 미션이 생기기 전의 세이브는 주간 기록이 빈 채로 읽는다', () => {
+    const old = normalizeSave({ version: 6, coins: 3, games: { g: { best: 5, plays: 2, lastPlayedAt: NOW } } }, NOW);
+    expect(old.weekly).toEqual(createWeekly());
+    expect(old.coins).toBe(3);
+    expect(old.version).toBe(SAVE_VERSION);
+  });
+
+  it('깨진 주간 기록은 버리고 나머지는 살린다', () => {
+    const save = normalizeSave({ version: SAVE_VERSION, coins: 9, games: {}, weekly: { weekKey: '엉뚱한 값' } }, NOW);
+    expect(save.weekly).toEqual(createWeekly());
+    expect(save.coins).toBe(9);
   });
 
   it('즐겨찾기가 생기기 전의 세이브는 즐겨찾기가 빈 채로 읽는다', () => {
@@ -462,5 +484,124 @@ describe('resetProgress', () => {
       bestStreak: 0,
       totalCleared: 0,
     });
+  });
+});
+
+describe('주간 미션', () => {
+  const GAMES: WeeklyGame[] = [
+    { id: 'p1', title: '길 잇기', genre: 'puzzle', quick: true },
+    { id: 'p2', title: '머지 타일', genre: 'puzzle', quick: true },
+    { id: 'a1', title: '번개 탭', genre: 'action', quick: true },
+    { id: 'a2', title: '탑 쌓기', genre: 'action', quick: true },
+    { id: 'duo', title: '둘이서 대결', genre: null, quick: false },
+  ];
+  /** 2026-11-09는 월요일이고, 이 주의 쉬운 미션은 "서로 다른 게임 몇 가지"다. */
+  const WEEK = '2026-11-09';
+  const NEXT_WEEK = '2026-11-16';
+  const week: WeekContext = { weekKey: WEEK, missions: missionsFor(WEEK, GAMES) };
+  const next: WeekContext = { weekKey: NEXT_WEEK, missions: missionsFor(NEXT_WEEK, GAMES) };
+  const easy = week.missions[0];
+
+  /** 서로 다른 게임을 한 판씩 count번 한다. */
+  function playDifferent(count: number, from = createDefaultSave(NOW)) {
+    let save = from;
+    let last = applyPlayResult(save, GAMES[0].id, 0, 0, NOW, null, null);
+    for (let index = 0; index < count; index += 1) {
+      last = applyPlayResult(save, GAMES[index].id, 10, 2, NOW + index, null, week);
+      save = last.save;
+    }
+    return last;
+  }
+
+  it('이 주의 쉬운 미션은 가짓수 미션이다(아래 테스트들이 기대는 것)', () => {
+    expect(easy.kind).toBe('variety');
+    expect(easy.goal).toBeLessThanOrEqual(GAMES.length);
+  });
+
+  it('주를 넘기지 않으면 주간 기록을 건드리지 않는다', () => {
+    const result = applyPlayResult(createDefaultSave(NOW), 'p1', 10, 2, NOW);
+    expect(result.save.weekly).toEqual(createWeekly());
+    expect(result.newMissions).toEqual([]);
+  });
+
+  it('한 판마다 판 수와 얻은 코인을 주간 기록에 더한다', () => {
+    const first = applyPlayResult(createDefaultSave(NOW), 'p1', 10, 2, NOW, null, week);
+    expect(first.save.weekly).toEqual({ weekKey: WEEK, plays: { p1: 1 }, coins: 2, dailyClears: 0, claimed: [] });
+    const second = applyPlayResult(first.save, 'p1', 30, 4, NOW + 1, null, week);
+    expect(second.save.weekly.plays).toEqual({ p1: 2 });
+    expect(second.save.weekly.coins).toBe(6);
+    // 원본은 그대로다.
+    expect(first.save.weekly.plays).toEqual({ p1: 1 });
+  });
+
+  it('점수를 냈을 때 채워 주는 코인도 주간 기록에 들어간다', () => {
+    const result = applyPlayResult(createDefaultSave(NOW), 'p1', 5, 0, NOW, null, week);
+    expect(result.coinsEarned).toBe(MIN_COINS_PER_PLAY);
+    expect(result.save.weekly.coins).toBe(MIN_COINS_PER_PLAY);
+  });
+
+  it('오늘의 도전을 달성하면 그 보상과 달성 횟수도 주간 기록에 들어간다', () => {
+    const challenge: DailyChallenge = { dateKey: '2026-11-11', gameId: 'p1', target: 5, reward: 15 };
+    const cleared = applyPlayResult(createDefaultSave(NOW), 'p1', 10, 2, NOW, challenge, week);
+    expect(cleared.save.weekly.dailyClears).toBe(1);
+    expect(cleared.save.weekly.coins).toBe(2 + 15);
+    // 같은 날 다시 해도 도전은 한 번만 센다.
+    const again = applyPlayResult(cleared.save, 'p1', 10, 2, NOW + 1, challenge, week);
+    expect(again.save.weekly.dailyClears).toBe(1);
+    expect(again.save.weekly.coins).toBe(2 + 15 + 2);
+  });
+
+  it('이 판으로 다 채운 미션만 새로 달성한 것으로 알린다', () => {
+    const before = playDifferent(easy.goal - 1);
+    expect(before.newMissions).toEqual([]);
+    const done = playDifferent(easy.goal);
+    expect(done.newMissions.map((mission) => mission.id)).toEqual(['easy']);
+    // 이미 다 채운 뒤의 판은 다시 알리지 않는다.
+    const after = applyPlayResult(done.save, 'p1', 10, 2, NOW + 50, null, week);
+    expect(after.newMissions).toEqual([]);
+  });
+
+  it('보상을 받으면 코인이 늘고, 한 번만 받을 수 있다', () => {
+    const done = playDifferent(easy.goal).save;
+    const claimed = claimWeeklyMission(done, week, 'easy', NOW + 100);
+    expect(claimed.ok).toBe(true);
+    if (!claimed.ok) return;
+    expect(claimed.mission).toBe(easy);
+    expect(claimed.save.coins).toBe(done.coins + easy.reward);
+    expect(claimed.save.weekly.claimed).toEqual(['easy']);
+    expect(claimed.save.updatedAt).toBe(NOW + 100);
+    // 받은 보상은 "게임으로 얻은 코인"에 넣지 않는다.
+    expect(claimed.save.weekly.coins).toBe(done.weekly.coins);
+    // 원본은 그대로다.
+    expect(done.weekly.claimed).toEqual([]);
+
+    expect(claimWeeklyMission(claimed.save, week, 'easy', NOW + 200)).toEqual({ ok: false, reason: 'claimed' });
+  });
+
+  it('덜 채운 미션은 받을 수 없다', () => {
+    const save = playDifferent(easy.goal - 1).save;
+    expect(claimWeeklyMission(save, week, 'easy', NOW)).toEqual({ ok: false, reason: 'incomplete' });
+    expect(claimWeeklyMission(save, week, 'bonus', NOW)).toEqual({ ok: false, reason: 'unknown' });
+  });
+
+  it('주가 바뀌면 처음부터 다시 세고, 지난주에 채운 미션은 받을 수 없다', () => {
+    const done = playDifferent(easy.goal).save;
+    expect(claimWeeklyMission(done, next, 'easy', NOW)).toEqual({ ok: false, reason: 'incomplete' });
+    const played = applyPlayResult(done, 'a1', 10, 3, NOW + 100, null, next);
+    expect(played.save.weekly).toEqual({ weekKey: NEXT_WEEK, plays: { a1: 1 }, coins: 3, dailyClears: 0, claimed: [] });
+  });
+
+  it('기기 시계를 되돌려 앞선 주를 넘기면 주간 기록은 그대로이고, 판은 평소처럼 기록된다', () => {
+    const later = applyPlayResult(createDefaultSave(NOW), 'p1', 10, 2, NOW, null, next).save;
+    const result = applyPlayResult(later, 'p2', 10, 2, NOW + 1, null, week);
+    expect(result.save.weekly).toBe(later.weekly);
+    expect(result.newMissions).toEqual([]);
+    expect(getRecord(result.save, 'p2').plays).toBe(1);
+    expect(result.save.coins).toBe(4);
+  });
+
+  it('기록을 지우면 주간 기록도 지운다', () => {
+    const done = playDifferent(easy.goal).save;
+    expect(resetProgress(done, NOW + 100).weekly).toEqual(createWeekly());
   });
 });
