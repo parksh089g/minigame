@@ -20,6 +20,7 @@ import {
   DEPARTMENTS,
   EQUIPMENT,
   EQUIPMENT_ORDER,
+  GUIDE_STEPS,
   FIRST_HIRES,
   HIRE_COST,
   INBOX_SLOTS,
@@ -175,6 +176,8 @@ export interface CompanyState {
   topOffice: number;
   /** 사 둔 꾸미기와 지금 쓰는 것. 자회사를 세워도 남는다. */
   decor: Decor;
+  /** 길잡이의 지금 걸음(GUIDE_STEPS의 번호). 걸음의 수와 같으면 길잡이를 마친 것이다. */
+  guide: number;
   /** 이미 본 처음 안내의 id */
   tips: string[];
   /** 마지막으로 저장한 때(ms). 닫아 둔 시간을 재는 데 쓴다. */
@@ -225,6 +228,7 @@ export function createCompany(boss: StaffId, now = 0): CompanyState {
     perks: {},
     topOffice: 0,
     decor: { owned: [], wall: null, floor: null, sign: null },
+    guide: 0,
     tips: [],
     savedAt: now,
   };
@@ -1280,6 +1284,8 @@ export function foundBranch(state: CompanyState): Founding | null {
     perks: state.perks,
     topOffice: state.topOffice,
     decor: state.decor,
+    // 자회사를 세울 만큼 키운 사람에게는 길잡이를 다시 띄우지 않는다.
+    guide: GUIDE_STEPS.length,
     stars: state.stars,
     releases: state.releases,
     goals: state.goals,
@@ -1590,5 +1596,8 @@ export function normalizeCompany(raw: unknown): CompanyState | null {
   } else if (state.releases > 0) {
     state.tips = [...OLD_HAND_TIPS];
   }
+  // 길잡이가 생기기 전부터 하던 회사에는 길잡이를 띄우지 않는다. 아직 아무것도 내지 않았으면 처음부터 본다.
+  if (typeof raw.guide === 'number') state.guide = toCount(raw.guide, GUIDE_STEPS.length);
+  else state.guide = state.releases > 0 || state.office > 0 ? GUIDE_STEPS.length : 0;
   return state;
 }
