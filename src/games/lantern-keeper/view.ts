@@ -15,8 +15,12 @@ const DEPTH = {
   shot: 6,
   player: 7,
   dark: 8,
+  pointer: 8.5,
   spark: 9,
 } as const;
+
+/** 화면 밖의 보스를 가리키는 화살표: 화면 가장자리에서 떨어진 거리와 크기 */
+const POINTER = { inset: 12, size: 7 } as const;
 
 interface Ring {
   x: number;
@@ -88,6 +92,7 @@ export class RunView {
   private readonly terrain: Phaser.GameObjects.Graphics;
   private readonly ground: Phaser.GameObjects.Graphics;
   private readonly air: Phaser.GameObjects.Graphics;
+  private readonly pointer: Phaser.GameObjects.Graphics;
   private readonly player: Phaser.GameObjects.Image;
   private readonly enemies: Pool;
   private readonly gems: Pool;
@@ -109,6 +114,11 @@ export class RunView {
     private readonly scene: Phaser.Scene,
     centerY: number,
     sim: Sim,
+    /**
+     * top은 화면 위쪽에서 HUD가 차지하는 높이로, 그 아래부터가 싸움터로 보이는 곳이다.
+     * bar는 그 바로 아래에 보스의 이름과 체력 막대가 놓이는 높이로, 화살표는 이것을 피해서 그린다.
+     */
+    private readonly frame: { top: number; bar: number } = { top: 0, bar: 0 },
   ) {
     const { width, height } = scene.scale;
     const { hero, stage } = sim.state;
@@ -142,6 +152,9 @@ export class RunView {
       repeat: -1,
       ease: 'Sine.InOut',
     });
+
+    // 화살표는 어둠 덮개 위에 그려야 가장자리에서도 또렷하다.
+    this.pointer = scene.add.graphics().setDepth(DEPTH.pointer);
 
     this.sparks = scene.add
       .particles(0, 0, LK.spark, {
@@ -191,6 +204,7 @@ export class RunView {
     }
     this.ground.clear();
     this.air.clear();
+    this.pointer.clear();
     this.darkPulse.stop();
     this.scene.tweens.add({ targets: this.dark, alpha: 0, duration: ms, ease: 'Sine.Out' });
   }
@@ -232,6 +246,42 @@ export class RunView {
         air.fillStyle(LOOK.threatCore, 0.9);
         air.fillCircle(x, y, 1 + 2 * progress);
       }
+    }
+  }
+
+  /**
+   * 화면 밖에 있는 보스가 어느 쪽에 있는지, 화면 가장자리에 화살표로 알려 준다.
+   * 보스는 느려서 멀리 따돌리기 쉬운데, 어디 있는지 모르면 잡으러 갈 수도 피할 수도 없다.
+   */
+  private drawPointers(sim: Sim, seconds: number, offsetX: number, offsetY: number): void {
+    const g = this.pointer;
+    g.clear();
+    const { inset, size } = POINTER;
+    for (const e of sim.state.enemies) {
+      if (!ENEMIES[e.kind].boss || e.hp <= 0) continue;
+      const x = e.x + offsetX;
+      const y = e.y + offsetY;
+      // 몸의 가운데가 화면 안에 있으면 이미 보이는 것이다.
+      if (x >= 0 && x <= this.width && y >= this.frame.top && y <= this.height) continue;
+      const px = Math.min(this.width - inset, Math.max(inset, x));
+      const py = Math.min(this.height - inset, Math.max(this.frame.top + this.frame.bar + inset, y));
+      const angle = Math.atan2(y - py, x - px);
+      const wing = 2.4;
+      const corner = (turn: number, reach: number): [number, number] => [
+        Math.round(px + Math.cos(angle + turn) * reach),
+        Math.round(py + Math.sin(angle + turn) * reach),
+      ];
+      const draw = (reach: number): void => {
+        const [tipX, tipY] = corner(0, reach);
+        const [leftX, leftY] = corner(wing, reach);
+        const [rightX, rightY] = corner(-wing, reach);
+        g.fillTriangle(tipX, tipY, leftX, leftY, rightX, rightY);
+      };
+      // 밝은 테두리 안에 붉은 화살표. 테두리가 숨 쉬듯 깜빡여서 눈에 띈다.
+      g.fillStyle(LOOK.pointerEdge, 0.65 + 0.3 * Math.sin(seconds * 8));
+      draw(size + 2);
+      g.fillStyle(LOOK.threat, 1);
+      draw(size);
     }
   }
 
@@ -426,5 +476,6 @@ export class RunView {
     this.flashes.length = kept;
 
     this.drawThreats(sim, seconds, offsetX, offsetY);
+    this.drawPointers(sim, seconds, offsetX, offsetY);
   }
 }

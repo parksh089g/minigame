@@ -3,16 +3,19 @@ import { vibrate } from '../../core/haptics';
 import { sfx, tone } from '../../core/sfx';
 import { addText, fadeToScene } from '../../core/ui';
 import { showBanner } from '../../scenes/GameHud';
-import { MiniGameScene, type ResultStat } from '../../scenes/MiniGameScene';
+import { MiniGameScene, type PauseExtra, type ResultStat } from '../../scenes/MiniGameScene';
 import { registerLanternTextures } from './art';
+import { damageRanking } from './build';
 import { newlyDone } from './challenges';
 import { ENEMIES, LANTERN_GAME_ID, LANTERN_SCENE, WEAPONS } from './data';
 import { RunEffects } from './effects';
-import { HP_DANGER, HUD_HEIGHT, RunHud } from './hud';
+import { BOSS_BAR_HEIGHT, HP_DANGER, HUD_HEIGHT, RunHud } from './hud';
+import { iconKey } from './icons';
 import { Joystick } from './joystick';
 import { levelUpHeader, showChoices, TICKET_HEADER } from './levelup';
 import { buildLobby, type LobbyPage } from './lobby';
 import { applyRun, metaStore, newDepth, newUnlocks } from './meta';
+import { pauseInfo } from './pauseinfo';
 import {
   depthName,
   depthRules,
@@ -166,7 +169,7 @@ export class LanternKeeperScene extends MiniGameScene {
     if (!saved) metaStore.setRun(null);
     this.sim = new Sim(state, Math.random);
 
-    this.view = new RunView(this, centerY, this.sim);
+    this.view = new RunView(this, centerY, this.sim, { top: HUD_HEIGHT, bar: BOSS_BAR_HEIGHT });
     this.effects = new RunEffects(this, DEPTH.fx, HUD_HEIGHT);
     this.hud = new RunHud(this, { top: DEPTH.hud, field: DEPTH.field }, GAME_WIDTH / 2, this.view.centerY, () => {
       sfx.click();
@@ -477,6 +480,11 @@ export class LanternKeeperScene extends MiniGameScene {
     super.pauseGame();
   }
 
+  /** 멈춘 김에 지금 빌드(무기와 패시브의 이름과 레벨, 무기마다 준 피해)를 볼 수 있게 한다. */
+  protected override pauseExtra(): PauseExtra {
+    return pauseInfo(this.sim.state);
+  }
+
   private endRun(): void {
     this.phase = 'over';
     this.stick.enabled = false;
@@ -554,7 +562,16 @@ export class LanternKeeperScene extends MiniGameScene {
     if (opened.length > 0) {
       stats.push(['새로 열림', opened.length <= 2 ? opened.join(' · ') : `${opened[0]} 외 ${opened.length - 1}`]);
     }
-    this.finishMiniGame(scoreFor(summary), stats, ending);
+    // 어느 무기가 일을 했는지: 무기마다 준 피해의 비중을 많이 준 순서대로 보여 준다.
+    const ranking = damageRanking(state.weapons, state.dealt);
+    const strip =
+      ranking.length > 0
+        ? {
+            caption: '무기별 피해 (%)',
+            chips: ranking.map((row) => ({ texture: iconKey(row.icon), label: String(Math.round(row.share * 100)) })),
+          }
+        : undefined;
+    this.finishMiniGame(scoreFor(summary), stats, ending, strip);
   }
 
   /** 끝맺음 소리는 endRun에서 새벽 소리나 꺼지는 소리로 따로 낸다. */

@@ -211,6 +211,8 @@ export interface RunState {
   revives: number;
   /** 레벨업 선택지를 다시 뽑을 수 있는 남은 횟수. 없으면 0이다. 다시 뽑기가 생기기 전에 저장한 판에는 없다. */
   rerolls?: number;
+  /** 무기마다 지금까지 준 피해. 결과 화면과 일시정지 화면에서 비중으로 보여 준다. 이것이 생기기 전에 저장한 판에는 없다. */
+  dealt?: Levels<WeaponId>;
   /**
    * 지금 보여 주고 있는 레벨업 선택지. 고르면 지워진다.
    * 판과 함께 저장해서, 고르다가 나갔다 들어와도 같은 선택지가 나온다(나갔다 들어오는 것으로 공짜로 다시 뽑지 못한다).
@@ -342,6 +344,7 @@ export function createRun(config: RunConfig): RunState {
     pendingTickets: 0,
     revives: config.meta.second ? 1 : 0,
     rerolls: Math.max(0, Math.floor(config.meta.reroll ?? 0)),
+    dealt: {},
     nextUid: 1,
     over: null,
   };
@@ -408,6 +411,9 @@ export class Sim {
   ) {
     this.mods = this.computeMods();
     this.depth = depthRules(state.depth ?? 0);
+    // 무기별 피해량은 없어도 되는 항목이다. 예전 저장이나 엉뚱한 값이면 비워서 시작한다.
+    const dealt: unknown = state.dealt;
+    if (typeof dealt !== 'object' || dealt === null || Array.isArray(dealt)) state.dealt = {};
   }
 
   private computeMods(): Modifiers {
@@ -591,7 +597,7 @@ export class Sim {
       for (const e of s.enemies) {
         if (e.hp <= 0) continue;
         const reach = REVIVE.radius + ENEMIES[e.kind].radius;
-        if ((e.x - p.x) ** 2 + (e.y - p.y) ** 2 < reach * reach) this.damage(e, REVIVE.damage);
+        if ((e.x - p.x) ** 2 + (e.y - p.y) ** 2 < reach * reach) this.damage(e, REVIVE.damage, null);
       }
       s.hazards.length = 0;
       this.events.push({ type: 'revive' });
@@ -947,7 +953,15 @@ export class Sim {
 
   // ------------------------------------------------------------ 무기
 
-  private damage(enemy: Enemy, amount: number, flash = 0.09): void {
+  /**
+   * 적에게 피해를 준다. by는 그 피해를 준 무기로, 무기별 피해량(state.dealt)에 쌓인다.
+   * 남은 체력보다 많이 준 피해는 세지 않아서, 약한 적을 한 방에 잡는 무기가 부풀려지지 않는다.
+   */
+  private damage(enemy: Enemy, amount: number, by: WeaponId | null, flash = 0.09): void {
+    if (by) {
+      const dealt = (this.state.dealt ??= {});
+      dealt[by] = (dealt[by] ?? 0) + Math.min(amount, Math.max(0, enemy.hp));
+    }
     enemy.hp -= amount;
     enemy.flash = flash;
   }
@@ -1015,7 +1029,7 @@ export class Sim {
           const reach = stats.radius + ENEMIES[e.kind].radius;
           if ((e.x - p.x) ** 2 + (e.y - p.y) ** 2 < reach * reach) {
             // 고리 안의 적이 한꺼번에 번쩍여 화면을 가리지 않게 짧게만 깜빡인다.
-            this.damage(e, stats.damage, 0.04);
+            this.damage(e, stats.damage, 'aura', 0.04);
             this.chill(e, stats.slow);
           }
         }
@@ -1033,7 +1047,7 @@ export class Sim {
           if (e.hp <= 0 || e.fireflyCd > 0) continue;
           const reach = FIREFLY_RADIUS + ENEMIES[e.kind].radius;
           if ((e.x - fx) ** 2 + (e.y - fy) ** 2 < reach * reach) {
-            this.damage(e, stats.damage);
+            this.damage(e, stats.damage, 'firefly');
             e.fireflyCd = stats.rehit;
           }
         }
@@ -1157,7 +1171,7 @@ export class Sim {
             }
             if (!target) break;
             struck.push(target);
-            this.damage(target, stats.damage);
+            this.damage(target, stats.damage, 'bolt');
             points.push(target.x, target.y);
             fromX = target.x;
             fromY = target.y;
@@ -1193,7 +1207,7 @@ export class Sim {
             const dx = e.x - shot.x;
             const dy = e.y - shot.y;
             if (dx * dx + dy * dy >= reach * reach) continue;
-            this.damage(e, shot.damage);
+            this.damage(e, shot.damage, shot.look === 'ember' || shot.look === 'emberEvo' ? 'ember' : 'lance');
             // 맞은 적은 살짝 밀려난다.
             if (!ENEMIES[e.kind].boss) {
               const speed = Math.hypot(shot.vx, shot.vy) || 1;
@@ -1231,7 +1245,7 @@ export class Sim {
         if (e.hp <= 0) continue;
         const reach = strike.radius + ENEMIES[e.kind].radius;
         if ((e.x - strike.x) ** 2 + (e.y - strike.y) ** 2 < reach * reach) {
-          this.damage(e, strike.damage);
+          this.damage(e, strike.damage, 'star');
         }
       }
       this.events.push({ type: 'strike', x: strike.x, y: strike.y, radius: strike.radius });
@@ -1251,7 +1265,7 @@ export class Sim {
           if (e.hp <= 0) continue;
           const reach = fire.radius + ENEMIES[e.kind].radius;
           if ((e.x - fire.x) ** 2 + (e.y - fire.y) ** 2 < reach * reach) {
-            this.damage(e, fire.damage, 0.04);
+            this.damage(e, fire.damage, 'oil', 0.04);
             this.chill(e, fire.slow);
           }
         }

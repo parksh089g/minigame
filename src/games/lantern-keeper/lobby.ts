@@ -38,6 +38,8 @@ const HERO_CARD = { width: (ROW_WIDTH - CARD_GAP * 2) / 3, height: 62 } as const
 const STAGE_CARD = { width: (ROW_WIDTH - CARD_GAP) / 2, height: 38 } as const;
 const DETAIL_HEIGHT = 56;
 const UPGRADE_BUTTON_HEIGHT = 24;
+/** 하던 판을 버리고 새로 시작할 때 한 번 더 묻는 말과, 그 물음이 살아 있는 시간 */
+const DISCARD = { label: '하던 판을 버릴까요? 한 번 더!', ms: 3000 } as const;
 /** 스테이지 카드 아래의 한 줄: 스테이지 설명, 깊은 밤이 열린 스테이지에서는 단계를 고르는 줄 */
 const DEPTH_ROW = { height: 20, button: 26 } as const;
 /** 고르는 구역(누가 갈까 ~ 스테이지 설명)의 높이 */
@@ -200,13 +202,26 @@ function addMainPage(
       style: 'green',
       onTap: handlers.onResume,
     });
-    new PixelButton(scene, {
+    // 하던 판이 있을 때 새로 시작하면 그 판은 사라진다. 실수로 누르지 않도록 한 번 더 누르게 한다.
+    let armed = false;
+    const fresh = new PixelButton(scene, {
       x: buttonX,
       y: height - 42,
       width: buttonWidth,
       height: 28,
       label: '새로 시작',
-      onTap: handlers.onStart,
+      onTap: () => {
+        if (armed) {
+          handlers.onStart();
+          return;
+        }
+        armed = true;
+        fresh.setLabel(DISCARD.label).setStyle('red');
+        scene.time.delayedCall(DISCARD.ms, () => {
+          armed = false;
+          fresh.setLabel('새로 시작').setStyle('neutral');
+        });
+      },
     });
   } else {
     new PixelButton(scene, {

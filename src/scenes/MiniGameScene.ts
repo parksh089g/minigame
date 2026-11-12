@@ -22,10 +22,31 @@ export interface ResultData {
   /** 이미 세이브에 반영된 이번 판의 결과 */
   result: PlayResult;
   stats: readonly ResultStat[];
+  /** 기록 아래에 덧붙이는 아이콘 한 줄. 화면이 짧아 자리가 없으면 보이지 않는다. */
+  strip?: ResultStrip;
+}
+
+/** 결과 화면의 기록 아래에 덧붙이는 아이콘 한 줄. 예: 무기마다 준 피해의 비중 */
+export interface ResultStrip {
+  /** 이 줄이 무엇인지 알려 주는 작은 글씨 */
+  caption: string;
+  /** 왼쪽부터 차례로 놓인다. texture는 이미 만들어 둔 텍스처의 이름(한 변 18px 안팎) */
+  chips: ReadonlyArray<{ texture: string; label: string }>;
 }
 
 export interface PauseData {
   sceneKey: string;
+  /** 게임이 일시정지 화면에 덧붙여 보여 주는 것. 제목과 버튼 사이에 자리를 내준다. */
+  extra?: PauseExtra;
+}
+
+/** 일시정지 화면에 게임이 덧붙이는 것. 예: 지금까지 고른 강화 */
+export interface PauseExtra {
+  /** 카드의 너비. 기본 너비보다 넓어야 할 때만 적는다. */
+  width?: number;
+  height: number;
+  /** 일시정지 씬의 (left, top)에서 시작하는 width × height 자리에 그린다. */
+  draw: (scene: Phaser.Scene, left: number, top: number, width: number) => void;
 }
 
 /**
@@ -80,7 +101,12 @@ export abstract class MiniGameScene extends Phaser.Scene implements BackAware {
   protected pauseGame(): void {
     if (this.finished || !this.scene.isActive()) return;
     this.scene.pause();
-    this.scene.launch(SCENE.pause, { sceneKey: this.scene.key } satisfies PauseData);
+    this.scene.launch(SCENE.pause, { sceneKey: this.scene.key, extra: this.pauseExtra() } satisfies PauseData);
+  }
+
+  /** 일시정지 화면에 덧붙여 보여 줄 것. 없으면 기본 화면 그대로다. */
+  protected pauseExtra(): PauseExtra | undefined {
+    return undefined;
   }
 
   /** 판이 끝날 때 나는 소리. 끝맺음 소리가 따로 있는 게임은 이것을 바꿔 쓴다. */
@@ -93,7 +119,12 @@ export abstract class MiniGameScene extends Phaser.Scene implements BackAware {
    * 저장을 먼저 해 두면 결과 화면이 뜨기 전에 앱을 닫아도 기록이 남는다.
    * 끝나는 장면을 더 길게 보여 줄 게임은 resultDelayMs를 늘린다.
    */
-  protected finishMiniGame(score: number, stats: readonly ResultStat[] = [], resultDelayMs = 900): void {
+  protected finishMiniGame(
+    score: number,
+    stats: readonly ResultStat[] = [],
+    resultDelayMs = 900,
+    strip?: ResultStrip,
+  ): void {
     if (this.finished) return;
     this.finished = true;
     this.playing = false;
@@ -114,6 +145,7 @@ export abstract class MiniGameScene extends Phaser.Scene implements BackAware {
       gameId: this.gameId,
       result,
       stats,
+      strip,
     };
     this.time.delayedCall(resultDelayMs, () => {
       this.scene.pause();
