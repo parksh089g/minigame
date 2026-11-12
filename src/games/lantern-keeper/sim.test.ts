@@ -1376,8 +1376,31 @@ describe('캐릭터', () => {
       if (trait.cooldown) expect(shown).toContain(`재사용 ${percent(trait.cooldown)}`);
       if (trait.area) expect(shown).toContain(`범위 ${percent(trait.area)}`);
       if (trait.xp) expect(shown).toContain(`경험치 ${percent(trait.xp)}`);
+      if (trait.taken) expect(shown).toContain(`받는 피해 ${percent(trait.taken)}`);
       if (trait.maxHp) expect(shown).toContain(`최대 체력 ${trait.maxHp > 0 ? '+' : '-'}${Math.abs(trait.maxHp)}`);
     }
+  });
+
+  it('종지기는 종소리로 시작하고, 같은 공격에 덜 다친다', () => {
+    const hit = (hero: 'keeper' | 'ringer'): number => {
+      const sim = quietSim(1, { hero });
+      sim.state.weapons = {};
+      const before = sim.state.player.hp;
+      sim.state.enemies.push(enemy('slag', 2, 0, 1e9));
+      sim.step(STEP, 0, 0);
+      return before - sim.state.player.hp;
+    };
+    expect(createRun({ ...config, hero: 'ringer' }).weapons).toEqual({ bell: 1 });
+    expect(hit('keeper')).toBe(ENEMIES.slag.damage);
+    expect(hit('ringer')).toBeCloseTo(ENEMIES.slag.damage * (HEROES.ringer.trait.taken ?? 1), 5);
+    // 가장 튼튼하고, 가장 느리다.
+    for (const id of HERO_ORDER) {
+      if (id === 'ringer') continue;
+      expect(HEROES.ringer.trait.maxHp ?? 0).toBeGreaterThan(HEROES[id].trait.maxHp ?? 0);
+      expect(HEROES.ringer.trait.speed ?? 1).toBeLessThan(HEROES[id].trait.speed ?? 1);
+    }
+    // 가장 늦게 열린다.
+    expect(HEROES.ringer.unlockSeconds).toBe(Math.max(...HERO_ORDER.map((id) => HEROES[id].unlockSeconds)));
   });
 
   it('번개잡이는 손이 잦아서 같은 무기를 더 자주 쓴다', () => {
