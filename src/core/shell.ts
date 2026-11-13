@@ -3,6 +3,7 @@
  * main.ts는 이 파일만 알면 된다.
  */
 import type Phaser from 'phaser';
+import { refitDataOf } from './app-events';
 import { initBackButton } from './back';
 import { initCrashNotice } from './crash';
 import { initOrientation } from './orientation';
@@ -15,5 +16,6 @@ export function initAppShell(game: Phaser.Game, parent: HTMLElement): void {
   initCrashNotice();
   initBackButton(game);
   initOrientation(game);
-  initRefit(game, parent, (scene) => fadeToScene(scene, scene.scene.key));
+  // 씬이 원하면(RefitAware) 보던 것을 이어 보여 주도록 넘길 값을 함께 준다.
+  initRefit(game, parent, (scene) => fadeToScene(scene, scene.scene.key, refitDataOf(scene)));
 }

@@ -31,11 +31,19 @@ export const GOAL_COUNT = 3;
 export const GOAL_REWARD = 5;
 /** 출시로 받는 코인의 하루 상한. 오래 켜 두어도 코인이 끝없이 나오지 않게 한다. */
 export const RELEASE_COINS_PER_DAY = 20;
+/**
+ * 교육과 장비 목표를 고를 때 셈하는 시간(초). 가진 잎사귀에 이 시간 동안 버는 잎사귀를 더한 만큼으로
+ * 살 수 있는 횟수까지만 목표로 낸다(rules.ts의 goalLimits). 값이 너무 올라서 사실상 채울 수 없는 목표를 막는다.
+ */
+export const GOAL_BUDGET_SECONDS = 30 * 60;
 
 export interface Goal {
   kind: GoalKind;
   target: number;
 }
+
+/** 목표마다 오늘 할 수 있는 횟수의 한도. 적히지 않은 목표는 한도가 없다. */
+export type GoalLimits = Partial<Record<GoalKind, number>>;
 
 /** 세이브에 남기는 오늘의 목표 */
 export interface GoalsState {
@@ -54,11 +62,16 @@ export interface GoalsState {
 const isGoalKind = (value: unknown): value is GoalKind => typeof value === 'string' && value in GOALS;
 
 /**
- * 그 날짜와 사무실에 맞는 목표를 정한다. 같은 날짜와 사무실이면 언제나 같다.
- * skip에 적힌 것은 고르지 않는다. 더 올릴 것이 남지 않아서 채울 수 없는 목표를 빼는 데 쓴다.
+ * 그 날짜와 사무실에 맞는 목표를 정한다. 같은 날짜와 사무실(과 한도)이면 언제나 같다.
+ * limits는 목표마다 오늘 할 수 있는 횟수다(rules.ts의 goalLimits). 뽑힌 목표가 한도보다 크면 한도 안의
+ * 가장 큰 목표로 낮추고, 가장 작은 목표도 넘으면 그 목표는 고르지 않는다.
  */
-export function goalsFor(day: string, office: number, skip: readonly GoalKind[] = []): Goal[] {
-  const open = GOAL_KINDS.filter((kind) => (GOALS[kind] as GoalDef).unlockOffice <= office && !skip.includes(kind));
+export function goalsFor(day: string, office: number, limits: GoalLimits = {}): Goal[] {
+  const limit = (kind: GoalKind): number => limits[kind] ?? Number.POSITIVE_INFINITY;
+  const open = GOAL_KINDS.filter((kind) => {
+    const def = GOALS[kind] as GoalDef;
+    return def.unlockOffice <= office && Math.min(...def.targets) <= limit(kind);
+  });
   // 날짜에서 뽑은 수로 줄을 세워 앞의 셋을 고른다. 날마다 다른 조합이 나온다.
   const ranked = open
     .map((kind) => ({ kind, order: seededUnit(`${day}:${kind}`) }))
@@ -67,18 +80,19 @@ export function goalsFor(day: string, office: number, skip: readonly GoalKind[] 
   return ranked.map(({ kind }) => {
     const targets = (GOALS[kind] as GoalDef).targets;
     const pick = Math.min(targets.length - 1, Math.floor(seededUnit(`${day}:${kind}:target`) * targets.length));
-    return { kind, target: targets[pick] };
+    const target = targets[pick] <= limit(kind) ? targets[pick] : Math.max(...targets.filter((value) => value <= limit(kind)));
+    return { kind, target };
   });
 }
 
-export function createGoals(day = '', office = 0, skip: readonly GoalKind[] = []): GoalsState {
-  const list = day === '' ? [] : goalsFor(day, office, skip);
+export function createGoals(day = '', office = 0, limits: GoalLimits = {}): GoalsState {
+  const list = day === '' ? [] : goalsFor(day, office, limits);
   return { day, list, progress: list.map(() => 0), claimed: list.map(() => false), releaseCoins: 0 };
 }
 
 /** 날이 바뀌었으면 새 목표를, 아니면 그대로 돌려준다. */
-export function rollGoals(goals: GoalsState, day: string, office: number, skip: readonly GoalKind[] = []): GoalsState {
-  return goals.day === day ? goals : createGoals(day, office, skip);
+export function rollGoals(goals: GoalsState, day: string, office: number, limits: GoalLimits = {}): GoalsState {
+  return goals.day === day ? goals : createGoals(day, office, limits);
 }
 
 /** 이 일을 amount번 한 것을 목표에 센다. 목표를 넘겨서는 세지 않는다. */

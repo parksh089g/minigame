@@ -3,6 +3,7 @@ import {
   bumpGoals,
   claimGoal,
   createGoals,
+  GOAL_BUDGET_SECONDS,
   GOAL_COUNT,
   GOAL_KINDS,
   GOAL_REWARD,
@@ -27,9 +28,11 @@ import {
   createCompany,
   moveOffice,
   normalizeCompany,
+  equipmentCost,
+  goalLimits,
+  incomePerSecond,
   release,
   startProject,
-  stuckGoals,
   train,
   type CompanyState,
 } from './rules';
@@ -79,15 +82,35 @@ describe('오늘의 목표 정하기', () => {
     }
   });
 
-  it('빼 달라고 한 목표는 나오지 않고, 그래도 셋이 나온다', () => {
+  it('가장 작은 목표도 못 채우는 일은 나오지 않고, 그래도 셋이 나온다', () => {
+    const small = (kind: 'train' | 'upgrade'): number => Math.min(...GOALS[kind].targets);
     for (const day of days()) {
-      const kinds = goalsFor(day, OFFICES.length - 1, ['train', 'upgrade']).map((goal) => goal.kind);
+      const kinds = goalsFor(day, OFFICES.length - 1, { train: small('train') - 1, upgrade: 0 }).map((goal) => goal.kind);
       expect(kinds).toHaveLength(GOAL_COUNT);
       expect(kinds).not.toContain('train');
       expect(kinds).not.toContain('upgrade');
     }
-    const rolled = rollGoals(createGoals(DAY, 1), '2026-11-13', OFFICES.length - 1, ['train']);
+    const rolled = rollGoals(createGoals(DAY, 1), '2026-11-13', OFFICES.length - 1, { train: 0 });
     expect(rolled.list.map((goal) => goal.kind)).not.toContain('train');
+  });
+
+  it('한도가 뽑힌 목표보다 작으면 한도 안의 가장 큰 목표로 낮춘다', () => {
+    const targets = GOALS.upgrade.targets;
+    let lowered = 0;
+    for (const day of days()) {
+      const free = goalsFor(day, OFFICES.length - 1);
+      const tight = goalsFor(day, OFFICES.length - 1, { upgrade: targets[1] });
+      // 다른 목표와 어떤 일이 나오는지는 그대로이고, 장비 목표만 한도를 넘지 않는다.
+      expect(tight.map((goal) => goal.kind)).toEqual(free.map((goal) => goal.kind));
+      tight.forEach((goal, index) => {
+        if (goal.kind !== 'upgrade') expect(goal).toEqual(free[index]);
+        else {
+          expect(goal.target).toBe(Math.min(free[index].target, targets[1]));
+          if (goal.target !== free[index].target) lowered += 1;
+        }
+      });
+    }
+    expect(lowered).toBeGreaterThan(0);
   });
 
   it('목표를 한 줄로 적는다', () => {
@@ -140,25 +163,33 @@ describe('오늘의 목표 채우기', () => {
   });
 });
 
-describe('채울 수 없는 목표', () => {
+describe('오늘 채울 수 있는 만큼', () => {
   const most = (kind: 'train' | 'upgrade'): number => Math.max(...GOALS[kind].targets);
+  const full = { train: most('train'), upgrade: most('upgrade') };
+  /** 게임 하나를 내서 잎사귀를 버는 새 회사 */
+  const earning = (): CompanyState => {
+    const state = createCompany('sprout');
+    state.released['lightning-tap'] = 1;
+    return state;
+  };
 
-  it('새 회사에는 없다', () => {
-    expect(stuckGoals(createCompany('sprout'))).toEqual([]);
+  it('새 회사는 아직 버는 것이 없어서 값을 따지지 않는다', () => {
+    const state = createCompany('sprout');
+    expect(incomePerSecond(state)).toBe(0);
+    expect(goalLimits(state)).toEqual(full);
   });
 
-  it('교육이 목표만큼 남지 않으면 교육 목표를 뺀다', () => {
+  it('교육은 남은 단계만큼만 센다', () => {
     const state = createCompany('sprout');
     for (const desk of state.desks) desk.level = TRAINING.maxLevel;
-    expect(stuckGoals(state)).toEqual(['train']);
-    // 한 친구가 목표의 수보다 하나 적게 남았으면 아직 채울 수 없다.
+    expect(goalLimits(state).train).toBe(0);
     state.desks[0].level = TRAINING.maxLevel - (most('train') - 1);
-    expect(stuckGoals(state)).toEqual(['train']);
+    expect(goalLimits(state).train).toBe(most('train') - 1);
     state.desks[0].level = TRAINING.maxLevel - most('train');
-    expect(stuckGoals(state)).toEqual([]);
+    expect(goalLimits(state).train).toBe(most('train'));
   });
 
-  it('장비를 거의 다 올렸으면 장비 목표를 뺀다', () => {
+  it('장비는 남은 단계만큼만 센다', () => {
     const state = createCompany('sprout');
     const fill = (): void => {
       for (const id of EQUIPMENT_ORDER) {
@@ -167,14 +198,47 @@ describe('채울 수 없는 목표', () => {
       }
     };
     fill();
-    expect(stuckGoals(state)).toEqual(['upgrade']);
-    state.desks[0].gear.computer = EQUIPMENT.computer.maxLevel - most('upgrade');
-    expect(stuckGoals(state)).toEqual([]);
+    expect(goalLimits(state).upgrade).toBe(0);
+    state.desks[0].gear.computer = EQUIPMENT.computer.maxLevel - 2;
+    expect(goalLimits(state).upgrade).toBe(2);
     // 아직 열리지 않은 장비는 세지 않는다. 옥탑방에서는 컴퓨터와 화분뿐이다.
     fill();
     state.gear.coffee = 0;
     expect(EQUIPMENT.coffee.unlockOffice).toBeGreaterThan(state.office);
-    expect(stuckGoals(state)).toEqual(['upgrade']);
+    expect(goalLimits(state).upgrade).toBe(0);
+  });
+
+  it('버는 회사는 가진 잎사귀와 반 시간 동안 버는 잎사귀로 살 수 있는 만큼만 센다', () => {
+    const state = earning();
+    // 남은 장비는 컴퓨터 하나뿐이고, 그 값을 한 단계씩 맞춰 본다.
+    for (const id of EQUIPMENT_ORDER) if (EQUIPMENT[id].scope === 'company') state.gear[id] = EQUIPMENT[id].maxLevel;
+    for (const desk of state.desks) desk.gear.computer = EQUIPMENT.computer.maxLevel;
+    const level = EQUIPMENT.computer.maxLevel - 3;
+    state.desks[0].gear.computer = level;
+    // 회사 장비가 수익도 올리므로 장비를 다 놓은 뒤에 잰다.
+    const income = incomePerSecond(state);
+    expect(income).toBeGreaterThan(0);
+    const costs = [0, 1, 2].map((step) => equipmentCost('computer', level + step));
+    const budget = (leaves: number): void => {
+      state.leaves = leaves - income * GOAL_BUDGET_SECONDS;
+    };
+    budget(costs[0] - 1);
+    expect(goalLimits(state).upgrade).toBe(0);
+    budget(costs[0] + costs[1]);
+    expect(goalLimits(state).upgrade).toBe(2);
+    budget(costs[0] + costs[1] + costs[2]);
+    expect(goalLimits(state).upgrade).toBe(3);
+  });
+
+  it('값이 너무 오른 장비만 남은 큰 회사에는 장비 목표가 나오지 않는다', () => {
+    const state = earning();
+    for (const id of EQUIPMENT_ORDER) if (EQUIPMENT[id].scope === 'company') state.gear[id] = EQUIPMENT[id].maxLevel;
+    for (const desk of state.desks) desk.gear.computer = EQUIPMENT.computer.maxLevel - 1;
+    state.leaves = 0;
+    expect(goalLimits(state).upgrade).toBe(0);
+    for (const day of days()) {
+      expect(goalsFor(day, state.office, goalLimits(state)).map((goal) => goal.kind)).not.toContain('upgrade');
+    }
   });
 });
 

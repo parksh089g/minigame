@@ -60,7 +60,16 @@ import {
   type StaffId,
   type TaskKind,
 } from './data';
-import { bumpGoals, createGoals, GOALS, normalizeGoals, type GoalKind, type GoalsState } from './goals';
+import {
+  bumpGoals,
+  createGoals,
+  GOAL_BUDGET_SECONDS,
+  GOALS,
+  normalizeGoals,
+  type GoalKind,
+  type GoalLimits,
+  type GoalsState,
+} from './goals';
 
 export const COMPANY_VERSION = 1;
 
@@ -782,29 +791,65 @@ export function train(state: CompanyState, index: number): boolean {
 }
 
 /**
- * 지금은 채울 수 없는 오늘의 목표. 교육이나 장비를 거의 다 올려서 목표의 수만큼 남지 않았을 때다.
- * 새 목표를 정할 때 이것들은 빼고 고른다.
+ * 교육과 장비 목표를 오늘 몇 번까지 채울 수 있는지(새 목표를 정할 때 쓴다. goals.ts의 goalsFor).
+ * 남은 단계가 모자라거나, 값이 너무 올라서 가진 잎사귀와 GOAL_BUDGET_SECONDS 동안 버는 잎사귀로는
+ * 몇 번 못 사는 날이 있다. 싼 것부터 사 나간다고 보고 센다. 가장 큰 목표의 수까지만 센다.
+ * 아직 버는 것이 없으면(첫 출시 전) 얼마나 벌지 알 수 없으니 값은 따지지 않는다.
  */
-export function stuckGoals(state: CompanyState): GoalKind[] {
+export function goalLimits(state: CompanyState): GoalLimits {
   const most = (kind: GoalKind): number => Math.max(...GOALS[kind].targets);
-  const stuck: GoalKind[] = [];
-  let lessons = 0;
-  for (const desk of state.desks) if (desk.staff) lessons += Math.max(0, TRAINING.maxLevel - desk.level);
-  if (lessons < most('train')) stuck.push('train');
-  let upgrades = 0;
+  const income = incomePerSecond(state);
+  const budget = income > 0 ? state.leaves + income * GOAL_BUDGET_SECONDS : Number.POSITIVE_INFINITY;
+
+  // 사람마다, 장비마다 다음 단계부터의 값. 단계가 오를수록 비싸진다.
+  const lessons: number[][] = [];
+  for (const desk of state.desks) {
+    if (!desk.staff) continue;
+    lessons.push(costsFrom(desk.level, TRAINING.maxLevel, most('train'), trainCost));
+  }
+  const upgrades: number[][] = [];
   for (const id of EQUIPMENT_ORDER) {
     const def: EquipmentDef = EQUIPMENT[id];
     if (def.unlockOffice > state.office) continue;
+    const cost = (level: number): number => equipmentCost(id, level);
     if (def.scope === 'company') {
-      upgrades += Math.max(0, def.maxLevel - equipmentLevel(state, id));
+      upgrades.push(costsFrom(equipmentLevel(state, id), def.maxLevel, most('upgrade'), cost));
       continue;
     }
     state.desks.forEach((desk, index) => {
-      if (desk.staff) upgrades += Math.max(0, def.maxLevel - equipmentLevel(state, id, index));
+      if (desk.staff) upgrades.push(costsFrom(equipmentLevel(state, id, index), def.maxLevel, most('upgrade'), cost));
     });
   }
-  if (upgrades < most('upgrade')) stuck.push('upgrade');
-  return stuck;
+  return {
+    train: affordable(lessons, budget, most('train')),
+    upgrade: affordable(upgrades, budget, most('upgrade')),
+  };
+}
+
+/** level부터 max 전까지 한 단계씩 올리는 값. 많아야 count개까지만 적는다. */
+function costsFrom(level: number, max: number, count: number, cost: (level: number) => number): number[] {
+  const costs: number[] = [];
+  for (let next = level; next < max && costs.length < count; next += 1) costs.push(cost(next));
+  return costs;
+}
+
+/** 줄마다 앞에서부터 사야 하는 값들에서, budget으로 싼 것부터 몇 번 살 수 있는지. 많아야 limit번까지 센다. */
+function affordable(chains: readonly (readonly number[])[], budget: number, limit: number): number {
+  const next = chains.map(() => 0);
+  let left = budget;
+  let count = 0;
+  while (count < limit) {
+    let best = -1;
+    for (let index = 0; index < chains.length; index += 1) {
+      const cost = chains[index][next[index]];
+      if (cost !== undefined && (best < 0 || cost < chains[best][next[best]])) best = index;
+    }
+    if (best < 0 || chains[best][next[best]] > left) break;
+    left -= chains[best][next[best]];
+    next[best] += 1;
+    count += 1;
+  }
+  return count;
 }
 
 // ───────── 급한 의뢰 ─────────
@@ -1001,6 +1046,30 @@ export function catchUp(state: CompanyState, seconds: number): Away | null {
   }
   releaseDone();
   return { seconds: counted, leaves, tasks, capped: seconds > AWAY.maxSeconds, releases };
+}
+
+/** passOpen의 결과 */
+export interface Passed {
+  /** 그동안 번 잎사귀. 출시 보너스와 의뢰의 보상까지 넣은 것이다. */
+  leaves: number;
+  /** 그동안 예약 줄 덕분에 저절로 된 출시 */
+  releases: Release[];
+}
+
+/**
+ * 회사를 열어 둔 채 아무것도 누르지 않고 seconds초를 보낸 것처럼 1초씩 흘린다.
+ * 회사에서 보낸 게임을 하고 돌아왔을 때 그 시간을 셈하는 데 쓴다(data.ts의 PLAY_TRIP).
+ * 닫아 둔 동안(catchUp)과 달리 출시작이 평소만큼 벌고, 급한 의뢰도 열어 둔 때처럼 오고 간다.
+ */
+export function passOpen(state: CompanyState, seconds: number, random: () => number = Math.random): Passed {
+  const before = state.leaves;
+  const releases: Release[] = [];
+  for (let time = 0; time < seconds; time += 1) {
+    for (const event of advance(state, Math.min(1, seconds - time), random)) {
+      if (event.type === 'release') releases.push(event.release);
+    }
+  }
+  return { leaves: state.leaves - before, releases };
 }
 
 /** 시간을 짧게 적는다: 45초, 12분, 2시간 5분 */
