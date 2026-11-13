@@ -139,6 +139,7 @@ export const CHALLENGES: readonly Challenge[] = [
   { id: 'marsh-dawn', title: '늪의 새벽', description: '안개 늪에서 새벽 맞기', goal: 1, reward: 60, measure: (s) => (s.stats.stages.includes('marsh') ? 1 : 0) },
   { id: 'ridge-dawn', title: '고개의 새벽', description: '잿빛 고개에서 새벽 맞기', goal: 1, reward: 80, measure: (s) => (s.stats.stages.includes('ridge') ? 1 : 0) },
   { id: 'tundra-dawn', title: '설원의 새벽', description: '바람 설원에서 새벽 맞기', goal: 1, reward: 100, measure: (s) => (s.stats.stages.includes('tundra') ? 1 : 0) },
+  { id: 'grove-dawn', title: '숲의 새벽', description: '빛버섯 숲에서 새벽 맞기', goal: 1, reward: 120, measure: (s) => (s.stats.stages.includes('grove') ? 1 : 0) },
   { id: 'boss-25', title: '보스 사냥꾼', description: '보스 25마리 쓰러뜨리기', goal: 25, reward: 60, measure: (s) => s.stats.bossKills },
   { id: 'evolve-3', title: '세 갈래 빛', description: '한 판에 무기 셋 진화시키기', goal: 3, reward: 80, measure: (s) => s.stats.bestEvolved },
   { id: 'deep-1', title: '더 깊은 곳으로', description: '깊은 밤 1에서 새벽 맞기', goal: 1, reward: 80, measure: clearedDepth(1) },

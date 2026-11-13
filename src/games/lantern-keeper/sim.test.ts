@@ -13,6 +13,7 @@ import {
   FEAST_LEVELS,
   FEAST_ORDER,
   FLINT,
+  GLIDE,
   GUARD,
   HERO_ORDER,
   HEROES,
@@ -28,7 +29,9 @@ import {
   MID_BOSS_TIERS,
   PLAYER_BASE,
   POSTS,
+  QUAKE,
   RUN_SECONDS,
+  SPROUT,
   STAGE_ORDER,
   STAGES,
   SURGES,
@@ -64,6 +67,7 @@ import {
   dashOf,
   HOP_REST,
   HOP_SECONDS,
+  inQuakeGap,
   looksLikeRun,
   restoreRun,
   RUN_STATE_VERSION,
@@ -71,7 +75,9 @@ import {
   Sim,
   WARDEN_CHARGING,
   WARDEN_REST,
+  quakeCrosses,
   type Enemy,
+  type Quake,
   type RunState,
   type SimEvent,
 } from './sim';
@@ -81,8 +87,12 @@ import {
   gustAt,
   gustDirection,
   inPuddle,
+  LEAP,
   PUDDLE_SLOW,
   puddleInCell,
+  shroomAt,
+  shroomInCell,
+  type Shroom,
   VENT,
   ventAt,
   ventClock,
@@ -2114,6 +2124,362 @@ describe('바람 설원', () => {
     sim.state.enemies.push(enemy('blizzard', 300, 0, 0));
     sim.step(STEP, 0, 0);
     expect(sim.state.over).toBe('cleared');
+  });
+});
+
+describe('빛버섯 숲', () => {
+  const grove = (seed = 3): Sim => {
+    const sim = quietSim(seed, { stage: 'grove', seed });
+    sim.state.postsSpawned = POSTS.times.length;
+    return sim;
+  };
+  /** 시작하는 자리에서 가까운 빛버섯 하나. 내려앉을 자리에는 다른 버섯이 없는 것으로 고른다. */
+  const nearShroom = (seed: number): Shroom => {
+    for (let cellX = 1; cellX < 40; cellX += 1) {
+      const shroom = shroomInCell(cellX, 0, seed);
+      if (shroom && !shroomAt(shroom.x + LEAP.distance, shroom.y, seed)) return shroom;
+    }
+    throw new Error('빛버섯이 없다');
+  };
+  /** 플레이어를 버섯의 왼쪽 가장자리 바로 앞에 세운다. 오른쪽으로 걸으면 곧 밟는다. */
+  const standBefore = (sim: Sim, shroom: Shroom): void => {
+    sim.state.player.x = shroom.x - shroom.r - LEAP.reach - 1;
+    sim.state.player.y = shroom.y;
+  };
+  /** 플레이어가 서 있는 쪽을 향해 퍼지는 땅울림 고리 */
+  const ring = (x: number, y: number, r: number, gap: number, extra: Partial<Quake> = {}): Quake => ({
+    x,
+    y,
+    r,
+    gap,
+    damage: QUAKE.damage,
+    delay: 0,
+    ...extra,
+  });
+
+  it('숲에서는 숲의 적만 나오고, 다른 스테이지와 같은 짜임이다', () => {
+    const sim = newSim(4, createRun({ ...config, stage: 'grove' }));
+    sim.state.weapons = {};
+    sim.state.player.hp = 1e9;
+    sim.state.midBosses = MID_BOSS_COUNT;
+    sim.state.finalBoss = true;
+    sim.state.elites = ELITE.times.length;
+    sim.state.t = 200;
+    advance(sim, 6);
+    const allowed = new Set<EnemyKind>(STAGES.grove.spawns.map((row) => row.kind));
+    expect(sim.state.enemies.length).toBeGreaterThan(10);
+    for (const e of sim.state.enemies) expect(allowed.has(e.kind)).toBe(true);
+    expect(STAGES.grove.spawns).toHaveLength(6);
+    expect(STAGES.grove.spawns.filter((row) => ENEMIES[row.kind].shoots)).toHaveLength(1);
+    expect(STAGES.grove.spawns.filter((row) => ENEMIES[row.kind].bursts)).toHaveLength(1);
+    expect(STAGES.grove.spawns.filter((row) => ENEMIES[row.kind].sprouts)).toHaveLength(1);
+    expect(STAGES.grove.spawns[0].from).toBe(0);
+    expect(ENEMIES[STAGES.grove.elite].springs).toBe(true);
+    expect(ENEMIES[STAGES.grove.finalBoss].brain).toBe('elder');
+    // 빛버섯은 이 스테이지에만 있다.
+    expect(STAGE_ORDER.filter((id) => STAGES[id].shrooms)).toEqual(['grove']);
+  });
+
+  it('빛버섯은 씨앗과 칸으로 자리가 정해지고, 시작하는 칸에는 없다', () => {
+    for (const seed of [1, 2, 3, 77]) {
+      expect(shroomInCell(0, 0, seed)).toBeNull();
+      const shroom = nearShroom(seed);
+      expect(shroomInCell(Math.floor(shroom.x / 116), Math.floor(shroom.y / 116), seed)).toEqual(shroom);
+      expect(shroomAt(shroom.x, shroom.y, seed)).toEqual(shroom);
+      expect(shroomAt(shroom.x + shroom.r + LEAP.reach - 0.5, shroom.y, seed)).toEqual(shroom);
+      expect(shroomAt(shroom.x + shroom.r + LEAP.reach + 0.5, shroom.y, seed)).toBeNull();
+    }
+    // 넓은 땅에 고르게 돋아 있다.
+    let count = 0;
+    for (let cellY = -10; cellY < 10; cellY += 1) {
+      for (let cellX = -10; cellX < 10; cellX += 1) if (shroomInCell(cellX, cellY, 5)) count += 1;
+    }
+    expect(count).toBeGreaterThan(120);
+    expect(count).toBeLessThan(220);
+  });
+
+  it('빛버섯을 밟으면 걷던 쪽으로 뛰고, 뛰는 동안은 다치지 않는다', () => {
+    const seed = 3;
+    const sim = grove(seed);
+    const shroom = nearShroom(seed);
+    standBefore(sim, shroom);
+    const p = sim.state.player;
+    const events: SimEvent[] = [];
+    for (let i = 0; i < 10 && !p.leap; i += 1) {
+      sim.step(STEP, 1, 0);
+      events.push(...sim.events);
+    }
+    expect(p.leap).toBeDefined();
+    expect(events.some((event) => event.type === 'leap')).toBe(true);
+    const start = { x: p.leap?.x0 ?? 0, y: p.leap?.y0 ?? 0 };
+    expect(p.leap?.x1).toBeCloseTo(start.x + LEAP.distance, 5);
+    expect(p.leap?.y1).toBeCloseTo(start.y, 5);
+    // 공중에서는 그림자에 닿아도 다치지 않는다. 걷는 쪽을 바꿔도 날아가는 길은 그대로다.
+    sim.state.enemies.push(enemy('cone', p.x + 4, p.y));
+    const hp = p.hp;
+    for (let i = 0; i < Math.ceil(LEAP.seconds / STEP) - 2; i += 1) {
+      sim.state.enemies[0].x = p.x + 2;
+      sim.state.enemies[0].y = p.y;
+      sim.step(STEP, -1, 1);
+      expect(p.hp).toBe(hp);
+    }
+    // 내려앉는 자리 가까이의 그림자는 밀려난다.
+    sim.state.enemies.length = 0;
+    const near = enemy('cone', start.x + LEAP.distance + 12, start.y);
+    sim.state.enemies.push(near);
+    const landed: SimEvent[] = [];
+    for (let i = 0; i < 6 && p.leap; i += 1) {
+      sim.step(STEP, 0, 0);
+      landed.push(...sim.events);
+    }
+    expect(p.leap).toBeUndefined();
+    expect(landed.some((event) => event.type === 'land')).toBe(true);
+    expect(p.x).toBeCloseTo(start.x + LEAP.distance, 5);
+    expect(near.kx ?? 0).toBeGreaterThan(0);
+  });
+
+  it('밟힌 빛버섯은 잠깐 납작해졌다가 다시 부푼다', () => {
+    const seed = 3;
+    const sim = grove(seed);
+    const shroom = nearShroom(seed);
+    standBefore(sim, shroom);
+    const p = sim.state.player;
+    for (let i = 0; i < 10 && !p.leap; i += 1) sim.step(STEP, 1, 0);
+    expect(sim.shroomReady(shroom.key)).toBe(false);
+    advance(sim, LEAP.seconds + 0.1);
+    expect(p.leap).toBeUndefined();
+    // 납작한 동안에는 다시 밟아도 뛰지 않는다.
+    p.x = shroom.x;
+    p.y = shroom.y;
+    sim.step(STEP, 0, 0);
+    expect(p.leap).toBeUndefined();
+    // 버섯에서 내려와 기다린다. 위에 서 있으면 부푸는 대로 다시 뛴다.
+    p.x = shroom.x - 50;
+    advance(sim, LEAP.rest);
+    expect(sim.shroomReady(shroom.key)).toBe(true);
+    p.x = shroom.x + 1;
+    p.y = shroom.y;
+    sim.step(STEP, 0, 0);
+    // 서 있다가 부풀면 버섯 가운데에서 먼 쪽으로 뛴다.
+    expect(p.leap).toBeDefined();
+    expect((p.leap?.x1 ?? 0) - (p.leap?.x0 ?? 0)).toBeCloseTo(LEAP.distance, 5);
+    // 다시 부푼 버섯은 적어 둔 것에서 지워져 저장이 쌓이지 않는다.
+    expect(Object.keys(sim.state.squashed ?? {})).toEqual([shroom.key]);
+  });
+
+  it('다른 스테이지에서는 같은 자리를 걸어도 뛰지 않는다', () => {
+    const seed = 3;
+    const sim = quietSim(seed, { stage: 'meadow', seed });
+    const shroom = nearShroom(seed);
+    standBefore(sim, shroom);
+    advance(sim, 1, 1, 0);
+    expect(sim.state.player.leap).toBeUndefined();
+    expect(sim.state.squashed).toBeUndefined();
+  });
+
+  it('도토리가 쓰러진 자리에는 싹이 남는다. 밟으면 사라지고, 두면 솔방울로 자란다', () => {
+    const sim = grove();
+    const acorn = enemy('acorn', 60, 0);
+    sim.state.enemies.push(acorn);
+    acorn.hp = 0;
+    sim.step(STEP, 0, 0);
+    expect(sim.events).toContainEqual({ type: 'plant' });
+    expect(sim.state.sprouts).toHaveLength(1);
+    expect(sim.state.sprouts?.[0]).toMatchObject({ x: 60, y: 0 });
+    expect(sim.state.sprouts?.[0].t).toBeCloseTo((ENEMIES.acorn.sprouts ?? 0) - STEP, 5);
+    // 그대로 두면 자란다.
+    const events = advance(sim, (ENEMIES.acorn.sprouts ?? 0) + 0.1);
+    expect(events).toContainEqual({ type: 'sprout', x: 60, y: 0 });
+    expect(sim.state.sprouts).toEqual([]);
+    expect(sim.state.enemies.map((e) => e.kind)).toEqual([STAGES.grove.spawns[0].kind]);
+    // 다시 하나를 남기고, 이번에는 밟는다.
+    sim.state.enemies.length = 0;
+    const next = enemy('acorn', 30, 0);
+    sim.state.enemies.push(next);
+    next.hp = 0;
+    sim.step(STEP, 0, 0);
+    sim.state.player.x = 30 - PLAYER_BASE.radius;
+    sim.step(STEP, 0, 0);
+    expect(sim.events).toContainEqual({ type: 'stomp', x: 30, y: 0 });
+    expect(sim.state.sprouts).toEqual([]);
+    advance(sim, 5);
+    expect(sim.state.enemies).toEqual([]);
+  });
+
+  it('싹이 너무 많으면 가장 오래된 것부터 시든다', () => {
+    const sim = grove();
+    for (let i = 0; i < SPROUT.limit + 5; i += 1) {
+      const acorn = enemy('acorn', 100 + i * 3, 50);
+      acorn.hp = 0;
+      sim.state.enemies.push(acorn);
+      sim.step(STEP, 0, 0);
+    }
+    const sprouts = sim.state.sprouts ?? [];
+    expect(sprouts).toHaveLength(SPROUT.limit);
+    expect(sprouts[0].x).toBe(100 + 5 * 3);
+  });
+
+  it('날다람쥐는 빛버섯을 딛고 뛰어올라, 뛸 때 플레이어가 있던 쪽에 내려앉는다', () => {
+    const seed = 3;
+    const sim = grove(seed);
+    const shroom = nearShroom(seed);
+    const p = sim.state.player;
+    p.x = shroom.x + 60;
+    p.y = shroom.y;
+    const glider = enemy('glider', shroom.x, shroom.y);
+    glider.timer = 0;
+    sim.state.enemies.push(glider);
+    sim.step(STEP, 0, 0);
+    expect(sim.events).toContainEqual({ type: 'pounce' });
+    expect(glider.mode).toBe(1);
+    expect(sim.shroomReady(shroom.key)).toBe(false);
+    const hp = p.hp;
+    const events = advance(sim, GLIDE.seconds + STEP);
+    const thud = events.find((event) => event.type === 'thud');
+    expect(thud).toBeDefined();
+    expect(glider.mode).toBe(0);
+    expect(glider.x).toBeCloseTo(p.x, 0);
+    expect(p.hp).toBe(hp - GLIDE.damage);
+    // 내려앉은 뒤에는 한동안 다시 뛰지 않는다.
+    expect(glider.timer).toBeGreaterThan(GLIDE.rest - 0.1);
+  });
+
+  it('날다람쥐가 내려앉을 자리에서 비키면 다치지 않는다', () => {
+    const seed = 3;
+    const sim = grove(seed);
+    const shroom = nearShroom(seed);
+    const p = sim.state.player;
+    p.x = shroom.x + 60;
+    p.y = shroom.y;
+    const glider = enemy('glider', shroom.x, shroom.y);
+    glider.timer = 0;
+    sim.state.enemies.push(glider);
+    sim.step(STEP, 0, 0);
+    const hp = p.hp;
+    // 위로 비켜선다.
+    advance(sim, GLIDE.seconds + STEP, 0, -1);
+    expect(p.hp).toBe(hp);
+    // 멀리 있는 플레이어에게는 GLIDE.reach까지만 뛴다.
+    const far = grove(seed);
+    // 멀리 있어도 다시 데려올 만큼 멀지는 않은 거리
+    far.state.player.x = shroom.x + 250;
+    far.state.player.y = shroom.y;
+    const jumper = enemy('glider', shroom.x, shroom.y);
+    jumper.timer = 0;
+    far.state.enemies.push(jumper);
+    far.step(STEP, 0, 0);
+    expect(Math.hypot(jumper.vx, jumper.vy) * GLIDE.seconds).toBeCloseTo(GLIDE.reach, 3);
+  });
+
+  it('땅울림 고리의 틈은 같은 간격으로 나 있다', () => {
+    const quake = ring(0, 0, 50, 0.3);
+    const step = (Math.PI * 2) / QUAKE.gaps;
+    for (let k = -2; k <= QUAKE.gaps + 2; k += 1) {
+      expect(inQuakeGap(quake, 0.3 + k * step)).toBe(true);
+      expect(inQuakeGap(quake, 0.3 + k * step + QUAKE.gap / 2 - 0.01)).toBe(true);
+      expect(inQuakeGap(quake, 0.3 + k * step + QUAKE.gap / 2 + 0.01)).toBe(false);
+      expect(inQuakeGap(quake, 0.3 + k * step + step / 2)).toBe(false);
+    }
+    // 이번 걸음에 고리가 지나간 자리만 닿는다.
+    expect(quakeCrosses(ring(0, 0, 60, Math.PI), 55, 58, 0, 5)).toBe(true);
+    expect(quakeCrosses(ring(0, 0, 60, Math.PI), 55, 90, 0, 5)).toBe(false);
+    expect(quakeCrosses(ring(0, 0, 60, Math.PI), 55, 30, 0, 5)).toBe(false);
+    // 틈 안에 있으면 지나가도 닿지 않는다.
+    expect(quakeCrosses(ring(0, 0, 60, 0), 55, 58, 0, 5)).toBe(false);
+  });
+
+  it('땅울림 고리는 틈이 아닌 곳에 서 있던 플레이어를 한 번만 다치게 한다', () => {
+    const hit = grove();
+    hit.state.quakes = [ring(100, 0, 20, 0)];
+    const hp = hit.state.player.hp;
+    advance(hit, 2.5);
+    expect(hit.state.player.hp).toBe(hp - QUAKE.damage);
+    expect(hit.state.quakes).toEqual([]);
+    // 틈에 서 있으면 다치지 않는다.
+    const safe = grove();
+    safe.state.quakes = [ring(100, 0, 20, Math.PI)];
+    advance(safe, 2.5);
+    expect(safe.state.player.hp).toBe(hp);
+  });
+
+  it('빛버섯을 밟고 공중에 떠 있는 동안 지나간 고리에는 다치지 않는다', () => {
+    const sim = grove();
+    const p = sim.state.player;
+    p.leap = { x0: 0, y0: 0, x1: 0, y1: 0, t: 0 };
+    sim.state.quakes = [ring(100, 0, 92, 0)];
+    const hp = p.hp;
+    advance(sim, 1);
+    expect(p.hp).toBe(hp);
+  });
+
+  it('숲의 고목은 힘을 모았다가 땅을 굴러 고리를 퍼뜨리고, 쫓다가 부하를 부른다', () => {
+    const sim = grove();
+    sim.state.player.inv = 1e9;
+    const boss = enemy('elder', 120, 0);
+    boss.timer = 0.01;
+    sim.state.enemies.push(boss);
+    sim.step(STEP, 0, 0);
+    expect(boss.mode).toBe(CHARGING);
+    expect(sim.events).toContainEqual({ type: 'charge' });
+    const charged = advance(sim, QUAKE.windup + STEP);
+    expect(charged.some((event) => event.type === 'quake')).toBe(true);
+    expect(sim.state.quakes).toHaveLength(1);
+    // 그다음에는 쫓다가 부하를 부른다.
+    advance(sim, QUAKE.rest + STEP);
+    const minions = sim.state.enemies.filter((e) => e !== boss);
+    expect(minions.length).toBeGreaterThan(0);
+    for (const minion of minions) expect(STAGES.grove.minions).toContain(minion.kind);
+  });
+
+  it('숲의 고목은 체력이 반 아래면 틈이 어긋난 두 겹을 퍼뜨린다', () => {
+    const sim = grove();
+    sim.state.player.inv = 1e9;
+    const boss = enemy('elder', 120, 0);
+    boss.hp = boss.maxHp * (QUAKE.rage - 0.05);
+    boss.mode = CHARGING;
+    boss.timer = 0.01;
+    sim.state.enemies.push(boss);
+    sim.step(STEP, 0, 0);
+    const quakes = sim.state.quakes ?? [];
+    expect(quakes).toHaveLength(2);
+    // 퍼뜨린 걸음에 이미 한 걸음만큼 기다렸다.
+    expect(quakes[1].delay).toBeCloseTo(QUAKE.echo - STEP, 5);
+    expect(quakes[1].gap - quakes[0].gap).toBeCloseTo(Math.PI / QUAKE.gaps, 5);
+    // 두 번째 겹이 퍼지기 시작할 때도 알린다.
+    const later = advance(sim, QUAKE.echo + STEP);
+    expect(later.filter((event) => event.type === 'quake')).toHaveLength(1);
+  });
+
+  it('숲은 가장 늦게 열리고, 숲의 고목을 쓰러뜨리면 새벽이 온다', () => {
+    const times = STAGE_ORDER.map((id) => STAGES[id].unlockSeconds);
+    expect([...times].sort((a, b) => a - b)).toEqual(times);
+    expect(STAGES.grove.unlockSeconds).toBeGreaterThan(STAGES.tundra.unlockSeconds);
+    expect(STAGES.grove.unlockSeconds).toBeLessThanOrEqual(RUN_SECONDS);
+    const sim = grove();
+    sim.state.player.inv = 1e9;
+    sim.state.t = RUN_SECONDS + 5;
+    sim.state.enemies.push(enemy('elder', 300, 0, 0));
+    sim.step(STEP, 0, 0);
+    expect(sim.state.over).toBe('cleared');
+  });
+
+  it('뛰는 중이나 싹과 고리가 있을 때 저장했다가 이어 해도 그대로 이어진다', () => {
+    const seed = 3;
+    const sim = grove(seed);
+    const shroom = nearShroom(seed);
+    standBefore(sim, shroom);
+    for (let i = 0; i < 10 && !sim.state.player.leap; i += 1) sim.step(STEP, 1, 0);
+    sim.state.sprouts = [{ x: 200, y: 200, t: 2 }];
+    sim.state.quakes = [ring(300, 0, 20, 0)];
+    const saved = JSON.parse(JSON.stringify(sim.state)) as unknown;
+    expect(looksLikeRun(saved)).toBe(true);
+    const restored = restoreRun(saved);
+    expect(restored).not.toBeNull();
+    const again = new Sim(restored as RunState, seededRandom(seed));
+    advance(again, LEAP.seconds);
+    expect(again.state.player.leap).toBeUndefined();
+    expect(again.state.player.x).toBeGreaterThan(shroom.x);
+    expect(again.shroomReady(shroom.key)).toBe(false);
   });
 });
 

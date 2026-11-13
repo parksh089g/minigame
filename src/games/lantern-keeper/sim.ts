@@ -13,6 +13,7 @@ import {
   FEAST,
   FEAST_LEVELS,
   FLINT,
+  GLIDE,
   HEROES,
   MAX_LEVEL,
   MAX_PASSIVES,
@@ -20,7 +21,9 @@ import {
   MID_BOSS_EVERY,
   PLAYER_BASE,
   POSTS,
+  QUAKE,
   RUN_SECONDS,
+  SPROUT,
   STAGES,
   SURGES,
   type BoonId,
@@ -78,7 +81,20 @@ import {
   type RunSummary,
   type Upgrade,
 } from './rules';
-import { GUST, gustAt, inPuddle, PUDDLE_SLOW, VENT, ventAt, ventClock, ventPhase, ventsAround, type Gust } from './terrain';
+import {
+  GUST,
+  gustAt,
+  inPuddle,
+  LEAP,
+  PUDDLE_SLOW,
+  shroomAt,
+  VENT,
+  ventAt,
+  ventClock,
+  ventPhase,
+  ventsAround,
+  type Gust,
+} from './terrain';
 
 export const RUN_STATE_VERSION = 3;
 
@@ -130,6 +146,39 @@ export interface Post {
   lit: number;
   /** 다음에 둘레를 태울 때까지(초) */
   tick: number;
+}
+
+/** 빛버섯을 밟고 뛰는 중인 플레이어의 길. (x0, y0)에서 (x1, y1)까지 LEAP.seconds 동안 날아간다. */
+export interface Leap {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  /** 뛰어오른 지 몇 초인지 */
+  t: number;
+}
+
+/** 도토리 같은 그림자가 쓰러진 자리에 남긴 싹 */
+export interface Sprout {
+  x: number;
+  y: number;
+  /** 자라서 그림자가 될 때까지 남은 시간(초) */
+  t: number;
+}
+
+/** 숲의 고목이 퍼뜨리는 땅울림 고리. 틈 QUAKE.gaps개가 같은 간격으로 나 있다. */
+export interface Quake {
+  x: number;
+  y: number;
+  /** 지금의 반지름(px). 고리의 바깥 가장자리다. */
+  r: number;
+  /** 첫 틈의 가운데가 향하는 각도(라디안) */
+  gap: number;
+  damage: number;
+  /** 퍼지기 시작할 때까지 남은 시간(초). 두 겹을 퍼뜨릴 때 두 번째 겹이 기다린다. */
+  delay: number;
+  /** 이미 플레이어를 다치게 했다. 한 고리에는 한 번만 다친다. */
+  hit?: boolean;
 }
 
 /** 날아가는 것의 생김새. 화면에서 그림을 고를 때 쓴다. */
@@ -286,6 +335,8 @@ export interface RunState {
     scorch?: number;
     /** 서릿발 같은 그림자에 닿아 발이 얼어 있는 남은 시간(초). 그동안 느리게 걷는다. */
     chilled?: number;
+    /** 빛버섯을 밟고 뛰는 중이면 그 길. 뛰는 동안은 다치지 않고, 내려앉을 때까지 걷지 못한다. */
+    leap?: Leap;
   };
   weapons: Levels<WeaponId>;
   passives: Levels<PassiveId>;
@@ -302,6 +353,12 @@ export interface RunState {
   posts?: Post[];
   /** 지금까지 나타난 등불 기둥의 수. POSTS.times의 몇 번째까지 나왔는지를 가리킨다. */
   postsSpawned?: number;
+  /** 빛버섯 숲: 밟혀 납작해진 빛버섯(terrain.ts의 Shroom.key)과 다시 부푸는 시각(초) */
+  squashed?: Record<string, number>;
+  /** 빛버섯 숲: 쓰러진 도토리가 남긴 싹 */
+  sprouts?: Sprout[];
+  /** 빛버섯 숲: 퍼지고 있는 땅울림 고리 */
+  quakes?: Quake[];
   /**
    * 이 판에서 만난 것: 나타난 적의 종류와, 주운 것('heal', 'pull', 'blast'), 등불 기둥('post').
    * 판이 끝나면 도감에 적힌다. 도감이 생기기 전에 저장한 판에는 없다.
@@ -386,6 +443,26 @@ export const BLIZZARD_FIRING = 5;
  */
 export const BLIZZARD = { rings: 3, count: 9, gap: 0.6, damage: 12 } as const;
 
+/** angle 쪽이 땅울림 고리의 틈 안인지 */
+export function inQuakeGap(quake: Quake, angle: number): boolean {
+  const step = (Math.PI * 2) / QUAKE.gaps;
+  // 첫 틈에서 잰 각도를 틈 사이의 간격으로 접어서, 가장 가까운 틈의 가운데에서 얼마나 떨어졌는지 본다.
+  const off = (((angle - quake.gap) % step) + step) % step;
+  return Math.min(off, step - off) < QUAKE.gap / 2;
+}
+
+/**
+ * 땅울림 고리가 이번 걸음에 (x, y)에 있는 반지름 radius의 둥근 것을 지나갔는지. before는 걸음 전의 반지름이다.
+ * 고리의 틈 안에 있으면 지나가도 닿지 않는다.
+ */
+export function quakeCrosses(quake: Quake, before: number, x: number, y: number, radius: number): boolean {
+  const dx = x - quake.x;
+  const dy = y - quake.y;
+  const d = Math.hypot(dx, dy);
+  if (d < before - QUAKE.band - radius || d > quake.r + radius) return false;
+  return !inQuakeGap(quake, Math.atan2(dy, dx));
+}
+
 /** 돌진하는 보스가 힘을 모으는 시간(초), 내달리는 빠르기(px/초)와 시간(초) */
 export function dashOf(kind: EnemyKind, tier: number): { windup: number; speed: number; seconds: number } {
   const brain = ENEMIES[kind].brain;
@@ -428,6 +505,22 @@ export type SimEvent =
   | { type: 'gust'; phase: 'warn' | 'blow'; dirX: number; dirY: number }
   /** 서릿발 같은 그림자에 닿아 발이 얼었다 */
   | { type: 'chill' }
+  /** 빛버섯을 밟고 (x, y)에서 뛰어올랐다 */
+  | { type: 'leap'; x: number; y: number }
+  /** 뛰었다가 (x, y)에 내려앉았다 */
+  | { type: 'land'; x: number; y: number }
+  /** 쓰러진 그림자가 싹을 남겼다 */
+  | { type: 'plant' }
+  /** (x, y)의 싹을 밟아 없앴다 */
+  | { type: 'stomp'; x: number; y: number }
+  /** (x, y)의 싹이 그림자로 자랐다 */
+  | { type: 'sprout'; x: number; y: number }
+  /** (x, y)에서 땅울림 고리가 퍼지기 시작했다 */
+  | { type: 'quake'; x: number; y: number }
+  /** 빛버섯을 딛고 덮치는 정예가 뛰어올랐다 */
+  | { type: 'pounce' }
+  /** 뛰어오른 정예가 (x, y)에 내려앉았다. radius는 다치는 둘레 */
+  | { type: 'thud'; x: number; y: number; radius: number }
   /** 종소리가 울렸다 */
   | { type: 'bell'; evolved: boolean }
   /** 부싯돌: 쓰러진 그림자가 (x, y)에서 터졌다 */
@@ -922,6 +1015,8 @@ export class Sim {
     if (s.over) return;
     this.moveHazards(dt);
     if (s.over) return;
+    this.moveQuakes(dt);
+    if (s.over) return;
     this.fireWeapons(dt);
     this.moveShots(dt);
     this.spreadWaves(dt);
@@ -933,6 +1028,7 @@ export class Sim {
     if (s.over) return;
     this.tellGusts(dt);
     this.reap();
+    this.tendSprouts(dt);
     this.moveGems(dt);
   }
 
@@ -981,7 +1077,7 @@ export class Sim {
     const under = ventAt(p.x, p.y, s.seed);
     if ((p.scorch ?? 0) > 0) p.scorch = (p.scorch ?? 0) - dt;
     // 한 번 솟는 동안에는 한 번만 덴다. 빛막이가 막아 줬을 때도 마찬가지다.
-    if (under && p.inv <= 0 && !((p.scorch ?? 0) > 0) && ventPhase(under, s.t) === 'erupt') {
+    if (under && this.exposed && !((p.scorch ?? 0) > 0) && ventPhase(under, s.t) === 'erupt') {
       p.scorch = VENT.erupt;
       if (this.hurt(Math.round(VENT.damage * this.harm))) return;
     }
@@ -1004,19 +1100,25 @@ export class Sim {
     p.moving = length > 0.05;
     p.wading = this.isMire(p.x, p.y);
     if ((p.chilled ?? 0) > 0) p.chilled = Math.max(0, (p.chilled ?? 0) - dt);
-    // 돌풍이 부는 동안에는 가만히 있어도 바람 부는 쪽으로 밀린다.
-    const gust = this.gust;
-    if (gust && gust.phase === 'blow') {
-      p.x += gust.dirX * GUST.player * gust.force * dt;
-      p.y += gust.dirY * GUST.player * gust.force * dt;
-    }
-    if (p.moving) {
-      const slow = (p.wading ? PUDDLE_SLOW : 1) * ((p.chilled ?? 0) > 0 ? CHILL_SLOW : 1);
-      const speed = PLAYER_BASE.speed * this.mods.speed * slow;
-      const scale = (speed * dt) / Math.max(1, length);
-      p.x += moveX * scale;
-      p.y += moveY * scale;
-      if (Math.abs(moveX) > 0.15) p.face = moveX > 0 ? 1 : -1;
+    if (p.leap) {
+      // 빛버섯을 밟고 뛰는 중: 정해진 길로 날아가고, 걷는 것은 내려앉을 때까지 미룬다.
+      this.flyLeap(dt);
+    } else {
+      // 돌풍이 부는 동안에는 가만히 있어도 바람 부는 쪽으로 밀린다.
+      const gust = this.gust;
+      if (gust && gust.phase === 'blow') {
+        p.x += gust.dirX * GUST.player * gust.force * dt;
+        p.y += gust.dirY * GUST.player * gust.force * dt;
+      }
+      if (p.moving) {
+        const slow = (p.wading ? PUDDLE_SLOW : 1) * ((p.chilled ?? 0) > 0 ? CHILL_SLOW : 1);
+        const speed = PLAYER_BASE.speed * this.mods.speed * slow;
+        const scale = (speed * dt) / Math.max(1, length);
+        p.x += moveX * scale;
+        p.y += moveY * scale;
+        if (Math.abs(moveX) > 0.15) p.face = moveX > 0 ? 1 : -1;
+      }
+      this.bounce(p.moving ? moveX : 0, p.moving ? moveY : 0);
     }
     if (p.inv > 0) p.inv -= dt;
     if (this.mods.regen > 0) p.hp = Math.min(this.mods.maxHp, p.hp + this.mods.regen * dt);
@@ -1026,6 +1128,87 @@ export class Sim {
   /** 등갓의 빛막이 지금 서 있는지 */
   get guardReady(): boolean {
     return this.mods.guard > 0 && !((this.state.player.guard ?? 0) > 0);
+  }
+
+  /** 지금 다칠 수 있는지: 맞은 뒤의 무적 시간이 아니고, 빛버섯을 밟고 공중에 떠 있지도 않다. */
+  private get exposed(): boolean {
+    const p = this.state.player;
+    return p.inv <= 0 && !p.leap;
+  }
+
+  /** key의 빛버섯이 부풀어 있어서 밟으면 뛸 수 있는지 */
+  shroomReady(key: string): boolean {
+    const until = this.state.squashed?.[key];
+    return until === undefined || until <= this.state.t;
+  }
+
+  /** key의 빛버섯을 납작하게 한다. 다시 부푼 버섯은 지워서 판에 저장되는 것이 쌓이지 않게 한다. */
+  private squash(key: string): void {
+    const s = this.state;
+    const squashed = (s.squashed ??= {});
+    for (const other of Object.keys(squashed)) if (squashed[other] <= s.t) delete squashed[other];
+    squashed[key] = s.t + LEAP.rest;
+  }
+
+  /**
+   * 부푼 빛버섯 위에 있으면 뛰어오른다. (dirX, dirY) 쪽으로 뛰고,
+   * 그 쪽이 없으면(서 있었으면) 버섯 가운데에서 먼 쪽으로 뛴다.
+   */
+  private bounce(dirX: number, dirY: number): void {
+    const s = this.state;
+    if (!STAGES[s.stage].shrooms) return;
+    const p = s.player;
+    const shroom = shroomAt(p.x, p.y, s.seed);
+    if (!shroom || !this.shroomReady(shroom.key)) return;
+    let length = Math.hypot(dirX, dirY);
+    if (length < 0.05) {
+      dirX = p.x - shroom.x;
+      dirY = p.y - shroom.y;
+      length = Math.hypot(dirX, dirY);
+      if (length < 0.01) {
+        dirX = p.face;
+        dirY = 0;
+        length = 1;
+      }
+    }
+    this.squash(shroom.key);
+    const reach = LEAP.distance / length;
+    p.leap = { x0: p.x, y0: p.y, x1: p.x + dirX * reach, y1: p.y + dirY * reach, t: 0 };
+    if (Math.abs(dirX / length) > 0.15) p.face = dirX > 0 ? 1 : -1;
+    this.events.push({ type: 'leap', x: p.x, y: p.y });
+  }
+
+  /** 뛰는 중인 플레이어를 날린다. 내려앉으면 둘레의 그림자를 밀쳐 내고, 또 빛버섯 위면 같은 쪽으로 다시 뛴다. */
+  private flyLeap(dt: number): void {
+    const s = this.state;
+    const p = s.player;
+    const leap = p.leap;
+    if (!leap) return;
+    leap.t += dt;
+    // 걸음을 더해 가며 생기는 아주 작은 오차로 한 걸음 늦게 내려앉지 않게 한다.
+    const progress = Math.min(1, (leap.t + 1e-6) / LEAP.seconds);
+    // 처음에는 빠르게 솟고 내려앉을 때 느려진다.
+    const eased = 1 - (1 - progress) * (1 - progress);
+    p.x = leap.x0 + (leap.x1 - leap.x0) * eased;
+    p.y = leap.y0 + (leap.y1 - leap.y0) * eased;
+    p.moving = true;
+    if (progress < 1) return;
+    delete p.leap;
+    this.events.push({ type: 'land', x: p.x, y: p.y });
+    for (const e of s.enemies) {
+      const info = ENEMIES[e.kind];
+      // 보스와 공중에 뜬 정예는 밀리지 않는다.
+      if (e.hp <= 0 || info.boss || (info.springs && e.mode === 1)) continue;
+      const dx = e.x - p.x;
+      const dy = e.y - p.y;
+      const reach = LEAP.landRadius + info.radius;
+      const d2 = dx * dx + dy * dy;
+      if (d2 >= reach * reach) continue;
+      const d = Math.sqrt(d2) || 1;
+      e.kx = (e.kx ?? 0) + (dx / d) * LEAP.landPush;
+      e.ky = (e.ky ?? 0) + (dy / d) * LEAP.landPush;
+    }
+    this.bounce(leap.x1 - leap.x0, leap.y1 - leap.y0);
   }
 
   /** 빛막이 다시 생기기까지 얼마나 찼는지(0~1). 서 있으면 1, 등갓이 없으면 0 */
@@ -1065,6 +1248,7 @@ export class Sim {
         if ((e.x - p.x) ** 2 + (e.y - p.y) ** 2 < reach * reach) this.damage(e, REVIVE.damage, null);
       }
       s.hazards.length = 0;
+      if (s.quakes) s.quakes.length = 0;
       this.events.push({ type: 'revive' });
       return false;
     }
@@ -1101,7 +1285,9 @@ export class Sim {
           ? this.rand() * HOP_REST
           : ENEMIES[kind].shoots
             ? 1 + (s.nextUid % 5) * 0.35
-            : 0,
+            : ENEMIES[kind].springs
+              ? GLIDE.rest / 2
+              : 0,
       mode: 0,
       tier: 0,
       vx: 0,
@@ -1390,6 +1576,26 @@ export class Sim {
               this.summon(e, minionKind(s.stage, e.tier), 5, 30);
             }
           }
+        } else if (brain === 'elder') {
+          // 숲의 고목: 쫓다가(0) 멈춰서 힘을 모으고(CHARGING) 땅을 굴러 고리를 퍼뜨린다. 그다음 쫓다가(1) 부하를 부른다.
+          if (e.mode === CHARGING) {
+            speed = 0;
+            if (e.timer <= 0) {
+              e.mode = 1;
+              e.timer = QUAKE.rest;
+              this.quake(e);
+            }
+          } else if (e.timer <= 0) {
+            if (e.mode === 0) {
+              e.mode = CHARGING;
+              e.timer = QUAKE.windup;
+              this.events.push({ type: 'charge' });
+            } else {
+              e.mode = 0;
+              e.timer = QUAKE.rest - QUAKE.windup;
+              this.summon(e, minionKind(s.stage, e.tier), 5, 30);
+            }
+          }
         } else if (brain === 'warden' && e.mode >= WARDEN_REST) {
           // 고개의 문지기: 내달린 다음에는 숨을 고르고(3) 빛을 모아(4) 부채꼴로 쏜다.
           if (e.mode === WARDEN_CHARGING) {
@@ -1508,6 +1714,33 @@ export class Sim {
           e.timer = burst.fuse;
           this.events.push({ type: 'swell' });
         }
+      } else if (info.springs) {
+        // 빛버섯을 디디면 뛸 때 플레이어가 있던 쪽으로 높이 뛰어 덮친다(1). 뛰는 동안 vx, vy는 날아가는 빠르기다.
+        if (e.timer > 0) e.timer -= dt;
+        if (e.mode === 1) {
+          e.x += e.vx * dt;
+          e.y += e.vy * dt;
+          if (e.timer <= 0) {
+            e.mode = 0;
+            e.timer = GLIDE.rest;
+            if (this.thud(e)) return;
+          }
+          // 공중에서는 다른 그림자와 밀치지 않고 플레이어에 닿지도 않는다.
+          continue;
+        }
+        if (e.timer <= 0 && STAGES[s.stage].shrooms) {
+          const shroom = shroomAt(e.x, e.y, s.seed);
+          if (shroom && this.shroomReady(shroom.key)) {
+            this.squash(shroom.key);
+            const reach = Math.min(distance, GLIDE.reach);
+            e.mode = 1;
+            e.timer = GLIDE.seconds;
+            e.vx = (dirX * reach) / GLIDE.seconds;
+            e.vy = (dirY * reach) / GLIDE.seconds;
+            this.events.push({ type: 'pounce' });
+            continue;
+          }
+        }
       }
 
       e.x += dirX * speed * dt;
@@ -1544,7 +1777,7 @@ export class Sim {
       const reach = info.radius + PLAYER_BASE.radius;
       const px = p.x - e.x;
       const py = p.y - e.y;
-      if (p.inv <= 0 && px * px + py * py < reach * reach) {
+      if (this.exposed && px * px + py * py < reach * reach) {
         const guarded = this.guardReady;
         if (this.hurt(Math.round(info.damage * (info.boss ? this.harm : hard)))) return;
         // 서릿발: 닿으면 발이 얼어 잠깐 느려진다. 빛막이 막아 줬으면 얼지 않는다.
@@ -1572,7 +1805,7 @@ export class Sim {
       if ((other.x - source.x) ** 2 + (other.y - source.y) ** 2 < reach * reach) this.damage(other, burst.splash, null);
     }
     const reach = burst.radius + PLAYER_BASE.radius;
-    if (p.inv <= 0 && (p.x - source.x) ** 2 + (p.y - source.y) ** 2 < reach * reach) {
+    if (this.exposed && (p.x - source.x) ** 2 + (p.y - source.y) ** 2 < reach * reach) {
       return this.hurt(Math.round(burst.damage * this.harm));
     }
     return false;
@@ -1607,7 +1840,7 @@ export class Sim {
       hazard.x += hazard.vx * dt;
       hazard.y += hazard.vy * dt;
       const reach = hazard.radius + PLAYER_BASE.radius;
-      if (p.inv <= 0 && (hazard.x - p.x) ** 2 + (hazard.y - p.y) ** 2 < reach * reach) {
+      if (this.exposed && (hazard.x - p.x) ** 2 + (hazard.y - p.y) ** 2 < reach * reach) {
         if (this.hurt(hazard.damage)) return;
         // 되살아나면 hurt가 빛덩이를 모두 치운다.
         if (s.hazards.length === 0) return;
@@ -1617,6 +1850,95 @@ export class Sim {
       kept += 1;
     }
     s.hazards.length = kept;
+  }
+
+  /** 뛰어오른 정예가 내려앉는다. 둘레 안의 플레이어가 다친다. 판이 끝났으면 true */
+  private thud(e: Enemy): boolean {
+    const p = this.state.player;
+    this.events.push({ type: 'thud', x: e.x, y: e.y, radius: GLIDE.radius });
+    const reach = GLIDE.radius + PLAYER_BASE.radius;
+    if (!this.exposed || (p.x - e.x) ** 2 + (p.y - e.y) ** 2 >= reach * reach) return false;
+    return this.hurt(Math.round(GLIDE.damage * this.harm));
+  }
+
+  /** 숲의 고목이 땅을 굴러 틈이 난 고리를 퍼뜨린다. 체력이 많이 줄었으면 틈이 어긋난 두 번째 겹이 뒤따른다. */
+  private quake(source: Enemy): void {
+    const quakes = (this.state.quakes ??= []);
+    const gap = this.rand() * Math.PI * 2;
+    const damage = Math.round(QUAKE.damage * this.harm);
+    const r = ENEMIES[source.kind].radius;
+    quakes.push({ x: source.x, y: source.y, r, gap, damage, delay: 0 });
+    if (source.hp < source.maxHp * QUAKE.rage) {
+      quakes.push({ x: source.x, y: source.y, r, gap: gap + Math.PI / QUAKE.gaps, damage, delay: QUAKE.echo });
+    }
+    this.events.push({ type: 'quake', x: source.x, y: source.y });
+  }
+
+  /** 땅울림 고리를 넓힌다. 고리가 지나갈 때 틈에 있지 않고 땅에 서 있던 플레이어는 다친다. */
+  private moveQuakes(dt: number): void {
+    const s = this.state;
+    const quakes = s.quakes;
+    if (!quakes || quakes.length === 0) return;
+    const p = s.player;
+    let kept = 0;
+    for (const quake of quakes) {
+      if (quake.delay > 0) {
+        quake.delay -= dt;
+        if (quake.delay <= 0) this.events.push({ type: 'quake', x: quake.x, y: quake.y });
+        quakes[kept] = quake;
+        kept += 1;
+        continue;
+      }
+      const before = quake.r;
+      quake.r += QUAKE.speed * dt;
+      if (quake.r - QUAKE.band > QUAKE.reach) continue;
+      if (!quake.hit && this.exposed && quakeCrosses(quake, before, p.x, p.y, PLAYER_BASE.radius)) {
+        quake.hit = true;
+        if (this.hurt(quake.damage)) return;
+        // 되살아나면 hurt가 고리를 모두 치운다.
+        if (quakes.length === 0) return;
+      }
+      quakes[kept] = quake;
+      kept += 1;
+    }
+    quakes.length = kept;
+  }
+
+  /** 쓰러진 자리에 싹을 남긴다. 싹이 너무 많으면 가장 오래된 것이 시든다. */
+  private plant(x: number, y: number, seconds: number): void {
+    const sprouts = (this.state.sprouts ??= []);
+    if (sprouts.length >= SPROUT.limit) sprouts.shift();
+    sprouts.push({ x, y, t: seconds });
+    this.events.push({ type: 'plant' });
+  }
+
+  /** 싹: 플레이어가 밟으면 사라지고, 다 자라면 그 스테이지의 가장 흔한 그림자가 된다. */
+  private tendSprouts(dt: number): void {
+    const s = this.state;
+    const sprouts = s.sprouts;
+    if (!sprouts || sprouts.length === 0) return;
+    const p = s.player;
+    const reach = PLAYER_BASE.radius + SPROUT.reach;
+    const limit = maxAlive(this.clock);
+    const kind = STAGES[s.stage].spawns[0].kind;
+    let kept = 0;
+    for (const sprout of sprouts) {
+      // 공중에 떠 있을 때는 밟지 못한다.
+      if (!p.leap && (sprout.x - p.x) ** 2 + (sprout.y - p.y) ** 2 < reach * reach) {
+        this.events.push({ type: 'stomp', x: sprout.x, y: sprout.y });
+        continue;
+      }
+      sprout.t -= dt;
+      // 다 자랐어도 싸움터가 붐비면 자리가 날 때까지 기다린다.
+      if (sprout.t <= 0 && s.enemies.length < limit) {
+        this.makeEnemy(kind, sprout.x, sprout.y);
+        this.events.push({ type: 'sprout', x: sprout.x, y: sprout.y });
+        continue;
+      }
+      sprouts[kept] = sprout;
+      kept += 1;
+    }
+    sprouts.length = kept;
   }
 
   private summon(source: Enemy, kind: EnemyKind, count: number, radius: number): void {
@@ -2259,6 +2581,7 @@ export class Sim {
       this.events.push({ type: 'kill', x: e.x, y: e.y, boss: Boolean(info.boss) });
       if (info.xp > 0) this.dropGem(e.x, e.y, info.xp, 'xp');
       if (info.splits) pieces.push({ kind: info.splits.into, x: e.x, y: e.y, count: info.splits.count });
+      if (info.sprouts) this.plant(e.x, e.y, info.sprouts);
       if (info.boss) {
         s.bossKills += 1;
         this.dropGem(e.x + 8, e.y, HEAL_DROP_VALUE * 2, 'heal');

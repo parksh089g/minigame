@@ -326,9 +326,10 @@ describe('캐릭터와 스테이지 고르기', () => {
       STAGES.marsh.name,
       STAGES.ridge.name,
       STAGES.tundra.name,
+      STAGES.grove.name,
     ]);
-    // 새벽을 맞아야 달잡이가 열린다.
-    expect(newUnlocks(599, 600)).toEqual([HEROES.mooner.name]);
+    // 새벽을 맞아야 달잡이와 빛버섯 숲이 열린다.
+    expect(newUnlocks(599, 600)).toEqual([HEROES.mooner.name, STAGES.grove.name]);
     expect(newUnlocks(480, 545)).toEqual([STAGES.tundra.name]);
     expect(newUnlocks(600, 600)).toEqual([]);
   });

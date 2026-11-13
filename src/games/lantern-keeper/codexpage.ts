@@ -89,10 +89,14 @@ export function addCodexPage(scene: Phaser.Scene, handlers: LobbyHandlers, tabIn
   });
 
   const rows = Math.max(...entries.map((entry) => entry.row)) + 1;
+  // 줄이 많아 설명 칸이 화면 밖으로 밀려나면 칸을 줄인다(키가 작은 휴대폰의 그림자 쪽).
+  const room = scene.scale.height - GRID_TOP - 3 - DETAIL.height - 1;
+  const tileSize = Math.min(TILE.size, Math.floor(room / rows) - TILE.gap);
+  const tileArt = TILE.art - (TILE.size - tileSize);
   // 가장 긴 줄이 가운데에 오도록 놓는다.
   const perRow = Math.max(...Array.from({ length: rows }, (_, row) => entries.filter((entry) => entry.row === row).length));
-  const gridLeft = MARGIN + Math.floor((width - (TILE.size * perRow + TILE.gap * (perRow - 1))) / 2);
-  const detailTop = GRID_TOP + rows * (TILE.size + TILE.gap) + 3;
+  const gridLeft = MARGIN + Math.floor((width - (tileSize * perRow + TILE.gap * (perRow - 1))) / 2);
+  const detailTop = GRID_TOP + rows * (tileSize + TILE.gap) + 3;
 
   // 처음에는 새로 열린 것 가운데 첫 항목을, 없으면 첫 항목을 고른다.
   let chosen = entries.find((entry) => fresh.includes(entry.id)) ?? entries[0];
@@ -142,31 +146,31 @@ export function addCodexPage(scene: Phaser.Scene, handlers: LobbyHandlers, tabIn
   for (const entry of entries) {
     const column = placed.get(entry.row) ?? 0;
     placed.set(entry.row, column + 1);
-    const x = gridLeft + column * (TILE.size + TILE.gap);
-    const y = GRID_TOP + entry.row * (TILE.size + TILE.gap);
+    const x = gridLeft + column * (tileSize + TILE.gap);
+    const y = GRID_TOP + entry.row * (tileSize + TILE.gap);
     const open = isOpen(entry, meta);
     const tile = scene.add.graphics();
     const draw = (pressed: boolean): void => {
       const picked = chosen === entry;
       tile.clear();
-      drawPanel(tile, x, y, TILE.size, TILE.size, {
+      drawPanel(tile, x, y, tileSize, tileSize, {
         fill: pressed || picked ? COLOR.navy : COLOR.charcoal,
         shadow: null,
         radius: 6,
         ...(picked ? { border: COLOR.yellow } : {}),
       });
     };
-    const image = scene.add.image(x + TILE.size / 2, y + TILE.size / 2, artOf(entry)[0]);
-    fit(image, TILE.art);
+    const image = scene.add.image(x + tileSize / 2, y + tileSize / 2, artOf(entry)[0]);
+    fit(image, tileArt);
     shroud(image, !open);
     // 새로 열린 항목에 붙는 점
     if (fresh.includes(entry.id)) {
       const dot = scene.add.graphics();
-      dot.fillStyle(COLOR.ink, 1).fillCircle(x + TILE.size - 5, y + 5, 4);
-      dot.fillStyle(COLOR.yellow, 1).fillCircle(x + TILE.size - 5, y + 5, 3);
+      dot.fillStyle(COLOR.ink, 1).fillCircle(x + tileSize - 5, y + 5, 4);
+      dot.fillStyle(COLOR.yellow, 1).fillCircle(x + tileSize - 5, y + 5, 3);
     }
     redraws.push(() => draw(false));
-    addTapZone(scene, x, y, TILE.size, TILE.size, draw, () => {
+    addTapZone(scene, x, y, tileSize, tileSize, draw, () => {
       if (chosen !== entry) sfx.click();
       chosen = entry;
       step = 0;

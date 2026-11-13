@@ -75,6 +75,13 @@ const OLD_STAGES = 3;
 export const MOONER_DAILY_FROM = 20_777;
 /** 달잡이가 생기기 전에 돌던 캐릭터의 수 */
 const OLD_HEROES = 4;
+/**
+ * 빛버섯 숲이 오늘의 판에 섞이기 시작하는 날(2026년 11월 23일). 그 전의 날은 스테이지 넷이 돌던 차례 그대로다.
+ * 캐릭터와 스테이지가 다섯씩이라 하루에 한 칸씩 돌면 같은 짝만 나오므로, 스테이지는 캐릭터가 한 바퀴 돌 때마다 한 칸 더 밀린다.
+ */
+export const GROVE_DAILY_FROM = 20_780;
+/** 빛버섯 숲이 생기기 전에 돌던 스테이지의 수 */
+const FOUR_STAGES = 4;
 
 /**
  * 그날의 조건. 캐릭터는 하루에 한 칸씩 돌아가고, 스테이지는 캐릭터가 한 바퀴 돌 때마다 한 칸 더 밀려서
@@ -83,19 +90,20 @@ const OLD_HEROES = 4;
  */
 export function dailyPlan(day: number): DailyPlan {
   const index = Math.max(0, Math.floor(day));
-  const fresh = index >= MOONER_DAILY_FROM;
-  const stage =
-    index < TUNDRA_DAILY_FROM
-      ? STAGE_ORDER[index % OLD_STAGES]
-      : fresh
-        ? STAGE_ORDER[index % STAGE_ORDER.length]
-        : STAGE_ORDER[(index + Math.floor(index / OLD_HEROES)) % STAGE_ORDER.length];
   return {
     day: index,
-    hero: HERO_ORDER[index % (fresh ? HERO_ORDER.length : OLD_HEROES)],
-    stage,
+    hero: HERO_ORDER[index % (index >= MOONER_DAILY_FROM ? HERO_ORDER.length : OLD_HEROES)],
+    stage: dailyStage(index),
     seed: mix(index) & 0x7fffffff,
   };
+}
+
+/** 그날의 스테이지. 스테이지나 캐릭터가 늘어난 날보다 앞의 날은 그때 정해 둔 차례 그대로 둔다. */
+function dailyStage(index: number): StageId {
+  if (index < TUNDRA_DAILY_FROM) return STAGE_ORDER[index % OLD_STAGES];
+  if (index < MOONER_DAILY_FROM) return STAGE_ORDER[(index + Math.floor(index / OLD_HEROES)) % FOUR_STAGES];
+  if (index < GROVE_DAILY_FROM) return STAGE_ORDER[index % FOUR_STAGES];
+  return STAGE_ORDER[(index + Math.floor(index / HERO_ORDER.length)) % STAGE_ORDER.length];
 }
 
 /**
