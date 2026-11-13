@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { darknessTexture, flashOf, FLOOR_OF, HERO_FRAMES, LK, LOOK } from './art';
-import { ENEMIES, POSTS, STAGES } from './data';
+import { ENEMIES, GLIDE, POSTS, QUAKE, STAGES } from './data';
 import { HUD_HEIGHT } from './hud';
 import { auraStats, beamStats, fireflyStats, isEvolved } from './rules';
 import {
@@ -14,7 +14,7 @@ import {
   type ShotLook,
   type Sim,
 } from './sim';
-import { GUST, puddlesAround, VENT, ventClock, ventsAround } from './terrain';
+import { GUST, LEAP, puddlesAround, shroomsAround, VENT, ventClock, ventsAround } from './terrain';
 
 const DEPTH = {
   floor: 0,
@@ -54,14 +54,33 @@ interface Flash {
   life: number;
 }
 
+/** 횃불을 휘두른 자국. 플레이어가 들고 휘두르므로 플레이어를 따라 그린다. */
+interface Swing {
+  angle: number;
+  arc: number;
+  reach: number;
+  count: number;
+  evolved: boolean;
+  life: number;
+}
+
 const RING_SECONDS = 0.22;
 const FLASH_SECONDS = 0.2;
+/** 횃불을 휘두른 자국이 보이는 시간(초). 앞의 절반 동안 부채꼴을 쓸고 지나간다. */
+const SWING_SECONDS = 0.22;
+/** 풍등이 바닥(불티가 떨어지는 둘레의 가운데)에서 떠 있는 높이(px) */
+const LAMP_LIFT = 12;
 
 /** 등불 기둥의 그림을 선 자리에서 이만큼(px) 올려 그린다. 받침이 그 자리에 놓인다. */
 const POST_LIFT = 6;
 
 /** 등갓의 빛막: 등불지기를 두르는 고리의 반지름과, 발밑이 아니라 몸 가운데에 오도록 올리는 높이(px) */
 const GUARD = { radius: 11, lift: -2 } as const;
+
+/** 빛버섯을 딛고 뛴 정예가 얼마나 날아왔는지(0~1). timer는 내려앉을 때까지 남은 시간이다. */
+function glideProgress(timer: number): number {
+  return Math.min(1, Math.max(0, 1 - timer / GLIDE.seconds));
+}
 
 /** 떨어져 있는 것의 그림. 빛 조각은 값이 클수록 큰 조각으로 보인다. */
 function gemKey(gem: Gem): string {
@@ -92,6 +111,9 @@ const WIND = { count: 34, length: 9, speed: 300, margin: 24 } as const;
 
 /** 화면 밖의 보물 상자를 알리는 그림이 가장자리에서 이만큼(px) 안쪽에 선다. */
 const CHEST_EDGE = 10;
+
+/** 빛버섯을 딛고 뛰는 정예가 그림에서 가장 높이 떠오르는 높이(px) */
+const GLIDE_LIFT = 26;
 
 class Pool {
   private readonly items: Phaser.GameObjects.Image[] = [];
@@ -149,6 +171,7 @@ export class RunView {
   private readonly darkPulse: Phaser.Tweens.Tween;
   private readonly rings: Ring[] = [];
   private readonly flashes: Flash[] = [];
+  private readonly swings: Swing[] = [];
   private readonly width: number;
   private readonly height: number;
   /** 이 판의 캐릭터가 걷는 그림 두 장 */
@@ -157,6 +180,8 @@ export class RunView {
   private readonly puddles: boolean;
   /** 불구멍이 있는 스테이지인지 */
   private readonly vents: boolean;
+  /** 빛버섯이 있는 스테이지인지 */
+  private readonly shrooms: boolean;
   /** 돌풍의 바람결을 그리는 판. 돌풍이 없는 스테이지에는 없다. */
   private readonly wind?: Phaser.GameObjects.Graphics;
   /** 바람결이 지금까지 흘러간 거리(px). 바람이 셀수록 빨리 는다. */
@@ -178,6 +203,7 @@ export class RunView {
     this.frames = HERO_FRAMES[hero];
     this.puddles = STAGES[stage].puddles;
     this.vents = STAGES[stage].vents;
+    this.shrooms = STAGES[stage].shrooms;
     this.width = width;
     this.height = height;
     this.centerX = Math.round(width / 2);
@@ -250,6 +276,44 @@ export class RunView {
     this.burst(sim, x, y, 5);
   }
 
+  /** 횃불을 휘두른 자국을 잠깐 그린다. */
+  swing(angle: number, arc: number, reach: number, count: number, evolved: boolean): void {
+    this.swings.push({ angle, arc, reach, count, evolved, life: SWING_SECONDS });
+  }
+
+  /**
+   * 횃불을 휘두른 자국: 부채꼴을 한쪽 끝에서 다른 쪽 끝으로 쓸고 지나가며 옅어진다.
+   * 쓸고 지나가는 끝에는 밝은 줄을 긋는다. 맞은편도 베면 맞은편에도 같은 자국을 그린다.
+   */
+  private drawSwings(dt: number, g: Phaser.GameObjects.Graphics): void {
+    let kept = 0;
+    for (const swing of this.swings) {
+      swing.life -= dt;
+      if (swing.life <= 0) continue;
+      const progress = 1 - swing.life / SWING_SECONDS;
+      const swept = Math.min(1, progress * 2);
+      const fade = 1 - progress;
+      for (let k = 0; k < swing.count; k += 1) {
+        const from = swing.angle + k * Math.PI - swing.arc / 2;
+        const to = from + swing.arc * swept;
+        g.fillStyle(swing.evolved ? LOOK.torchEvo : LOOK.torch, 0.5 * fade);
+        g.beginPath();
+        g.slice(this.centerX, this.centerY, swing.reach, from, to, false);
+        g.fillPath();
+        g.lineStyle(2, LOOK.torchEdge, 0.9 * fade);
+        g.lineBetween(
+          this.centerX + Math.cos(to) * 6,
+          this.centerY + Math.sin(to) * 6,
+          this.centerX + Math.cos(to) * swing.reach,
+          this.centerY + Math.sin(to) * swing.reach,
+        );
+      }
+      this.swings[kept] = swing;
+      kept += 1;
+    }
+    this.swings.length = kept;
+  }
+
   /** 번갯불이 지나간 길을 잠깐 그린다. points는 세상 좌표의 x, y가 번갈아 들어 있다. */
   bolt(points: number[], evolved: boolean): void {
     this.flashes.push({ points, evolved, life: FLASH_SECONDS });
@@ -298,10 +362,21 @@ export class RunView {
       const info = ENEMIES[e.kind];
       if (e.hp <= 0) continue;
       if (!info.boss) {
-        if (e.mode !== 1 || (!info.bursts && !info.shoots)) continue;
+        if (e.mode !== 1 || (!info.bursts && !info.shoots && !info.springs)) continue;
         const x = Math.round(e.x + offsetX);
         const y = Math.round(e.y + offsetY);
-        if (info.bursts) {
+        if (info.springs) {
+          // 내려앉을 자리: 바닥의 원이 안에서부터 차오르고, 다 차면 내려앉는다.
+          const progress = glideProgress(e.timer);
+          const landX = Math.round(x + e.vx * Math.max(0, e.timer));
+          const landY = Math.round(y + e.vy * Math.max(0, e.timer));
+          g.fillStyle(LOOK.threat, 0.12);
+          g.fillCircle(landX, landY, GLIDE.radius);
+          g.fillStyle(LOOK.threat, 0.24);
+          g.fillCircle(landX, landY, GLIDE.radius * progress);
+          g.lineStyle(1, LOOK.threat, 0.8);
+          g.strokeCircle(landX, landY, GLIDE.radius);
+        } else if (info.bursts) {
           // 터질 둘레: 바닥의 원이 안에서부터 차오르고, 다 차면 터진다.
           const progress = 1 - Math.max(0, e.timer) / info.bursts.fuse;
           g.fillStyle(LOOK.threat, 0.1);
@@ -335,6 +410,14 @@ export class RunView {
         g.lineBetween(x, y, endX, endY);
         g.lineStyle(1, locked ? LOOK.threatCore : LOOK.threat, locked ? 0.85 : 0.5);
         g.lineBetween(x, y, endX, endY);
+      } else if (brain === 'elder' && e.mode === CHARGING) {
+        // 땅을 구르기 전: 보스의 발밑에 붉은 고리가 조여들며 짙어진다.
+        const progress = 1 - Math.max(0, e.timer) / QUAKE.windup;
+        const shake = Math.floor(seconds * 30) % 2 === 0 ? 1 : -1;
+        g.fillStyle(LOOK.threat, 0.1 + 0.2 * progress);
+        g.fillEllipse(x, y + 8, (info.radius + 10) * 2, info.radius + 10);
+        g.lineStyle(2, LOOK.threat, 0.4 + 0.5 * progress);
+        g.strokeEllipse(x + shake, y + 8, (info.radius + 4 + 18 * (1 - progress)) * 2, info.radius + 4 + 18 * (1 - progress));
       } else if (
         ((brain === 'volley' || brain === 'matron' || brain === 'blizzard') && e.mode === CHARGING) ||
         (brain === 'warden' && e.mode === WARDEN_CHARGING)
@@ -493,6 +576,124 @@ export class RunView {
     return hurt ? flashOf(key) : key;
   }
 
+  /**
+   * 화면에 걸치는 빛버섯을 그린다. 부푼 버섯은 둘레가 은은히 빛나고,
+   * 밟힌 버섯은 납작하게 꺼져 있다가 다시 부풀 때가 되면 빠르게 솟는다.
+   */
+  private drawShrooms(sim: Sim, seconds: number): void {
+    const s = sim.state;
+    const p = s.player;
+    const g = this.terrain;
+    g.clear();
+    const midX = p.x + this.width / 2 - this.centerX;
+    const midY = p.y + this.height / 2 - this.centerY;
+    for (const shroom of shroomsAround(midX, midY, this.width / 2 + 24, this.height / 2 + 24, s.seed)) {
+      const x = Math.round(shroom.x - p.x + this.centerX);
+      const y = Math.round(shroom.y - p.y + this.centerY);
+      const r = shroom.r;
+      const until = s.squashed?.[shroom.key];
+      const rest = until === undefined ? 0 : Math.max(0, until - s.t);
+      // 0이면 납작하게 꺼진 것, 1이면 다 부푼 것
+      const puff = rest <= 0 ? 1 : 0.35 + 0.65 * Math.max(0, 1 - rest / LEAP.rest) ** 4;
+      const ready = rest <= 0;
+      if (ready) {
+        const breath = 0.5 + 0.5 * Math.sin(seconds * 2.4 + shroom.x * 0.07);
+        g.fillStyle(LOOK.shroomGlow, 0.1 + 0.08 * breath);
+        g.fillEllipse(x, y - 2, r * 3.4, r * 2.2);
+      }
+      // 땅에 드리운 그림자와 대
+      g.fillStyle(LOOK.shadow, 0.4);
+      g.fillEllipse(x, y + 2, r * 1.6, 4);
+      const stemTop = y - 3 - Math.round(2 * puff);
+      g.fillStyle(LOOK.shroomStem, ready ? 1 : 0.7);
+      g.fillRect(x - 2, stemTop, 4, y + 2 - stemTop);
+      // 갓: 둥근 지붕. 밟혀 납작해지면 낮아지고 어두워진다.
+      const height = Math.max(2, r * 0.95 * puff);
+      const dome = (rx: number, ry: number, baseY: number): void => {
+        g.beginPath();
+        g.moveTo(x + rx, baseY);
+        for (let k = 1; k <= 12; k += 1) {
+          const angle = (Math.PI * k) / 12;
+          g.lineTo(x + Math.cos(angle) * rx, baseY - Math.sin(angle) * ry);
+        }
+        g.closePath();
+        g.fillPath();
+      };
+      g.fillStyle(ready ? LOOK.shroomRim : LOOK.shroomFlat, 1);
+      dome(r + 1, height + 1, stemTop);
+      g.fillStyle(ready ? LOOK.shroom : LOOK.shroomRim, ready ? 1 : 0.85);
+      dome(r, height, stemTop - 1);
+      // 갓 아래의 주름: 어두운 띠
+      g.fillStyle(ready ? LOOK.shroomRim : LOOK.shroomFlat, 1);
+      g.fillRect(x - r, stemTop - 1, r * 2 + 1, 2);
+      if (ready) {
+        g.fillStyle(LOOK.shroomSpot, 0.95);
+        g.fillRect(x - Math.round(r * 0.5), stemTop - Math.round(height * 0.55), 2, 2);
+        g.fillRect(x + Math.round(r * 0.25), stemTop - Math.round(height * 0.75), 2, 1);
+        g.fillRect(x + Math.round(r * 0.55), stemTop - Math.round(height * 0.3), 1, 1);
+      }
+    }
+  }
+
+  /**
+   * 빛버섯 숲에서 바닥에 그리는 것: 싹, 땅울림 고리, 공중에 뜬 것의 그림자.
+   * 싹은 자랄수록 커지고 곧 자랄 때는 깜빡인다. 고리는 틈을 남기고 붉게 퍼진다.
+   */
+  private drawGrove(sim: Sim, seconds: number, offsetX: number, offsetY: number, g: Phaser.GameObjects.Graphics): void {
+    const s = sim.state;
+    const p = s.player;
+    for (const sprout of s.sprouts ?? []) {
+      const x = Math.round(sprout.x + offsetX);
+      const y = Math.round(sprout.y + offsetY);
+      if (x < -8 || x > this.width + 8 || y < -8 || y > this.height + 8) continue;
+      const grown = Math.min(1, Math.max(0, 1 - sprout.t / 4));
+      if (sprout.t < 1 && Math.floor(seconds * 10) % 2 === 0) continue;
+      const tall = 2 + Math.round(4 * grown);
+      g.fillStyle(LOOK.shadow, 0.35);
+      g.fillEllipse(x, y + 1, 8, 3);
+      g.fillStyle(LOOK.sproutStem, 1);
+      g.fillRect(x, y - tall, 1, tall + 1);
+      g.fillStyle(LOOK.sprout, 1);
+      const leaf = 1 + Math.round(2 * grown);
+      g.fillRect(x - leaf, y - tall, leaf, 2);
+      g.fillRect(x + 1, y - tall - 1, leaf, 2);
+    }
+    for (const quake of s.quakes ?? []) {
+      if (quake.delay > 0 || quake.r <= 0) continue;
+      const x = quake.x + offsetX;
+      const y = quake.y + offsetY;
+      const fade = 1 - Math.min(1, quake.r / QUAKE.reach) * 0.5;
+      const step = (Math.PI * 2) / QUAKE.gaps;
+      const inner = Math.max(1, quake.r - QUAKE.band / 2);
+      for (let k = 0; k < QUAKE.gaps; k += 1) {
+        // 틈과 틈 사이의 호
+        const from = quake.gap + k * step + QUAKE.gap / 2;
+        const to = quake.gap + (k + 1) * step - QUAKE.gap / 2;
+        g.lineStyle(QUAKE.band, LOOK.threat, 0.42 * fade);
+        g.beginPath();
+        g.arc(x, y, inner, from, to);
+        g.strokePath();
+        g.lineStyle(1, LOOK.threatCore, 0.75 * fade);
+        g.beginPath();
+        g.arc(x, y, quake.r, from, to);
+        g.strokePath();
+      }
+    }
+    // 공중에 뜬 것의 그림자: 높이 뜰수록 작아진다.
+    if (p.leap) {
+      const height = Math.sin(Math.PI * Math.min(1, p.leap.t / LEAP.seconds));
+      g.fillStyle(LOOK.shadow, 0.45);
+      g.fillEllipse(this.centerX, this.centerY + 7, 12 - 4 * height, 4 - height);
+    }
+    for (const e of s.enemies) {
+      const info = ENEMIES[e.kind];
+      if (!info.springs || e.mode !== 1 || e.hp <= 0) continue;
+      const height = Math.sin(Math.PI * glideProgress(e.timer));
+      g.fillStyle(LOOK.shadow, 0.45);
+      g.fillEllipse(Math.round(e.x + offsetX), Math.round(e.y + offsetY) + 8, 22 - 8 * height, 7 - 2 * height);
+    }
+  }
+
   /** 화면에 걸치는 웅덩이를 그린다. 플레이어가 빠져 있으면 발밑에 물결이 인다. */
   private drawPuddles(sim: Sim, seconds: number): void {
     const s = sim.state;
@@ -614,12 +815,16 @@ export class RunView {
     if (this.puddles) this.drawPuddles(sim, seconds);
     if (this.vents) this.drawVents(sim, seconds);
     if (this.wind) this.drawWind(sim, dt);
+    if (this.shrooms) this.drawShrooms(sim, seconds);
 
     // 웅덩이에서는 발이 무거워 걸음도 느려진다.
     if (p.moving) this.stride += (p.wading ? 36 : 60) * dt;
     const playerKey = this.playerKey(sim, seconds);
     if (this.player.texture.key !== playerKey) this.player.setTexture(playerKey);
     this.player.setFlipX(p.face < 0);
+    // 빛버섯을 밟고 뛰는 동안에는 캐릭터가 떠오른다. 발밑의 그림자는 바닥 그림에서 그린다.
+    const lift = p.leap ? Math.round(LEAP.height * Math.sin(Math.PI * Math.min(1, p.leap.t / LEAP.seconds))) : 0;
+    if (this.player.y !== this.centerY - lift) this.player.setY(this.centerY - lift);
     // 발이 얼어 있는 동안에는 얼음빛이 돈다.
     const chilled = (p.chilled ?? 0) > 0;
     if (chilled !== this.player.isTinted) {
@@ -663,10 +868,13 @@ export class RunView {
       // 터지려고 부푸는 적은 점점 커지면서 깜빡인다.
       const swell = info.bursts && e.mode === 1 ? 1 - Math.max(0, e.timer) / info.bursts.fuse : 0;
       const lit = e.flash > 0 || (swell > 0 && Math.floor(seconds * (8 + 10 * swell)) % 2 === 0);
-      const image = this.enemies.put(lit ? flashOf(key) : key, x, y);
+      // 빛버섯을 딛고 뛴 정예는 떠올랐다가 내려앉는다.
+      const airborne = Boolean(info.springs) && e.mode === 1;
+      const rise = airborne ? Math.round(GLIDE_LIFT * Math.sin(Math.PI * glideProgress(e.timer))) : 0;
+      const image = this.enemies.put(lit ? flashOf(key) : key, x, y - rise);
       const scale = 1 + 0.4 * swell;
       if (image.scaleX !== scale) image.setScale(scale);
-      const depth = boss ? DEPTH.boss : DEPTH.enemy;
+      const depth = boss || airborne ? DEPTH.boss : DEPTH.enemy;
       if (image.depth !== depth) image.setDepth(depth);
     }
     this.enemies.end();
@@ -756,8 +964,21 @@ export class RunView {
         }
       }
     }
+    // 풍등이 불티를 떨구는 둘레: 옅게 칠하고, 떨굴 때마다 테두리가 밝아진다.
+    for (const lamp of s.lamps) {
+      const fade = Math.min(1, lamp.life / 0.4);
+      const flare = Math.max(0, 1 - (lamp.every - lamp.tick) / 0.15);
+      const x = Math.round(lamp.x + offsetX);
+      const y = Math.round(lamp.y + offsetY);
+      g.fillStyle(lamp.evolved ? LOOK.lampEvo : LOOK.lamp, (0.1 + 0.12 * flare) * fade);
+      g.fillCircle(x, y, lamp.radius);
+      g.lineStyle(1, lamp.evolved ? LOOK.lampEvoRim : LOOK.lampRim, (0.25 + 0.4 * flare) * fade);
+      g.strokeCircle(x, y, lamp.radius);
+    }
+    this.drawSwings(dt, g);
     this.drawPosts(sim, seconds, offsetX, offsetY, g);
     this.drawGuard(sim, seconds, g);
+    if (this.shrooms) this.drawGrove(sim, seconds, offsetX, offsetY, g);
     for (const strike of s.strikes) {
       g.lineStyle(1, LOOK.strike, 0.5);
       g.strokeCircle(Math.round(strike.x + offsetX), Math.round(strike.y + offsetY), strike.radius);
@@ -824,6 +1045,35 @@ export class RunView {
       kept += 1;
     }
     this.flashes.length = kept;
+
+    // 풍등: 무리 위에 떠서 천천히 오르내리는 종이 등. 둥근 머리에 아래로 좁아지고, 아래 구멍의 불이 등 전체를 밝힌다.
+    for (const lamp of s.lamps) {
+      const fade = Math.min(1, lamp.life / 0.4);
+      const bob = Math.sin(seconds * 3 + lamp.x * 0.11 + lamp.y * 0.07);
+      const x = Math.round(lamp.x + offsetX);
+      const y = Math.round(lamp.y + offsetY - LAMP_LIFT + bob * 1.5);
+      const half = lamp.evolved ? 5 : 4;
+      const tall = lamp.evolved ? 10 : 8;
+      const top = y - tall / 2;
+      const bottom = y + tall / 2;
+      const rim = lamp.evolved ? LOOK.lampEvoRim : LOOK.lampRim;
+      const body = lamp.evolved ? LOOK.lampEvo : LOOK.lamp;
+      air.fillStyle(body, 0.2 * fade);
+      air.fillCircle(x, y, half * 2 + 2);
+      air.fillStyle(rim, fade);
+      air.fillEllipse(x, top + 1, half * 2 + 2, 5);
+      air.fillTriangle(x - half - 1, top + 1, x + half + 1, top + 1, x + half - 1, bottom + 1);
+      air.fillTriangle(x - half - 1, top + 1, x + half - 1, bottom + 1, x - half + 1, bottom + 1);
+      air.fillStyle(body, fade);
+      air.fillEllipse(x, top + 1, half * 2, 3);
+      air.fillTriangle(x - half, top + 1, x + half, top + 1, x + half - 2, bottom);
+      air.fillTriangle(x - half, top + 1, x + half - 2, bottom, x - half + 2, bottom);
+      // 안쪽의 불빛과, 아래 구멍에서 일렁이는 불
+      air.fillStyle(LOOK.lampCore, 0.5 * fade);
+      air.fillRect(x - 1, top + 1, 2, tall - 3);
+      air.fillStyle(LOOK.lampCore, (0.7 + 0.3 * Math.sin(seconds * 15 + lamp.x)) * fade);
+      air.fillRect(x - 1, bottom - 1, 2, 2);
+    }
 
     this.drawThreats(sim, seconds, offsetX, offsetY);
     this.drawPointers(sim, seconds, offsetX, offsetY);

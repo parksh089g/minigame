@@ -15,6 +15,7 @@ export const LK = {
   stormer: ['lk-stormer-1', 'lk-stormer-2'],
   ringer: ['lk-ringer-1', 'lk-ringer-2'],
   mooner: ['lk-mooner-1', 'lk-mooner-2'],
+  bearer: ['lk-bearer-1', 'lk-bearer-2'],
   shade: ['lk-shade-1', 'lk-shade-2'],
   bat: ['lk-bat-1', 'lk-bat-2'],
   wisp: ['lk-wisp-1', 'lk-wisp-2'],
@@ -39,10 +40,17 @@ export const LK = {
   floe: ['lk-floe-1', 'lk-floe-2'],
   hail: ['lk-hail-1', 'lk-hail-2'],
   bloat: ['lk-bloat-1', 'lk-bloat-2'],
+  cone: ['lk-cone-1', 'lk-cone-2'],
+  leaf: ['lk-leaf-1', 'lk-leaf-2'],
+  acorn: ['lk-acorn-1', 'lk-acorn-2'],
+  log: ['lk-log-1', 'lk-log-2'],
+  needle: ['lk-needle-1', 'lk-needle-2'],
+  husk: ['lk-husk-1', 'lk-husk-2'],
   prowler: ['lk-prowler-1', 'lk-prowler-2'],
   lurker: ['lk-lurker-1', 'lk-lurker-2'],
   stoker: ['lk-stoker-1', 'lk-stoker-2'],
   fang: ['lk-fang-1', 'lk-fang-2'],
+  glider: ['lk-glider-1', 'lk-glider-2'],
   giant: ['lk-giant-1', 'lk-giant-2'],
   ram: ['lk-ram-1', 'lk-ram-2'],
   owl: ['lk-owl-1', 'lk-owl-2'],
@@ -50,6 +58,7 @@ export const LK = {
   matron: ['lk-matron-1', 'lk-matron-2'],
   warden: ['lk-warden-1', 'lk-warden-2'],
   blizzard: ['lk-blizzard-1', 'lk-blizzard-2'],
+  elder: ['lk-elder-1', 'lk-elder-2'],
   /** 보스가 쏘는 빛덩이 */
   orb: 'lk-orb',
   gemSmall: 'lk-gem-s',
@@ -78,6 +87,7 @@ export const LK = {
   floorMarsh: 'lk-floor-marsh',
   floorRidge: 'lk-floor-ridge',
   floorTundra: 'lk-floor-tundra',
+  floorGrove: 'lk-floor-grove',
   spark: 'lk-spark',
 } as const;
 
@@ -87,6 +97,7 @@ export const FLOOR_OF: Readonly<Record<StageId, string>> = {
   marsh: LK.floorMarsh,
   ridge: LK.floorRidge,
   tundra: LK.floorTundra,
+  grove: LK.floorGrove,
 };
 
 /** 캐릭터의 걷는 그림 두 장 */
@@ -96,6 +107,7 @@ export const HERO_FRAMES: Readonly<Record<HeroId, readonly [string, string]>> = 
   stormer: LK.stormer,
   ringer: LK.ringer,
   mooner: LK.mooner,
+  bearer: LK.bearer,
 };
 
 /**
@@ -117,6 +129,16 @@ export const LOOK = {
   noticeFill: COLOR.ink,
   noticeEdge: COLOR.sky,
   beamCore: COLOR.white,
+  /** 횃불을 휘두른 자리(봉화는 붉게)와, 휘두르는 끝의 밝은 줄 */
+  torch: COLOR.orange,
+  torchEvo: COLOR.red,
+  torchEdge: COLOR.yellow,
+  /** 풍등의 종이 등과 불티가 떨어지는 둘레. 풍등 축제는 붉은 등이다. */
+  lamp: COLOR.yellow,
+  lampRim: COLOR.orange,
+  lampEvo: COLOR.orange,
+  lampEvoRim: COLOR.red,
+  lampCore: COLOR.white,
   bellEvo: COLOR.cyan,
   flint: COLOR.orange,
   bolt: COLOR.white,
@@ -135,6 +157,18 @@ export const LOOK = {
   /** 바람 설원의 돌풍: 바람결과, 발이 얼었을 때 캐릭터에 도는 빛 */
   wind: COLOR.white,
   chill: COLOR.cyan,
+  /** 빛버섯 숲의 빛버섯: 부푼 갓과 테두리, 갓의 점, 대, 둘레의 빛, 밟혀 납작해진 갓 */
+  shroom: COLOR.cyan,
+  shroomRim: COLOR.teal,
+  shroomSpot: COLOR.white,
+  shroomStem: COLOR.silver,
+  shroomGlow: COLOR.cyan,
+  shroomFlat: COLOR.navy,
+  /** 쓰러진 도토리가 남긴 싹: 잎과 줄기 */
+  sprout: COLOR.lime,
+  sproutStem: COLOR.green,
+  /** 공중에 뜬 것의 그림자 */
+  shadow: COLOR.ink,
   /** 보스의 공격 예고: 돌진할 길, 쏘려고 모으는 빛 */
   threat: COLOR.red,
   threatCore: COLOR.white,
@@ -222,6 +256,13 @@ const MOONER_TOP: Rows = recolor(
   KEEPER_TOP.map((row) => row.slice(0, 11)),
   { '4': 'd', '2': '1', '3': 'a' },
 ).map((row, index) => row + MOONER_MOON[index]);
+
+/** 횃불잡이: 잿빛 두건에 주황 옷, 손에는 등불 대신 불길이 붙은 횃불 */
+const BEARER_TORCH: Rows = ['.....', '..0..', '.040.', '04340', '03c30', '03c30', '.0d0.', '.010.', '.010.', '.010.', '.010.', '..0..', '.....', '.....'];
+const BEARER_TOP: Rows = recolor(
+  KEEPER_TOP.map((row) => row.slice(0, 11)),
+  { '4': 'e', '2': '3', '3': '4' },
+).map((row, index) => row + BEARER_TORCH[index]);
 
 const BAT_1: Rows = [
   '0............0',
@@ -437,6 +478,8 @@ interface BlobLook {
   ears?: 'horn' | 'tuft';
   /** 뿔의 색. 없으면 희다. 정예 그림자는 금빛 뿔로 알아본다. */
   horn?: number;
+  /** 머리에 이 색의 도토리 깍정이를 씌운다 */
+  cap?: number;
 }
 
 /**
@@ -445,7 +488,7 @@ interface BlobLook {
  */
 function blobRows(look: BlobLook, frame: 1 | 2): Rows {
   const { size } = look;
-  const crownRows = look.crown ? Math.round(size / 4) : look.ears ? Math.round(size / 5) : 0;
+  const crownRows = look.crown ? Math.round(size / 4) : look.ears ? Math.round(size / 5) : look.cap !== undefined ? 1 : 0;
   const height = size + crownRows;
   const grid: string[][] = Array.from({ length: height }, () => Array<string>(size).fill('.'));
   const cx = size / 2;
@@ -464,6 +507,24 @@ function blobRows(look: BlobLook, frame: 1 | 2): Rows {
       if (color !== 0 && dx < -0.2 && dy < -0.3 && d > 0.55) color = look.shade;
       grid[crownRows + y][x] = color.toString(16);
     }
+  }
+  // 도토리 깍정이: 머리의 윗부분을 깍정이 색으로 덮고, 꼭대기에 꼭지를 단다.
+  if (look.cap !== undefined) {
+    const capColor = look.cap.toString(16);
+    for (let y = 0; y < size; y += 1) {
+      const dy = (crownRows + y + 0.5 - cy) / ry;
+      if (dy > -0.25) continue;
+      for (let x = 0; x < size; x += 1) {
+        const cell = grid[crownRows + y][x];
+        if (cell !== '.' && cell !== '0') grid[crownRows + y][x] = capColor;
+      }
+    }
+    // 깍정이의 아랫단에 어두운 띠를 둘러 몸과 갈라 보이게 한다.
+    const rim = Math.round(cy - ry * 0.25) - 1;
+    for (let x = 0; x < size; x += 1) {
+      if (grid[rim]?.[x] === capColor) grid[rim][x] = '0';
+    }
+    grid[0][Math.floor(cx)] = '0';
   }
   // 물결치는 아랫단: 한 칸씩 건너 구멍을 낸다.
   if (look.frill) {
@@ -552,11 +613,18 @@ const BLOBS = {
   floe: { size: 18, body: 9, shade: 10, eye: 12 },
   hail: { size: 13, body: 14, shade: 13, eye: 11, ears: 'tuft' },
   bloat: { size: 13, body: 3, shade: 4, eye: 0 },
+  // 빛버섯 숲: 이끼와 나무의 초록과 밤빛 보라. 쏘는 적과 터지는 적은 다른 스테이지와 같은 약속을 따른다.
+  cone: { size: 12, body: 6, shade: 7, eye: 4, frill: true },
+  acorn: { size: 13, body: 2, shade: 1, eye: 4, cap: 15 },
+  log: { size: 18, body: 1, shade: 15, eye: 5 },
+  needle: { size: 13, body: 7, shade: 6, eye: 4, ears: 'tuft' },
+  husk: { size: 13, body: 3, shade: 4, eye: 0 },
   // 정예 그림자: 그 스테이지의 흔한 그림자를 크게 키운 모습에 금빛 뿔이 솟았다.
   prowler: { size: 22, body: 1, shade: 2, eye: 4, ears: 'horn', horn: 4, frill: true },
   lurker: { size: 22, body: 6, shade: 5, eye: 4, ears: 'horn', horn: 4 },
   stoker: { size: 23, body: 14, shade: 13, eye: 3, ears: 'horn', horn: 4, frill: true },
   fang: { size: 22, body: 10, shade: 11, eye: 12, ears: 'horn', horn: 4, frill: true },
+  glider: { size: 22, body: 6, shade: 7, eye: 4, ears: 'horn', horn: 4, frill: true },
   giant: { size: 30, body: 7, shade: 6, eye: 4, frill: true },
   ram: { size: 28, body: 3, shade: 4, eye: 0, ears: 'horn' },
   owl: { size: 28, body: 9, shade: 10, eye: 4, ears: 'tuft', frill: true },
@@ -564,6 +632,7 @@ const BLOBS = {
   matron: { size: 34, body: 6, shade: 5, eye: 4, crown: true, frill: true },
   warden: { size: 34, body: 14, shade: 3, eye: 4, crown: true, frill: true },
   blizzard: { size: 34, body: 12, shade: 13, eye: 9, crown: true, frill: true },
+  elder: { size: 34, body: 15, shade: 14, eye: 5, crown: true, frill: true, cap: 6 },
 } as const satisfies Record<string, BlobLook>;
 
 function drawGem(size: number, rim: number, body: number): HTMLCanvasElement {
@@ -717,6 +786,48 @@ function drawTundraFloor(): HTMLCanvasElement {
     [20, 28],
     [6, 42],
     [34, 36],
+  ]) {
+    context.fillRect(x, y, 1, 1);
+  }
+  return canvas;
+}
+
+/** 빛버섯 숲. 이끼 낀 어두운 숲 바닥에 떨어진 솔잎과 이끼 덩이, 희미한 포자를 박는다. */
+function drawGroveFloor(): HTMLCanvasElement {
+  const size = 48;
+  const [canvas, context] = canvasOf(size, size);
+  context.fillStyle = '#1d3532';
+  context.fillRect(0, 0, size, size);
+  // 이끼 덩이: 바탕보다 조금만 밝아서 적과 빛 조각이 묻히지 않는다.
+  context.fillStyle = '#244540';
+  for (const [x, y, w, h] of [
+    [4, 6, 5, 2],
+    [30, 14, 6, 2],
+    [12, 30, 4, 2],
+    [36, 38, 5, 2],
+  ]) {
+    context.fillRect(x, y, w, h);
+  }
+  // 떨어진 솔잎: 비스듬한 짧은 줄
+  context.fillStyle = '#3a4a2e';
+  for (const [x, y] of [
+    [20, 4],
+    [42, 22],
+    [6, 40],
+    [26, 44],
+    [16, 18],
+  ]) {
+    context.fillRect(x, y, 1, 1);
+    context.fillRect(x + 1, y + 1, 1, 1);
+    context.fillRect(x + 2, y + 2, 1, 1);
+  }
+  // 희미한 포자
+  context.fillStyle = '#3f6f69';
+  for (const [x, y] of [
+    [34, 6],
+    [10, 22],
+    [44, 32],
+    [22, 36],
   ]) {
     context.fillRect(x, y, 1, 1);
   }
@@ -890,6 +1001,8 @@ export function registerLanternTextures(scene: Phaser.Scene): void {
   addWithFlash(LK.ringer[1], [...RINGER_TOP, ...LEGS_2]);
   addWithFlash(LK.mooner[0], [...MOONER_TOP, ...LEGS_1]);
   addWithFlash(LK.mooner[1], [...MOONER_TOP, ...LEGS_2]);
+  addWithFlash(LK.bearer[0], [...BEARER_TOP, ...LEGS_1]);
+  addWithFlash(LK.bearer[1], [...BEARER_TOP, ...LEGS_2]);
   addWithFlash(LK.bat[0], BAT_1);
   addWithFlash(LK.bat[1], BAT_2);
   // 안개나방은 박쥐와 같은 모양에 날개만 잿빛이다.
@@ -901,6 +1014,9 @@ export function registerLanternTextures(scene: Phaser.Scene): void {
   // 서리나비도 같은 모양에 날개가 얼음빛이다.
   addWithFlash(LK.sleet[0], recolor(BAT_1, { '2': 'b' }));
   addWithFlash(LK.sleet[1], recolor(BAT_2, { '2': 'b' }));
+  // 가랑잎도 같은 모양에 날개가 마른 잎의 노란빛이다.
+  addWithFlash(LK.leaf[0], recolor(BAT_1, { '2': '4' }));
+  addWithFlash(LK.leaf[1], recolor(BAT_2, { '2': '4' }));
   addWithFlash(LK.wisp[0], WISP_1);
   addWithFlash(LK.wisp[1], WISP_2);
   for (const kind of Object.keys(BLOBS) as Array<keyof typeof BLOBS>) {
@@ -987,5 +1103,6 @@ export function registerLanternTextures(scene: Phaser.Scene): void {
   add(LK.floorMarsh, drawMarshFloor());
   add(LK.floorRidge, drawRidgeFloor());
   add(LK.floorTundra, drawTundraFloor());
+  add(LK.floorGrove, drawGroveFloor());
   for (const id of ICON_IDS) add(iconKey(id), drawRows(withOutline(ICONS[id])));
 }

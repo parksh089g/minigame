@@ -84,10 +84,17 @@ const FOE_TEXT: Readonly<Record<EnemyKind, string>> = {
   floe: '아주 느리고 아주 튼튼하다. 무거워서 돌풍에도 조금만 밀린다',
   hail: '멀찍이 멈춰 서서 어둠 방울을 쏜다. 고리가 조여들면 옆으로 비키자',
   bloat: '가까이 와서 부풀었다가 터진다. 바닥의 원 밖으로 나가면 다치지 않고, 둘레의 그림자는 함께 다친다',
+  cone: '숲에서 가장 흔한 그림자. 도토리가 남긴 싹이 자라도 이것이 된다',
+  leaf: '약하지만 팔랑팔랑 빠르게 날아든다',
+  acorn: '쓰러진 자리에 싹을 남긴다. 싹은 4초 뒤에 솔방울로 자라니 그 전에 밟아 없애자',
+  log: '아주 느리고 아주 튼튼하다. 막아서면 빛버섯을 밟고 뛰어넘자',
+  needle: '멀찍이 멈춰 서서 어둠 방울을 쏜다. 고리가 조여들면 옆으로 비키자',
+  husk: '가까이 와서 부풀었다가 터진다. 바닥의 원 밖으로 나가면 다치지 않고, 둘레의 그림자는 함께 다친다',
   prowler: '크고 튼튼한 정예 그림자. 곧장 쫓아온다. 쓰러뜨리면 보물 상자를 떨어뜨린다',
   lurker: '크고 튼튼한 정예 그림자. 웅크렸다가 멀리 뛰어든다. 쓰러뜨리면 보물 상자를 떨어뜨린다',
   stoker: '느리지만 아주 튼튼한 정예 그림자. 닿으면 몹시 아프다. 쓰러뜨리면 보물 상자를 떨어뜨린다',
   fang: '크고 튼튼한 정예 그림자. 닿으면 발이 얼어 느려진다. 쓰러뜨리면 보물 상자를 떨어뜨린다',
+  glider: '크고 튼튼한 정예 그림자. 빛버섯을 딛고 높이 뛰어 덮친다. 바닥의 붉은 원에서 비키자. 쓰러뜨리면 보물 상자를 떨어뜨린다',
   giant: '부하를 자꾸 불러낸다. 쓰러뜨리면 무기 강화권을 준다',
   ram: '힘을 모았다가 곧게 내달린다. 붉은 길에서 비키자. 쓰러뜨리면 무기 강화권을 준다',
   owl: '빛을 모았다가 부채꼴로 쏜다. 쓰러뜨리면 무기 강화권을 준다',
@@ -95,6 +102,7 @@ const FOE_TEXT: Readonly<Record<EnemyKind, string>> = {
   matron: '사방으로 쏘기와 부하 부르기를 번갈아 한다. 쓰러뜨리면 새벽이 온다',
   blizzard: '빛을 모았다가 사방으로 세 겹을 엇갈려 쏘고, 사이사이에 부하를 부른다. 겹마다 틈이 어긋나니 한 겹씩 지나가자. 쓰러뜨리면 새벽이 온다',
   warden: '내달린 다음에 빛을 모아 부채꼴로 쏜다. 붉은 길에서 비키고, 쏘면 옆으로 돌자. 쓰러뜨리면 새벽이 온다',
+  elder: '멈춰서 땅을 구르면 틈이 난 땅울림 고리가 퍼진다. 틈으로 지나가거나 빛버섯을 밟고 뛰어넘자. 체력이 반 아래면 두 겹씩 퍼뜨린다. 쓰러뜨리면 새벽이 온다',
 };
 
 const FINDS: ReadonlyArray<{ id: FindId; name: string; note: string; text: string; hint?: string }> = [
@@ -203,7 +211,7 @@ function buildCodex(): CodexEntry[] {
       text: passiveText(id),
     });
   });
-  // 그림자: 스테이지마다 한 줄(나오는 차례대로, 끝에 마지막 보스), 그 아래에 중간 보스 한 줄
+  // 그림자: 스테이지마다 한 줄(나오는 차례대로, 끝에 마지막 보스), 그 아래에 중간 보스 한 줄과 정예 한 줄
   STAGE_ORDER.forEach((stageId, row) => {
     const stage = STAGES[stageId];
     for (const spawn of [...stage.spawns].sort((a, b) => a.from - b.from)) {
@@ -245,13 +253,12 @@ function buildCodex(): CodexEntry[] {
       hint: `${MID_BOSS_EVERY / 60}분마다 하나씩 나오는 중간 보스예요`,
     });
   }
-  // 정예 그림자는 중간 보스와 같은 줄에 놓는다.
   for (const stageId of STAGE_ORDER) {
     const stage = STAGES[stageId];
     entries.push({
       id: stage.elite,
       tab: 'foes',
-      row: STAGE_ORDER.length,
+      row: STAGE_ORDER.length + 1,
       name: ENEMIES[stage.elite].name,
       note: `${stage.name}의 정예 · 한 판에 ${ELITE.times.length}번`,
       text: FOE_TEXT[stage.elite],

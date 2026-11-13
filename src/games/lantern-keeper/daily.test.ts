@@ -13,6 +13,8 @@ import {
   friendNotice,
   friendToday,
   friendVerdict,
+  BEARER_DAILY_FROM,
+  GROVE_DAILY_FROM,
   MOONER_DAILY_FROM,
   normalizeDaily,
   normalizeFriend,
@@ -74,11 +76,29 @@ describe('오늘의 판: 조건', () => {
   it('캐릭터와 스테이지의 모든 짝이 차례로 한 번씩 나온다', () => {
     const cycle = HERO_ORDER.length * STAGE_ORDER.length;
     const pairs = new Set<string>();
-    for (let day = MOONER_DAILY_FROM + 3; day < MOONER_DAILY_FROM + 3 + cycle; day += 1) {
+    for (let day = BEARER_DAILY_FROM; day < BEARER_DAILY_FROM + cycle; day += 1) {
       const plan = dailyPlan(day);
       pairs.add(`${plan.hero}/${plan.stage}`);
     }
     expect(pairs.size).toBe(cycle);
+  });
+
+  it('횃불잡이는 정해진 날부터 섞이고, 그 전의 날은 캐릭터 다섯이 돌던 차례 그대로다', () => {
+    // 2026년 11월 26일(한국 시각)이 그날이다. 빛버섯 숲은 그 사흘 앞(11월 23일)부터 섞인다.
+    expect(dayLabel(GROVE_DAILY_FROM)).toBe('11월 23일');
+    expect(dayLabel(BEARER_DAILY_FROM)).toBe('11월 26일');
+    const before = Array.from({ length: 400 }, (_, i) => dailyPlan(BEARER_DAILY_FROM - 1 - i));
+    expect(before.some((plan) => plan.hero === 'bearer')).toBe(false);
+    // 빛버섯 숲이 섞인 뒤부터 횃불잡이가 섞이기 전까지의 사흘은 먼저 정해 둔 차례 그대로다.
+    expect([0, 1, 2].map((i) => dailyPlan(GROVE_DAILY_FROM + i))).toMatchObject([
+      { hero: 'keeper', stage: 'marsh' },
+      { hero: 'stargazer', stage: 'ridge' },
+      { hero: 'stormer', stage: 'tundra' },
+    ]);
+    expect(dailyPlan(BEARER_DAILY_FROM)).toMatchObject({ hero: 'bearer', stage: 'grove' });
+    const after = Array.from({ length: 30 }, (_, i) => dailyPlan(BEARER_DAILY_FROM + i));
+    expect(after.filter((plan) => plan.hero === 'bearer')).toHaveLength(5);
+    expect(new Set(after.filter((plan) => plan.hero === 'bearer').map((plan) => plan.stage)).size).toBe(5);
   });
 
   it('바람 설원은 정해진 날부터 섞이고, 그 전의 날은 예전 차례 그대로다', () => {
@@ -103,9 +123,10 @@ describe('오늘의 판: 조건', () => {
     for (const plan of before) expect(plan.hero).toBe(HERO_ORDER[plan.day % 4]);
     // 바람 설원이 섞인 뒤부터 달잡이가 섞이기 전까지의 나흘은 먼저 정해 둔 차례 그대로다.
     expect([0, 1, 2, 3].map((i) => dailyPlan(TUNDRA_DAILY_FROM + i).stage)).toEqual(['ridge', 'tundra', 'meadow', 'ridge']);
-    const after = Array.from({ length: 20 }, (_, i) => dailyPlan(MOONER_DAILY_FROM + i));
-    expect(after.filter((plan) => plan.hero === 'mooner')).toHaveLength(4);
-    expect(new Set(after.filter((plan) => plan.hero === 'mooner').map((plan) => plan.stage)).size).toBe(4);
+    // 달잡이가 섞인 뒤부터 횃불잡이가 섞이기 전까지는 캐릭터 다섯이 하루에 한 칸씩 돈다.
+    const after = Array.from({ length: BEARER_DAILY_FROM - MOONER_DAILY_FROM }, (_, i) => dailyPlan(MOONER_DAILY_FROM + i));
+    for (const plan of after) expect(plan.hero).toBe(HERO_ORDER[plan.day % 5]);
+    expect(after.some((plan) => plan.hero === 'mooner')).toBe(true);
   });
 
   it('엉뚱한 날짜가 와도 조건은 나온다', () => {

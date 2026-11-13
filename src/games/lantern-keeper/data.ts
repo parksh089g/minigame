@@ -61,7 +61,15 @@ export type EnemyKind =
   | 'lord'
   | 'matron'
   | 'warden'
-  | 'blizzard';
+  | 'blizzard'
+  | 'cone'
+  | 'leaf'
+  | 'acorn'
+  | 'log'
+  | 'needle'
+  | 'husk'
+  | 'glider'
+  | 'elder';
 
 /**
  * 보스가 싸우는 방식.
@@ -69,8 +77,9 @@ export type EnemyKind =
  * lord 돌진한 뒤 부하를 부른다 · matron 사방으로 쏘기와 부하 부르기를 번갈아 한다
  * warden 돌진과 부채꼴로 쏘기를 번갈아 한다
  * blizzard 사방으로 여러 겹을 엇갈려 쏘기와 부하 부르기를 번갈아 한다
+ * elder 땅을 굴러 틈이 난 땅울림 고리를 퍼뜨리기와 부하 부르기를 번갈아 한다
  */
-export type BossBrain = 'summon' | 'charge' | 'volley' | 'lord' | 'matron' | 'warden' | 'blizzard';
+export type BossBrain = 'summon' | 'charge' | 'volley' | 'lord' | 'matron' | 'warden' | 'blizzard' | 'elder';
 
 /** 멀찍이 멈춰 서서 어둠 방울을 쏘는 적의 숫자 */
 export interface ShootInfo {
@@ -122,6 +131,13 @@ export interface EnemyInfo {
   bursts?: BurstInfo;
   /** 닿으면 플레이어의 발이 이만큼(초) 얼어 느려진다(CHILL_SLOW). 빛막이 막아 줬을 때는 얼지 않는다. */
   chills?: number;
+  /**
+   * 쓰러진 자리에 싹을 남긴다. 싹은 이만큼(초) 뒤에 그 스테이지의 가장 흔한 그림자로 자라고,
+   * 그 전에 플레이어가 밟으면 사라진다(SPROUT).
+   */
+  sprouts?: number;
+  /** 빛버섯을 딛고 높이 뛰어, 뛸 때 플레이어가 있던 자리를 덮친다(GLIDE). 빛버섯 숲의 정예다. */
+  springs?: boolean;
   /** 정예 그림자: 가끔 하나씩 나오는 크고 센 그림자. 쓰러지면 보물 상자를 떨어뜨린다(ELITE). */
   elite?: boolean;
   boss?: boolean;
@@ -221,11 +237,35 @@ export const ENEMIES: Readonly<Record<EnemyKind, EnemyInfo>> = {
     radius: 6,
     bursts: { trigger: 25, fuse: 0.95, radius: 33, damage: 12, splash: 43 },
   },
+  // 빛버섯 숲
+  cone: { name: '솔방울', hp: 7, speed: 23, damage: 5, xp: 1, radius: 6 },
+  leaf: { name: '가랑잎', hp: 5, speed: 44, damage: 4, xp: 1, radius: 5 },
+  acorn: { name: '도토리', hp: 18, speed: 27, damage: 8, xp: 2, radius: 6, sprouts: 4 },
+  log: { name: '통나무', hp: 60, speed: 14, damage: 13, xp: 5, radius: 9 },
+  needle: {
+    name: '솔잎 눈',
+    hp: 11,
+    speed: 22,
+    damage: 5,
+    xp: 2,
+    radius: 6,
+    shoots: { range: 88, every: 5, windup: 0.7, damage: 4, limit: 4 },
+  },
+  husk: {
+    name: '부푼 꽈리',
+    hp: 28,
+    speed: 32,
+    damage: 6,
+    xp: 3,
+    radius: 6,
+    bursts: { trigger: 25, fuse: 0.95, radius: 33, damage: 12, splash: 43 },
+  },
   // 정예 그림자: 스테이지마다 하나. 체력은 다른 그림자처럼 시간이 갈수록 불어난다.
   prowler: { name: '밤 사냥꾼', hp: 150, speed: 30, damage: 14, xp: 12, radius: 11, elite: true },
   lurker: { name: '늪 도사리', hp: 140, speed: 62, damage: 14, xp: 12, radius: 11, hops: true, elite: true },
   stoker: { name: '불티 대장', hp: 175, speed: 25, damage: 16, xp: 12, radius: 12, elite: true },
   fang: { name: '서리 송곳니', hp: 150, speed: 29, damage: 14, xp: 12, radius: 11, elite: true, chills: 1.5 },
+  glider: { name: '숲 날다람쥐', hp: 150, speed: 31, damage: 14, xp: 12, radius: 11, elite: true, springs: true },
   // 중간 보스의 체력은 MID_BOSS_TIERS가 정한다. 여기 적힌 값은 첫 번째 것과 같다.
   giant: { name: '어스름 거인', hp: 320, speed: 30, damage: 18, xp: 30, radius: 15, boss: true, brain: 'summon' },
   ram: { name: '뿔그림자', hp: 320, speed: 26, damage: 20, xp: 30, radius: 14, boss: true, brain: 'charge' },
@@ -235,6 +275,7 @@ export const ENEMIES: Readonly<Record<EnemyKind, EnemyInfo>> = {
   matron: { name: '늪의 어미', hp: 4000, speed: 23, damage: 22, xp: 0, radius: 17, boss: true, brain: 'matron' },
   warden: { name: '고개의 문지기', hp: 4000, speed: 25, damage: 23, xp: 0, radius: 17, boss: true, brain: 'warden' },
   blizzard: { name: '눈보라의 눈', hp: 4000, speed: 24, damage: 22, xp: 0, radius: 17, boss: true, brain: 'blizzard' },
+  elder: { name: '숲의 고목', hp: 4000, speed: 22, damage: 23, xp: 0, radius: 17, boss: true, brain: 'elder' },
 };
 
 export interface SpawnRow {
@@ -256,7 +297,7 @@ export const MID_BOSS_TIERS: ReadonlyArray<{ hp: number; summon: number }> = [
   { hp: 2400, summon: 8 },
 ];
 
-export type StageId = 'meadow' | 'marsh' | 'ridge' | 'tundra';
+export type StageId = 'meadow' | 'marsh' | 'ridge' | 'tundra' | 'grove';
 
 export interface StageInfo {
   name: string;
@@ -279,6 +320,8 @@ export interface StageInfo {
   vents: boolean;
   /** 가끔 돌풍이 부는 곳. 부는 동안 플레이어와 그림자가 바람 부는 쪽으로 밀린다(terrain.ts의 GUST). */
   gusts: boolean;
+  /** 빛버섯이 돋은 곳. 밟으면 플레이어가 걷던 쪽으로 높이 뛴다(terrain.ts의 LEAP). */
+  shrooms: boolean;
   /** 최고 기록이 이만큼(초) 되면 열린다. 0이면 처음부터 열려 있다. */
   unlockSeconds: number;
 }
@@ -303,6 +346,7 @@ export const STAGES: Readonly<Record<StageId, StageInfo>> = {
     puddles: false,
     vents: false,
     gusts: false,
+    shrooms: false,
     unlockSeconds: 0,
   },
   marsh: {
@@ -324,6 +368,7 @@ export const STAGES: Readonly<Record<StageId, StageInfo>> = {
     puddles: true,
     vents: false,
     gusts: false,
+    shrooms: false,
     unlockSeconds: 240,
   },
   ridge: {
@@ -345,6 +390,7 @@ export const STAGES: Readonly<Record<StageId, StageInfo>> = {
     puddles: false,
     vents: true,
     gusts: false,
+    shrooms: false,
     unlockSeconds: 420,
   },
   tundra: {
@@ -366,11 +412,34 @@ export const STAGES: Readonly<Record<StageId, StageInfo>> = {
     puddles: false,
     vents: false,
     gusts: true,
+    shrooms: false,
     unlockSeconds: 540,
+  },
+  grove: {
+    name: '빛버섯 숲',
+    blurb: '빛버섯을 밟으면 껑충 뛴다. 싹은 자라기 전에 밟자',
+    spawns: [
+      { kind: 'cone', from: 0, weight: 10 },
+      { kind: 'leaf', from: 55, weight: 6 },
+      { kind: 'acorn', from: 110, weight: 4.5 },
+      { kind: 'log', from: 165, weight: 2 },
+      { kind: 'needle', from: 120, weight: 1 },
+      { kind: 'husk', from: 260, weight: 1.2 },
+    ],
+    surge: ['leaf', 'acorn'],
+    minions: ['leaf', 'cone'],
+    midBosses: ['ram', 'giant', 'owl', 'ram'],
+    elite: 'glider',
+    finalBoss: 'elder',
+    puddles: false,
+    vents: false,
+    gusts: false,
+    shrooms: true,
+    unlockSeconds: 600,
   },
 };
 
-export const STAGE_ORDER: readonly StageId[] = ['meadow', 'marsh', 'ridge', 'tundra'];
+export const STAGE_ORDER: readonly StageId[] = ['meadow', 'marsh', 'ridge', 'tundra', 'grove'];
 
 /** 서릿발 같은 그림자에 닿아 발이 얼어 있는 동안의 이동 속도 배율 */
 export const CHILL_SLOW = 0.6;
@@ -426,6 +495,53 @@ export const ELITE = {
   vent: 0.03,
   /** 불꽃 단지에 잃는 체력의 몫 */
   blast: 0.5,
+} as const;
+
+/** 도토리 같은 그림자가 쓰러진 자리에 남기는 싹(EnemyInfo.sprouts) */
+export const SPROUT = {
+  /** 밟았다고 보는 거리: 플레이어의 판정 반지름에 이만큼 더한다(px) */
+  reach: 5,
+  /** 싸움터에 한꺼번에 있을 수 있는 싹의 수. 넘치면 가장 오래된 싹이 시든다. */
+  limit: 30,
+} as const;
+
+/** 빛버섯을 딛고 덮치는 정예(EnemyInfo.springs) */
+export const GLIDE = {
+  /** 공중에 떠 있는 시간(초). 이 동안 내려앉을 자리가 바닥에 보인다. */
+  seconds: 0.8,
+  /** 내려앉은 뒤 다시 뛸 수 있을 때까지(초) */
+  rest: 4,
+  /** 한 번에 뛰는 가장 먼 거리(px). 플레이어가 이보다 멀면 그쪽으로 이만큼만 뛴다. */
+  reach: 140,
+  /** 이만큼(px) 안에 부푼 빛버섯이 있고 거기서 플레이어가 닿는 거리면, 플레이어 대신 그 버섯 쪽으로 간다. */
+  seek: 90,
+  /** 내려앉을 때 다치는 둘레(px)와 피해. 피해는 예고가 있는 공격이라 깊은 밤의 단계만 따른다. */
+  radius: 22,
+  damage: 16,
+} as const;
+
+/**
+ * 숲의 고목이 땅을 굴러 퍼뜨리는 땅울림 고리. 고리에는 틈이 나 있어서 틈으로 지나가거나,
+ * 빛버섯을 밟고 뛰어 공중에 있는 동안 고리가 지나가게 하면 다치지 않는다.
+ */
+export const QUAKE = {
+  /** 땅을 구르기 전에 멈춰서 힘을 모으는 시간(초) */
+  windup: 0.9,
+  /** 고리가 퍼지는 빠르기(px/초)와 사라지는 반지름(px) */
+  speed: 72,
+  reach: 180,
+  /** 고리의 두께(px) */
+  band: 8,
+  /** 틈의 수와 틈 하나의 폭(라디안) */
+  gaps: 3,
+  gap: 0.75,
+  damage: 16,
+  /** 체력이 이 몫 아래로 내려가면 고리를 두 겹씩 퍼뜨린다. 두 번째 겹의 틈은 첫 겹의 틈 사이에 난다. */
+  rage: 0.5,
+  /** 두 겹을 퍼뜨릴 때 겹 사이의 시간(초) */
+  echo: 0.7,
+  /** 고리를 퍼뜨린 뒤 부하를 부르기까지, 부하를 부른 뒤 다시 힘을 모으기까지 쫓는 시간(초). 뒤의 것은 windup만큼 짧다. */
+  rest: 3.2,
 } as const;
 
 /**
@@ -497,7 +613,19 @@ export const BOONS: Record<BoonId, BoonInfo> = {
 
 export const BOON_ORDER: readonly BoonId[] = ['blaze', 'haste', 'bulwark', 'ward', 'bloom', 'breath'];
 
-export type WeaponId = 'ember' | 'aura' | 'firefly' | 'star' | 'lance' | 'oil' | 'bolt' | 'bell' | 'moon' | 'beam';
+export type WeaponId =
+  | 'ember'
+  | 'aura'
+  | 'firefly'
+  | 'star'
+  | 'lance'
+  | 'oil'
+  | 'bolt'
+  | 'bell'
+  | 'moon'
+  | 'beam'
+  | 'torch'
+  | 'lamp';
 export type PassiveId = 'wick' | 'hourglass' | 'boots' | 'magnet' | 'coat' | 'lens' | 'hood' | 'herb' | 'flint';
 
 /** 레벨업으로 올릴 수 있는 무기와 패시브의 최대 레벨 */
@@ -611,10 +739,33 @@ export const WEAPONS: Readonly<Record<WeaponId, WeaponInfo>> = {
     levels: ['긴 빛줄기가 둘레를 훑으며 돈다', '피해 +4', '더 멀리 닿는다', '한 줄기 더', '피해 +6, 더 빨리 돈다'],
     evolved: { name: '천 리 등대', description: '굵은 빛줄기 셋이 훨씬 멀리까지 훑는다' },
   },
+  torch: {
+    name: '횃불',
+    levels: ['가까운 적 쪽을 부채꼴로 휘둘러 벤다', '피해 +4', '더 넓게 휘두른다', '맞은편도 벤다', '피해 +6, 재사용 -20%'],
+    evolved: { name: '봉화', description: '앞뒤를 크고 넓게 휘둘러, 벤 그림자를 밀쳐 낸다' },
+  },
+  lamp: {
+    name: '풍등',
+    levels: ['그림자가 모인 곳 위로 날아가 불티를 떨군다', '하나 더', '피해 +3', '더 오래 머문다', '하나 더, 범위 +4'],
+    evolved: { name: '풍등 축제', description: '크고 오래 타는 풍등 넷이 무리를 따라다닌다' },
+  },
 };
 
 /** 선택지와 화면에 늘어놓는 순서 */
-export const WEAPON_ORDER: readonly WeaponId[] = ['ember', 'aura', 'firefly', 'star', 'lance', 'oil', 'bolt', 'bell', 'moon', 'beam'];
+export const WEAPON_ORDER: readonly WeaponId[] = [
+  'ember',
+  'aura',
+  'firefly',
+  'star',
+  'lance',
+  'oil',
+  'bolt',
+  'bell',
+  'moon',
+  'beam',
+  'torch',
+  'lamp',
+];
 
 export interface PassiveInfo {
   name: string;
@@ -657,7 +808,7 @@ export const FLINT = {
 /** 등갓의 빛막이 다시 생기는 데 걸리는 시간(초): 1레벨의 값과 레벨마다 줄어드는 값 */
 export const GUARD = { seconds: 24, perLevel: 3 } as const;
 
-export type HeroId = 'keeper' | 'stargazer' | 'stormer' | 'ringer' | 'mooner';
+export type HeroId = 'keeper' | 'stargazer' | 'stormer' | 'ringer' | 'mooner' | 'bearer';
 
 /** 캐릭터마다 다른 능력. 더하는 값(maxHp)과 곱하는 값(나머지)이 있다. */
 export interface HeroTrait {
@@ -671,6 +822,8 @@ export interface HeroTrait {
   damage?: number;
   /** 받는 피해에 곱한다 */
   taken?: number;
+  /** 1초마다 차는 체력에 더한다 */
+  regen?: number;
 }
 
 export interface HeroInfo {
@@ -734,9 +887,19 @@ export const HEROES: Readonly<Record<HeroId, HeroInfo>> = {
     // 새벽을 한 번 맞으면 열린다.
     unlockSeconds: RUN_SECONDS,
   },
+  bearer: {
+    name: '횃불잡이',
+    blurb: '가까이 베고 상처가 금방 아문다',
+    perk: '초당 체력 +0.4 · 최대 체력 +10',
+    flaw: '경험치 -10%',
+    weapon: 'torch',
+    trait: { regen: 0.4, maxHp: 10, xp: 0.9 },
+    // 캐릭터는 고르는 줄의 차례대로 열린다. 달잡이처럼 새벽을 한 번 맞으면 열린다.
+    unlockSeconds: RUN_SECONDS,
+  },
 };
 
-export const HERO_ORDER: readonly HeroId[] = ['keeper', 'stargazer', 'stormer', 'ringer', 'mooner'];
+export const HERO_ORDER: readonly HeroId[] = ['keeper', 'stargazer', 'stormer', 'ringer', 'mooner', 'bearer'];
 
 /** 판 밖에서 불씨로 올리는 영구 강화 */
 export type MetaId =

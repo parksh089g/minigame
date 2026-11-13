@@ -20,6 +20,10 @@ export const TIPS = {
   vent: '붉어진 불구멍은 그림자도 태워요',
   gust: '돌풍이 불면 그림자가 바람을 타고 와요',
   chill: '서릿발에 닿으면 발이 얼어 느려져요',
+  leap: '빛버섯을 밟고 뛰는 동안은 다치지 않아요',
+  sprout: '도토리 싹은 자라기 전에 밟아 없애요',
+  pounce: '날다람쥐가 내려앉을 자리를 비켜요',
+  quake: '땅울림 고리는 틈으로 지나거나 뛰어넘어요',
   elite: '금빛 뿔의 정예를 잡으면 보물 상자가 나와요',
   chest: '보물 상자는 가진 것 하나를 한 단계 올려 줘요',
 } as const;
@@ -64,6 +68,14 @@ export function tipFor(event: SimEvent): TipId | null {
       return 'gust';
     case 'chill':
       return 'chill';
+    case 'leap':
+      return 'leap';
+    case 'plant':
+      return 'sprout';
+    case 'pounce':
+      return 'pounce';
+    case 'quake':
+      return 'quake';
     case 'elite':
       return 'elite';
     case 'chest':

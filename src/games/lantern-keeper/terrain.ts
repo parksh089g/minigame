@@ -249,3 +249,82 @@ export function gustAt(t: number, seed: number): Gust {
   const [nextX, nextY] = gustDirection(index + 1, seed);
   return { phase: 'calm', index: index + 1, dirX: nextX, dirY: nextY, since: blown - GUST.blow, force: 0 };
 }
+
+// ------------------------------------------------------------ 빛버섯
+
+/**
+ * 빛버섯 숲의 빛버섯. 웅덩이처럼 칸 좌표와 씨앗으로 자리를 정한다.
+ * 플레이어가 밟으면 걷던 쪽으로 높이 뛰어(LEAP) 그림자 무리를 넘어갈 수 있다.
+ * 한 번 밟힌 버섯은 잠깐 납작해졌다가 다시 부푼다. 그 시각은 판에 저장한다(sim.ts의 RunState.squashed).
+ */
+export interface Shroom {
+  x: number;
+  y: number;
+  /** 갓의 반지름(px) */
+  r: number;
+  /** 이 버섯을 가리키는 이름. 납작해진 버섯을 적어 둘 때 쓴다. */
+  key: string;
+}
+
+/** 빛버섯을 밟고 뛰는 것의 숫자 */
+export const LEAP = {
+  /** 공중에 떠 있는 시간(초). 이 동안은 다치지 않고, 무기는 그대로 쏜다. */
+  seconds: 0.5,
+  /** 뛰는 거리(px) */
+  distance: 72,
+  /** 그림에서 가장 높이 떠오르는 높이(px) */
+  height: 16,
+  /** 밟힌 빛버섯이 다시 부풀 때까지(초) */
+  rest: 3,
+  /** 버섯을 밟았다고 보는 거리: 갓의 반지름에 이만큼 더한다(px) */
+  reach: 3,
+  /** 내려앉을 때 둘레의 그림자를 밀쳐 내는 둘레(px)와 미는 거리(px). 보스는 밀리지 않는다. */
+  landRadius: 30,
+  landPush: 26,
+} as const;
+
+const SHROOM_CELL = 116;
+const SHROOM_CHANCE = 42;
+const SHROOM_MIN = 8;
+const SHROOM_MAX = 11;
+/** 밟는 거리까지 칸 안에 들게 띄운다. 그래서 한 점이 든 칸만 보면 된다. */
+const SHROOM_INSET = SHROOM_MAX + LEAP.reach + 4;
+const SHROOM_SALT = 0x68e31da4;
+
+/** (cellX, cellY) 칸의 빛버섯. 없으면 null. 시작하는 자리의 칸에는 두지 않는다. */
+export function shroomInCell(cellX: number, cellY: number, seed: number): Shroom | null {
+  if (cellX === 0 && cellY === 0) return null;
+  const h = mix(cellX, cellY, seed ^ SHROOM_SALT);
+  if (h % 100 >= SHROOM_CHANCE) return null;
+  const room = SHROOM_CELL - SHROOM_INSET * 2;
+  return {
+    x: cellX * SHROOM_CELL + SHROOM_INSET + ((h >>> 14) % (room + 1)),
+    y: cellY * SHROOM_CELL + SHROOM_INSET + ((h >>> 22) % (room + 1)),
+    r: SHROOM_MIN + ((h >>> 8) % (SHROOM_MAX - SHROOM_MIN + 1)),
+    key: `${cellX},${cellY}`,
+  };
+}
+
+/** 세상 좌표 (x, y)에서 밟히는 빛버섯. 없으면 null */
+export function shroomAt(x: number, y: number, seed: number): Shroom | null {
+  const shroom = shroomInCell(Math.floor(x / SHROOM_CELL), Math.floor(y / SHROOM_CELL), seed);
+  if (!shroom) return null;
+  const reach = shroom.r + LEAP.reach;
+  return (x - shroom.x) ** 2 + (y - shroom.y) ** 2 < reach * reach ? shroom : null;
+}
+
+/** (x, y)를 가운데로 한 네모 안에 걸치는 빛버섯을 모두 돌려준다. 화면에 그릴 때 쓴다. */
+export function shroomsAround(x: number, y: number, halfW: number, halfH: number, seed: number): Shroom[] {
+  const found: Shroom[] = [];
+  const fromX = Math.floor((x - halfW) / SHROOM_CELL);
+  const toX = Math.floor((x + halfW) / SHROOM_CELL);
+  const fromY = Math.floor((y - halfH) / SHROOM_CELL);
+  const toY = Math.floor((y + halfH) / SHROOM_CELL);
+  for (let cellY = fromY; cellY <= toY; cellY += 1) {
+    for (let cellX = fromX; cellX <= toX; cellX += 1) {
+      const shroom = shroomInCell(cellX, cellY, seed);
+      if (shroom) found.push(shroom);
+    }
+  }
+  return found;
+}

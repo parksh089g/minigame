@@ -10,6 +10,7 @@ import {
   FEAST,
   FEAST_LEVELS,
   FEAST_ORDER,
+  HEROES,
   MAX_DEPTH,
   GUARD,
   MAX_LEVEL,
@@ -61,6 +62,8 @@ import {
   modifiers,
   moonStats,
   beamStats,
+  torchStats,
+  lampStats,
   oilStats,
   ownedPassives,
   ownedWeapons,
@@ -149,8 +152,8 @@ describe('데이터', () => {
     for (const passive of Object.values(PASSIVES)) expect(passive.perLevel).not.toBe('');
   });
 
-  it('무기는 열 가지이고, 늘어놓는 순서에 빠진 것이 없다', () => {
-    expect(WEAPON_ORDER).toHaveLength(10);
+  it('무기는 열두 가지이고, 늘어놓는 순서에 빠진 것이 없다', () => {
+    expect(WEAPON_ORDER).toHaveLength(12);
     expect([...WEAPON_ORDER].sort()).toEqual(Object.keys(WEAPONS).sort());
     expect(MAX_WEAPONS).toBeLessThan(WEAPON_ORDER.length);
   });
@@ -280,7 +283,32 @@ describe('성장', () => {
       const [h0, h1] = [beamStats(level - 1, base), beamStats(level, base)];
       expect(h1.damage * h1.count * h1.length * h1.spin).toBeGreaterThanOrEqual(h0.damage * h0.count * h0.length * h0.spin);
       expect(h1.length).toBeGreaterThanOrEqual(h0.length);
+      const [t0, t1] = [torchStats(level - 1, base), torchStats(level, base)];
+      expect((t1.damage * t1.count * t1.reach * t1.arc) / t1.cooldown).toBeGreaterThanOrEqual(
+        (t0.damage * t0.count * t0.reach * t0.arc) / t0.cooldown,
+      );
+      expect(t1.push).toBeGreaterThanOrEqual(t0.push);
+      const [p0, p1] = [lampStats(level - 1, base), lampStats(level, base)];
+      expect((p1.damage * p1.count * p1.radius * p1.duration) / (p1.tick * p1.cooldown)).toBeGreaterThanOrEqual(
+        (p0.damage * p0.count * p0.radius * p0.duration) / (p0.tick * p0.cooldown),
+      );
     }
+  });
+
+  it('횃불은 4레벨부터 맞은편도 베고, 진화하면 벤 그림자를 밀쳐 낸다', () => {
+    expect([1, 3, 4, MAX_LEVEL, EVOLVE_LEVEL].map((level) => torchStats(level, base).count)).toEqual([1, 1, 2, 2, 2]);
+    expect(torchStats(MAX_LEVEL, base).push).toBe(0);
+    expect(torchStats(EVOLVE_LEVEL, base).push).toBeGreaterThan(0);
+    // 3레벨에 부채꼴이 넓어지고, 범위 강화로 닿는 거리가 는다.
+    expect(torchStats(3, base).arc).toBeGreaterThan(torchStats(2, base).arc);
+    expect(torchStats(1, modifiers({ lens: 2 }, {})).reach).toBeCloseTo(torchStats(1, base).reach * 1.2);
+  });
+
+  it('풍등은 하나에서 셋으로 늘고, 진화하면 넷이 더 크고 오래 머문다', () => {
+    expect([1, 2, 4, MAX_LEVEL, EVOLVE_LEVEL].map((level) => lampStats(level, base).count)).toEqual([1, 2, 2, 3, 4]);
+    expect(lampStats(4, base).duration).toBeGreaterThan(lampStats(3, base).duration);
+    expect(lampStats(EVOLVE_LEVEL, base).radius).toBeGreaterThan(lampStats(MAX_LEVEL, base).radius);
+    expect(lampStats(1, modifiers({ hourglass: 1 }, {})).cooldown).toBeCloseTo(lampStats(1, base).cooldown * 0.93);
   });
 
   it('등대빛은 범위 강화로 길어지고, 재사용이 줄면 빨리 돈다', () => {
@@ -304,6 +332,8 @@ describe('성장', () => {
       const r = bellStats(level, base);
       const m = moonStats(level, base);
       const h = beamStats(level, base);
+      const t = torchStats(level, base);
+      const p = lampStats(level, base);
       // 초승달은 가는 길과 오는 길에 한 번씩, 보름달은 나는 동안 rehit초마다 벤다.
       const cuts = m.rehit > 0 ? (2 * m.reach) / m.speed / m.rehit : 2;
       return [
@@ -317,6 +347,8 @@ describe('성장', () => {
         (r.damage * r.radius ** 2 * r.rings) / r.cooldown,
         (m.damage * m.count * cuts) / m.cooldown,
         h.damage * h.count * h.length ** 2 * h.spin,
+        (t.damage * t.count * t.reach ** 2 * t.arc) / t.cooldown,
+        (p.damage * p.count * p.radius ** 2 * p.duration) / (p.tick * p.cooldown),
       ];
     };
     const before = power(MAX_LEVEL);
@@ -339,6 +371,16 @@ describe('성장', () => {
     expect(modifiers({ herb: 1 }, {}).regen).toBeCloseTo(0.2);
     expect(modifiers({ herb: MAX_LEVEL }, {}).regen).toBeCloseTo(1);
     expect(modifiers({ herb: 2 }, { mend: 3 }).regen).toBeCloseTo(0.4 + 0.3);
+  });
+
+  it('횃불잡이는 처음부터 상처가 아물고, 약초 주머니와 영구 강화의 회복이 그 위에 더해진다', () => {
+    const trait = HEROES.bearer.trait;
+    expect(modifiers({}, {}, trait).regen).toBeCloseTo(0.4);
+    expect(modifiers({ herb: 1 }, { mend: 1 }, trait).regen).toBeCloseTo(0.4 + 0.2 + 0.1);
+    expect(modifiers({}, {}, trait).maxHp).toBe(base.maxHp + 10);
+    expect(modifiers({}, {}, trait).xp).toBeCloseTo(0.9);
+    // 다른 캐릭터는 저절로 아물지 않는다.
+    expect(modifiers({}, {}, HEROES.ringer.trait).regen).toBe(0);
   });
 
   it('부싯돌은 올릴수록 자주 터지지만, 다 올려도 절반을 넘지 않는다', () => {

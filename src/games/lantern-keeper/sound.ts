@@ -49,11 +49,20 @@ export type SoundId =
   | 'volley'
   | 'strike'
   | 'bolt'
+  | 'swing'
+  | 'lamp'
   | 'bell'
   | 'flint'
   | 'vent'
   | 'gust'
   | 'chill'
+  | 'leap'
+  | 'land'
+  | 'stomp'
+  | 'sprout'
+  | 'quake'
+  | 'pounce'
+  | 'thud'
   | 'revive'
   | 'clear'
   | 'death';
@@ -161,6 +170,29 @@ export const SOUNDS: Readonly<Record<SoundId, readonly Note[]>> = {
   ],
   // 발이 얼 때: 얼음이 맺히듯 높은 음이 짧게 내려온다.
   chill: run([1568, 1319, 988], 0.05, 0.08, { type: 'triangle', v: 0.2 }),
+  // 빛버섯을 밟고 뛴다: 용수철처럼 튀어 오르는 소리
+  leap: [
+    { f: 300, to: 900, d: 0.16, type: 'triangle', v: 0.26 },
+    { f: 600, to: 1200, d: 0.1, type: 'sine', v: 0.12, at: 0.04 },
+  ],
+  // 내려앉는다: 부드럽게 쿵
+  land: [{ f: 160, to: 60, d: 0.14, type: 'triangle', v: 0.28 }],
+  // 싹을 밟는다: 작게 톡
+  stomp: [{ f: 520, to: 260, d: 0.07, type: 'square', v: 0.12 }],
+  // 싹이 그림자로 자란다: 짧게 올라가는 두 음
+  sprout: run([392, 523], 0.06, 0.08, { type: 'triangle', v: 0.18 }),
+  // 숲의 고목이 땅을 구른다: 낮게 울리는 소리
+  quake: [
+    { f: 90, to: 50, d: 0.6, type: 'sawtooth', v: 0.3 },
+    { f: 180, to: 70, d: 0.4, type: 'triangle', v: 0.2 },
+  ],
+  // 정예가 빛버섯을 딛고 뛰어오른다: 바람을 가르며 솟는 소리
+  pounce: [{ f: 220, to: 660, d: 0.3, type: 'sawtooth', v: 0.16 }],
+  // 뛰어오른 정예가 내려앉는다: 무겁게 쿵
+  thud: [
+    { f: 140, to: 45, d: 0.3, type: 'square', v: 0.24 },
+    { f: 70, to: 40, d: 0.25, type: 'triangle', v: 0.2 },
+  ],
   // 정예 그림자: 보스보다 짧고 가벼운 으르렁 소리
   elite: [
     { f: 147, d: 0.22, type: 'sawtooth', v: 0.28 },
@@ -182,6 +214,13 @@ export const SOUNDS: Readonly<Record<SoundId, readonly Note[]>> = {
   volley: [{ f: 740, to: 330, d: 0.11, v: 0.24 }],
   strike: [{ f: 160, to: 62, d: 0.09, type: 'triangle', v: 0.26 }],
   bolt: [{ f: 1500, to: 520, d: 0.05, type: 'sawtooth', v: 0.12 }],
+  // 횃불을 휘두른다: 바람을 가르는 짧은 소리. 자주 나므로 작게 둔다.
+  swing: [{ f: 520, to: 180, d: 0.09, type: 'triangle', v: 0.1 }],
+  // 풍등이 떠오른다: 위로 흔들리며 오르는 소리
+  lamp: [
+    { f: 440, to: 880, d: 0.18, type: 'sine', v: 0.1 },
+    { f: 660, to: 990, d: 0.12, type: 'sine', v: 0.06, at: 0.06 },
+  ],
   // 종소리: 댕 하고 한 번 울린다. 몇 초마다 나므로 등불 기둥의 종보다 낮고 작게 둔다.
   bell: [
     { f: 659, d: 0.2, type: 'triangle', v: 0.18 },
@@ -225,8 +264,12 @@ export const MIN_GAP_MS: Readonly<Partial<Record<SoundId, number>>> = {
   burst: 120,
   strike: 140,
   bolt: 170,
+  swing: 140,
   flint: 150,
   vent: 450,
+  stomp: 90,
+  sprout: 200,
+  land: 120,
   volley: 200,
   charge: 200,
   windup: 200,

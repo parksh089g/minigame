@@ -565,6 +565,13 @@ export class LanternKeeperScene extends MiniGameScene {
           }
           board.play('bolt', now);
           break;
+        case 'swing':
+          this.view.swing(event.angle, event.arc, event.reach, event.count, event.evolved);
+          board.play('swing', now);
+          break;
+        case 'lamp':
+          board.play('lamp', now);
+          break;
         case 'bell':
           board.play('bell', now);
           // 새벽 종은 두 번 울린다.
@@ -580,6 +587,33 @@ export class LanternKeeperScene extends MiniGameScene {
           break;
         case 'chill':
           board.play('chill', now);
+          break;
+        case 'leap':
+          board.play('leap', now);
+          break;
+        case 'land':
+          // 내려앉은 자리에 흙먼지 고리가 퍼진다.
+          this.view.ring(event.x, event.y, 22);
+          board.play('land', now);
+          break;
+        case 'stomp':
+          this.view.burst(sim, event.x, event.y, 3);
+          board.play('stomp', now);
+          break;
+        case 'sprout':
+          board.play('sprout', now);
+          break;
+        case 'quake':
+          board.play('quake', now);
+          this.effects.shake(220, 0.006);
+          break;
+        case 'pounce':
+          board.play('pounce', now);
+          break;
+        case 'thud':
+          this.view.pop(event.x, event.y, event.radius);
+          board.play('thud', now);
+          this.effects.shake(120, 0.004);
           break;
         case 'spark':
           this.view.flint(sim, event.x, event.y, event.radius);

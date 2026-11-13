@@ -323,12 +323,14 @@ describe('캐릭터와 스테이지 고르기', () => {
       HEROES.stormer.name,
       HEROES.ringer.name,
       HEROES.mooner.name,
+      HEROES.bearer.name,
       STAGES.marsh.name,
       STAGES.ridge.name,
       STAGES.tundra.name,
+      STAGES.grove.name,
     ]);
-    // 새벽을 맞아야 달잡이가 열린다.
-    expect(newUnlocks(599, 600)).toEqual([HEROES.mooner.name]);
+    // 새벽을 맞아야 달잡이와 횃불잡이와 빛버섯 숲이 열린다.
+    expect(newUnlocks(599, 600)).toEqual([HEROES.mooner.name, HEROES.bearer.name, STAGES.grove.name]);
     expect(newUnlocks(480, 545)).toEqual([STAGES.tundra.name]);
     expect(newUnlocks(600, 600)).toEqual([]);
   });
@@ -356,13 +358,17 @@ describe('캐릭터와 스테이지 고르기', () => {
       version: createDefaultMeta().version,
       // 안내가 생기기 전부터 하던 사람이므로, 그때도 있던 일의 안내는 본 것으로 친다.
       tips: OLD_HAND_TIPS,
-      // 달잡이와 등대빛이 들어오기 전부터 하던 사람이므로, 그 둘은 아직 모르는 것으로 친다(준비 화면이 한 번 알린다).
-      known: [...HERO_ORDER.filter((id) => id !== 'mooner'), ...WEAPON_ORDER.filter((id) => id !== 'beam')],
+      // 달잡이와 등대빛이 들어오기 전부터 하던 사람이므로, 그 뒤에 들어온 것은 아직 모르는 것으로 친다(준비 화면이 한 번 알린다).
+      known: [
+        ...HERO_ORDER.filter((id) => id !== 'mooner' && id !== 'bearer'),
+        ...WEAPON_ORDER.filter((id) => !['beam', 'torch', 'lamp'].includes(id)),
+        ...STAGE_ORDER.filter((id) => id !== 'grove'),
+      ],
     });
   });
 });
 
-describe('새로 들어온 캐릭터와 무기', () => {
+describe('새로 들어온 캐릭터와 무기와 스테이지', () => {
   /** 달잡이와 등대빛이 들어오기 전부터 하던 사람의 저장 */
   const oldHand = (): LanternMeta => normalizeMeta({ embers: 40, runs: 3, bestSeconds: 200, unread: ['bat'] });
 
@@ -374,18 +380,36 @@ describe('새로 들어온 캐릭터와 무기', () => {
     expect(hasNews(unknownNews(normalizeMeta({ embers: 5 })))).toBe(false);
   });
 
-  it('그 전부터 하던 사람에게는 달잡이와 등대빛을 알린다', () => {
+  it('그 전부터 하던 사람에게는 그 뒤에 들어온 캐릭터와 무기와 스테이지를 알린다', () => {
     const news = unknownNews(oldHand());
-    expect(news).toEqual({ heroes: ['mooner'], weapons: ['beam'] });
-    expect(newsLine(news)).toBe('새 캐릭터 달잡이 · 새 무기 등대빛');
-    expect(newsLine({ heroes: ['mooner'], weapons: [] })).toBe('새 캐릭터 달잡이');
-    expect(newsLine({ heroes: [], weapons: ['beam', 'moon'] })).toBe('새 무기 등대빛, 초승달');
+    expect(news).toEqual({ heroes: ['mooner', 'bearer'], weapons: ['beam', 'torch', 'lamp'], stages: ['grove'] });
+    expect(newsLine(news)).toBe('새 캐릭터 달잡이, 횃불잡이 · 새 무기 등대빛, 횃불, 풍등 · 새 스테이지 빛버섯 숲');
+    expect(newsLine({ heroes: ['mooner'], weapons: [], stages: [] })).toBe('새 캐릭터 달잡이');
+    expect(newsLine({ heroes: [], weapons: ['beam', 'moon'], stages: [] })).toBe('새 무기 등대빛, 초승달');
+    expect(newsLine({ heroes: [], weapons: [], stages: ['grove'] })).toBe('새 스테이지 빛버섯 숲');
+  });
+
+  it('달잡이와 등대빛을 이미 알린 사람에게는 그 뒤에 들어온 것만 알린다', () => {
+    // 스테이지를 알리기 전의 저장에는 known에 스테이지가 없다.
+    const before = [
+      ...HERO_ORDER.filter((id) => id !== 'bearer'),
+      ...WEAPON_ORDER.filter((id) => id !== 'torch' && id !== 'lamp'),
+    ];
+    const told = normalizeMeta({ runs: 9, bestSeconds: 600, known: before });
+    const news = unknownNews(told);
+    expect(news).toEqual({ heroes: ['bearer'], weapons: ['torch', 'lamp'], stages: ['grove'] });
+    const after = announceNews(told);
+    // 스테이지는 카드에 "새"를 붙이지 않고 한 줄로만 알린다. 새 무기는 도감에 새 항목으로 뜬다.
+    expect(after.fresh).toEqual(['bearer']);
+    expect(after.unread).toEqual(['torch', 'lamp']);
+    expect(hasNews(unknownNews(after))).toBe(false);
+    expect(normalizeMeta(JSON.parse(JSON.stringify(after)))).toEqual(after);
   });
 
   it('알리면 새 캐릭터에는 "새"가 붙고 새 무기는 도감에 새 항목으로 뜨며, 다시 알리지 않는다', () => {
     const before = oldHand();
     const told = announceNews(before);
-    expect(told.fresh).toEqual(['mooner']);
+    expect(told.fresh).toEqual(['mooner', 'bearer']);
     // 도감에서 이미 새로 열려 있던 것은 그대로 두고, 도감의 차례대로 더한다.
     expect(told.unread).toContain('beam');
     expect(told.unread).toContain('bat');
@@ -399,14 +423,15 @@ describe('새로 들어온 캐릭터와 무기', () => {
   it('카드를 눌러 보면 "새"가 사라진다', () => {
     const told = announceNews(oldHand());
     const seen = meetHero(told, 'mooner');
-    expect(seen.fresh).toEqual([]);
+    expect(seen.fresh).toEqual(['bearer']);
     expect(meetHero(seen, 'mooner')).toBe(seen);
+    expect(meetHero(seen, 'bearer').fresh).toEqual([]);
     expect(meetHero(told, 'keeper')).toBe(told);
   });
 
   it('저장된 값에서 모르는 이름은 버린다', () => {
-    const meta = normalizeMeta({ runs: 2, known: ['keeper', 'nobody', 'beam', 7], fresh: ['mooner', 'x', 'beam'] });
-    expect(meta.known).toEqual(['keeper', 'beam']);
+    const meta = normalizeMeta({ runs: 2, known: ['keeper', 'nobody', 'beam', 7, 'grove'], fresh: ['mooner', 'x', 'beam'] });
+    expect(meta.known).toEqual(['keeper', 'beam', 'grove']);
     expect(meta.fresh).toEqual(['mooner']);
   });
 });

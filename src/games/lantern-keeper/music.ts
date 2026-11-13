@@ -567,11 +567,98 @@ export const TUNDRA_SONG: Song = {
   drumVolume: 0.32,
 };
 
+// ------------------------------------------------------------ 빛버섯 숲
+
+/** 통통 튀는 베이스: 낮은 뿌리음과 한 옥타브 위를 오가며 다섯째 음을 섞는다. */
+const hop = (low: string, high: string, fifth: string): string =>
+  `${low} . ${high} . ${fifth} . ${high} . ${low} . ${high} . ${fifth} . ${high} .`;
+
+const GROVE_BASS = {
+  em: hop('e2', 'e3', 'b2'),
+  a: hop('a2', 'a3', 'e3'),
+  d: hop('d3', 'd4', 'a3'),
+  g: hop('g2', 'g3', 'd3'),
+  bm: hop('b2', 'b3', 'f#3'),
+} as const;
+
+/** 줄을 퉁기듯 짧게 끊는 화음 */
+const GROVE_ARP = {
+  em: 'e4 . g4 . b4 . e5 . b4 . g4 . b4 . g4 .',
+  a: 'e4 . a4 . c#5 . e5 . c#5 . a4 . c#5 . a4 .',
+  d: 'f#4 . a4 . d5 . f#5 . d5 . a4 . d5 . a4 .',
+  g: 'd4 . g4 . b4 . d5 . b4 . g4 . b4 . g4 .',
+  bm: 'f#4 . b4 . d5 . f#5 . d5 . b4 . d5 . b4 .',
+} as const;
+
+const GROVE_DRUM = {
+  one: 'k..hk..hs..hk.h.',
+  two: 'k..hk..hs..hs.hh',
+  fill: 'k.hhs.hhk.hhs.ss',
+} as const;
+
+const GROVE_FLOW = [
+  ...(['em', 'em', 'a', 'a', 'd', 'd', 'em', 'em'] as const),
+  ...(['g', 'g', 'd', 'd', 'a', 'a', 'bm', 'bm'] as const),
+  ...(['em', 'em', 'a', 'a', 'g', 'd', 'em', 'em'] as const),
+] as const;
+
+/**
+ * 빛버섯 숲: 통통 튀고 조금 신비롭다(E 도리안). 스물네 마디가 여덟 마디씩 세 대목이다.
+ * 가락은 버섯을 밟고 뛰듯 높이 건너뛰었다가 길게 내려앉고, 북은 발걸음처럼 가볍게 친다.
+ */
+export const GROVE_SONG: Song = {
+  bpm: 118,
+  bars: 24,
+  voices: [
+    { wave: 'triangle', volume: 0.36, soft: true, gate: 0.7, bars: GROVE_FLOW.map((chord) => GROVE_BASS[chord]) },
+    { wave: 'triangle', volume: 0.2, gate: 0.35, bars: GROVE_FLOW.map((chord) => GROVE_ARP[chord]) },
+    // 가락
+    {
+      wave: 'sine',
+      volume: 0.2,
+      soft: true,
+      gate: 0.9,
+      bars: [
+        'b4*2 e5*2 g5*4 f#5*2 e5*2 b4*4',
+        'e5*8 .*4 b4*2 d5*2',
+        'c#5*2 e5*2 a5*4 g5*2 f#5*2 e5*4',
+        'c#5*8 .*4 a4*2 c#5*2',
+        'd5*2 f#5*2 a5*4 g5*2 f#5*2 d5*4',
+        'a4*8 .*4 d5*2 e5*2',
+        'g5*4 f#5*2 e5*2 d5*4 b4*4',
+        'e5*12 .*4',
+        'd5*2 g5*2 b5*4 a5*2 g5*2 d5*4',
+        'b4*8 .*4 g5*2 a5*2',
+        'f#5*4 a5*4 d6*8',
+        'd6*4 a5*4 f#5*8',
+        'e5*2 a5*2 c#6*4 b5*2 a5*2 e5*4',
+        'a5*12 .*4',
+        'b5*4 a5*2 f#5*2 d5*4 b4*4',
+        'f#5*8 d5*4 f#5*4',
+        'b4*2 e5*2 g5*4 f#5*2 e5*2 b4*4',
+        'e5*8 g5*4 b5*4',
+        'c#6*4 b5*2 a5*2 e5*8',
+        'a5*8 .*4 g5*2 f#5*2',
+        'g5*4 b5*4 d6*8',
+        'f#5*4 a5*4 d5*8',
+        'e5*4 g5*4 b5*4 g5*4',
+        'e5*12 .*4',
+      ],
+    },
+  ],
+  drums: [
+    ...[GROVE_DRUM.one, GROVE_DRUM.two, GROVE_DRUM.one, GROVE_DRUM.two],
+    ...[GROVE_DRUM.one, GROVE_DRUM.two, GROVE_DRUM.one, GROVE_DRUM.fill],
+  ],
+  drumVolume: 0.34,
+};
+
 export const STAGE_SONGS: Readonly<Record<StageId, Song>> = {
   meadow: MEADOW_SONG,
   marsh: MARSH_SONG,
   ridge: RIDGE_SONG,
   tundra: TUNDRA_SONG,
+  grove: GROVE_SONG,
 };
 
 export const SONGS = {
@@ -580,6 +667,7 @@ export const SONGS = {
   marsh: MARSH_SONG,
   ridge: RIDGE_SONG,
   tundra: TUNDRA_SONG,
+  grove: GROVE_SONG,
   boss: BOSS_SONG,
   final: FINAL_SONG,
 } as const;
