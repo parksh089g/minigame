@@ -51,7 +51,8 @@ export function companyTodo(state: CompanyState | null, now: number, today: stri
  */
 export async function loadTodos(playedBefore: (id: string) => boolean, now: Date = new Date()): Promise<Todos> {
   const todos: Todos = {};
-  const [lantern, company] = await Promise.allSettled([metaStore.load(), companyStore.refresh()]);
+  // 같은 기기의 다른 곳(설치한 앱과 브라우저 탭 같은)에서 그사이 저장한 것이 더 새것이면 그것을 읽는다.
+  const [lantern, company] = await Promise.allSettled([metaStore.refresh(), companyStore.refresh()]);
   if (lantern.status === 'fulfilled') {
     const playedToday = dailyToday(metaStore.data.daily, dayIndexOf(now)).tries > 0;
     const todo = lanternTodo(metaStore.run, playedToday, playedBefore(LANTERN_GAME_ID));
