@@ -31,6 +31,8 @@ export interface ResultData {
   strip?: ResultStrip;
   /** 공유 카드와 문구, 주소를 바꿔 적을 것. 없으면 여느 점수 카드를 보낸다. */
   share?: ShareOverride;
+  /** "다시 하기"가 게임 씬을 다시 열 때 넘길 값. 없으면 여느 때처럼 처음부터 연다. */
+  retry?: object;
 }
 
 /** 결과 화면의 기록 아래에 덧붙이는 아이콘 한 줄. 예: 무기마다 준 피해의 비중 */
@@ -221,6 +223,14 @@ export abstract class MiniGameScene extends Phaser.Scene implements BackAware {
   }
 
   /**
+   * 결과 화면의 "다시 하기"가 이 씬을 다시 열 때 넘길 값. 기본은 없어서 처음부터 연다.
+   * 판을 고르는 화면이 따로 있는 게임이, 방금 한 판을 고르던 자리로 돌아가게 할 때 돌려준다.
+   */
+  protected retryData(): object | undefined {
+    return undefined;
+  }
+
+  /**
    * 지금까지의 점수를 기록하고 판을 끝낼 수 있는지. true면 일시정지 화면에 "기록하고 끝내기"가 생기고,
    * 누르면 finishEarly()가 불린다. 스스로 끝낼 길이 없는 게임(시간 제한 없이 이어지는 게임)이 바꿔 쓴다.
    */
@@ -283,6 +293,7 @@ export abstract class MiniGameScene extends Phaser.Scene implements BackAware {
       stats,
       strip,
       share,
+      retry: this.retryData(),
     };
     this.time.delayedCall(resultDelayMs, () => {
       this.scene.pause();

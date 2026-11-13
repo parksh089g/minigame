@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { HERO_ORDER, HEROES, MAX_DEPTH, META, META_ORDER, STAGE_ORDER, STAGES, type StageId } from './data';
 import {
+  HERO_ORDER,
+  HEROES,
+  MAX_DEPTH,
+  META,
+  META_ORDER,
+  STAGE_ORDER,
+  STAGES,
+  WEAPON_ORDER,
+  type StageId,
+} from './data';
+import {
+  announceNews,
   applyRun,
   buyMeta,
   chooseDepth,
@@ -8,10 +19,15 @@ import {
   chooseStage,
   claimChallenge,
   createDefaultMeta,
+  hasNews,
+  meetFriend,
+  meetHero,
   newDepth,
+  newsLine,
   newUnlocks,
   normalizeMeta,
   openDepth,
+  unknownNews,
   type LanternMeta,
   type RunResult,
 } from './meta';
@@ -303,7 +319,84 @@ describe('캐릭터와 스테이지 고르기', () => {
       version: createDefaultMeta().version,
       // 안내가 생기기 전부터 하던 사람이므로, 그때도 있던 일의 안내는 본 것으로 친다.
       tips: OLD_HAND_TIPS,
+      // 달잡이와 등대빛이 들어오기 전부터 하던 사람이므로, 그 둘은 아직 모르는 것으로 친다(준비 화면이 한 번 알린다).
+      known: [...HERO_ORDER.filter((id) => id !== 'mooner'), ...WEAPON_ORDER.filter((id) => id !== 'beam')],
     });
+  });
+});
+
+describe('새로 들어온 캐릭터와 무기', () => {
+  /** 달잡이와 등대빛이 들어오기 전부터 하던 사람의 저장 */
+  const oldHand = (): LanternMeta => normalizeMeta({ embers: 40, runs: 3, bestSeconds: 200, unread: ['bat'] });
+
+  it('처음 하는 사람은 지금 있는 것을 모두 아는 것으로 쳐서 따로 알리지 않는다', () => {
+    const fresh = createDefaultMeta();
+    expect(hasNews(unknownNews(fresh))).toBe(false);
+    expect(announceNews(fresh)).toBe(fresh);
+    // 판을 한 번도 마치지 않은 예전 저장도 처음 하는 사람이다.
+    expect(hasNews(unknownNews(normalizeMeta({ embers: 5 })))).toBe(false);
+  });
+
+  it('그 전부터 하던 사람에게는 달잡이와 등대빛을 알린다', () => {
+    const news = unknownNews(oldHand());
+    expect(news).toEqual({ heroes: ['mooner'], weapons: ['beam'] });
+    expect(newsLine(news)).toBe('새 캐릭터 달잡이 · 새 무기 등대빛');
+    expect(newsLine({ heroes: ['mooner'], weapons: [] })).toBe('새 캐릭터 달잡이');
+    expect(newsLine({ heroes: [], weapons: ['beam', 'moon'] })).toBe('새 무기 등대빛, 초승달');
+  });
+
+  it('알리면 새 캐릭터에는 "새"가 붙고 새 무기는 도감에 새 항목으로 뜨며, 다시 알리지 않는다', () => {
+    const before = oldHand();
+    const told = announceNews(before);
+    expect(told.fresh).toEqual(['mooner']);
+    // 도감에서 이미 새로 열려 있던 것은 그대로 두고, 도감의 차례대로 더한다.
+    expect(told.unread).toContain('beam');
+    expect(told.unread).toContain('bat');
+    expect(told.unread.indexOf('beam')).toBeLessThan(told.unread.indexOf('bat'));
+    expect(hasNews(unknownNews(told))).toBe(false);
+    expect(announceNews(told)).toBe(told);
+    // 저장했다가 다시 읽어도 같다.
+    expect(normalizeMeta(JSON.parse(JSON.stringify(told)))).toEqual(told);
+  });
+
+  it('카드를 눌러 보면 "새"가 사라진다', () => {
+    const told = announceNews(oldHand());
+    const seen = meetHero(told, 'mooner');
+    expect(seen.fresh).toEqual([]);
+    expect(meetHero(seen, 'mooner')).toBe(seen);
+    expect(meetHero(told, 'keeper')).toBe(told);
+  });
+
+  it('저장된 값에서 모르는 이름은 버린다', () => {
+    const meta = normalizeMeta({ runs: 2, known: ['keeper', 'nobody', 'beam', 7], fresh: ['mooner', 'x', 'beam'] });
+    expect(meta.known).toEqual(['keeper', 'beam']);
+    expect(meta.fresh).toEqual(['mooner']);
+  });
+});
+
+describe('공유받은 친구 기록', () => {
+  const day = 20_770;
+
+  it('받은 점수를 그날의 것으로 적고, 같은 날에는 가장 높은 것을 둔다', () => {
+    const met = meetFriend(createDefaultMeta(), day, 333);
+    expect(met.friend).toEqual({ day, score: 333 });
+    expect(meetFriend(met, day, 200)).toBe(met);
+    expect(meetFriend(met, day, 333)).toBe(met);
+    expect(meetFriend(met, day, 500).friend).toEqual({ day, score: 500 });
+    // 다른 날에 받은 것은 낮아도 새것으로 바꾼다.
+    expect(meetFriend(met, day + 1, 10).friend).toEqual({ day: day + 1, score: 10 });
+  });
+
+  it('판을 마쳐도 남고, 저장했다가 다시 읽어도 같다', () => {
+    const met = meetFriend(createDefaultMeta(), day, 333);
+    expect(applyRun(met, result({ seconds: 30 })).friend).toEqual({ day, score: 333 });
+    expect(normalizeMeta(JSON.parse(JSON.stringify(met))).friend).toEqual({ day, score: 333 });
+  });
+
+  it('모양이 아닌 값은 버린다', () => {
+    for (const bad of [null, 3, { day }, { score: 5 }, { day, score: 0 }, { day: 0, score: 5 }, { day, score: 1_000_000 }]) {
+      expect(normalizeMeta({ friend: bad }).friend, JSON.stringify(bad)).toBeNull();
+    }
   });
 });
 

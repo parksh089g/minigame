@@ -9,14 +9,19 @@ import {
   dayIndexOf,
   dayLabel,
   dayResetLabel,
+  addFriend,
+  friendNotice,
+  friendToday,
+  friendVerdict,
   MOONER_DAILY_FROM,
   normalizeDaily,
+  normalizeFriend,
   TUNDRA_DAILY_FROM,
   withRo,
 } from './daily';
 import { rankDayOf } from '../../online/protocol';
 import { HERO_ORDER, HEROES, STAGE_ORDER, STAGES, WEAPON_ORDER, WEAPONS } from './data';
-import { sharedDay, shareUrl } from '../../share/link';
+import { sharedDay, sharedScore, shareUrl } from '../../share/link';
 
 describe('오늘의 판: 날짜', () => {
   /** 한국 시각으로 적은 때 */
@@ -198,6 +203,47 @@ describe('오늘의 판: 결과 공유', () => {
     expect(share.day).toBe(day);
     const url = new URL(shareUrl('https://example.com/', 'lantern-keeper', share.day));
     expect(sharedDay(url.search)).toBe(day);
+  });
+
+  it('주소에 그 판의 점수도 실어서, 받은 사람이 넘어 볼 기록으로 꺼낼 수 있다', () => {
+    const share = dailyShare(day, 1234, 3);
+    expect(share.score).toBe(1234);
+    const url = new URL(shareUrl('https://example.com/', 'lantern-keeper', share.day, share.score));
+    expect(sharedDay(url.search)).toBe(day);
+    expect(sharedScore(url.search)).toBe(1234);
+  });
+});
+
+describe('오늘의 판: 친구 기록', () => {
+  const day = 20_770;
+
+  it('그날 받은 것만 보이고, 날이 바뀌면 사라진다', () => {
+    const friend = { day, score: 333 };
+    expect(friendToday(friend, day)).toBe(333);
+    expect(friendToday(friend, day + 1)).toBeNull();
+    expect(friendToday(null, day)).toBeNull();
+  });
+
+  it('같은 날에 여럿을 받으면 가장 높은 것을 두고, 다른 날의 것은 바꾼다', () => {
+    const first = addFriend(null, day, 333);
+    expect(first).toEqual({ day, score: 333 });
+    expect(addFriend(first, day, 100)).toBe(first);
+    expect(addFriend(first, day, 400)).toEqual({ day, score: 400 });
+    expect(addFriend(first, day + 1, 50)).toEqual({ day: day + 1, score: 50 });
+  });
+
+  it('저장된 값이 모양이 아니면 버린다', () => {
+    expect(normalizeFriend({ day, score: 333.7 })).toEqual({ day, score: 333 });
+    for (const bad of [undefined, 'x', { day }, { day, score: -1 }, { day: 'a', score: 3 }, { day, score: 1_000_000 }]) {
+      expect(normalizeFriend(bad), JSON.stringify(bad)).toBeNull();
+    }
+  });
+
+  it('결과 화면에는 넘었는지, 얼마나 남았는지 적는다', () => {
+    expect(friendVerdict(333, 400)).toBe('333점을 넘었어요!');
+    expect(friendVerdict(333, 333)).toBe('333점과 같아요');
+    expect(friendVerdict(333, 290)).toBe('333점까지 43점');
+    expect(friendNotice(333)).toBe('친구 기록 333점을 넘어 보세요');
   });
 });
 

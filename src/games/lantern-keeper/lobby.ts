@@ -10,7 +10,7 @@ import { rankLabel } from '../../online/protocol';
 import { DARK_PANEL, FLOOR_OF, HERO_FRAMES, LK } from './art';
 import { CHALLENGES, claimable, isDone, progressOf, type Challenge } from './challenges';
 import { foundCount } from './codex';
-import { DAILY_REWARD, dailyPlan, dailyToday, dayLabel, withRo } from './daily';
+import { DAILY_REWARD, dailyPlan, dailyToday, dayLabel, friendToday, withRo } from './daily';
 import { addCodexPage, startingTab } from './codexpage';
 import { addRankPage } from './rankpage';
 import {
@@ -34,6 +34,7 @@ import {
   chooseHero,
   chooseStage,
   claimChallenge,
+  meetHero,
   openDepth,
   type LanternMeta,
 } from './meta';
@@ -47,8 +48,18 @@ const CARD_GAP = 6;
 /** 캐릭터 카드는 다섯이 한 줄에 놓여서, 사이를 조금 좁힌다. */
 const HERO_GAP = 4;
 const HERO_CARD = { width: (ROW_WIDTH - HERO_GAP * (HERO_ORDER.length - 1)) / HERO_ORDER.length, height: 62 } as const;
-/** 잠긴 카드에 적는 여는 조건. 끝까지 버텨야 열리는 것은 새벽을 맞으라고 적는다. */
-const unlockLabel = (seconds: number): string => (seconds >= RUN_SECONDS ? '새벽 맞기' : `${formatClock(seconds)} 버티기`);
+/** 잠긴 카드에 적는 여는 조건: 무엇을("2:00", "새벽") 어떻게("버티기", "맞기"). 끝까지 버텨야 열리는 것은 새벽을 맞으라고 적는다. */
+const unlockParts = (seconds: number): readonly [string, string] =>
+  seconds >= RUN_SECONDS ? ['새벽', '맞기'] : [formatClock(seconds), '버티기'];
+/** 스테이지 카드처럼 한 줄에 적을 때의 여는 조건 */
+const unlockLabel = (seconds: number): string => unlockParts(seconds).join(' ');
+/**
+ * 잠긴 캐릭터 카드: 그림자를 조금 작게 그리고 그 아래에 여는 조건을 두 줄로 적는다.
+ * 캐릭터가 다섯이라 카드가 좁아서, 한 줄로 적으면 글씨를 가장 작은 크기보다도 줄여야 했다.
+ */
+const LOCKED_HERO = { scale: 1.5, artY: 21, lines: [35, 47] } as const;
+/** 새로 들어와서 아직 눌러 보지 않은 캐릭터 카드의 오른쪽 위에 붙는 "새" */
+const FRESH_BADGE = { label: '새', height: 12, pad: 3, inset: 2 } as const;
 /** 카드보다 긴 글은 카드에 맞춰 줄인다. */
 const fitText = (text: Phaser.GameObjects.Text, room: number): void => {
   if (text.width > room) text.setScale(room / text.width);
@@ -77,8 +88,8 @@ const MAX_SPREAD = 30;
 
 /** 영구 강화, 도전 과제, 오늘의 판으로 가는 버튼 셋 사이의 틈 */
 const LINK_GAP = 4;
-/** 오늘의 판 쪽: 가장 짧은 화면에서의 미리보기와 기록 칸의 높이 */
-const DAILY = { showcase: 70, record: 46, rank: 24, gap: 6 } as const;
+/** 오늘의 판 쪽: 가장 짧은 화면에서의 미리보기와 기록 칸의 높이. 기록 칸은 친구 기록이 있으면 한 줄(row)만큼 길어진다. */
+const DAILY = { showcase: 70, record: 46, row: 18, rank: 24, gap: 6 } as const;
 
 /** 긴 화면에서만 보이는 미리보기 띠: 이만큼 남아야 넣고, 이 높이까지 키운다. */
 const SHOWCASE = { needs: 64, max: 84, gap: 6 } as const;
@@ -372,8 +383,11 @@ function addDailyPage(
   });
   y += 14 + gap;
 
+  // 공유받은 주소에 친구의 오늘 점수가 실려 왔으면 넘어 볼 기록으로 한 줄 더 적는다.
+  const friend = friendToday(handlers.getMeta().friend, handlers.today);
+  const recordHeight = DAILY.record + (friend === null ? 0 : DAILY.row);
   const panel = scene.add.graphics();
-  drawPanel(panel, MARGIN, y, ROW_WIDTH, DAILY.record, { fill: COLOR.ink, border: COLOR.navy, shadow: null });
+  drawPanel(panel, MARGIN, y, ROW_WIDTH, recordHeight, { fill: COLOR.ink, border: COLOR.navy, shadow: null });
   addText(scene, MARGIN + 10, y + 7, '오늘의 기록', { color: CSS.silver });
   addText(
     scene,
@@ -390,7 +404,16 @@ function addDailyPage(
     record.streak > 0 ? `${record.streak}일${record.tries > 0 ? '' : ' (오늘 하면 하루 더)'}` : '오늘부터 시작',
     { color: CSS.white, originX: 1 },
   );
-  y += DAILY.record + gap;
+  if (friend !== null) {
+    const beaten = record.tries > 0 && record.best > friend;
+    addText(scene, MARGIN + 10, y + 7 + DAILY.row * 2, '친구 기록', { color: CSS.silver });
+    addText(scene, MARGIN + ROW_WIDTH - 10, y + 7 + DAILY.row * 2, `${friend}점${beaten ? ' · 넘었어요!' : ''}`, {
+      color: beaten ? CSS.lime : CSS.sky,
+      bold: true,
+      originX: 1,
+    });
+  }
+  y += recordHeight + gap;
   addText(
     scene,
     middle,
@@ -523,33 +546,65 @@ function addHeroCards(
     };
     const centerX = x + HERO_CARD.width / 2;
     const sprite = scene.add.image(centerX, top + 24, HERO_FRAMES[id][0]).setScale(2);
+    // 새로 들어와서 아직 눌러 보지 않았으면 "새"가 붙는다. 잠겨 있어도 붙는다(무엇이 새로 왔는지 알 수 있게).
+    let badge = handlers.getMeta().fresh.includes(id) ? addFreshBadge(scene, x + HERO_CARD.width, top) : null;
     if (open) {
       fitText(addText(scene, centerX, top + 43, hero.name, { color: CSS.white, bold: true, originX: 0.5 }), HERO_CARD.width - 4);
     } else {
-      // 잠긴 캐릭터는 그림자로만 보이고, 여는 조건을 적어 둔다.
-      sprite.setTint(COLOR.ink).setTintMode(Phaser.TintModes.FILL).setAlpha(0.7);
-      scene.add.image(centerX, top + 24, 'icon-lock');
-      fitText(
-        addText(scene, centerX, top + 45, unlockLabel(hero.unlockSeconds), {
-          color: CSS.silver,
-          size: FONT_SIZE.small,
-          originX: 0.5,
-        }),
-        HERO_CARD.width - 4,
-      );
+      // 잠긴 캐릭터는 그림자로만 보이고, 여는 조건을 두 줄로 적어 둔다("2:00" 아래에 "버티기").
+      sprite
+        .setY(top + LOCKED_HERO.artY)
+        .setScale(LOCKED_HERO.scale)
+        .setTint(COLOR.ink)
+        .setTintMode(Phaser.TintModes.FILL)
+        .setAlpha(0.7);
+      scene.add.image(centerX, top + LOCKED_HERO.artY, 'icon-lock');
+      unlockParts(hero.unlockSeconds).forEach((part, line) => {
+        fitText(
+          addText(scene, centerX, top + LOCKED_HERO.lines[line], part, {
+            color: CSS.silver,
+            size: FONT_SIZE.small,
+            originX: 0.5,
+          }),
+          HERO_CARD.width - 4,
+        );
+      });
     }
     refreshers.push(() => draw(false));
     addTapZone(scene, x, top, HERO_CARD.width, HERO_CARD.height, draw, () => {
       const before = handlers.getMeta();
-      const after = chooseHero(before, id);
+      // 눌러 봤으면 "새"를 뗀다.
+      const seen = meetHero(before, id);
+      const after = chooseHero(seen, id);
       if (!open) sfx.deny();
-      else if (after !== before) {
-        handlers.setMeta(after);
-        sfx.click();
-      }
+      else if (after !== seen) sfx.click();
+      if (after !== before) handlers.setMeta(after);
+      for (const part of badge ?? []) part.destroy();
+      badge = null;
       refresh();
     });
   });
+}
+
+/** 카드의 오른쪽 위 모서리(right, top)에 "새"를 붙인다. 떼어 낼 수 있게 그린 것들을 돌려준다. */
+function addFreshBadge(scene: Phaser.Scene, right: number, top: number): Phaser.GameObjects.GameObject[] {
+  const label = addText(scene, 0, 0, FRESH_BADGE.label, {
+    size: FONT_SIZE.small,
+    bold: true,
+    color: CSS.ink,
+    originX: 0.5,
+    originY: 0.5,
+  });
+  const width = Math.ceil(label.width) + FRESH_BADGE.pad * 2;
+  const left = right - FRESH_BADGE.inset - width;
+  const y = top + FRESH_BADGE.inset;
+  const pill = scene.add.graphics();
+  pill.fillStyle(COLOR.ink, 1).fillRoundedRect(left - 1, y - 1, width + 2, FRESH_BADGE.height + 2, 6);
+  pill.fillStyle(COLOR.yellow, 1).fillRoundedRect(left, y, width, FRESH_BADGE.height, 5);
+  // 글씨가 띠 위에 오도록 그린 차례를 바로잡는다.
+  label.setPosition(left + width / 2, y + FRESH_BADGE.height / 2);
+  scene.children.bringToTop(label);
+  return [pill, label];
 }
 
 /** 고른 캐릭터의 시작 무기와 고유 특성 */

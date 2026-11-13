@@ -9,8 +9,20 @@ export const SHARE_PARAM = 'game';
 /** 공유 주소에서 그 게임의 날(등불지기의 오늘의 판)을 가리키는 쿼리 이름. 이것도 바꾸지 않는다. */
 export const SHARE_DAY_PARAM = 'day';
 
+/**
+ * 공유 주소에서 보낸 사람의 그날 점수를 가리키는 쿼리 이름. 이것도 바꾸지 않는다.
+ * 받은 사람에게 넘어 볼 기록으로 보이기만 하고 랭킹에는 쓰지 않아서, 누가 주소의 점수를 고쳐도 해가 없다.
+ */
+export const SHARE_SCORE_PARAM = 'score';
+
 /** 날로 쓸 수 있는 가장 큰 값. 1970년 1월 1일부터 센 날 수라서 이만큼이면 넉넉하다. */
 const MAX_DAY = 999_999;
+
+/** 주소에 실을 수 있는 가장 큰 점수. 랭킹이 받는 가장 큰 점수(online/protocol.ts의 MAX_SCORE)와 같다. */
+const MAX_SHARED_SCORE = 999_999;
+
+/** 주소에 실을 수 있는 점수인지. 0점은 넘어 볼 것이 없어서 싣지 않는다. */
+const isSharedScore = (score: number): boolean => Number.isInteger(score) && score >= 1 && score <= MAX_SHARED_SCORE;
 
 /** 게임 id로 쓸 수 있는 글자. 주소에 아무 글자나 실려 와도 이 모양이 아니면 버린다. */
 const GAME_ID = /^[a-z0-9-]{1,40}$/;
@@ -19,13 +31,19 @@ const GAME_ID = /^[a-z0-9-]{1,40}$/;
  * 그 게임을 바로 여는 주소. pageUrl은 지금 앱이 열려 있는 주소이고, 거기 붙어 있던 쿼리와 해시는 버린다.
  * 예: https://example.com/arcade/?x=1#top 과 path-link 로 https://example.com/arcade/?game=path-link
  */
-export function shareUrl(pageUrl: string, gameId: string, day?: number): string {
+export function shareUrl(pageUrl: string, gameId: string, day?: number, score?: number): string {
   const url = new URL(pageUrl);
   url.search = '';
   url.hash = '';
   url.searchParams.set(SHARE_PARAM, gameId);
   // 그날의 판을 가리키는 주소면 날도 붙인다. 예: ?game=lantern-keeper&day=20770
-  if (day !== undefined) url.searchParams.set(SHARE_DAY_PARAM, String(day));
+  if (day !== undefined) {
+    url.searchParams.set(SHARE_DAY_PARAM, String(day));
+    // 그날의 점수도 실을 수 있다. 예: ?game=lantern-keeper&day=20770&score=333. 날이 없는 점수는 견줄 판이 없어서 싣지 않는다.
+    if (score !== undefined && isSharedScore(Math.floor(score))) {
+      url.searchParams.set(SHARE_SCORE_PARAM, String(Math.floor(score)));
+    }
+  }
   return url.toString();
 }
 
@@ -37,10 +55,20 @@ export function sharedDay(search: string): number | null {
   return day <= MAX_DAY ? day : null;
 }
 
+/** 주소의 쿼리에서 보낸 사람의 점수를 꺼낸다. 없거나 점수의 모양이 아니면(0점 포함) null이다. */
+export function sharedScore(search: string): number | null {
+  const raw = new URLSearchParams(search).get(SHARE_SCORE_PARAM);
+  if (raw === null || !/^\d{1,6}$/.test(raw)) return null;
+  const score = Number(raw);
+  return isSharedScore(score) ? score : null;
+}
+
 /** 그날의 판을 가리키는 공유 주소로 들어왔을 때 게임 씬에 넘기는 것 */
 export interface SharedStart {
   /** 주소에 적혀 있던 날 */
   sharedDay?: number;
+  /** 주소에 함께 적혀 있던, 보낸 사람의 그날 점수. 날이 없으면 오지 않는다. */
+  sharedScore?: number;
 }
 
 /** 결과 공유의 카드와 문구, 주소를 게임이 바꿔 적을 때 넘기는 것. 등불지기가 오늘의 판의 결과를 이렇게 보낸다. */
@@ -55,6 +83,8 @@ export interface ShareOverride {
   text: string;
   /** 주소가 가리킬 날. 받은 사람이 열면 그 게임의 그날 판으로 바로 간다. */
   day?: number;
+  /** 주소에 날과 함께 실을 이번 판의 점수. 받은 사람의 그날 판에 넘어 볼 기록으로 보인다. */
+  score?: number;
 }
 
 /** 주소의 쿼리(location.search)에서 공유받은 게임 id를 꺼낸다. 없거나 id 모양이 아니면 null이다. */
@@ -91,6 +121,7 @@ export function withoutShareParam(pathname: string, search: string, hash: string
   const params = new URLSearchParams(search);
   params.delete(SHARE_PARAM);
   params.delete(SHARE_DAY_PARAM);
+  params.delete(SHARE_SCORE_PARAM);
   const rest = params.toString();
   return `${pathname}${rest ? `?${rest}` : ''}${hash}`;
 }
