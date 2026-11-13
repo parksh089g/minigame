@@ -24,12 +24,13 @@ import {
   META_ORDER,
   STAGE_ORDER,
   STAGES,
+  type FeastId,
   type HeroId,
   type MetaId,
   type StageId,
 } from './data';
 import { addDailyRun, createDaily, DAILY_REWARD, normalizeDaily, type DailyRecord } from './daily';
-import { clampDepth, depthName, isUnlocked, metaCost, type Levels } from './rules';
+import { clampDepth, depthName, isFeast, isUnlocked, metaCost, type Levels } from './rules';
 import { restoreRun, type RunState } from './sim';
 import { normalizeTips, OLD_HAND_TIPS, type TipId } from './tips';
 
@@ -64,6 +65,8 @@ export interface LanternMeta {
   tips: TipId[];
   /** 오늘의 판(daily.ts)의 기록: 마지막으로 한 날과 그날의 최고 기록, 이어 온 날 수 */
   daily: DailyRecord;
+  /** 준비 화면에서 고른 잔치의 밤(data.ts의 FEAST)의 난이도. 꺼져 있으면 null이고, 열리기 전에는 늘 null이다. */
+  feast: FeastId | null;
 }
 
 export function createDefaultMeta(): LanternMeta {
@@ -84,6 +87,7 @@ export function createDefaultMeta(): LanternMeta {
     unread: [],
     tips: [],
     daily: createDaily(),
+    feast: null,
   };
 }
 
@@ -129,7 +133,20 @@ export function normalizeMeta(raw: unknown): LanternMeta {
   // 안내가 생기기 전부터 하던 사람에게는 그때도 있던 일을 새삼 알려 주지 않는다.
   meta.tips = Array.isArray(data.tips) ? normalizeTips(data.tips) : meta.runs > 0 ? [...OLD_HAND_TIPS] : [];
   meta.daily = normalizeDaily(data.daily);
+  meta.feast = isFeast(data.feast) && feastOpen(meta) ? data.feast : null;
   return meta;
+}
+
+/** 잔치의 밤을 켤 수 있는지: 새벽을 한 번이라도 맞았으면 열린다. */
+export function feastOpen(meta: Pick<LanternMeta, 'clears'>): boolean {
+  return meta.clears > 0;
+}
+
+/** 잔치의 밤을 그 난이도로 켜거나, null이면 끈다. 바뀌는 것이 없거나 아직 열리지 않았으면 그대로 돌려준다. */
+export function chooseFeast(meta: LanternMeta, level: FeastId | null): LanternMeta {
+  const next = isFeast(level) ? level : null;
+  if (meta.feast === next || (next !== null && !feastOpen(meta))) return meta;
+  return { ...meta, feast: next };
 }
 
 /** 그 스테이지에서 열려 있는 깊은 밤의 가장 깊은 단계 */

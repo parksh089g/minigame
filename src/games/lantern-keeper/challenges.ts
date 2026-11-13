@@ -3,7 +3,7 @@
  * 허브의 업적(core/achievements.ts)과는 따로다. 허브 업적은 코인을 주고, 여기는 등불지기 안에서 쓰는 불씨를 준다.
  * 화면에 의존하지 않는 순수한 값과 함수만 둔다.
  */
-import { HERO_ORDER, MAX_DEPTH, STAGE_ORDER, WEAPON_ORDER, type HeroId, type StageId, type WeaponId } from './data';
+import { FEAST, HERO_ORDER, MAX_DEPTH, STAGE_ORDER, WEAPON_ORDER, type HeroId, type StageId, type WeaponId } from './data';
 
 /** 도전 과제를 재는 데 쓰는 누적 기록. 한 판이 끝날 때마다 쌓인다(meta.ts의 applyRun). */
 export interface LanternStats {
@@ -152,6 +152,8 @@ export const CHALLENGES: readonly Challenge[] = [
   { id: 'evolve-all', title: '무기 수집가', description: '무기 아홉 가지 진화', goal: 9, reward: 150, measure: (s) => s.stats.evolved.length },
   { id: 'deep-3', title: '칠흑 속의 등불', description: '깊은 밤 3에서 새벽 맞기', goal: 1, reward: 150, measure: clearedDepth(3) },
   { id: 'evolve-ten', title: '열 가지 빛', description: '무기 열 가지 모두 진화', goal: WEAPON_ORDER.length, reward: 200, measure: (s) => s.stats.evolved.length },
+  // 무기를 여섯까지 드는 잔치의 밤에서만 이룰 수 있다.
+  { id: 'evolve-6', title: '여섯 갈래 빛', description: '잔치의 밤에서 무기 여섯 진화', goal: FEAST.weapons, reward: 200, measure: (s) => s.stats.bestEvolved },
   { id: 'kills-100k', title: '밤을 쓸어 낸 자', description: '그림자 10만 마리 쓰러뜨리기', goal: 100_000, reward: 200, measure: (s) => s.stats.kills },
   { id: 'endless-6', title: '새벽을 미룬 자', description: '끝없는 밤에서 6분 버티기', goal: 6, reward: 250, measure: (s) => s.stats.bestEndless / 60 },
   { id: 'deep-5', title: '밤의 끝자락', description: '깊은 밤 5에서 새벽 맞기', goal: 1, reward: 300, measure: clearedDepth(5) },

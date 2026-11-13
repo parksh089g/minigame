@@ -512,6 +512,46 @@ export const MAX_WEAPONS = 4;
 /** 한 판에 가질 수 있는 패시브의 가짓수. 패시브가 이보다 많아서, 무엇을 뺄지 골라야 한다. */
 export const MAX_PASSIVES = 6;
 
+/**
+ * 잔치의 밤: 새벽을 한 번 맞으면 준비 화면에서 고를 수 있는 판의 규칙. 무기를 여섯 가지까지 든다.
+ * 칸만 늘리면 레벨업이 모자라 무기마다 레벨이 얕아지므로 경험치를 더 주고(얼마나 더 주는지가 난이도다),
+ * 강화권이 중간 보스 넷에게서만 나오면 여섯을 다 진화시키기 어려우므로 정예 둘도 강화권을 준다.
+ * 쉬운 단계일수록 끝없는 밤에서 오래 버티기 쉬워서 점수와 불씨에 작은 배율이 붙는다(랭킹과 불씨 모으기가 이 판으로 쏠리지 않게).
+ * 오늘의 판은 누구나 같은 조건이어야 해서 늘 보통 판이다.
+ */
+export const FEAST = {
+  name: '잔치의 밤',
+  /** 들 수 있는 무기의 수 */
+  weapons: 6,
+  /** 쓰러뜨리면 보물 상자와 함께 무기 강화권도 주는 정예 그림자: ELITE.times의 몇 번째인지(0부터) */
+  ticketElites: [2, 4] as readonly number[],
+} as const;
+
+/** 잔치의 밤의 난이도 */
+export type FeastId = 'easy' | 'normal' | 'hard';
+
+export interface FeastLevel {
+  name: string;
+  /** 얻는 경험치의 배율 */
+  xp: number;
+  /** 점수와, 판이 끝나고 받는 불씨에 붙는 배율 */
+  reward: number;
+}
+
+/** 고르는 창에 늘어서는 차례 */
+export const FEAST_ORDER: readonly FeastId[] = ['easy', 'normal', 'hard'];
+
+/**
+ * 영구 강화를 다 올린 자동 플레이로 잰 값(16판씩): 보통 판은 새벽까지 열에 다섯쯤 버틴다.
+ * 어려움은 보통 판과 비슷하고, 보통은 조금 쉽고, 쉬움은 거의 늘 새벽을 맞는다.
+ * 배율은 어느 난이도든 끝없는 밤의 최고 점수가 보통 판보다 낮고, 가운데 점수와 불씨는 보통 판과 비슷하게 맞췄다.
+ */
+export const FEAST_LEVELS: Readonly<Record<FeastId, FeastLevel>> = {
+  easy: { name: '쉬움', xp: 2, reward: 0.6 },
+  normal: { name: '보통', xp: 1.5, reward: 0.8 },
+  hard: { name: '어려움', xp: 1.2, reward: 0.9 },
+};
+
 export interface WeaponInfo {
   name: string;
   /** 레벨마다 무엇이 좋아지는지. 0번이 처음 얻을 때 설명. MAX_LEVEL개. */

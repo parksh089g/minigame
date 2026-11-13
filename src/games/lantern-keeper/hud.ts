@@ -35,8 +35,19 @@ const RIGHT = GAME_WIDTH - 8;
 /** 든 것을 늘어놓는 줄. 왼쪽이 무기, 오른쪽이 패시브다. */
 const SLOT_Y = 38;
 const SLOT_HEIGHT = 26;
-const WEAPON_SLOT = { x: 8, width: 22, step: 24 } as const;
-const PASSIVE_SLOT = { x: 108, width: 20, step: 21 } as const;
+interface SlotRow {
+  x: number;
+  width: number;
+  step: number;
+}
+/**
+ * 무기 칸과 패시브 칸의 자리. 보통은 무기 넷과 패시브 여섯이 한 줄을 꽉 채우고,
+ * 무기를 여섯까지 드는 잔치의 밤에서는 칸을 좁혀서 열두 칸을 한 줄에 넣는다(아이콘은 16px 그대로).
+ */
+function slotLayout(weapons: number): { weapon: SlotRow; passive: SlotRow } {
+  if (weapons <= MAX_WEAPONS) return { weapon: { x: 8, width: 22, step: 24 }, passive: { x: 108, width: 20, step: 21 } };
+  return { weapon: { x: 6, width: 19, step: 20 }, passive: { x: 6 + weapons * 20 + 2, width: 17, step: 18 } };
+}
 const PASSIVE_COUNT = MAX_PASSIVES;
 /** 레벨을 나타내는 점 하나의 크기와 간격 */
 const PIP = { size: 2, step: 3 } as const;
@@ -77,6 +88,8 @@ export class RunHud {
   private readonly bossText: Phaser.GameObjects.Text;
   private readonly weaponIcons: Phaser.GameObjects.Image[] = [];
   private readonly passiveIcons: Phaser.GameObjects.Image[] = [];
+  private readonly weaponRow: SlotRow;
+  private readonly passiveRow: SlotRow;
 
   private shownHp = -1;
   private shownDanger: boolean | null = null;
@@ -93,7 +106,12 @@ export class RunHud {
     private readonly playerX: number,
     private readonly playerY: number,
     onPause: () => void,
+    /** 들 수 있는 무기의 수. 그만큼 칸을 그린다. */
+    private readonly weaponCount: number = MAX_WEAPONS,
   ) {
+    const layout = slotLayout(weaponCount);
+    this.weaponRow = layout.weapon;
+    this.passiveRow = layout.passive;
     scene.add.rectangle(0, 0, GAME_WIDTH, HUD_HEIGHT, COLOR.ink, 0.72).setOrigin(0, 0).setDepth(depth.top);
 
     // 일시정지 버튼. 공용 버튼은 깊이를 정할 수 없어 어둠 덮개에 가려지므로 HUD 위에 따로 그린다.
@@ -127,12 +145,14 @@ export class RunHud {
     }).setDepth(depth.field);
 
     const iconY = SLOT_Y + 11;
-    for (let i = 0; i < MAX_WEAPONS; i += 1) {
-      const x = WEAPON_SLOT.x + i * WEAPON_SLOT.step + WEAPON_SLOT.width / 2;
+    const weaponRow = this.weaponRow;
+    const passiveRow = this.passiveRow;
+    for (let i = 0; i < weaponCount; i += 1) {
+      const x = weaponRow.x + i * weaponRow.step + weaponRow.width / 2;
       this.weaponIcons.push(scene.add.image(x, iconY, LK.heart).setVisible(false).setDepth(depth.top));
     }
     for (let i = 0; i < PASSIVE_COUNT; i += 1) {
-      const x = PASSIVE_SLOT.x + i * PASSIVE_SLOT.step + PASSIVE_SLOT.width / 2;
+      const x = passiveRow.x + i * passiveRow.step + passiveRow.width / 2;
       this.passiveIcons.push(scene.add.image(x, iconY, LK.heart).setVisible(false).setDepth(depth.top));
     }
   }
@@ -230,35 +250,37 @@ export class RunHud {
   private drawSlots(weapons: readonly Slot[], passives: readonly Slot[]): void {
     const g = this.slots;
     g.clear();
-    for (let i = 0; i < MAX_WEAPONS; i += 1) {
-      const x = WEAPON_SLOT.x + i * WEAPON_SLOT.step;
+    const weaponRow = this.weaponRow;
+    const passiveRow = this.passiveRow;
+    for (let i = 0; i < this.weaponCount; i += 1) {
+      const x = weaponRow.x + i * weaponRow.step;
       const slot = weapons[i];
       const icon = this.weaponIcons[i];
       icon.setVisible(Boolean(slot));
       if (!slot) {
         // 빈 칸도 그려서 무기를 몇 개까지 들 수 있는지 보이게 한다.
         g.lineStyle(1, COLOR.slate, 0.7);
-        g.strokeRoundedRect(x + 0.5, SLOT_Y + 0.5, WEAPON_SLOT.width - 1, SLOT_HEIGHT - 1, 5);
+        g.strokeRoundedRect(x + 0.5, SLOT_Y + 0.5, weaponRow.width - 1, SLOT_HEIGHT - 1, 5);
         continue;
       }
-      drawPanel(g, x, SLOT_Y, WEAPON_SLOT.width, SLOT_HEIGHT, {
+      drawPanel(g, x, SLOT_Y, weaponRow.width, SLOT_HEIGHT, {
         fill: COLOR.navy,
         border: slot.evolved ? COLOR.yellow : undefined,
         shadow: null,
         radius: 5,
       });
       icon.setTexture(iconKey(slot.icon));
-      this.pips(g, x + (WEAPON_SLOT.width - PIPS_WIDTH) / 2, slot, COLOR.yellow);
+      this.pips(g, x + (weaponRow.width - PIPS_WIDTH) / 2, slot, COLOR.yellow);
     }
     for (let i = 0; i < PASSIVE_COUNT; i += 1) {
       const slot = passives[i];
       const icon = this.passiveIcons[i];
       icon.setVisible(Boolean(slot));
       if (!slot) continue;
-      const x = PASSIVE_SLOT.x + i * PASSIVE_SLOT.step;
-      drawPanel(g, x, SLOT_Y, PASSIVE_SLOT.width, SLOT_HEIGHT, { fill: COLOR.charcoal, shadow: null, radius: 5 });
+      const x = passiveRow.x + i * passiveRow.step;
+      drawPanel(g, x, SLOT_Y, passiveRow.width, SLOT_HEIGHT, { fill: COLOR.charcoal, shadow: null, radius: 5 });
       icon.setTexture(iconKey(slot.icon));
-      this.pips(g, x + (PASSIVE_SLOT.width - PIPS_WIDTH) / 2, slot, COLOR.cyan);
+      this.pips(g, x + (passiveRow.width - PIPS_WIDTH) / 2, slot, COLOR.cyan);
     }
   }
 
