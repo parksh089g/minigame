@@ -7,6 +7,7 @@ import {
   sharedDay,
   sharedGame,
   sharedGameId,
+  sharedScore,
   shareFileName,
   shareNotice,
   shareText,
@@ -65,6 +66,44 @@ describe('그날의 판을 가리키는 주소', () => {
   it('주소창에서 지울 때 날도 같이 지운다', () => {
     expect(withoutShareParam('/', '?game=lantern-keeper&day=20770', '')).toBe('/');
     expect(withoutShareParam('/', '?a=1&day=20770&game=duel', '#x')).toBe('/?a=1#x');
+  });
+});
+
+describe('그날의 판에 실은 보낸 사람의 점수', () => {
+  it('날과 함께 주면 날 뒤에 붙인다', () => {
+    expect(shareUrl('https://example.com/', 'lantern-keeper', 20770, 333)).toBe(
+      'https://example.com/?game=lantern-keeper&day=20770&score=333',
+    );
+    // 소수는 버린다.
+    expect(shareUrl('https://example.com/', 'lantern-keeper', 20770, 333.9)).toBe(
+      'https://example.com/?game=lantern-keeper&day=20770&score=333',
+    );
+  });
+
+  it('날이 없거나 실을 수 없는 점수면 싣지 않는다', () => {
+    expect(shareUrl('https://example.com/', 'lantern-keeper', undefined, 333)).toBe(
+      'https://example.com/?game=lantern-keeper',
+    );
+    for (const bad of [0, -5, 1_000_000, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(shareUrl('https://example.com/', 'lantern-keeper', 20770, bad), String(bad)).toBe(
+        'https://example.com/?game=lantern-keeper&day=20770',
+      );
+    }
+  });
+
+  it('만든 주소에서 같은 점수를 다시 꺼내고, 모양이 아니면 null이다', () => {
+    const url = new URL(shareUrl('https://example.com/', 'lantern-keeper', 20770, 999_999));
+    expect(sharedScore(url.search)).toBe(999_999);
+    expect(sharedScore('')).toBeNull();
+    expect(sharedScore('?game=lantern-keeper&day=20770')).toBeNull();
+    for (const bad of ['', '0', '000', 'abc', '-3', '1.5', '1e3', '1234567', ' 5']) {
+      expect(sharedScore(`?score=${encodeURIComponent(bad)}`), bad).toBeNull();
+    }
+  });
+
+  it('주소창에서 지울 때 점수도 같이 지운다', () => {
+    expect(withoutShareParam('/', '?game=lantern-keeper&day=20770&score=333', '')).toBe('/');
+    expect(withoutShareParam('/', '?a=1&score=333&day=20770&game=lantern-keeper', '#x')).toBe('/?a=1#x');
   });
 });
 

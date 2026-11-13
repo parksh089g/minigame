@@ -4,7 +4,7 @@
  * 그날의 점수는 오늘의 랭킹(online/)에 올라가서 다른 사람과 겨룬다.
  * 화면에 의존하지 않는 순수한 값과 함수만 둔다.
  */
-import { rankDayOf, rankDayStart } from '../../online/protocol';
+import { MAX_SCORE, rankDayOf, rankDayStart } from '../../online/protocol';
 import type { ShareOverride } from '../../share/link';
 import { HERO_ORDER, HEROES, STAGE_ORDER, STAGES, type HeroId, type StageId } from './data';
 
@@ -101,6 +101,7 @@ export function dailyPlan(day: number): DailyPlan {
 /**
  * 오늘의 판의 결과를 공유할 때 카드와 문구에 적을 것. 받은 사람이 주소를 열면 등불지기의 오늘의 판으로 바로 간다.
  * 카드에는 "11월 13일 오늘의 판 · 3일째"와 "달잡이 · 바람 설원"이 두 줄로 적힌다. streak는 그날까지 이어 온 날 수다.
+ * 주소에는 점수도 실려서, 받은 사람의 오늘의 판 쪽에 넘어 볼 친구 기록으로 보인다.
  */
 export function dailyShare(day: number, score: number, streak: number): ShareOverride {
   const plan = dailyPlan(day);
@@ -111,6 +112,8 @@ export function dailyShare(day: number, score: number, streak: number): ShareOve
     invite: '같은 판 도전하기',
     text: `포켓 아케이드 [등불지기] ${label} ${score}점! 같은 판에서 겨뤄 볼까요?`,
     day: plan.day,
+    // 받은 사람의 오늘의 판 쪽에 넘어 볼 기록으로 보인다.
+    score,
   };
 }
 
@@ -197,4 +200,45 @@ export function addDailyRun(record: DailyRecord, today: number, run: DailyRun): 
     first,
     improved,
   };
+}
+
+/**
+ * 공유받은 주소에 실려 온 친구의 오늘의 판 점수. 그날 동안 오늘의 판 쪽과 결과 화면에 넘어 볼 기록으로 보인다.
+ * 주소의 점수는 누구나 고칠 수 있으므로 보여 주기만 하고 랭킹에는 쓰지 않는다.
+ */
+export interface FriendScore {
+  day: number;
+  score: number;
+}
+
+/** 저장된 친구 점수를 믿을 수 있는 모양으로 맞춘다. 모양이 아니면 null */
+export function normalizeFriend(raw: unknown): FriendScore | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const data = raw as Record<string, unknown>;
+  const day = count(data.day);
+  const score = count(data.score);
+  return day > 0 && score > 0 && score <= MAX_SCORE ? { day, score } : null;
+}
+
+/** 받은 친구 점수를 적는다. 같은 날의 것을 여럿 받으면 가장 높은 것을 넘어 볼 기록으로 둔다. */
+export function addFriend(current: FriendScore | null, day: number, score: number): FriendScore {
+  if (current && current.day === day && current.score >= score) return current;
+  return { day, score };
+}
+
+/** today에 보일 친구 점수. 그날 받은 것이 아니면 null */
+export function friendToday(friend: FriendScore | null, today: number): number | null {
+  return friend && friend.day === today ? friend.score : null;
+}
+
+/** 친구 점수가 실린 주소로 들어왔을 때 준비 화면에 띄우는 한 줄 */
+export function friendNotice(score: number): string {
+  return `친구 기록 ${score}점을 넘어 보세요`;
+}
+
+/** 결과 화면에서 이번 판의 점수를 친구 점수와 견준 한 줄 */
+export function friendVerdict(friend: number, score: number): string {
+  if (score > friend) return `${friend}점을 넘었어요!`;
+  if (score === friend) return `${friend}점과 같아요`;
+  return `${friend}점까지 ${friend - score}점`;
 }

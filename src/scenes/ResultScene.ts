@@ -224,7 +224,7 @@ export class ResultScene extends Phaser.Scene implements BackAware {
       height: BUTTON_HEIGHT,
       label: '다시 하기',
       style: 'pink',
-      onTap: () => this.scene.start(data.sceneKey),
+      onTap: () => this.scene.start(data.sceneKey, data.retry),
     });
     new PixelButton(this, {
       x: left,
@@ -294,7 +294,7 @@ export class ResultScene extends Phaser.Scene implements BackAware {
         void sendShare({
           title: shareTitle(data.title),
           text: share?.text ?? shareText(data.title, result.score),
-          url: shareUrl(pageUrl, data.gameId, share?.day),
+          url: shareUrl(pageUrl, data.gameId, share?.day, share?.score),
           image: this.shareImage,
         }).then((outcome) => {
           busy = false;

@@ -14,7 +14,7 @@ import {
   type LanternStats,
   type RunFeats,
 } from './challenges';
-import { discover, normalizeCodex } from './codex';
+import { CODEX_IDS, discover, normalizeCodex } from './codex';
 import {
   HERO_ORDER,
   HEROES,
@@ -24,12 +24,24 @@ import {
   META_ORDER,
   STAGE_ORDER,
   STAGES,
+  WEAPON_ORDER,
+  WEAPONS,
   type FeastId,
   type HeroId,
   type MetaId,
   type StageId,
+  type WeaponId,
 } from './data';
-import { addDailyRun, createDaily, DAILY_REWARD, normalizeDaily, type DailyRecord } from './daily';
+import {
+  addDailyRun,
+  addFriend,
+  createDaily,
+  DAILY_REWARD,
+  normalizeDaily,
+  normalizeFriend,
+  type DailyRecord,
+  type FriendScore,
+} from './daily';
 import { clampDepth, depthName, isFeast, isUnlocked, metaCost, type Levels } from './rules';
 import { restoreRun, type RunState } from './sim';
 import { normalizeTips, OLD_HAND_TIPS, type TipId } from './tips';
@@ -65,9 +77,26 @@ export interface LanternMeta {
   tips: TipId[];
   /** 오늘의 판(daily.ts)의 기록: 마지막으로 한 날과 그날의 최고 기록, 이어 온 날 수 */
   daily: DailyRecord;
+  /** 공유받은 주소에 실려 온 친구의 오늘의 판 점수(daily.ts). 그날 동안 넘어 볼 기록으로 보인다. */
+  friend: FriendScore | null;
+  /** 들어온 줄 아는 캐릭터와 무기. 업데이트로 여기 없는 것이 생기면 준비 화면이 한 번 알린다(announceNews). */
+  known: string[];
+  /** 새로 들어왔는데 아직 눌러 보지 않은 캐릭터. 준비 화면의 카드에 "새"가 붙는다. */
+  fresh: HeroId[];
   /** 준비 화면에서 고른 잔치의 밤(data.ts의 FEAST)의 난이도. 꺼져 있으면 null이고, 열리기 전에는 늘 null이다. */
   feast: FeastId | null;
 }
+
+/** 지금 있는 캐릭터와 무기 모두. 처음 하는 사람은 이것을 다 아는 것으로 친다(모두 처음 보므로 따로 알리지 않는다). */
+const ALL_KNOWN: readonly string[] = [...HERO_ORDER, ...WEAPON_ORDER];
+/**
+ * 들어온 줄 아는 것(known)이 적혀 있지 않은 예전 저장이 알던 것: 다섯 번째 캐릭터 달잡이와 열 번째 무기 등대빛이
+ * 들어오기 전의 캐릭터 넷과 무기 아홉. 그 뒤로 들어온 것은 known에 없으면 알린다.
+ */
+const OLD_KNOWN: readonly string[] = [
+  ...(['keeper', 'stargazer', 'stormer', 'ringer'] satisfies HeroId[]),
+  ...(['ember', 'aura', 'firefly', 'star', 'lance', 'oil', 'bolt', 'bell', 'moon'] satisfies WeaponId[]),
+];
 
 export function createDefaultMeta(): LanternMeta {
   return {
@@ -87,6 +116,9 @@ export function createDefaultMeta(): LanternMeta {
     unread: [],
     tips: [],
     daily: createDaily(),
+    friend: null,
+    known: [...ALL_KNOWN],
+    fresh: [],
     feast: null,
   };
 }
@@ -133,6 +165,13 @@ export function normalizeMeta(raw: unknown): LanternMeta {
   // 안내가 생기기 전부터 하던 사람에게는 그때도 있던 일을 새삼 알려 주지 않는다.
   meta.tips = Array.isArray(data.tips) ? normalizeTips(data.tips) : meta.runs > 0 ? [...OLD_HAND_TIPS] : [];
   meta.daily = normalizeDaily(data.daily);
+  meta.friend = normalizeFriend(data.friend);
+  // 들어온 줄 아는 것이 적혀 있지 않으면, 처음 하는 사람은 지금 것을 모두 아는 것으로 치고
+  // 그 전부터 하던 사람은 달잡이와 등대빛이 들어오기 전의 것만 아는 것으로 친다. 그래야 두 가지를 한 번 알린다.
+  const known = Array.isArray(data.known) ? data.known : meta.runs > 0 ? OLD_KNOWN : ALL_KNOWN;
+  meta.known = ALL_KNOWN.filter((id) => known.includes(id));
+  const fresh = Array.isArray(data.fresh) ? data.fresh : [];
+  meta.fresh = HERO_ORDER.filter((id) => fresh.includes(id));
   meta.feast = isFeast(data.feast) && feastOpen(meta) ? data.feast : null;
   return meta;
 }
@@ -236,6 +275,56 @@ export function applyRun(meta: LanternMeta, result: RunResult): LanternMeta {
 export function readEntries(meta: LanternMeta, ids: readonly string[]): LanternMeta {
   const unread = meta.unread.filter((id) => !ids.includes(id));
   return unread.length === meta.unread.length ? meta : { ...meta, unread };
+}
+
+/** 업데이트로 새로 들어왔는데 아직 알리지 않은 캐릭터와 무기 */
+export interface News {
+  heroes: HeroId[];
+  weapons: WeaponId[];
+}
+
+export function unknownNews(meta: LanternMeta): News {
+  return {
+    heroes: HERO_ORDER.filter((id) => !meta.known.includes(id)),
+    weapons: WEAPON_ORDER.filter((id) => !meta.known.includes(id)),
+  };
+}
+
+export const hasNews = (news: News): boolean => news.heroes.length > 0 || news.weapons.length > 0;
+
+/** 새로 들어온 것을 알리는 한 줄. 예: "새 캐릭터 달잡이 · 새 무기 등대빛" */
+export function newsLine(news: News): string {
+  const parts: string[] = [];
+  if (news.heroes.length > 0) parts.push(`새 캐릭터 ${news.heroes.map((id) => HEROES[id].name).join(', ')}`);
+  if (news.weapons.length > 0) parts.push(`새 무기 ${news.weapons.map((id) => WEAPONS[id].name).join(', ')}`);
+  return parts.join(' · ');
+}
+
+/**
+ * 새로 들어온 것을 알렸다고 적는다. 새 캐릭터는 눌러 볼 때까지 카드에 "새"가 붙고(fresh),
+ * 새 무기는 도감에서 새로 열린 항목처럼 들여다볼 때까지 점이 붙는다(unread). 알릴 것이 없으면 그대로 돌려준다.
+ */
+export function announceNews(meta: LanternMeta): LanternMeta {
+  const news = unknownNews(meta);
+  if (!hasNews(news)) return meta;
+  const weapons: readonly string[] = news.weapons;
+  return {
+    ...meta,
+    known: [...ALL_KNOWN],
+    fresh: HERO_ORDER.filter((id) => meta.fresh.includes(id) || news.heroes.includes(id)),
+    unread: CODEX_IDS.filter((id) => meta.unread.includes(id) || weapons.includes(id)),
+  };
+}
+
+/** 캐릭터 카드를 눌러 봤다고 적는다. 그 카드의 "새"가 사라진다. 붙어 있지 않았으면 그대로 돌려준다. */
+export function meetHero(meta: LanternMeta, id: HeroId): LanternMeta {
+  return meta.fresh.includes(id) ? { ...meta, fresh: meta.fresh.filter((hero) => hero !== id) } : meta;
+}
+
+/** 공유받은 주소에 실려 온 친구의 그날 점수를 적는다. 그날 받은 것보다 높지 않으면 그대로 돌려준다. */
+export function meetFriend(meta: LanternMeta, day: number, score: number): LanternMeta {
+  const friend = addFriend(meta.friend, day, score);
+  return friend === meta.friend ? meta : { ...meta, friend };
 }
 
 /** 그 안내를 봤다고 적는다. 이미 봤으면 그대로 돌려준다. */

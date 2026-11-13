@@ -218,13 +218,13 @@ interface Button {
 }
 
 /** 화면 크기가 바뀌어 다시 열 때 넘겨받는 것: 열려 있던 창과 창마다 보던 쪽 */
-interface CompanyStart {
+export interface CompanyStart {
   panel?: PanelKind;
   pages?: Partial<Record<PanelKind, number>>;
 }
 
 /** 아래쪽 버튼으로 여는 창 다섯과, 사무실 창에서 여는 부서 창, 위쪽의 수익을 눌러 여는 출시작 창, 돌아왔을 때 저절로 뜨는 알림 */
-type PanelKind =
+export type PanelKind =
   | 'project'
   | 'gear'
   | 'staff'
