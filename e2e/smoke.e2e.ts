@@ -4,15 +4,15 @@
  * 게임 목록은 허브와 같은 registry에서 읽으므로, 게임을 새로 넣으면 따로 할 일 없이 이 점검에 들어온다.
  */
 import './app-globals';
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
 import { SCENE } from '../src/config';
 import { GAMES } from '../src/games/registry';
 import { dayIndexOf } from '../src/games/lantern-keeper/daily';
 import { LANTERN_GAME_ID, LANTERN_SCENE } from '../src/games/lantern-keeper/data';
 import {
   activeScenes,
-  collectErrors,
   expectRendering,
+  it,
   openApp,
   scribble,
   seedOf,
@@ -24,18 +24,6 @@ import {
 
 /** 씬이 있는(준비 중이 아닌) 게임 */
 const PLAYABLE = GAMES.flatMap((game) => (game.sceneKey ? [{ ...game, sceneKey: game.sceneKey }] : []));
-
-/** 모든 점검은 끝날 때 페이지에서 난 오류가 없어야 통과한다. */
-const it = test.extend<{ errors: string[] }>({
-  errors: [
-    async ({ page }, use) => {
-      const errors = collectErrors(page);
-      await use(errors);
-      expect(errors, '페이지에서 오류가 나지 않아야 한다').toEqual([]);
-    },
-    { auto: true },
-  ],
-});
 
 it('허브가 열리고, 여기저기 눌러 봐도 오류가 없다', async ({ page }, info) => {
   await openApp(page);
