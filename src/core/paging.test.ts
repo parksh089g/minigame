@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { balancedRows, clampPage, layoutPages, pagedCapacity, pageOfIndex, pageSlice } from './paging';
+import { balancedRows, clampPage, fitStack, layoutPages, pagedCapacity, pageOfIndex, pageSlice, stackHeight } from './paging';
 
 describe('layoutPages', () => {
   it('모두 들어가면 한 쪽이고 쪽 넘김 줄의 자리를 빼지 않는다', () => {
@@ -80,5 +80,57 @@ describe('balancedRows', () => {
     expect(balancedRows(0, 4)).toEqual([]);
     expect(balancedRows(-3, 4)).toEqual([]);
     expect(balancedRows(3, 0)).toEqual([1, 1, 1]);
+  });
+});
+
+describe('fitStack', () => {
+  const size = { height: 60, gap: 8 };
+  const squeeze = { roomy: 50, gap: 4, least: 44 };
+
+  it('넉넉하면 늘 쓰는 크기 그대로다', () => {
+    expect(fitStack(4, 294, size, squeeze)).toEqual(size);
+    expect(fitStack(1, 294, size, squeeze)).toEqual(size);
+    expect(fitStack(6, 400, size, squeeze)).toEqual(size);
+  });
+
+  it('모자라면 간격은 둔 채 낮추고, 그래도 모자라면 간격까지 좁힌다', () => {
+    // 등불지기 강화권 창: 가장 작은 화면(논리 높이 426)에서 카드가 놓일 높이는 294다.
+    expect(fitStack(5, 294, size, squeeze)).toEqual({ height: 52, gap: 8 });
+    expect(fitStack(6, 294, size, squeeze)).toEqual({ height: 45, gap: 4 });
+    // 흔한 화면(논리 높이 519)에서는 387
+    expect(fitStack(6, 387, size, squeeze)).toEqual({ height: 57, gap: 8 });
+  });
+
+  it('줄인 크기는 언제나 room 안에 들어가고, 너무 짧으면 가장 낮은 높이에서 멈춘다', () => {
+    for (let count = 1; count <= 8; count += 1) {
+      for (let room = 200; room <= 520; room += 1) {
+        const { height, gap } = fitStack(count, room, size, squeeze);
+        expect(height).toBeLessThanOrEqual(size.height);
+        expect(height).toBeGreaterThanOrEqual(squeeze.least);
+        if (height > squeeze.least) expect(stackHeight(count, { height, gap })).toBeLessThanOrEqual(room);
+      }
+    }
+    expect(fitStack(6, 100, size, squeeze)).toEqual({ height: 44, gap: 4 });
+  });
+
+  it('담을 것이 많아 least가 roomy보다 크면, 간격을 좁혀서라도 least를 지킨다', () => {
+    // 다섯이 간격 8로는 52까지만 되는데 53은 되어야 하면 간격을 4로 좁혀 55
+    expect(fitStack(5, 294, size, { ...squeeze, least: 53 })).toEqual({ height: 55, gap: 4 });
+    // 간격을 좁혀도 모자라면 least에서 멈추고, 다 들어가지 않는다.
+    const tight = fitStack(6, 294, size, { ...squeeze, least: 53 });
+    expect(tight).toEqual({ height: 53, gap: 4 });
+    expect(stackHeight(6, tight)).toBeGreaterThan(294);
+  });
+
+  it('least가 늘 쓰는 높이보다 크면 그만큼 키운다', () => {
+    expect(fitStack(3, 400, size, { ...squeeze, least: 70 })).toEqual({ height: 70, gap: 8 });
+  });
+});
+
+describe('stackHeight', () => {
+  it('높이를 모두 더하고 사이 간격은 하나 적게 더한다', () => {
+    expect(stackHeight(6, { height: 45, gap: 4 })).toBe(290);
+    expect(stackHeight(1, { height: 60, gap: 8 })).toBe(60);
+    expect(stackHeight(0, { height: 60, gap: 8 })).toBe(0);
   });
 });

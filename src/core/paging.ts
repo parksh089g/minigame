@@ -66,3 +66,35 @@ export function balancedRows(count: number, perRow: number): number[] {
   const extra = n % rows;
   return Array.from({ length: rows }, (_, index) => base + (index < extra ? 1 : 0));
 }
+
+/** 세로로 늘어놓는 것 하나의 높이와 그 사이 간격 */
+export interface StackSize {
+  height: number;
+  gap: number;
+}
+
+/**
+ * count개를 room 높이 안에 세로로 늘어놓을 때 하나의 높이와 사이 간격.
+ * 넉넉하면 size 그대로이고, 모자라면 간격은 둔 채 높이를 squeeze.roomy까지 낮춰 보고,
+ * 그래도 모자라면 간격을 squeeze.gap으로 좁혀 들어가는 만큼 낮춘다. 높이는 squeeze.least 밑으로 내려가지 않는다.
+ * 담을 것이 많아 least가 roomy보다 크면 간격을 좁혀서라도 least를 지키고, size.height보다 크면 그만큼 키운다.
+ * 그래서 room 안에 다 들어가지 않을 수도 있고, 들어갔는지는 stackHeight로 본다.
+ * 예: 높이 60, 간격 8을 294 안에 놓으면 넷은 그대로, 다섯은 52와 8, 여섯은 45와 4
+ */
+export function fitStack(
+  count: number,
+  room: number,
+  size: StackSize,
+  squeeze: { roomy: number; gap: number; least: number },
+): StackSize {
+  const n = Math.max(1, Math.floor(count));
+  const fit = (gap: number): number => Math.floor((room - (n - 1) * gap) / n);
+  const gap = fit(size.gap) >= Math.max(squeeze.roomy, squeeze.least) ? size.gap : squeeze.gap;
+  return { height: Math.max(squeeze.least, Math.min(size.height, fit(gap))), gap };
+}
+
+/** count개를 size대로 세로로 늘어놓은 전체 높이 */
+export function stackHeight(count: number, size: StackSize): number {
+  const n = Math.max(0, Math.floor(count));
+  return n === 0 ? 0 : n * size.height + (n - 1) * size.gap;
+}
