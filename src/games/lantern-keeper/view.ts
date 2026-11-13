@@ -546,24 +546,38 @@ export class RunView {
       if (ready) {
         const breath = 0.5 + 0.5 * Math.sin(seconds * 2.4 + shroom.x * 0.07);
         g.fillStyle(LOOK.shroomGlow, 0.1 + 0.08 * breath);
-        g.fillEllipse(x, y, r * 3.4, r * 2.2);
+        g.fillEllipse(x, y - 2, r * 3.4, r * 2.2);
       }
-      // 대
-      const capY = y - Math.round(3 * puff);
-      g.fillStyle(LOOK.shroomStem, ready ? 1 : 0.6);
-      g.fillRect(x - 2, capY, 4, y - capY + 3);
-      // 갓: 어두운 테두리 위에 밝은 갓, 그 위에 흰 점
-      const capW = r * 2 * (ready ? 1 : 1.1);
-      const capH = Math.max(3, r * 1.25 * puff);
+      // 땅에 드리운 그림자와 대
+      g.fillStyle(LOOK.shadow, 0.4);
+      g.fillEllipse(x, y + 2, r * 1.6, 4);
+      const stemTop = y - 3 - Math.round(2 * puff);
+      g.fillStyle(LOOK.shroomStem, ready ? 1 : 0.7);
+      g.fillRect(x - 2, stemTop, 4, y + 2 - stemTop);
+      // 갓: 둥근 지붕. 밟혀 납작해지면 낮아지고 어두워진다.
+      const height = Math.max(2, r * 0.95 * puff);
+      const dome = (rx: number, ry: number, baseY: number): void => {
+        g.beginPath();
+        g.moveTo(x + rx, baseY);
+        for (let k = 1; k <= 12; k += 1) {
+          const angle = (Math.PI * k) / 12;
+          g.lineTo(x + Math.cos(angle) * rx, baseY - Math.sin(angle) * ry);
+        }
+        g.closePath();
+        g.fillPath();
+      };
       g.fillStyle(ready ? LOOK.shroomRim : LOOK.shroomFlat, 1);
-      g.fillEllipse(x, capY, capW + 2, capH + 2);
-      g.fillStyle(ready ? LOOK.shroom : LOOK.shroomRim, ready ? 1 : 0.8);
-      g.fillEllipse(x, capY - 1, capW, capH);
+      dome(r + 1, height + 1, stemTop);
+      g.fillStyle(ready ? LOOK.shroom : LOOK.shroomRim, ready ? 1 : 0.85);
+      dome(r, height, stemTop - 1);
+      // 갓 아래의 주름: 어두운 띠
+      g.fillStyle(ready ? LOOK.shroomRim : LOOK.shroomFlat, 1);
+      g.fillRect(x - r, stemTop - 1, r * 2 + 1, 2);
       if (ready) {
         g.fillStyle(LOOK.shroomSpot, 0.95);
-        g.fillRect(x - Math.round(r * 0.45), capY - Math.round(capH * 0.25), 2, 1);
-        g.fillRect(x + Math.round(r * 0.2), capY - Math.round(capH * 0.35), 1, 1);
-        g.fillRect(x + Math.round(r * 0.05), capY + Math.round(capH * 0.05), 1, 1);
+        g.fillRect(x - Math.round(r * 0.5), stemTop - Math.round(height * 0.55), 2, 2);
+        g.fillRect(x + Math.round(r * 0.25), stemTop - Math.round(height * 0.75), 2, 1);
+        g.fillRect(x + Math.round(r * 0.55), stemTop - Math.round(height * 0.3), 1, 1);
       }
     }
   }
