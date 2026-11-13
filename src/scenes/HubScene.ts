@@ -21,7 +21,7 @@ import { sfx } from '../core/sfx';
 import { clearedOf, totalCleared } from '../core/stages';
 import { store } from '../core/store';
 import { setToastAnchor } from '../core/toast';
-import { loadTodos, type Todos } from './hub-todo';
+import { loadTodos, todosNow, watchTodos, type HubRecords, type Todo, type Todos } from './hub-todo';
 import { settleLastWeek } from './weekly-settle';
 import { claimableMissions } from '../core/weekly';
 import {
@@ -92,11 +92,14 @@ let lastPage = 0;
 /** 별을 누른 뒤 카드를 다시 늘어놓기까지의 틈(ms). 별이 바뀐 것을 먼저 보여 주고 나서 자리를 옮긴다. */
 const STAR_SETTLE_MS = 160;
 
-/**
- * 두 큰 게임의 오늘 할 일(hub-todo.ts). 저장을 읽는 데 잠깐 걸리므로, 허브를 그릴 때는 지난번에 읽은 것을 먼저 보여 주고
- * 새로 읽으면 바꾼다. 허브를 열 때마다 기록 줄에서 할 일로 깜박이지 않게 하려는 것이다.
- */
-let knownTodos: Todos = {};
+/** 두 큰 게임의 할 일(hub-todo.ts)을 셈하는 데 쓰는 허브 세이브의 것 */
+const RECORDS: HubRecords = {
+  playedBefore: (id) => getRecord(store.data, id).plays > 0,
+  weekly: () => store.data.weekly,
+};
+
+/** 허브를 띄워 둔 동안 할 일을 다시 셈하는 틈(ms). 닫아 둔 회사의 수익이 그사이 다 차는 것 같은 일을 따라간다. */
+const TODO_RECHECK_MS = 60_000;
 
 /** 카드 아랫줄에 쓰는 글과 색 */
 interface CardLine {
@@ -136,6 +139,10 @@ export class HubScene extends Phaser.Scene {
   private slideFrom = 0;
   /** 지금 쪽에 놓인 카드의 아랫줄과, 할 일이 없을 때 그 자리에 쓰는 기록 줄. 할 일을 새로 읽으면 바꾼다. */
   private readonly cardLines = new Map<string, { label: Phaser.GameObjects.Text; record: CardLine }>();
+  /** 두 큰 게임의 할 일. 카드를 누르면 그 일이 있는 곳을 바로 연다. */
+  private todos: Todos = {};
+  /** 할 일을 마지막으로 셈한 때(씬의 시각, ms) */
+  private todosAt = 0;
 
   constructor() {
     super(SCENE.hub);
@@ -151,16 +158,29 @@ export class HubScene extends Phaser.Scene {
 
     this.addHeader();
     this.shownDate = dateKeyOf(new Date());
+    // 두 큰 게임의 저장을 이미 읽었으면 그것으로 바로 셈해서, 카드를 그릴 때부터 맞는 할 일이 보이게 한다.
+    // 기록 초기화나 가져오기로 저장이 바뀌었어도 이 곳의 저장소는 이미 바뀐 것을 들고 있다.
+    this.todos = todosNow(RECORDS);
+    this.todosAt = 0;
     this.addDaily();
     this.addGames(height);
     this.addTip(height);
     this.addFooter(height);
 
     const unsubscribe = onOfflineStatus((status) => this.showOfflineStatus(status));
+    // 같은 기기의 다른 곳(설치한 앱이나 다른 탭)에서 두 큰 게임을 하면 할 일을 바로 고친다.
+    const unwatch = watchTodos(() => this.paintTodos(todosNow(RECORDS)));
+    // 뒤에 있다가 다시 보이면 두 게임의 저장을 다시 읽는다. 그사이 다른 곳에서 한 것도 따라간다.
+    const onVisible = (): void => {
+      if (!document.hidden) this.refreshTodos();
+    };
+    document.addEventListener('visibilitychange', onVisible);
     // 이 화면은 아래쪽에 누르는 도움말과 상태 표시가 있어서, 안내 문구는 제목 자리에 띄운다.
     setToastAnchor(TOAST_Y);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       unsubscribe();
+      unwatch();
+      document.removeEventListener('visibilitychange', onVisible);
       setToastAnchor(null);
       this.cardLines.clear();
     });
@@ -181,6 +201,12 @@ export class HubScene extends Phaser.Scene {
     }
 
     if (dateKeyOf(new Date()) !== this.shownDate) this.scene.restart();
+
+    // 띄워 둔 채로 시간이 흐르면(닫아 둔 회사의 수익이 다 차는 것 같은) 할 일을 다시 셈한다.
+    if (time - this.todosAt >= TODO_RECHECK_MS) {
+      if (this.todosAt > 0) this.paintTodos(todosNow(RECORDS));
+      this.todosAt = time;
+    }
   }
 
   private addHeader(): void {
@@ -485,7 +511,7 @@ export class HubScene extends Phaser.Scene {
         originX: 0.5,
       });
       this.cardLines.set(game.id, { label, record: line });
-      this.paintLine(label, knownTodos[game.id], line);
+      this.paintLine(label, this.todos[game.id], line);
       card.add(label);
     } else {
       icon.setAlpha(0.35);
@@ -501,7 +527,8 @@ export class HubScene extends Phaser.Scene {
       if (game.sceneKey) {
         sfx.click();
         vibrate(8);
-        this.launchGame(game.sceneKey);
+        // 할 일이 있으면 그 일이 있는 곳(등불지기의 오늘의 판 쪽, 회사의 목표 창)을 바로 연다.
+        this.launchGame(game.sceneKey, this.todos[game.id]?.start);
       } else {
         sfx.deny();
         this.tweens.add({
@@ -564,28 +591,36 @@ export class HubScene extends Phaser.Scene {
    * 카드의 아랫줄을 쓴다. 오늘 할 일이 있으면(두 큰 게임) 기록 대신 그것을 초록 글씨로 쓰고, 없으면 기록 줄을 쓴다.
    * 긴 글도 카드 안에 들어가도록 줄인다.
    */
-  private paintLine(label: Phaser.GameObjects.Text, todo: string | undefined, record: CardLine): void {
-    const line = todo ? { text: todo, color: THEME_CSS.good } : record;
+  private paintLine(label: Phaser.GameObjects.Text, todo: Todo | undefined, record: CardLine): void {
+    const line = todo ? { text: todo.text, color: THEME_CSS.good } : record;
     label.setText(line.text).setColor(line.color);
     label.setScale(Math.min(1, (TILE_WIDTH - 4) / label.width));
   }
 
-  /** 두 큰 게임의 저장을 읽어서 오늘 할 일을 새로 고친다. 읽는 사이에 허브를 떠났으면 다음에 열 때 쓴다. */
+  /** 두 큰 게임의 저장을 기기에서 다시 읽어서 할 일을 새로 고친다. 읽는 사이에 허브를 떠났으면 아무것도 하지 않는다. */
   private refreshTodos(): void {
-    void loadTodos((id) => getRecord(store.data, id).plays > 0)
+    void loadTodos(RECORDS)
       .then((todos) => {
-        knownTodos = todos;
-        for (const [id, line] of this.cardLines) {
-          if (line.label.active) this.paintLine(line.label, todos[id], line.record);
-        }
+        if (this.sys.isActive()) this.paintTodos(todos);
       })
       .catch(() => undefined);
   }
 
-  /** 게임을 하러 간다. 방금 한 게임은 목록의 앞쪽으로 오므로, 돌아왔을 때는 그 게임이 보이는 첫 쪽을 연다. */
-  private launchGame(sceneKey: string): void {
+  /** 할 일을 바꾸고, 지금 쪽에 놓인 카드의 아랫줄을 다시 쓴다. */
+  private paintTodos(todos: Todos): void {
+    this.todos = todos;
+    for (const [id, line] of this.cardLines) {
+      if (line.label.active) this.paintLine(line.label, todos[id], line.record);
+    }
+  }
+
+  /**
+   * 게임을 하러 간다. 방금 한 게임은 목록의 앞쪽으로 오므로, 돌아왔을 때는 그 게임이 보이는 첫 쪽을 연다.
+   * data는 그 게임 씬에 넘길 값이다(할 일이 있는 곳을 바로 여는 것).
+   */
+  private launchGame(sceneKey: string, data?: object): void {
     lastPage = 0;
-    fadeToScene(this, sceneKey);
+    fadeToScene(this, sceneKey, data);
   }
 
   /** 카드 오른쪽 위의 별. 누르면 즐겨찾기에 넣거나 빼고, 넣은 게임은 목록의 앞쪽에 놓인다. */
