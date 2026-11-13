@@ -34,6 +34,7 @@ import {
   type PassiveId,
 } from './data';
 import {
+  beamStats,
   bellStats,
   depthRules,
   embersFor,
@@ -50,6 +51,7 @@ import {
 } from './rules';
 import {
   AIM_LOCK_SECONDS,
+  BEAM_REHIT,
   BLIZZARD,
   BLIZZARD_FIRING,
   CHARGE_SECONDS,
@@ -473,6 +475,49 @@ describe('무기', () => {
     expect(sim.state.moons).toHaveLength(0);
     // 가운데 달 하나만으로도 두 번보다 많이 벤다.
     expect(5000 - foe.hp).toBeGreaterThan(each * 2);
+  });
+
+  it('등대빛은 둘레를 돌며 빛줄기에 닿은 적을 한 바퀴에 한 번씩 훑는다', () => {
+    const sim = quietSim();
+    sim.state.weapons = { beam: 1 };
+    sim.state.player.hp = 1e9;
+    const stats = beamStats(1, modifiers({}, {}));
+    const lap = (Math.PI * 2) / stats.spin;
+    // 빛줄기는 오른쪽을 가리키며 시작한다. 가까운 적은 바로 맞고, 닿지 않는 곳의 적은 맞지 않는다.
+    const near = enemy('brute', 30, 0, 5000);
+    const far = enemy('brute', 0, 300, 5000);
+    sim.state.enemies.push(near, far);
+    sim.step(STEP, 0, 0);
+    expect(5000 - near.hp).toBe(stats.damage);
+    // 지나가는 동안 거듭 맞지 않고, 한 바퀴를 돌아와야 다시 맞는다.
+    advance(sim, lap * 0.8);
+    expect(5000 - near.hp).toBe(stats.damage);
+    advance(sim, lap * 0.4);
+    expect(5000 - near.hp).toBe(stats.damage * 2);
+    expect(far.hp).toBe(5000);
+    expect(sim.state.dealt?.beam).toBe(stats.damage * 2);
+    expect(BEAM_REHIT).toBeLessThan(lap / 3);
+  });
+
+  it('등대빛은 4레벨에 맞은편에도 한 줄기가 서고, 진화하면 셋이 더 멀리까지 훑는다', () => {
+    const hits = (level: number, distance: number): number => {
+      const sim = quietSim();
+      sim.state.weapons = { beam: level };
+      sim.state.player.hp = 1e9;
+      const stats = beamStats(level, modifiers({}, {}));
+      // 제자리에 묶어 둔 적 하나를 한 바퀴 동안 몇 번 훑는지 센다.
+      const foe = { ...enemy('brute', 0, distance, 1e6), slow: 1e9, slowTo: 0.0001 };
+      sim.state.enemies.push(foe);
+      advance(sim, (Math.PI * 2) / stats.spin - STEP);
+      return Math.round((1e6 - foe.hp) / stats.damage);
+    };
+    expect(hits(1, 30)).toBe(1);
+    expect(hits(4, 30)).toBe(2);
+    expect(hits(EVOLVE_LEVEL, 30)).toBe(3);
+    // 보통 등대빛이 닿지 않는 곳도 진화하면 닿는다.
+    const reach = beamStats(MAX_LEVEL, modifiers({}, {})).length + ENEMIES.brute.radius + 4;
+    expect(hits(MAX_LEVEL, reach)).toBe(0);
+    expect(hits(EVOLVE_LEVEL, reach)).toBe(3);
   });
 
   it('진화한 무기는 다른 모습으로 나간다', () => {
@@ -2815,8 +2860,11 @@ describe('저장과 이어하기', () => {
     const sim = newSim(1, restored as RunState);
     expect(sim.state.waves).toEqual([]);
     expect(sim.state.moons).toEqual([]);
-    sim.state.weapons = { bell: 1, moon: 1 };
+    // 등대빛이 생기기 전에 저장한 판에는 빛줄기가 가리키는 쪽이 없다.
+    expect(sim.state.beamAngle).toBeUndefined();
+    sim.state.weapons = { bell: 1, moon: 1, beam: 1 };
     expect(() => advance(sim, 5)).not.toThrow();
+    expect(Number.isFinite(sim.state.beamAngle)).toBe(true);
     expect(Number.isFinite(sim.state.cd.bell)).toBe(true);
     expect(Number.isFinite(sim.state.cd.moon)).toBe(true);
   });
@@ -2846,7 +2894,8 @@ describe('자동 플레이로 본 밸런스', () => {
         expect(result.level, `${hero} @ ${stage}`).toBeGreaterThan(4);
       }
     }
-  });
+    // 캐릭터 다섯과 스테이지 넷으로 스무 판을 돌리므로 넉넉히 기다린다.
+  }, 30000);
 
   it('피하면서 싸우면 서 있을 때보다 훨씬 오래 버틴다', () => {
     const result = playRun(2, 'kite', config, 240);

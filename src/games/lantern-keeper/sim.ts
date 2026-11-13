@@ -55,6 +55,7 @@ import {
   midBossTier,
   minionKind,
   modifiers,
+  beamStats,
   moonStats,
   oilStats,
   ownedPassives,
@@ -92,6 +93,8 @@ export interface Enemy {
   slowTo: number;
   /** 반딧불에 다시 맞을 수 있을 때까지(초) */
   fireflyCd: number;
+  /** 등대빛에 다시 맞을 수 있을 때까지(초). 같은 빛줄기가 지나가는 동안 거듭 맞지 않게 한다. */
+  beamCd?: number;
   /** 보스의 다음 행동까지, 뛰는 적의 다음 뜀이나 착지까지, 쏘는 적의 다음 발사까지, 터지는 적이 터질 때까지(초) */
   timer: number;
   /**
@@ -302,6 +305,8 @@ export interface RunState {
   chests?: number;
   cd: { ember: number; aura: number; star: number; lance: number; oil: number; bolt: number; bell: number; moon: number };
   fireflyAngle: number;
+  /** 등대빛의 첫 줄기가 가리키는 쪽(라디안). 등대빛이 생기기 전에 저장한 판에는 없다. */
+  beamAngle?: number;
   spawnDebt: number;
   surgeIndex: number;
   /** 지금까지 나온 중간 보스의 수 */
@@ -469,6 +474,8 @@ const LANCE_RANGE = 170;
 /** 꿰뚫는 화살은 사라질 때까지 몇이든 꿰뚫는다. */
 const PIERCE_ALL = 9999;
 /** 초승달이 겨누는 거리(px) */
+/** 등대빛에 맞은 적이 다시 맞을 수 있을 때까지(초). 빛줄기와 나란히 움직이는 적이 거듭 맞지 않게 한다. 다음 줄기가 오기 전에는 풀린다. */
+export const BEAM_REHIT = 0.3;
 const MOON_RANGE = 120;
 /** 초승달이 여럿일 때 벌어지는 각도(라디안) */
 const MOON_SPREAD = 0.5;
@@ -1241,6 +1248,7 @@ export class Sim {
       if (e.flash > 0) e.flash -= dt;
       if (e.slow > 0) e.slow -= dt;
       if (e.fireflyCd > 0) e.fireflyCd -= dt;
+      if (e.beamCd && e.beamCd > 0) e.beamCd -= dt;
       // 종소리에 밀려나는 중이면 남은 거리를 조금씩 물러난다.
       if (e.kx || e.ky) {
         const kx = e.kx ?? 0;
@@ -1692,6 +1700,32 @@ export class Sim {
             e.fireflyCd = stats.rehit;
           }
         }
+      }
+    }
+
+    if (w.beam) {
+      const stats = beamStats(w.beam, this.mods);
+      const full = Math.PI * 2;
+      const sweep = stats.spin * dt;
+      const turn = ((s.beamAngle ?? 0) + sweep) % full;
+      s.beamAngle = turn;
+      const gap = full / stats.count;
+      for (const e of enemies) {
+        if (e.hp <= 0 || (e.beamCd ?? 0) > 0) continue;
+        const dx = e.x - p.x;
+        const dy = e.y - p.y;
+        const radius = ENEMIES[e.kind].radius;
+        const reach = stats.length + radius;
+        const d2 = dx * dx + dy * dy;
+        if (d2 > reach * reach) continue;
+        // 이번 걸음에 어느 빛줄기든 이 적이 있는 쪽을 지나갔으면 맞는다.
+        // 굵기로 재면 바짝 붙은 적은 한 번 지나가는 동안 거듭 맞으므로, 빛줄기의 가운데가 지나간 때만 센다.
+        // 플레이어를 덮고 선 적은 어느 쪽에 있는지가 걸음마다 뒤집히므로, 한쪽(0)에 있는 것으로 친다.
+        const bearing = d2 < radius * radius ? 0 : Math.atan2(dy, dx);
+        const behind = (((turn - bearing) % gap) + gap) % gap;
+        if (behind > sweep + 1e-9) continue;
+        this.damage(e, stats.damage, 'beam');
+        e.beamCd = BEAM_REHIT;
       }
     }
 

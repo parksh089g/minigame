@@ -57,6 +57,7 @@ import {
   midBossTier,
   modifiers,
   moonStats,
+  beamStats,
   oilStats,
   ownedPassives,
   ownedWeapons,
@@ -141,8 +142,8 @@ describe('데이터', () => {
     for (const passive of Object.values(PASSIVES)) expect(passive.perLevel).not.toBe('');
   });
 
-  it('무기는 아홉 가지이고, 늘어놓는 순서에 빠진 것이 없다', () => {
-    expect(WEAPON_ORDER).toHaveLength(9);
+  it('무기는 열 가지이고, 늘어놓는 순서에 빠진 것이 없다', () => {
+    expect(WEAPON_ORDER).toHaveLength(10);
     expect([...WEAPON_ORDER].sort()).toEqual(Object.keys(WEAPONS).sort());
     expect(MAX_WEAPONS).toBeLessThan(WEAPON_ORDER.length);
   });
@@ -269,7 +270,19 @@ describe('성장', () => {
       expect((m1.damage * m1.count * m1.reach) / m1.cooldown).toBeGreaterThanOrEqual(
         (m0.damage * m0.count * m0.reach) / m0.cooldown,
       );
+      const [h0, h1] = [beamStats(level - 1, base), beamStats(level, base)];
+      expect(h1.damage * h1.count * h1.length * h1.spin).toBeGreaterThanOrEqual(h0.damage * h0.count * h0.length * h0.spin);
+      expect(h1.length).toBeGreaterThanOrEqual(h0.length);
     }
+  });
+
+  it('등대빛은 범위 강화로 길어지고, 재사용이 줄면 빨리 돈다', () => {
+    const plain = beamStats(1, base);
+    expect(beamStats(1, modifiers({ lens: 2 }, {})).length).toBeCloseTo(plain.length * 1.2);
+    expect(beamStats(1, modifiers({ hourglass: 1 }, {})).spin).toBeCloseTo(plain.spin / 0.93);
+    expect(beamStats(1, modifiers({ wick: 1 }, {})).damage).toBeCloseTo(plain.damage * 1.1);
+    // 한 줄기에서 둘, 진화하면 셋
+    expect([1, 3, 4, MAX_LEVEL, EVOLVE_LEVEL].map((level) => beamStats(level, base).count)).toEqual([1, 1, 2, 2, 3]);
   });
 
   it('진화하면 한 단계 오른 것보다 눈에 띄게 강해진다', () => {
@@ -283,6 +296,7 @@ describe('성장', () => {
       const b = boltStats(level, base);
       const r = bellStats(level, base);
       const m = moonStats(level, base);
+      const h = beamStats(level, base);
       // 초승달은 가는 길과 오는 길에 한 번씩, 보름달은 나는 동안 rehit초마다 벤다.
       const cuts = m.rehit > 0 ? (2 * m.reach) / m.speed / m.rehit : 2;
       return [
@@ -295,6 +309,7 @@ describe('성장', () => {
         (b.damage * b.jumps * b.chains) / b.cooldown,
         (r.damage * r.radius ** 2 * r.rings) / r.cooldown,
         (m.damage * m.count * cuts) / m.cooldown,
+        h.damage * h.count * h.length ** 2 * h.spin,
       ];
     };
     const before = power(MAX_LEVEL);

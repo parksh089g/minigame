@@ -112,6 +112,8 @@ export const LOOK = {
   fireEvo: COLOR.red,
   /** 종소리의 고리와, 부싯돌이 터진 자리 */
   bell: COLOR.yellow,
+  beam: COLOR.yellow,
+  beamCore: COLOR.white,
   bellEvo: COLOR.cyan,
   flint: COLOR.orange,
   bolt: COLOR.white,
