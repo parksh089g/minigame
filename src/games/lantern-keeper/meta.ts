@@ -79,7 +79,7 @@ export interface LanternMeta {
   daily: DailyRecord;
   /** 공유받은 주소에 실려 온 친구의 오늘의 판 점수(daily.ts). 그날 동안 넘어 볼 기록으로 보인다. */
   friend: FriendScore | null;
-  /** 들어온 줄 아는 캐릭터와 무기. 업데이트로 여기 없는 것이 생기면 준비 화면이 한 번 알린다(announceNews). */
+  /** 들어온 줄 아는 캐릭터와 무기와 스테이지. 업데이트로 여기 없는 것이 생기면 준비 화면이 한 번 알린다(announceNews). */
   known: string[];
   /** 새로 들어왔는데 아직 눌러 보지 않은 캐릭터. 준비 화면의 카드에 "새"가 붙는다. */
   fresh: HeroId[];
@@ -87,8 +87,8 @@ export interface LanternMeta {
   feast: FeastId | null;
 }
 
-/** 지금 있는 캐릭터와 무기 모두. 처음 하는 사람은 이것을 다 아는 것으로 친다(모두 처음 보므로 따로 알리지 않는다). */
-const ALL_KNOWN: readonly string[] = [...HERO_ORDER, ...WEAPON_ORDER];
+/** 지금 있는 캐릭터와 무기와 스테이지 모두. 처음 하는 사람은 이것을 다 아는 것으로 친다(모두 처음 보므로 따로 알리지 않는다). */
+const ALL_KNOWN: readonly string[] = [...HERO_ORDER, ...WEAPON_ORDER, ...STAGE_ORDER];
 /**
  * 들어온 줄 아는 것(known)이 적혀 있지 않은 예전 저장이 알던 것: 다섯 번째 캐릭터 달잡이와 열 번째 무기 등대빛이
  * 들어오기 전의 캐릭터 넷과 무기 아홉. 그 뒤로 들어온 것은 known에 없으면 알린다.
@@ -97,6 +97,11 @@ const OLD_KNOWN: readonly string[] = [
   ...(['keeper', 'stargazer', 'stormer', 'ringer'] satisfies HeroId[]),
   ...(['ember', 'aura', 'firefly', 'star', 'lance', 'oil', 'bolt', 'bell', 'moon'] satisfies WeaponId[]),
 ];
+/**
+ * 스테이지도 알리게 되기 전(다섯 번째 스테이지 빛버섯 숲이 들어오기 전)의 저장이 알던 스테이지 넷.
+ * 적어 둔 known에 스테이지가 하나도 없으면 이 넷을 아는 것으로 친다. 그래야 빛버섯 숲만 한 번 알린다.
+ */
+const OLD_STAGES: readonly StageId[] = ['meadow', 'marsh', 'ridge', 'tundra'];
 
 export function createDefaultMeta(): LanternMeta {
   return {
@@ -168,7 +173,9 @@ export function normalizeMeta(raw: unknown): LanternMeta {
   meta.friend = normalizeFriend(data.friend);
   // 들어온 줄 아는 것이 적혀 있지 않으면, 처음 하는 사람은 지금 것을 모두 아는 것으로 치고
   // 그 전부터 하던 사람은 달잡이와 등대빛이 들어오기 전의 것만 아는 것으로 친다. 그래야 두 가지를 한 번 알린다.
-  const known = Array.isArray(data.known) ? data.known : meta.runs > 0 ? OLD_KNOWN : ALL_KNOWN;
+  // 스테이지가 하나도 적혀 있지 않으면 빛버섯 숲이 들어오기 전의 넷을 아는 것으로 친다.
+  const saved: unknown[] = Array.isArray(data.known) ? data.known : meta.runs > 0 ? [...OLD_KNOWN] : [...ALL_KNOWN];
+  const known = saved.some(isStage) ? saved : [...saved, ...OLD_STAGES];
   meta.known = ALL_KNOWN.filter((id) => known.includes(id));
   const fresh = Array.isArray(data.fresh) ? data.fresh : [];
   meta.fresh = HERO_ORDER.filter((id) => fresh.includes(id));
@@ -277,26 +284,30 @@ export function readEntries(meta: LanternMeta, ids: readonly string[]): LanternM
   return unread.length === meta.unread.length ? meta : { ...meta, unread };
 }
 
-/** 업데이트로 새로 들어왔는데 아직 알리지 않은 캐릭터와 무기 */
+/** 업데이트로 새로 들어왔는데 아직 알리지 않은 캐릭터와 무기와 스테이지 */
 export interface News {
   heroes: HeroId[];
   weapons: WeaponId[];
+  stages: StageId[];
 }
 
 export function unknownNews(meta: LanternMeta): News {
   return {
     heroes: HERO_ORDER.filter((id) => !meta.known.includes(id)),
     weapons: WEAPON_ORDER.filter((id) => !meta.known.includes(id)),
+    stages: STAGE_ORDER.filter((id) => !meta.known.includes(id)),
   };
 }
 
-export const hasNews = (news: News): boolean => news.heroes.length > 0 || news.weapons.length > 0;
+export const hasNews = (news: News): boolean =>
+  news.heroes.length > 0 || news.weapons.length > 0 || news.stages.length > 0;
 
-/** 새로 들어온 것을 알리는 한 줄. 예: "새 캐릭터 달잡이 · 새 무기 등대빛" */
+/** 새로 들어온 것을 알리는 한 줄. 예: "새 캐릭터 달잡이 · 새 무기 등대빛 · 새 스테이지 빛버섯 숲" */
 export function newsLine(news: News): string {
   const parts: string[] = [];
   if (news.heroes.length > 0) parts.push(`새 캐릭터 ${news.heroes.map((id) => HEROES[id].name).join(', ')}`);
   if (news.weapons.length > 0) parts.push(`새 무기 ${news.weapons.map((id) => WEAPONS[id].name).join(', ')}`);
+  if (news.stages.length > 0) parts.push(`새 스테이지 ${news.stages.map((id) => STAGES[id].name).join(', ')}`);
   return parts.join(' · ');
 }
 

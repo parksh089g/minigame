@@ -613,7 +613,7 @@ const BLOBS = {
   matron: { size: 34, body: 6, shade: 5, eye: 4, crown: true, frill: true },
   warden: { size: 34, body: 14, shade: 3, eye: 4, crown: true, frill: true },
   blizzard: { size: 34, body: 12, shade: 13, eye: 9, crown: true, frill: true },
-  elder: { size: 34, body: 15, shade: 7, eye: 5, crown: true, frill: true },
+  elder: { size: 34, body: 15, shade: 14, eye: 5, crown: true, frill: true, cap: 6 },
 } as const satisfies Record<string, BlobLook>;
 
 function drawGem(size: number, rim: number, body: number): HTMLCanvasElement {

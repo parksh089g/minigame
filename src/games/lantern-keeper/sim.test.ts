@@ -2344,6 +2344,32 @@ describe('빛버섯 숲', () => {
     expect(glider.timer).toBeGreaterThan(GLIDE.rest - 0.1);
   });
 
+  it('날다람쥐는 가까이에 부푼 빛버섯이 있으면 그쪽으로 돌아가서 딛는다', () => {
+    const seed = 3;
+    const sim = grove(seed);
+    const shroom = nearShroom(seed);
+    const p = sim.state.player;
+    // 플레이어는 버섯 오른쪽에, 날다람쥐는 버섯 아래에 있다. 곧장 플레이어 쪽으로 가면 버섯을 밟지 않는다.
+    p.x = shroom.x + 100;
+    p.y = shroom.y;
+    const glider = enemy('glider', shroom.x, shroom.y + 60);
+    glider.timer = 0;
+    sim.state.enemies.push(glider);
+    expect(sim.springboard(glider.x, glider.y)).toMatchObject({ key: shroom.key });
+    const before = Math.hypot(glider.x - shroom.x, glider.y - shroom.y);
+    sim.step(STEP, 0, 0);
+    expect(Math.hypot(glider.x - shroom.x, glider.y - shroom.y)).toBeLessThan(before - 0.5);
+    const events = advance(sim, 3);
+    expect(events).toContainEqual({ type: 'pounce' });
+    // 납작해진 버섯은 다시 찾지 않는다.
+    expect(sim.springboard(shroom.x, shroom.y + 60)?.key).not.toBe(shroom.key);
+    // 거기서 뛰어도 플레이어에게 닿지 않는 버섯은 찾지 않는다.
+    const far = grove(seed);
+    far.state.player.x = shroom.x + GLIDE.reach + 20;
+    far.state.player.y = shroom.y;
+    expect(far.springboard(shroom.x, shroom.y + 60)?.key).not.toBe(shroom.key);
+  });
+
   it('날다람쥐가 내려앉을 자리에서 비키면 다치지 않는다', () => {
     const seed = 3;
     const sim = grove(seed);

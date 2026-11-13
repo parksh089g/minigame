@@ -88,12 +88,14 @@ import {
   LEAP,
   PUDDLE_SLOW,
   shroomAt,
+  shroomsAround,
   VENT,
   ventAt,
   ventClock,
   ventPhase,
   ventsAround,
   type Gust,
+  type Shroom,
 } from './terrain';
 
 export const RUN_STATE_VERSION = 3;
@@ -1142,6 +1144,25 @@ export class Sim {
     return until === undefined || until <= this.state.t;
   }
 
+  /**
+   * (x, y)에서 GLIDE.seek 안에 있는 부푼 빛버섯 가운데, 거기서 뛰면 플레이어에게 닿는(GLIDE.reach) 가장 가까운 것.
+   * 정예가 빛버섯을 디디러 돌아가는 곳이다. 없으면 null.
+   */
+  springboard(x: number, y: number): Shroom | null {
+    const s = this.state;
+    const p = s.player;
+    let best: Shroom | null = null;
+    let bestD: number = GLIDE.seek;
+    for (const shroom of shroomsAround(x, y, GLIDE.seek, GLIDE.seek, s.seed)) {
+      const d = Math.hypot(shroom.x - x, shroom.y - y);
+      if (d > bestD || !this.shroomReady(shroom.key)) continue;
+      if (Math.hypot(p.x - shroom.x, p.y - shroom.y) > GLIDE.reach) continue;
+      best = shroom;
+      bestD = d;
+    }
+    return best;
+  }
+
   /** key의 빛버섯을 납작하게 한다. 다시 부푼 버섯은 지워서 판에 저장되는 것이 쌓이지 않게 한다. */
   private squash(key: string): void {
     const s = this.state;
@@ -1739,6 +1760,15 @@ export class Sim {
             e.vy = (dirY * reach) / GLIDE.seconds;
             this.events.push({ type: 'pounce' });
             continue;
+          }
+          // 가까이에 디딜 빛버섯이 있으면 플레이어 대신 그쪽으로 돌아간다.
+          const board = this.springboard(e.x, e.y);
+          if (board) {
+            const bx = board.x - e.x;
+            const by = board.y - e.y;
+            const reach = Math.hypot(bx, by) || 0.001;
+            dirX = bx / reach;
+            dirY = by / reach;
           }
         }
       }
