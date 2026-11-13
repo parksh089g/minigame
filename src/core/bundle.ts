@@ -12,7 +12,10 @@ export const BUNDLE_VERSION = 1;
 export interface SavePart {
   /** 내보낼 값. lean이면 없어도 되는 큰 덩어리(하던 판 같은 것)는 뺀다. */
   read(lean: boolean): Promise<unknown>;
-  /** 가져온 값으로 바꾼다. 값이 없거나 맞지 않으면 처음 상태로 돌린다. */
+  /**
+   * 가져온 값으로 바꾼다. 값이 맞지 않으면 처음 상태로 돌린다. null을 받으면 반드시 처음 상태로 돌린다(resetParts).
+   * undefined는 그 덩어리가 생기기 전에 내보낸 묶음이라는 뜻이라, 지금 것을 그대로 둬도 된다.
+   */
   write(raw: unknown): Promise<void>;
 }
 
@@ -70,6 +73,11 @@ export async function exportBundleText(maxChars = Infinity, pretty = false): Pro
     if (text.length <= maxChars) return text;
   }
   return null;
+}
+
+/** 따로 저장하는 덩어리(등불지기, 새싹 컴퍼니)를 모두 처음 상태로 돌린다. 설정의 "기록 초기화"가 허브 세이브와 함께 지운다. */
+export async function resetParts(): Promise<void> {
+  for (const part of parts.values()) await part.write(null);
 }
 
 /** 내보낸 묶음(또는 예전 세이브 파일)의 글자를 읽어 이 기기의 기록을 바꾼다. 이 앱의 것이 아니면 false. */

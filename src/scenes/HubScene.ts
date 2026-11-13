@@ -21,6 +21,7 @@ import { sfx } from '../core/sfx';
 import { clearedOf, totalCleared } from '../core/stages';
 import { store } from '../core/store';
 import { setToastAnchor } from '../core/toast';
+import { loadTodos, type Todos } from './hub-todo';
 import { settleLastWeek } from './weekly-settle';
 import { claimableMissions } from '../core/weekly';
 import {
@@ -91,6 +92,18 @@ let lastPage = 0;
 /** 별을 누른 뒤 카드를 다시 늘어놓기까지의 틈(ms). 별이 바뀐 것을 먼저 보여 주고 나서 자리를 옮긴다. */
 const STAR_SETTLE_MS = 160;
 
+/**
+ * 두 큰 게임의 오늘 할 일(hub-todo.ts). 저장을 읽는 데 잠깐 걸리므로, 허브를 그릴 때는 지난번에 읽은 것을 먼저 보여 주고
+ * 새로 읽으면 바꾼다. 허브를 열 때마다 기록 줄에서 할 일로 깜박이지 않게 하려는 것이다.
+ */
+let knownTodos: Todos = {};
+
+/** 카드 아랫줄에 쓰는 글과 색 */
+interface CardLine {
+  text: string;
+  color: string;
+}
+
 const OFFLINE_LABEL: Record<OfflineStatus, { text: string; color: number }> = {
   ready: { text: '오프라인 준비 완료', color: THEME.mintDeep },
   preparing: { text: '오프라인 준비 중', color: THEME.gold },
@@ -121,6 +134,8 @@ export class HubScene extends Phaser.Scene {
   private cardsDirty = false;
   /** 새 카드가 밀려 들어오는 방향(1이면 오른쪽에서). 0이면 그냥 나타난다. */
   private slideFrom = 0;
+  /** 지금 쪽에 놓인 카드의 아랫줄과, 할 일이 없을 때 그 자리에 쓰는 기록 줄. 할 일을 새로 읽으면 바꾼다. */
+  private readonly cardLines = new Map<string, { label: Phaser.GameObjects.Text; record: CardLine }>();
 
   constructor() {
     super(SCENE.hub);
@@ -147,7 +162,9 @@ export class HubScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       unsubscribe();
       setToastAnchor(null);
+      this.cardLines.clear();
     });
+    this.refreshTodos();
 
     fadeIn(this);
   }
@@ -408,6 +425,7 @@ export class HubScene extends Phaser.Scene {
     this.tweens.killTweensOf(this.cardObjects);
     for (const object of this.cardObjects) object.destroy();
     this.cardObjects = [];
+    this.cardLines.clear();
     pageSlice(this.cards(), this.page, this.layout.perPage).forEach((card, index) => {
       const x = MARGIN + (index % COLUMNS) * (TILE_WIDTH + TILE_GAP);
       const y = CARDS_TOP + Math.floor(index / COLUMNS) * ROW_STEP;
@@ -454,20 +472,21 @@ export class HubScene extends Phaser.Scene {
       // 이어지는 성장 게임은 최고 기록 자리에 지금까지 쌓은 평판을 보여 준다.
       // 단계 모드로만 해 본 게임은 최고 점수가 없으니, 0점이라고 적는 대신 깬 단계를 적는다.
       const cleared = record.best === 0 ? clearedOf(store.data.stages, game.id) : 0;
-      const line = game.versus
+      const line: CardLine = game.versus
         ? { text: '둘이서', color: THEME_CSS.lilacDeep }
         : cleared > 0
           ? { text: `깬 단계 ${cleared}`, color: THEME_CSS.accent }
           : record.plays > 0
             ? { text: `${game.ongoing ? '평판' : '최고'} ${record.best}`, color: THEME_CSS.accent }
             : { text: '새 게임', color: THEME_CSS.faint };
-      const best = addText(this, center, TILE.recordY, line.text, {
+      const label = addText(this, center, TILE.recordY, line.text, {
         size: FONT_SIZE.small,
         color: line.color,
         originX: 0.5,
       });
-      best.setScale(Math.min(1, (TILE_WIDTH - 4) / best.width));
-      card.add(best);
+      this.cardLines.set(game.id, { label, record: line });
+      this.paintLine(label, knownTodos[game.id], line);
+      card.add(label);
     } else {
       icon.setAlpha(0.35);
       const soon = addText(this, center, TILE.recordY, '준비 중', {
@@ -539,6 +558,28 @@ export class HubScene extends Phaser.Scene {
       fadeToScene(this, SCENE.stages);
     });
     this.cardObjects.push(zone);
+  }
+
+  /**
+   * 카드의 아랫줄을 쓴다. 오늘 할 일이 있으면(두 큰 게임) 기록 대신 그것을 초록 글씨로 쓰고, 없으면 기록 줄을 쓴다.
+   * 긴 글도 카드 안에 들어가도록 줄인다.
+   */
+  private paintLine(label: Phaser.GameObjects.Text, todo: string | undefined, record: CardLine): void {
+    const line = todo ? { text: todo, color: THEME_CSS.good } : record;
+    label.setText(line.text).setColor(line.color);
+    label.setScale(Math.min(1, (TILE_WIDTH - 4) / label.width));
+  }
+
+  /** 두 큰 게임의 저장을 읽어서 오늘 할 일을 새로 고친다. 읽는 사이에 허브를 떠났으면 다음에 열 때 쓴다. */
+  private refreshTodos(): void {
+    void loadTodos((id) => getRecord(store.data, id).plays > 0)
+      .then((todos) => {
+        knownTodos = todos;
+        for (const [id, line] of this.cardLines) {
+          if (line.label.active) this.paintLine(line.label, todos[id], line.record);
+        }
+      })
+      .catch(() => undefined);
   }
 
   /** 게임을 하러 간다. 방금 한 게임은 목록의 앞쪽으로 오므로, 돌아왔을 때는 그 게임이 보이는 첫 쪽을 연다. */

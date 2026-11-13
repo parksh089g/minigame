@@ -244,6 +244,12 @@ export const OFFICE_COINS: readonly number[] = [0, 10, 20, 40, 80];
  */
 export const AWAY = { minSeconds: 60, maxSeconds: 4 * 3600, rate: 0.25 } as const;
 
+/**
+ * 회사에서 보낸 게임("우리 게임")을 하고 돌아오면, 그동안은 maxSeconds까지 회사를 열어 둔 것으로 친다.
+ * 별을 따라고 보낸 게임이라 하고 왔다고 손해를 보지 않게 한다. 그보다 오래 비웠으면 나머지는 닫아 둔 동안(AWAY)이다.
+ */
+export const PLAY_TRIP = { maxSeconds: 30 * 60 } as const;
+
 // ───────── 응원 ─────────
 
 /** 일하는 책상을 누르면 이만큼(초) 동안 그 자리가 CHEER_BOOST배로 빨라진다. 다시 누르면 처음부터 다시 센다. */

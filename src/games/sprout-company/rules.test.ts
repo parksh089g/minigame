@@ -17,6 +17,7 @@ import {
   LEAD,
   LEVEL_SPEED,
   OFFICES,
+  PLAY_TRIP,
   PROJECT_ORDER,
   PROJECTS,
   QUEUE,
@@ -77,6 +78,7 @@ import {
   moveBlock,
   moveOffice,
   normalizeCompany,
+  passOpen,
   projectBonus,
   projectReputation,
   projectWork,
@@ -592,6 +594,30 @@ describe('닫아 둔 동안', () => {
     expect(isReady(state)).toBe(true);
     // 출시는 돌아와서 직접 한다.
     expect(state.releases).toBe(0);
+  });
+
+  it('여기서 보낸 게임을 하고 온 동안은 열어 둔 것처럼 평소만큼 번다', () => {
+    const played = released();
+    const away = released();
+    const rate = incomePerSecond(played);
+    const passed = passOpen(played, 600, () => 0.5);
+    expect(passed.leaves).toBeCloseTo(rate * 600);
+    expect(passed.releases).toEqual([]);
+    // 닫아 둔 것으로 셈하면 그 일부만 번다.
+    expect(catchUp(away, 600)?.leaves).toBeCloseTo(passed.leaves * AWAY.rate);
+    expect(passOpen(released(), 0).leaves).toBe(0);
+  });
+
+  it('하고 온 동안에도 팀장이 카드를 맡기고, 예약한 게임은 저절로 출시된다', () => {
+    const state = grown(OFFICES.length - 1);
+    state.leaves = 1e12;
+    expect(promoteLead(state)).toBe(true);
+    startProject(state, 'lightning-tap');
+    expect(enqueue(state, 'stack-tower')).toBe(true);
+    const before = state.releases;
+    const passed = passOpen(state, PLAY_TRIP.maxSeconds, () => 0.5);
+    expect(passed.releases.map((done) => done.id)).toContain('lightning-tap');
+    expect(state.releases).toBe(before + passed.releases.length);
   });
 
   it('시간을 짧게 적는다', () => {

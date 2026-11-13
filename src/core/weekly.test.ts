@@ -8,14 +8,17 @@ import {
   daysLeft,
   GENRES,
   MISSION_IDS,
+  MISSION_RULES,
   missionProgress,
   missionsFor,
   normalizeWeekly,
   pickedGame,
   recordWeeklyPlay,
+  unclaimedFromLastWeek,
   weekContext,
   weekKeyOf,
   weeklyFor,
+  type BigMission,
   type MissionKind,
   type WeekContext,
   type WeeklyGame,
@@ -209,7 +212,7 @@ describe('지금 따질 주', () => {
 
   it('그 주의 미션을 함께 돌려준다', () => {
     const week = weekContext(createWeekly(), '2026-11-12', GAMES);
-    expect(week).toEqual({ weekKey: WEEK, missions: missionsFor(WEEK, GAMES) });
+    expect(week).toEqual({ weekKey: WEEK, missions: missionsFor(WEEK, GAMES), games: GAMES });
   });
 });
 
@@ -224,6 +227,7 @@ describe('한 주의 기록', () => {
       coins: 37,
       dailyClears: 1,
       claimed: [],
+      rules: MISSION_RULES,
     });
   });
 
@@ -237,7 +241,14 @@ describe('한 주의 기록', () => {
   it('주가 바뀌면 처음부터 다시 센다', () => {
     const last = { ...played(['p1', 'p1', 'a1']), coins: 50, claimed: ['easy' as const] };
     const next = recordWeeklyPlay(last, NEXT_WEEK, { gameId: 'p2', coins: 3, dailyCleared: false });
-    expect(next).toEqual({ weekKey: NEXT_WEEK, plays: { p2: 1 }, coins: 3, dailyClears: 0, claimed: [] });
+    expect(next).toEqual({
+      weekKey: NEXT_WEEK,
+      plays: { p2: 1 },
+      coins: 3,
+      dailyClears: 0,
+      claimed: [],
+      rules: MISSION_RULES,
+    });
   });
 
   it('기록보다 앞선 주로는 세지 않는다', () => {
@@ -250,7 +261,7 @@ describe('한 주의 기록', () => {
     const ahead = { ...played(['p1', 'p1'], '2027-11-08'), coins: 40, claimed: ['easy' as const] };
     expect(weeklyFor(ahead, WEEK)).toEqual({ ...createWeekly(), weekKey: WEEK });
     const next = recordWeeklyPlay(ahead, WEEK, { gameId: 'a1', coins: 2, dailyCleared: false });
-    expect(next).toEqual({ weekKey: WEEK, plays: { a1: 1 }, coins: 2, dailyClears: 0, claimed: [] });
+    expect(next).toEqual({ weekKey: WEEK, plays: { a1: 1 }, coins: 2, dailyClears: 0, claimed: [], rules: MISSION_RULES });
   });
 
   it('weeklyFor는 같은 주면 그대로, 새 주면 빈 기록을 준다', () => {
@@ -472,8 +483,124 @@ describe('normalizeWeekly', () => {
 
   it('plays와 claimed의 모양이 틀려도 깨지지 않는다', () => {
     expect(normalizeWeekly({ weekKey: WEEK, plays: ['p1'], claimed: 'easy' })).toEqual({
-      ...createWeekly(),
       weekKey: WEEK,
+      plays: {},
+      coins: 0,
+      dailyClears: 0,
+      claimed: [],
     });
+  });
+
+  it('미션을 정한 규칙의 판을 지킨다. 없으면 옛 기록이고, 모르는 새 판은 아는 가장 새 판으로 본다', () => {
+    const raw = { weekKey: WEEK, plays: { p1: 1 }, coins: 0, dailyClears: 0, claimed: [] };
+    expect(normalizeWeekly(raw)).not.toHaveProperty('rules');
+    expect(normalizeWeekly({ ...raw, rules: 1 }).rules).toBe(1);
+    expect(normalizeWeekly({ ...raw, rules: MISSION_RULES }).rules).toBe(MISSION_RULES);
+    expect(normalizeWeekly({ ...raw, rules: MISSION_RULES + 5 }).rules).toBe(MISSION_RULES);
+    expect(normalizeWeekly({ ...raw, rules: '2' })).not.toHaveProperty('rules');
+    expect(normalizeWeekly({ ...raw, rules: -1 })).not.toHaveProperty('rules');
+  });
+});
+
+describe('큰 게임 미션', () => {
+  const big = (title: string, unit: string): BigMission => ({
+    title: (goal) => `${title} ${goal}${unit}`,
+    description: '이번 주의 큰 게임이에요',
+    tiers: [
+      [2, 50],
+      [3, 55],
+      [4, 60],
+    ],
+  });
+  const LANTERN: WeeklyGame = { id: 'long', title: '등불지기', genre: null, quick: false, big: big('등불지기', '판') };
+  const COMPANY: WeeklyGame = { id: 'firm', title: '새싹 컴퍼니', genre: null, quick: false, big: big('새싹 컴퍼니', '번 출시') };
+  const WITH_BIG: WeeklyGame[] = [...GAMES.filter((game) => game.id !== 'long'), LANTERN, COMPANY];
+
+  it('보통 미션 자리에 네 주에 한 번 나오고, 나올 때마다 큰 게임을 번갈아 고른다', () => {
+    const list = weeks(16).map((weekKey) => missionsFor(weekKey, WITH_BIG));
+    const bigWeeks = list.map((missions, index) => ({ index, mission: missions[1] })).filter((entry) => entry.mission.kind === 'big');
+    expect(bigWeeks).toHaveLength(4);
+    for (let index = 1; index < bigWeeks.length; index += 1) {
+      expect(bigWeeks[index].index - bigWeeks[index - 1].index).toBe(4);
+      expect(bigWeeks[index].mission.counts).not.toEqual(bigWeeks[index - 1].mission.counts);
+    }
+    for (const { mission } of bigWeeks) {
+      const game = WITH_BIG.find((candidate) => candidate.id === mission.counts?.[0]);
+      expect(game?.big, mission.title).toBeDefined();
+      expect(mission.title).toBe(game?.big?.title(mission.goal));
+      expect(game?.big?.tiers.map(([goal]) => goal)).toContain(mission.goal);
+    }
+    // 큰 게임은 쉬운 미션과 어려운 미션, "이번 주의 게임"에는 나오지 않는다.
+    for (const missions of list) {
+      expect(missions.filter((mission) => mission.kind === 'big').map((mission) => mission.id)).not.toContain('easy');
+      const game = missions.find((mission) => mission.kind === 'game');
+      if (game) expect(['long', 'firm']).not.toContain(game.counts?.[0]);
+    }
+  });
+
+  it('큰 게임이 끼어도 잇닿은 두 주에 같은 보통 미션이 거듭 나오지 않는다', () => {
+    const list = weeks(26).map((weekKey) => missionsFor(weekKey, WITH_BIG));
+    for (let index = 1; index < list.length; index += 1) {
+      expect(list[index][1].title).not.toBe(list[index - 1][1].title);
+    }
+  });
+
+  it('그 게임의 판만 센다. 새싹 컴퍼니는 출시 한 번이 한 판이다', () => {
+    const weekKey = weeks(8).find((key) => missionsFor(key, WITH_BIG)[1].counts?.[0] === 'firm') ?? '';
+    const [, mission] = missionsFor(weekKey, WITH_BIG);
+    const state = played(['firm', 'p1', 'firm', 'long'], weekKey);
+    expect(missionProgress(mission, state).current).toBe(2);
+  });
+
+  it('큰 게임이 없으면 옛 규칙과 같은 미션이 나온다', () => {
+    for (const weekKey of weeks(12)) expect(missionsFor(weekKey, GAMES)).toEqual(missionsFor(weekKey, GAMES, undefined, 1));
+  });
+
+  it('규칙 1로 시작한 주는 큰 게임 미션 없이 그 주의 미션 그대로다', () => {
+    for (const weekKey of weeks(12)) {
+      expect(missionsFor(weekKey, WITH_BIG, undefined, 1).some((mission) => mission.kind === 'big')).toBe(false);
+    }
+    // 새 버전이 깔리기 전에 이번 주의 첫 판을 한 기록(규칙이 적히지 않은 기록)이다.
+    const bigWeek = weeks(8).find((key) => missionsFor(key, WITH_BIG)[1].kind === 'big') ?? '';
+    const old: WeeklyState = { weekKey: bigWeek, plays: { p1: 1 }, coins: 0, dailyClears: 0, claimed: [] };
+    const week = weekContext(old, bigWeek, WITH_BIG);
+    expect(week?.missions).toEqual(missionsFor(bigWeek, WITH_BIG, undefined, 1));
+    // 기록이 없는 새 주는 지금의 규칙으로 정한다. 그 주의 첫 판에 규칙이 적힌다.
+    const fresh = weekContext(createWeekly(), bigWeek, WITH_BIG);
+    expect(fresh?.missions[1].kind).toBe('big');
+    const first = recordWeeklyPlay(createWeekly(), bigWeek, { gameId: 'p1', coins: 0, dailyCleared: false });
+    expect(first.rules).toBe(MISSION_RULES);
+    expect(weekContext(first, bigWeek, WITH_BIG)?.missions).toEqual(fresh?.missions);
+    // 옛 기록에 한 판을 더해도 규칙은 그대로다.
+    expect(recordWeeklyPlay(old, bigWeek, { gameId: 'p1', coins: 0, dailyCleared: false })).not.toHaveProperty('rules');
+  });
+
+  it('지난주의 받지 않은 보상은 그 주를 시작한 규칙의 미션으로 따진다', () => {
+    const bigWeek = weeks(8).find((key) => missionsFor(key, WITH_BIG)[1].kind === 'big') ?? '';
+    const nextWeek = dateKeyOfDay((dayNumber(bigWeek) ?? 0) + 7);
+    const oldNormal = missionsFor(bigWeek, WITH_BIG, undefined, 1)[1];
+    // 옛 규칙의 보통 미션을 채운 기록이다. 새 규칙으로 따지면 큰 게임 미션이라 채우지 못한 것이 된다.
+    const ids = oldNormal.counts ?? [];
+    const plays = Array.from({ length: oldNormal.goal }, (_, index) => ids[index % ids.length]);
+    const old = played(plays, bigWeek, { weekKey: bigWeek, plays: {}, coins: 0, dailyClears: 0, claimed: [] });
+    expect(old).not.toHaveProperty('rules');
+    expect(unclaimedFromLastWeek(old, nextWeek, WITH_BIG).map((mission) => mission.title)).toContain(oldNormal.title);
+    const fresh = { ...old, rules: MISSION_RULES };
+    expect(unclaimedFromLastWeek(fresh, nextWeek, WITH_BIG).map((mission) => mission.title)).not.toContain(oldNormal.title);
+  });
+
+  it('큰 게임 미션의 게임을 적어 두어, 큰 게임이 늘어도 그 주의 미션이 바뀌지 않는다', () => {
+    const bigWeek = weeks(8).find((key) => missionsFor(key, WITH_BIG)[1].kind === 'big') ?? '';
+    const week = weekContext(createWeekly(), bigWeek, WITH_BIG) as WeekContext;
+    const pick = pickedGame(week);
+    expect(['long', 'firm']).toContain(pick);
+    const state = recordWeeklyPlay(createWeekly(), bigWeek, { gameId: 'p1', coins: 0, dailyCleared: false }, pick);
+    expect(state.pick).toBe(pick);
+    // 큰 게임이 하나 더 늘어 앞에 놓인 버전이 깔려도 적어 둔 게임 그대로다.
+    const grown: WeeklyGame[] = [
+      { id: 'zoo', title: '동물원', genre: null, quick: false, big: big('동물원', '판') },
+      ...WITH_BIG,
+    ];
+    expect(weekContext(state, bigWeek, grown)?.missions[1].counts).toEqual([pick]);
   });
 });

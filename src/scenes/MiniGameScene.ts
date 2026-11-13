@@ -11,6 +11,7 @@ import { holdToasts } from '../core/toast';
 import { fadeIn, PixelButton } from '../core/ui';
 import { getGame, thisWeek, todaysChallenge } from '../games/registry';
 import { floatText } from './GameHud';
+import { announceLastWeek } from './weekly-settle';
 import { syncScores } from '../online/online';
 
 /** 결과 화면에 덧붙여 보여 줄 한 줄. 예: ['최대 콤보', '12'] */
@@ -271,6 +272,7 @@ export abstract class MiniGameScene extends Phaser.Scene implements BackAware {
       todaysChallenge(),
       thisWeek(store.data.weekly),
     );
+    announceLastWeek(result.lastWeekCoins);
     // 랭킹에 참여하고 있으면 결과 화면이 뜨기 전에 기록을 올려 둔다. 인터넷이 없으면 다음에 올라간다.
     void syncScores();
     const data: ResultData = {
@@ -302,6 +304,7 @@ export abstract class MiniGameScene extends Phaser.Scene implements BackAware {
 
     const game = getGame(this.gameId);
     const result = cleared ? store.clearStage(this.gameId, level, thisWeek(store.data.weekly)) : null;
+    if (result) announceLastWeek(result.lastWeekCoins);
     const data: StageResultData = {
       title: game?.title ?? '단계',
       sceneKey: this.scene.key,
@@ -333,6 +336,8 @@ export abstract class MiniGameScene extends Phaser.Scene implements BackAware {
     this.playing = false;
     this.playFinishSound();
     const game = getGame(this.gameId);
-    return store.recordPlay(this.gameId, 0, game?.coinsFor(0) ?? 0, null, thisWeek(store.data.weekly));
+    const result = store.recordPlay(this.gameId, 0, game?.coinsFor(0) ?? 0, null, thisWeek(store.data.weekly));
+    announceLastWeek(result.lastWeekCoins);
+    return result;
   }
 }
