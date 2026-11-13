@@ -8,7 +8,8 @@ import { addText, fadeToScene } from '../../core/ui';
 import { noteDayScore } from '../../online/online';
 import { showBanner } from '../../scenes/GameHud';
 import { MiniGameScene, type PauseExtra, type ResultStat } from '../../scenes/MiniGameScene';
-import { registerLanternTextures } from './art';
+import type { SharedStart } from '../../share/link';
+import { LOOK, registerLanternTextures } from './art';
 import { damageRanking } from './build';
 import { newlyDone } from './challenges';
 import { CHEST, ENEMIES, LANTERN_GAME_ID, LANTERN_SCENE, STAGES, WEAPONS } from './data';
@@ -18,9 +19,9 @@ import { iconKey } from './icons';
 import { Joystick } from './joystick';
 import { BOON_HEADER, levelUpHeader, showChoices, TICKET_HEADER } from './levelup';
 import { buildLobby, parentPage, type LobbyPage } from './lobby';
-import { DAILY_REWARD, dailyPlan, dailyToday, dayIndexOf } from './daily';
+import { DAILY_REWARD, dailyPlan, dailyShare, dailyToday, dayIndexOf, SHARED_DAY_PASSED } from './daily';
 import { showDawnChoice } from './dawn';
-import { applyRun, learnTip, metaStore, newDepth, newUnlocks } from './meta';
+import { applyRun, learnTip, metaStore, newDepth, newUnlocks, type StoreChange } from './meta';
 import { BOSS_SONG, FINAL_SONG, LOBBY_SONG, STAGE_SONGS } from './music';
 import { pauseInfo } from './pauseinfo';
 import {
@@ -36,22 +37,29 @@ import {
   upgradeTitle,
   type Upgrade,
 } from './rules';
-import { createRun, runDawned, Sim, type SimEvent } from './sim';
+import { createRun, runDawned, Sim, type RunState, type SimEvent } from './sim';
 import { SoundBoard, type Note } from './sound';
 import { TIP_IDS, tipFor, TIPS, type TipId } from './tips';
 import { RunView } from './view';
 
 /** 씬을 시작할 때 넘기는 값. 없으면 준비 화면부터 연다. */
-interface StartData {
+interface StartData extends SharedStart {
   /** daily는 오늘의 판을 새로 시작한다. settle은 저장해 둔 판을 그 자리에서 마치고 결과를 받는다. */
   mode?: 'new' | 'resume' | 'daily' | 'settle';
   /** 준비 화면의 어느 쪽을 열지 */
   page?: LobbyPage;
   /** 그 쪽의 목록이 여러 묶음으로 나뉘었을 때 보일 묶음(0부터) */
   list?: number;
+  /** 준비 화면에 잠깐 띄울 한 줄 */
+  notice?: string;
 }
 
 type Phase = 'loading' | 'lobby' | 'run' | 'choosing' | 'over';
+
+/** 저장된 판이 어느 판인지 가리는 글. 같은 판을 이어 저장한 것이면 같고, 판이 없으면 빈 글이다. */
+function runKey(run: RunState | null): string {
+  return run ? `${run.seed}:${run.hero}:${run.stage}:${run.depth}:${run.daily ?? ''}` : '';
+}
 
 const STEP = 1 / 60;
 /** 한 프레임에 따라잡는 가장 긴 시간(초). 탭이 멈췄다 돌아와도 한꺼번에 몰아서 돌리지 않는다. */
@@ -92,6 +100,14 @@ export class LanternKeeperScene extends MiniGameScene {
   private phase: Phase = 'loading';
   /** 준비 화면에서 지금 열려 있는 쪽 */
   private lobbyPage: LobbyPage = 'main';
+  private lobbyList?: number;
+  /** 준비 화면을 그릴 때 저장되어 있던 판이 어느 판인지(runKey). 다른 곳이 같은 판을 이어 저장할 때마다 다시 그리지 않으려고 적어 둔다. */
+  private lobbyRun = '';
+  /**
+   * 같은 기기의 다른 곳(설치한 앱이나 다른 탭)이 하던 판을 저장하거나 지웠다. 판은 기기에 하나만 남으므로
+   * 이 곳은 들고 있던 판을 놓고 준비 화면으로 간다. 멈춰 있는 동안이었으면 다시 이어 할 때 간다.
+   */
+  private taken = false;
   private sim!: Sim;
   private view!: RunView;
   private stick!: Joystick;
@@ -119,8 +135,11 @@ export class LanternKeeperScene extends MiniGameScene {
 
   create(data: StartData = {}): void {
     const mode = data.mode;
-    const page = data.page ?? 'main';
+    // 오늘의 판을 공유한 주소로 들어왔으면 오늘의 판 쪽을 바로 연다. 그날이 지났으면 오늘의 판이라고 알린다.
+    const shared = data.sharedDay !== undefined && mode === undefined;
+    const page = shared ? 'daily' : (data.page ?? 'main');
     const list = data.list;
+    const notice = shared && data.sharedDay !== dayIndexOf(new Date()) ? SHARED_DAY_PASSED : data.notice;
     // Phaser는 값 없이 다시 시작하면 지난번 값을 그대로 넘긴다. "다시 하기"가 준비 화면으로 가도록 비워 둔다.
     this.sys.settings.data = {};
     this.beginMiniGame();
@@ -141,27 +160,39 @@ export class LanternKeeperScene extends MiniGameScene {
     music.hush(false);
     const rest = (): void => music.rest();
     this.events.on(Phaser.Scenes.Events.PAUSE, rest);
+    // 같은 기기의 다른 곳에서 진행이나 판을 저장하면 알려 온다.
+    this.taken = false;
+    const unwatch = metaStore.onChange((change) => this.onStoreChange(change));
+    const leave = (): void => {
+      if (this.taken) this.leaveTakenRun();
+    };
+    this.events.on(Phaser.Scenes.Events.RESUME, leave);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.events.off(Phaser.Scenes.Events.PAUSE, rest);
+      this.events.off(Phaser.Scenes.Events.RESUME, leave);
+      unwatch();
       rest();
     });
 
-    void metaStore.load().then(() => {
+    // 다른 곳에서 그사이 저장한 것이 있으면 그것을 읽어 와서 연다.
+    void metaStore.refresh().then(() => {
       // 불러오는 사이에 씬을 떠났으면 아무것도 하지 않는다.
       if (!this.sys.isActive() || this.phase !== 'loading') return;
       if (mode === 'new') this.startRun(false);
       else if (mode === 'daily') this.startRun(false, true);
       else if (mode === 'resume' && metaStore.run) this.startRun(true);
       else if (mode === 'settle' && runDawned(metaStore.run)) this.startRun(true, false, true);
-      else this.openLobby(page, list);
+      else this.openLobby(page, list, notice);
     });
   }
 
   // ------------------------------------------------------------ 준비 화면
 
-  private openLobby(page: LobbyPage, list?: number): void {
+  private openLobby(page: LobbyPage, list?: number, notice?: string): void {
     this.phase = 'lobby';
     this.lobbyPage = page;
+    this.lobbyList = list;
+    this.lobbyRun = runKey(metaStore.run);
     music.play(LOBBY_SONG);
     buildLobby(
       this,
@@ -180,6 +211,53 @@ export class LanternKeeperScene extends MiniGameScene {
       page,
       list,
     );
+    if (notice) this.showLobbyNotice(notice);
+  }
+
+  /** 준비 화면 위에 한 줄을 잠깐 띄운다. 어두운 띠를 깔아서 뒤의 글자와 섞이지 않게 한다. */
+  private showLobbyNotice(text: string): void {
+    const y = Math.round(this.scale.height * 0.3);
+    const label = addText(this, GAME_WIDTH / 2, y, text, { color: CSS.white, originX: 0.5, originY: 0.5 }).setDepth(
+      DEPTH.hud + 1,
+    );
+    const back = this.add
+      .rectangle(GAME_WIDTH / 2, y, Math.min(GAME_WIDTH - 8, label.width + 20), label.height + 12, LOOK.noticeFill, 0.94)
+      .setStrokeStyle(1, LOOK.noticeEdge)
+      .setDepth(DEPTH.hud);
+    this.tweens.add({
+      targets: [label, back],
+      alpha: 0,
+      delay: 2400,
+      duration: 500,
+      onComplete: () => {
+        label.destroy();
+        back.destroy();
+      },
+    });
+  }
+
+  /**
+   * 같은 기기의 다른 곳에서 진행(불씨, 강화)이나 하던 판을 저장했다. 준비 화면이면 새 진행으로 다시 그리고,
+   * 판을 하던 중에 다른 곳이 판을 저장하거나 지웠으면 이 곳의 판을 놓는다. 불씨와 강화는 판이 끝날 때 새것에 더한다.
+   */
+  private onStoreChange(change: StoreChange): void {
+    if (this.phase === 'lobby') {
+      // 다른 곳이 하던 판을 이어 저장하기만 했으면(20초마다) 그대로 둔다. 이어 할 때는 어차피 가장 새로 저장된 판을 연다.
+      if (!change.meta && runKey(metaStore.run) === this.lobbyRun) return;
+      this.scene.restart({ page: this.lobbyPage, list: this.lobbyList } satisfies StartData);
+      return;
+    }
+    if (!change.run || (this.phase !== 'run' && this.phase !== 'choosing')) return;
+    this.taken = true;
+    // 멈춰 있으면(일시정지 화면이 떠 있으면) 다시 이어 하려 할 때 준비 화면으로 간다.
+    if (!this.scene.isPaused()) this.leaveTakenRun();
+  }
+
+  /** 다른 곳이 가져간 판을 놓고 준비 화면으로 간다. 이 곳의 낡은 판은 저장하지 않는다. */
+  private leaveTakenRun(): void {
+    this.taken = false;
+    this.phase = 'loading';
+    this.scene.restart({ notice: '다른 곳에서 판을 이어 갔어요' } satisfies StartData);
   }
 
   /**
@@ -751,7 +829,8 @@ export class LanternKeeperScene extends MiniGameScene {
 
   private saveRun(): void {
     this.sinceSave = 0;
-    if (!this.sim.state.over) metaStore.setRun(this.sim.state);
+    // 다른 곳이 가져간 판이면 저장하지 않는다. 그 곳의 새 판을 이 곳의 낡은 판으로 덮지 않도록.
+    if (!this.sim.state.over && !this.taken) metaStore.setRun(this.sim.state);
   }
 
   /** 뒤로 가기: 준비 화면에서는 한 걸음 뒤로(오늘의 랭킹 → 오늘의 판 → 고르는 쪽 → 허브), 판 중에는 일시정지 */
@@ -771,6 +850,14 @@ export class LanternKeeperScene extends MiniGameScene {
     // 앱이 가려진 채로 닫혀도 이어서 할 수 있게 먼저 저장한다.
     this.saveRun();
     super.pauseGame();
+  }
+
+  /**
+   * 일시정지의 가운데 버튼은 이 게임에서 판을 버리지 않는다. 멈출 때 저장해 둔 판을 남긴 채 준비 화면으로 가서,
+   * 거기서 이어 하거나 새로 시작할 수 있다. 그래서 버튼에도 그렇게 적는다.
+   */
+  protected override restartLabel(): string {
+    return '준비 화면으로';
   }
 
   /** 멈춘 김에 지금 빌드(무기와 패시브의 이름과 레벨, 무기마다 준 피해)를 볼 수 있게 한다. */
@@ -896,7 +983,9 @@ export class LanternKeeperScene extends MiniGameScene {
             chips: ranking.map((row) => ({ texture: iconKey(row.icon), label: String(Math.round(row.share * 100)) })),
           }
         : undefined;
-    this.finishMiniGame(scoreFor(summary), stats, ending, strip);
+    // 오늘의 판이면 그날의 판이라는 것과 캐릭터, 스테이지, 이어 온 날 수를 적은 카드를 보내고, 주소도 오늘의 판을 바로 연다.
+    const share = daily ? dailyShare(daily.day, daily.score, metaStore.data.daily.streak) : undefined;
+    this.finishMiniGame(scoreFor(summary), stats, ending, strip, share);
   }
 
   /** 끝맺음 소리는 endRun에서 새벽 소리나 꺼지는 소리로 따로 낸다. */

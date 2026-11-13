@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { darknessTexture, flashOf, FLOOR_OF, HERO_FRAMES, LK, LOOK } from './art';
 import { ENEMIES, POSTS, STAGES } from './data';
 import { HUD_HEIGHT } from './hud';
-import { auraStats, fireflyStats, isEvolved } from './rules';
+import { auraStats, beamStats, fireflyStats, isEvolved } from './rules';
 import {
   AIM_LOCK_SECONDS,
   CHARGE_SECONDS,
@@ -735,6 +735,26 @@ export class RunView {
       g.fillCircle(this.centerX, this.centerY, stats.radius);
       g.lineStyle(evolved ? 2 : 1, evolved ? LOOK.auraEvoEdge : LOOK.auraEdge, evolved ? 0.7 : 0.55);
       g.strokeCircle(this.centerX, this.centerY, stats.radius);
+    }
+    if (s.weapons.beam) {
+      // 등대빛: 플레이어에게서 뻗어 끝으로 갈수록 퍼지는 빛줄기. 바깥은 노랗고 옅게, 가운데는 희고 밝게 칠한다.
+      const stats = beamStats(s.weapons.beam, sim.mods);
+      const evolved = isEvolved(s.weapons.beam);
+      const turn = s.beamAngle ?? 0;
+      for (let k = 0; k < stats.count; k += 1) {
+        const angle = turn + (k / stats.count) * Math.PI * 2;
+        const ax = Math.cos(angle);
+        const ay = Math.sin(angle);
+        const tipX = this.centerX + ax * stats.length;
+        const tipY = this.centerY + ay * stats.length;
+        for (const [half, color, alpha] of [
+          [stats.width + 3, LOOK.beam, evolved ? 0.4 : 0.32],
+          [stats.width * 0.5 + 0.5, LOOK.beamCore, evolved ? 0.7 : 0.55],
+        ] as const) {
+          g.fillStyle(color, alpha);
+          g.fillTriangle(this.centerX, this.centerY, tipX + ay * half, tipY - ax * half, tipX - ay * half, tipY + ax * half);
+        }
+      }
     }
     this.drawPosts(sim, seconds, offsetX, offsetY, g);
     this.drawGuard(sim, seconds, g);

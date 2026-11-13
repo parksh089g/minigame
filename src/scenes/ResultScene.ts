@@ -237,7 +237,7 @@ export class ResultScene extends Phaser.Scene implements BackAware {
    * 공유 창이 없는 브라우저에서는 문구와 주소를 복사한 뒤 (noticeX, noticeY)에 잠깐 알린다.
    */
   private addShareButton(data: ResultData, x: number, y: number, noticeX: number, noticeY: number): void {
-    const { result } = data;
+    const { result, share } = data;
     this.shareRound += 1;
     const round = this.shareRound;
     this.shareImage = null;
@@ -256,7 +256,11 @@ export class ResultScene extends Phaser.Scene implements BackAware {
           title: data.title,
           score: result.score,
           best: result.best,
-          isNewBest: result.isNewBest,
+          // 게임이 적을 것을 넘겼으면 신기록 띠 대신 그 줄을 적는다.
+          isNewBest: share ? false : result.isNewBest,
+          note: share?.note,
+          detail: share?.detail,
+          invite: share?.invite,
           host: displayHost(pageUrl),
           icon: getGame(data.gameId)?.icon ?? '',
           mascot,
@@ -285,8 +289,8 @@ export class ResultScene extends Phaser.Scene implements BackAware {
         busy = true;
         void sendShare({
           title: shareTitle(data.title),
-          text: shareText(data.title, result.score),
-          url: shareUrl(pageUrl, data.gameId),
+          text: share?.text ?? shareText(data.title, result.score),
+          url: shareUrl(pageUrl, data.gameId, share?.day),
           image: this.shareImage,
         }).then((outcome) => {
           busy = false;
