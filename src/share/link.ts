@@ -6,6 +6,12 @@
 /** 공유 주소에서 게임을 가리키는 쿼리 이름. 한 번 보낸 주소는 계속 돌아다니므로 바꾸지 않는다. */
 export const SHARE_PARAM = 'game';
 
+/** 공유 주소에서 그 게임의 날(등불지기의 오늘의 판)을 가리키는 쿼리 이름. 이것도 바꾸지 않는다. */
+export const SHARE_DAY_PARAM = 'day';
+
+/** 날로 쓸 수 있는 가장 큰 값. 1970년 1월 1일부터 센 날 수라서 이만큼이면 넉넉하다. */
+const MAX_DAY = 999_999;
+
 /** 게임 id로 쓸 수 있는 글자. 주소에 아무 글자나 실려 와도 이 모양이 아니면 버린다. */
 const GAME_ID = /^[a-z0-9-]{1,40}$/;
 
@@ -13,12 +19,42 @@ const GAME_ID = /^[a-z0-9-]{1,40}$/;
  * 그 게임을 바로 여는 주소. pageUrl은 지금 앱이 열려 있는 주소이고, 거기 붙어 있던 쿼리와 해시는 버린다.
  * 예: https://example.com/arcade/?x=1#top 과 path-link 로 https://example.com/arcade/?game=path-link
  */
-export function shareUrl(pageUrl: string, gameId: string): string {
+export function shareUrl(pageUrl: string, gameId: string, day?: number): string {
   const url = new URL(pageUrl);
   url.search = '';
   url.hash = '';
   url.searchParams.set(SHARE_PARAM, gameId);
+  // 그날의 판을 가리키는 주소면 날도 붙인다. 예: ?game=lantern-keeper&day=20770
+  if (day !== undefined) url.searchParams.set(SHARE_DAY_PARAM, String(day));
   return url.toString();
+}
+
+/** 주소의 쿼리에서 공유받은 날을 꺼낸다. 없거나 날의 모양이 아니면 null이다. */
+export function sharedDay(search: string): number | null {
+  const raw = new URLSearchParams(search).get(SHARE_DAY_PARAM);
+  if (raw === null || !/^\d{1,6}$/.test(raw)) return null;
+  const day = Number(raw);
+  return day <= MAX_DAY ? day : null;
+}
+
+/** 그날의 판을 가리키는 공유 주소로 들어왔을 때 게임 씬에 넘기는 것 */
+export interface SharedStart {
+  /** 주소에 적혀 있던 날 */
+  sharedDay?: number;
+}
+
+/** 결과 공유의 카드와 문구, 주소를 게임이 바꿔 적을 때 넘기는 것. 등불지기가 오늘의 판의 결과를 이렇게 보낸다. */
+export interface ShareOverride {
+  /** 카드의 최고 기록 자리에 적을 한 줄 */
+  note: string;
+  /** 그 아래에 작게 적을 한 줄 */
+  detail?: string;
+  /** 카드 아래의 단추에 적을 말 */
+  invite?: string;
+  /** 그림과 함께 보내는 문구 */
+  text: string;
+  /** 주소가 가리킬 날. 받은 사람이 열면 그 게임의 그날 판으로 바로 간다. */
+  day?: number;
 }
 
 /** 주소의 쿼리(location.search)에서 공유받은 게임 id를 꺼낸다. 없거나 id 모양이 아니면 null이다. */
@@ -54,6 +90,7 @@ export function sharedGame<T extends Playable>(
 export function withoutShareParam(pathname: string, search: string, hash: string): string {
   const params = new URLSearchParams(search);
   params.delete(SHARE_PARAM);
+  params.delete(SHARE_DAY_PARAM);
   const rest = params.toString();
   return `${pathname}${rest ? `?${rest}` : ''}${hash}`;
 }

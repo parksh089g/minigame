@@ -93,7 +93,7 @@ export class PauseScene extends Phaser.Scene implements BackAware {
     const buttons: Array<{ label: string; style?: ButtonStyle; onTap: () => void }> = [
       { label: '계속하기', style: 'pink', onTap: () => this.resume() },
       {
-        label: '처음부터 다시',
+        label: data.restartLabel ?? '처음부터 다시',
         style: 'green',
         // 단계 모드였으면 같은 단계를 다시 연다.
         onTap: () =>

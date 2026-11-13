@@ -5,7 +5,8 @@
  * 화면에 의존하지 않는 순수한 값과 함수만 둔다.
  */
 import { rankDayOf, rankDayStart } from '../../online/protocol';
-import { HERO_ORDER, STAGE_ORDER, type HeroId, type StageId } from './data';
+import type { ShareOverride } from '../../share/link';
+import { HERO_ORDER, HEROES, STAGE_ORDER, STAGES, type HeroId, type StageId } from './data';
 
 /** 그날 처음 마친 오늘의 판에 더 주는 불씨 */
 export const DAILY_REWARD = 30;
@@ -96,6 +97,25 @@ export function dailyPlan(day: number): DailyPlan {
     seed: mix(index) & 0x7fffffff,
   };
 }
+
+/**
+ * 오늘의 판의 결과를 공유할 때 카드와 문구에 적을 것. 받은 사람이 주소를 열면 등불지기의 오늘의 판으로 바로 간다.
+ * 카드에는 "11월 13일 오늘의 판 · 3일째"와 "달잡이 · 바람 설원"이 두 줄로 적힌다. streak는 그날까지 이어 온 날 수다.
+ */
+export function dailyShare(day: number, score: number, streak: number): ShareOverride {
+  const plan = dailyPlan(day);
+  const label = `${dayLabel(plan.day)} 오늘의 판`;
+  return {
+    note: streak > 0 ? `${label} · ${Math.floor(streak)}일째` : label,
+    detail: `${HEROES[plan.hero].name} · ${STAGES[plan.stage].name}`,
+    invite: '같은 판 도전하기',
+    text: `포켓 아케이드 [등불지기] ${label} ${score}점! 같은 판에서 겨뤄 볼까요?`,
+    day: plan.day,
+  };
+}
+
+/** 공유받은 주소의 날이 오늘이 아닐 때 준비 화면에 띄우는 한 줄. 지난 날의 판은 다시 할 수 없어서 오늘의 판을 연다. */
+export const SHARED_DAY_PASSED = '그날은 지났어요. 오늘의 판이에요';
 
 export interface DailyRecord {
   /** 마지막으로 오늘의 판을 마친 날. 한 번도 안 했으면 0 */
