@@ -263,7 +263,7 @@ export function modifiers(
     maxHp:
       Math.max(MIN_MAX_HP, PLAYER_BASE.maxHp + 20 * p('coat') + 10 * m('vigor') + (trait.maxHp ?? 0)) +
       BOON_VALUES.bulwark * b('bulwark'),
-    regen: 0.1 * m('mend') + HERB_REGEN * p('herb') + BOON_VALUES.breath * b('breath'),
+    regen: 0.1 * m('mend') + HERB_REGEN * p('herb') + BOON_VALUES.breath * b('breath') + (trait.regen ?? 0),
     taken: (1 - 0.04 * m('armor')) * (trait.taken ?? 1) * BOON_VALUES.ward ** b('ward'),
     guard: guardSeconds(p('hood')),
     spark: sparkChance(p('flint')),
@@ -374,6 +374,36 @@ export interface BeamStats {
   width: number;
   /** 도는 빠르기(라디안/초) */
   spin: number;
+}
+
+export interface TorchStats {
+  /** 한 번 휘두를 때의 피해 */
+  damage: number;
+  cooldown: number;
+  /** 닿는 거리(px) */
+  reach: number;
+  /** 부채꼴의 벌어진 각(라디안) */
+  arc: number;
+  /** 한 번에 휘두르는 쪽의 수. 둘이면 맞은편도 벤다. */
+  count: number;
+  /** 벤 적을 밀어내는 거리(px). 0이면 밀지 않는다. */
+  push: number;
+}
+
+export interface LampStats {
+  /** 한 번에 띄우는 풍등의 수 */
+  count: number;
+  /** 불티를 한 번 떨굴 때의 피해 */
+  damage: number;
+  /** 불티를 떨구는 간격(초) */
+  tick: number;
+  /** 불티가 떨어지는 둘레(px) */
+  radius: number;
+  /** 싸움터에 머무는 시간(초) */
+  duration: number;
+  cooldown: number;
+  /** 날아가는 빠르기(px/초) */
+  speed: number;
 }
 
 const atLeast = (level: number, n: number): number => (level >= n ? 1 : 0);
@@ -498,6 +528,39 @@ export function beamStats(level: number, mods: Modifiers): BeamStats {
     length: (46 + 10 * atLeast(level, 3) + 14 * evo) * mods.area,
     width: 3 + 2 * evo,
     spin: (level >= 5 ? 2.8 : 2.2) / mods.cooldown,
+  };
+}
+
+/**
+ * 횃불: 가까운 적 쪽을 부채꼴로 휘둘러, 닿는 적을 모두 한 번씩 벤다.
+ * 닿는 거리가 짧은 대신 한 번에 세게 때려서, 무리에 붙어 설수록 잘 듣는다.
+ */
+export function torchStats(level: number, mods: Modifiers): TorchStats {
+  const evo = atLeast(level, EVOLVE_LEVEL);
+  return {
+    damage: (10 + 4 * atLeast(level, 2) + 6 * atLeast(level, 5) + 6 * evo) * mods.damage,
+    cooldown: 1.3 * (level >= 5 ? 0.8 : 1) * mods.cooldown,
+    reach: (34 + 4 * atLeast(level, 3) + 10 * evo) * mods.area,
+    arc: 1.8 + 0.5 * atLeast(level, 3) + 0.5 * evo,
+    count: 1 + atLeast(level, 4),
+    push: evo ? 18 : 0,
+  };
+}
+
+/**
+ * 풍등: 그림자가 모인 곳 위로 날아가서, 머무는 동안 둘레에 불티를 거듭 떨군다.
+ * 무리를 따라다니므로 플레이어가 달아나는 동안에도 뒤쪽의 무리를 줄여 준다.
+ */
+export function lampStats(level: number, mods: Modifiers): LampStats {
+  const evo = atLeast(level, EVOLVE_LEVEL);
+  return {
+    count: 1 + atLeast(level, 2) + atLeast(level, 5) + evo,
+    damage: (6 + 3 * atLeast(level, 3) + 3 * evo) * mods.damage,
+    tick: 0.4,
+    radius: (16 + 4 * atLeast(level, 5) + 6 * evo) * mods.area,
+    duration: 3.5 + 1.5 * atLeast(level, 4) + 1 * evo,
+    cooldown: 3.6 * mods.cooldown,
+    speed: 90,
   };
 }
 

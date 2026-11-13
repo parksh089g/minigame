@@ -613,7 +613,19 @@ export const BOONS: Record<BoonId, BoonInfo> = {
 
 export const BOON_ORDER: readonly BoonId[] = ['blaze', 'haste', 'bulwark', 'ward', 'bloom', 'breath'];
 
-export type WeaponId = 'ember' | 'aura' | 'firefly' | 'star' | 'lance' | 'oil' | 'bolt' | 'bell' | 'moon' | 'beam';
+export type WeaponId =
+  | 'ember'
+  | 'aura'
+  | 'firefly'
+  | 'star'
+  | 'lance'
+  | 'oil'
+  | 'bolt'
+  | 'bell'
+  | 'moon'
+  | 'beam'
+  | 'torch'
+  | 'lamp';
 export type PassiveId = 'wick' | 'hourglass' | 'boots' | 'magnet' | 'coat' | 'lens' | 'hood' | 'herb' | 'flint';
 
 /** 레벨업으로 올릴 수 있는 무기와 패시브의 최대 레벨 */
@@ -727,10 +739,33 @@ export const WEAPONS: Readonly<Record<WeaponId, WeaponInfo>> = {
     levels: ['긴 빛줄기가 둘레를 훑으며 돈다', '피해 +4', '더 멀리 닿는다', '한 줄기 더', '피해 +6, 더 빨리 돈다'],
     evolved: { name: '천 리 등대', description: '굵은 빛줄기 셋이 훨씬 멀리까지 훑는다' },
   },
+  torch: {
+    name: '횃불',
+    levels: ['가까운 적 쪽을 부채꼴로 휘둘러 벤다', '피해 +4', '더 넓게 휘두른다', '맞은편도 벤다', '피해 +6, 재사용 -20%'],
+    evolved: { name: '봉화', description: '앞뒤를 크고 넓게 휘둘러, 벤 그림자를 밀쳐 낸다' },
+  },
+  lamp: {
+    name: '풍등',
+    levels: ['그림자가 모인 곳 위로 날아가 불티를 떨군다', '하나 더', '피해 +3', '더 오래 머문다', '하나 더, 범위 +4'],
+    evolved: { name: '풍등 축제', description: '크고 오래 타는 풍등 넷이 무리를 따라다닌다' },
+  },
 };
 
 /** 선택지와 화면에 늘어놓는 순서 */
-export const WEAPON_ORDER: readonly WeaponId[] = ['ember', 'aura', 'firefly', 'star', 'lance', 'oil', 'bolt', 'bell', 'moon', 'beam'];
+export const WEAPON_ORDER: readonly WeaponId[] = [
+  'ember',
+  'aura',
+  'firefly',
+  'star',
+  'lance',
+  'oil',
+  'bolt',
+  'bell',
+  'moon',
+  'beam',
+  'torch',
+  'lamp',
+];
 
 export interface PassiveInfo {
   name: string;
@@ -773,7 +808,7 @@ export const FLINT = {
 /** 등갓의 빛막이 다시 생기는 데 걸리는 시간(초): 1레벨의 값과 레벨마다 줄어드는 값 */
 export const GUARD = { seconds: 24, perLevel: 3 } as const;
 
-export type HeroId = 'keeper' | 'stargazer' | 'stormer' | 'ringer' | 'mooner';
+export type HeroId = 'keeper' | 'stargazer' | 'stormer' | 'ringer' | 'mooner' | 'bearer';
 
 /** 캐릭터마다 다른 능력. 더하는 값(maxHp)과 곱하는 값(나머지)이 있다. */
 export interface HeroTrait {
@@ -787,6 +822,8 @@ export interface HeroTrait {
   damage?: number;
   /** 받는 피해에 곱한다 */
   taken?: number;
+  /** 1초마다 차는 체력에 더한다 */
+  regen?: number;
 }
 
 export interface HeroInfo {
@@ -850,9 +887,19 @@ export const HEROES: Readonly<Record<HeroId, HeroInfo>> = {
     // 새벽을 한 번 맞으면 열린다.
     unlockSeconds: RUN_SECONDS,
   },
+  bearer: {
+    name: '횃불잡이',
+    blurb: '가까이 베고 상처가 금방 아문다',
+    perk: '초당 체력 +0.4 · 최대 체력 +10',
+    flaw: '경험치 -10%',
+    weapon: 'torch',
+    trait: { regen: 0.4, maxHp: 10, xp: 0.9 },
+    // 캐릭터는 고르는 줄의 차례대로 열린다. 달잡이처럼 새벽을 한 번 맞으면 열린다.
+    unlockSeconds: RUN_SECONDS,
+  },
 };
 
-export const HERO_ORDER: readonly HeroId[] = ['keeper', 'stargazer', 'stormer', 'ringer', 'mooner'];
+export const HERO_ORDER: readonly HeroId[] = ['keeper', 'stargazer', 'stormer', 'ringer', 'mooner', 'bearer'];
 
 /** 판 밖에서 불씨로 올리는 영구 강화 */
 export type MetaId =

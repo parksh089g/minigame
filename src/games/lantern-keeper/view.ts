@@ -54,8 +54,22 @@ interface Flash {
   life: number;
 }
 
+/** 횃불을 휘두른 자국. 플레이어가 들고 휘두르므로 플레이어를 따라 그린다. */
+interface Swing {
+  angle: number;
+  arc: number;
+  reach: number;
+  count: number;
+  evolved: boolean;
+  life: number;
+}
+
 const RING_SECONDS = 0.22;
 const FLASH_SECONDS = 0.2;
+/** 횃불을 휘두른 자국이 보이는 시간(초). 앞의 절반 동안 부채꼴을 쓸고 지나간다. */
+const SWING_SECONDS = 0.22;
+/** 풍등이 바닥(불티가 떨어지는 둘레의 가운데)에서 떠 있는 높이(px) */
+const LAMP_LIFT = 12;
 
 /** 등불 기둥의 그림을 선 자리에서 이만큼(px) 올려 그린다. 받침이 그 자리에 놓인다. */
 const POST_LIFT = 6;
@@ -157,6 +171,7 @@ export class RunView {
   private readonly darkPulse: Phaser.Tweens.Tween;
   private readonly rings: Ring[] = [];
   private readonly flashes: Flash[] = [];
+  private readonly swings: Swing[] = [];
   private readonly width: number;
   private readonly height: number;
   /** 이 판의 캐릭터가 걷는 그림 두 장 */
@@ -259,6 +274,44 @@ export class RunView {
   flint(sim: Sim, x: number, y: number, radius: number): void {
     this.rings.push({ x, y, radius, life: RING_SECONDS, flint: true });
     this.burst(sim, x, y, 5);
+  }
+
+  /** 횃불을 휘두른 자국을 잠깐 그린다. */
+  swing(angle: number, arc: number, reach: number, count: number, evolved: boolean): void {
+    this.swings.push({ angle, arc, reach, count, evolved, life: SWING_SECONDS });
+  }
+
+  /**
+   * 횃불을 휘두른 자국: 부채꼴을 한쪽 끝에서 다른 쪽 끝으로 쓸고 지나가며 옅어진다.
+   * 쓸고 지나가는 끝에는 밝은 줄을 긋는다. 맞은편도 베면 맞은편에도 같은 자국을 그린다.
+   */
+  private drawSwings(dt: number, g: Phaser.GameObjects.Graphics): void {
+    let kept = 0;
+    for (const swing of this.swings) {
+      swing.life -= dt;
+      if (swing.life <= 0) continue;
+      const progress = 1 - swing.life / SWING_SECONDS;
+      const swept = Math.min(1, progress * 2);
+      const fade = 1 - progress;
+      for (let k = 0; k < swing.count; k += 1) {
+        const from = swing.angle + k * Math.PI - swing.arc / 2;
+        const to = from + swing.arc * swept;
+        g.fillStyle(swing.evolved ? LOOK.torchEvo : LOOK.torch, 0.5 * fade);
+        g.beginPath();
+        g.slice(this.centerX, this.centerY, swing.reach, from, to, false);
+        g.fillPath();
+        g.lineStyle(2, LOOK.torchEdge, 0.9 * fade);
+        g.lineBetween(
+          this.centerX + Math.cos(to) * 6,
+          this.centerY + Math.sin(to) * 6,
+          this.centerX + Math.cos(to) * swing.reach,
+          this.centerY + Math.sin(to) * swing.reach,
+        );
+      }
+      this.swings[kept] = swing;
+      kept += 1;
+    }
+    this.swings.length = kept;
   }
 
   /** 번갯불이 지나간 길을 잠깐 그린다. points는 세상 좌표의 x, y가 번갈아 들어 있다. */
@@ -911,6 +964,18 @@ export class RunView {
         }
       }
     }
+    // 풍등이 불티를 떨구는 둘레: 옅게 칠하고, 떨굴 때마다 테두리가 밝아진다.
+    for (const lamp of s.lamps) {
+      const fade = Math.min(1, lamp.life / 0.4);
+      const flare = Math.max(0, 1 - (lamp.every - lamp.tick) / 0.15);
+      const x = Math.round(lamp.x + offsetX);
+      const y = Math.round(lamp.y + offsetY);
+      g.fillStyle(lamp.evolved ? LOOK.lampEvo : LOOK.lamp, (0.1 + 0.12 * flare) * fade);
+      g.fillCircle(x, y, lamp.radius);
+      g.lineStyle(1, lamp.evolved ? LOOK.lampEvoRim : LOOK.lampRim, (0.25 + 0.4 * flare) * fade);
+      g.strokeCircle(x, y, lamp.radius);
+    }
+    this.drawSwings(dt, g);
     this.drawPosts(sim, seconds, offsetX, offsetY, g);
     this.drawGuard(sim, seconds, g);
     if (this.shrooms) this.drawGrove(sim, seconds, offsetX, offsetY, g);
@@ -980,6 +1045,35 @@ export class RunView {
       kept += 1;
     }
     this.flashes.length = kept;
+
+    // 풍등: 무리 위에 떠서 천천히 오르내리는 종이 등. 둥근 머리에 아래로 좁아지고, 아래 구멍의 불이 등 전체를 밝힌다.
+    for (const lamp of s.lamps) {
+      const fade = Math.min(1, lamp.life / 0.4);
+      const bob = Math.sin(seconds * 3 + lamp.x * 0.11 + lamp.y * 0.07);
+      const x = Math.round(lamp.x + offsetX);
+      const y = Math.round(lamp.y + offsetY - LAMP_LIFT + bob * 1.5);
+      const half = lamp.evolved ? 5 : 4;
+      const tall = lamp.evolved ? 10 : 8;
+      const top = y - tall / 2;
+      const bottom = y + tall / 2;
+      const rim = lamp.evolved ? LOOK.lampEvoRim : LOOK.lampRim;
+      const body = lamp.evolved ? LOOK.lampEvo : LOOK.lamp;
+      air.fillStyle(body, 0.2 * fade);
+      air.fillCircle(x, y, half * 2 + 2);
+      air.fillStyle(rim, fade);
+      air.fillEllipse(x, top + 1, half * 2 + 2, 5);
+      air.fillTriangle(x - half - 1, top + 1, x + half + 1, top + 1, x + half - 1, bottom + 1);
+      air.fillTriangle(x - half - 1, top + 1, x + half - 1, bottom + 1, x - half + 1, bottom + 1);
+      air.fillStyle(body, fade);
+      air.fillEllipse(x, top + 1, half * 2, 3);
+      air.fillTriangle(x - half, top + 1, x + half, top + 1, x + half - 2, bottom);
+      air.fillTriangle(x - half, top + 1, x + half - 2, bottom, x - half + 2, bottom);
+      // 안쪽의 불빛과, 아래 구멍에서 일렁이는 불
+      air.fillStyle(LOOK.lampCore, 0.5 * fade);
+      air.fillRect(x - 1, top + 1, 2, tall - 3);
+      air.fillStyle(LOOK.lampCore, (0.7 + 0.3 * Math.sin(seconds * 15 + lamp.x)) * fade);
+      air.fillRect(x - 1, bottom - 1, 2, 2);
+    }
 
     this.drawThreats(sim, seconds, offsetX, offsetY);
     this.drawPointers(sim, seconds, offsetX, offsetY);

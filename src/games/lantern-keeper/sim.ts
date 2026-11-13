@@ -62,6 +62,8 @@ import {
   modifiers,
   beamStats,
   moonStats,
+  torchStats,
+  lampStats,
   oilStats,
   ownedPassives,
   ownedWeapons,
@@ -76,6 +78,7 @@ import {
   xpToNext,
   type DepthRules,
   type Levels,
+  type TorchStats,
   type Modifiers,
   type Rand,
   type RunSummary,
@@ -301,6 +304,26 @@ export interface Moon {
   evolved: boolean;
 }
 
+/** 풍등: 그림자가 모인 곳(tx, ty) 위로 날아가서, 머무는 동안 every초마다 둘레에 불티를 떨군다. */
+export interface Lamp {
+  x: number;
+  y: number;
+  /** 날아가는 곳. 무리를 따라 retarget초마다 다시 정한다. */
+  tx: number;
+  ty: number;
+  /** 다음에 갈 곳을 다시 정할 때까지(초) */
+  retarget: number;
+  speed: number;
+  damage: number;
+  radius: number;
+  /** 불티를 떨구는 간격(초)과, 다음에 떨굴 때까지 남은 시간(초) */
+  every: number;
+  tick: number;
+  /** 남은 시간(초) */
+  life: number;
+  evolved: boolean;
+}
+
 export interface RunState {
   version: number;
   /** 지난 시간(초) */
@@ -351,6 +374,8 @@ export interface RunState {
   /** 퍼지고 있는 종소리와 날고 있는 초승달. 이 무기들이 생기기 전에 저장한 판에는 없어서, 이어 할 때 채운다. */
   waves: Wave[];
   moons: Moon[];
+  /** 떠 있는 풍등. 풍등이 생기기 전에 저장한 판에는 없어서, 이어 할 때 빈 채로 채운다. */
+  lamps: Lamp[];
   /** 싸움터에 서 있는 등불 기둥. 기둥이 생기기 전에 저장한 판에는 없다. */
   posts?: Post[];
   /** 지금까지 나타난 등불 기둥의 수. POSTS.times의 몇 번째까지 나왔는지를 가리킨다. */
@@ -370,7 +395,18 @@ export interface RunState {
   elites?: number;
   /** 이 판에서 연 보물 상자의 수 */
   chests?: number;
-  cd: { ember: number; aura: number; star: number; lance: number; oil: number; bolt: number; bell: number; moon: number };
+  cd: {
+    ember: number;
+    aura: number;
+    star: number;
+    lance: number;
+    oil: number;
+    bolt: number;
+    bell: number;
+    moon: number;
+    torch: number;
+    lamp: number;
+  };
   fireflyAngle: number;
   /** 등대빛의 첫 줄기가 가리키는 쪽(라디안). 등대빛이 생기기 전에 저장한 판에는 없다. */
   beamAngle?: number;
@@ -501,6 +537,10 @@ export type SimEvent =
   | { type: 'strike'; x: number; y: number; radius: number }
   /** 번갯불이 지나간 길. points는 x, y가 번갈아 들어 있다. */
   | { type: 'bolt'; points: number[]; evolved: boolean }
+  /** 횃불을 휘둘렀다. angle 쪽으로 arc만큼 벌어진 부채꼴을 count쪽(둘이면 맞은편도) 벤다. */
+  | { type: 'swing'; angle: number; arc: number; reach: number; count: number; evolved: boolean }
+  /** 풍등을 띄웠다 */
+  | { type: 'lamp' }
   /** 화면 가까이의 불구멍에서 불길이 솟기 시작했다 */
   | { type: 'vent'; x: number; y: number }
   /** 돌풍이 일기 시작했거나(warn) 세게 불기 시작했다(blow). dirX, dirY는 바람이 부는 쪽 */
@@ -588,6 +628,16 @@ const MOON_SPREAD = 0.5;
 const MOON_CATCH = 8;
 /** 초승달이 날아다닐 수 있는 가장 긴 시간(초) */
 const MOON_LIFE = 4;
+/** 횃불은 닿는 거리보다 이만큼(px) 먼 적까지 보고 휘두른다. 둘레에 아무도 없으면 기다린다. */
+const TORCH_SLACK = 6;
+/** 풍등이 갈 곳을 고를 때 살펴보는 그림자의 수와, 무리로 셈하는 둘레(px) */
+const LAMP_SAMPLE = 12;
+const LAMP_CROWD = 30;
+/** 한꺼번에 띄운 풍등끼리 같은 무리로 가지 않도록 비켜서는 거리(px) */
+const LAMP_APART = 40;
+/** 풍등이 갈 곳을 다시 정하는 간격(초)과, 따라갈 그림자를 찾는 둘레(px) */
+export const LAMP_RETARGET = 0.5;
+const LAMP_FOLLOW = 40;
 /** 종소리가 퍼지는 빠르기(px/초)와, 두 번 울릴 때의 사이(초) */
 const BELL_SPEED = 170;
 const BELL_GAP = 0.3;
@@ -662,12 +712,13 @@ export function createRun(config: RunConfig): RunState {
     hazards: [],
     waves: [],
     moons: [],
+    lamps: [],
     posts: [],
     postsSpawned: 0,
     seen: [],
     elites: 0,
     chests: 0,
-    cd: { ember: 0.6, aura: 0, star: 1, lance: 0.8, oil: 0.5, bolt: 0.7, bell: 0.9, moon: 0.7 },
+    cd: { ember: 0.6, aura: 0, star: 1, lance: 0.8, oil: 0.5, bolt: 0.7, bell: 0.9, moon: 0.7, torch: 0.5, lamp: 0.8 },
     fireflyAngle: 0,
     spawnDebt: 0,
     surgeIndex: 0,
@@ -771,6 +822,10 @@ export class Sim {
     if (!Array.isArray(state.moons)) state.moons = [];
     if (typeof state.cd.bell !== 'number') state.cd.bell = 0.9;
     if (typeof state.cd.moon !== 'number') state.cd.moon = 0.7;
+    // 횃불과 풍등이 생기기 전에 저장한 판도 같다.
+    if (!Array.isArray(state.lamps)) state.lamps = [];
+    if (typeof state.cd.torch !== 'number') state.cd.torch = 0.5;
+    if (typeof state.cd.lamp !== 'number') state.cd.lamp = 0.8;
     // 도감이 생기기 전에 저장한 판: 지금 싸움터에 있는 것부터 만난 것으로 적는다.
     if (!Array.isArray(state.seen)) {
       state.seen = [];
@@ -1023,6 +1078,7 @@ export class Sim {
     this.moveShots(dt);
     this.spreadWaves(dt);
     this.moveMoons(dt);
+    this.moveLamps(dt);
     this.landStrikes(dt);
     this.burnFires(dt);
     this.tendPosts(dt);
@@ -2268,6 +2324,65 @@ export class Sim {
       }
     }
 
+    if (w.torch) {
+      s.cd.torch -= dt;
+      if (s.cd.torch <= 0) {
+        const stats = torchStats(w.torch, this.mods);
+        // 닿을 만한 가장 가까운 적 쪽으로 휘두른다. 둘레에 아무도 없으면 휘두르지 않고 기다린다.
+        let target: Enemy | null = null;
+        let best = Infinity;
+        for (const e of enemies) {
+          if (e.hp <= 0) continue;
+          const d2 = (e.x - p.x) ** 2 + (e.y - p.y) ** 2;
+          const reach = stats.reach + ENEMIES[e.kind].radius + TORCH_SLACK;
+          if (d2 < best && d2 < reach * reach) {
+            best = d2;
+            target = e;
+          }
+        }
+        if (target) {
+          this.swing(Math.atan2(target.y - p.y, target.x - p.x), stats, isEvolved(w.torch));
+          s.cd.torch = stats.cooldown;
+        } else {
+          s.cd.torch = 0.15;
+        }
+      }
+    }
+
+    if (w.lamp) {
+      s.cd.lamp -= dt;
+      if (s.cd.lamp <= 0) {
+        const stats = lampStats(w.lamp, this.mods);
+        const evolved = isEvolved(w.lamp);
+        const picked: { x: number; y: number }[] = [];
+        for (let i = 0; i < stats.count; i += 1) {
+          const crowd = this.crowd(picked);
+          if (!crowd) break;
+          picked.push(crowd);
+          s.lamps.push({
+            x: p.x,
+            y: p.y,
+            tx: crowd.x,
+            ty: crowd.y,
+            retarget: LAMP_RETARGET,
+            speed: stats.speed,
+            damage: stats.damage,
+            radius: stats.radius,
+            every: stats.tick,
+            tick: stats.tick,
+            life: stats.duration,
+            evolved,
+          });
+        }
+        if (picked.length > 0) {
+          s.cd.lamp = stats.cooldown;
+          this.events.push({ type: 'lamp' });
+        } else {
+          s.cd.lamp = 0.3;
+        }
+      }
+    }
+
     if (w.moon) {
       s.cd.moon -= dt;
       if (s.cd.moon <= 0) {
@@ -2310,6 +2425,123 @@ export class Sim {
         }
       }
     }
+  }
+
+  /**
+   * 횃불을 angle 쪽으로 휘두른다. 부채꼴(둘이면 맞은편까지) 안에 닿는 적을 모두 한 번씩 벤다.
+   * 적의 몸집만큼 각을 넉넉히 보고, 플레이어와 겹쳐 선 적은 어느 쪽에 있든 맞는다. 봉화는 벤 적을 밀쳐 낸다.
+   */
+  private swing(angle: number, stats: TorchStats, evolved: boolean): void {
+    const s = this.state;
+    const p = s.player;
+    const half = stats.arc / 2;
+    for (const e of s.enemies) {
+      if (e.hp <= 0) continue;
+      const info = ENEMIES[e.kind];
+      const dx = e.x - p.x;
+      const dy = e.y - p.y;
+      const distance = Math.hypot(dx, dy);
+      if (distance > stats.reach + info.radius) continue;
+      if (distance > info.radius) {
+        const bearing = Math.atan2(dy, dx);
+        const spare = Math.asin(info.radius / distance);
+        let inside = false;
+        for (let k = 0; k < stats.count && !inside; k += 1) {
+          const side = angle + k * Math.PI;
+          inside = Math.abs(Math.atan2(Math.sin(bearing - side), Math.cos(bearing - side))) <= half + spare;
+        }
+        if (!inside) continue;
+      }
+      this.damage(e, stats.damage, 'torch');
+      // 보스는 밀리지 않는다. 끝없는 밤에서 세진 그림자는 그만큼 덜 밀린다.
+      if (stats.push > 0 && !info.boss) {
+        const push = stats.push / this.late.damage;
+        const scale = distance > 0.001 ? push / distance : 0;
+        e.kx = (e.kx ?? 0) + (distance > 0.001 ? dx * scale : push);
+        e.ky = (e.ky ?? 0) + dy * scale;
+      }
+    }
+    this.events.push({ type: 'swing', angle, arc: stats.arc, reach: stats.reach, count: stats.count, evolved });
+  }
+
+  /**
+   * 풍등이 갈 곳: 화면 안의 그림자 몇을 골라 보고, 둘레에 그림자가 가장 많이 모인 것의 자리.
+   * avoid(이번에 먼저 띄운 풍등이 갈 곳) 가까이는 다른 곳이 없을 때만 고른다. 화면에 아무도 없으면 null.
+   */
+  private crowd(avoid: readonly { x: number; y: number }[]): { x: number; y: number } | null {
+    const s = this.state;
+    const p = s.player;
+    const halfW = s.viewW / 2;
+    const halfH = s.viewH / 2;
+    const seen = s.enemies.filter((e) => e.hp > 0 && Math.abs(e.x - p.x) < halfW && Math.abs(e.y - p.y) < halfH);
+    if (seen.length === 0) return null;
+    let best: Enemy = seen[0];
+    let bestScore = -Infinity;
+    const tries = Math.min(LAMP_SAMPLE, seen.length);
+    for (let i = 0; i < tries; i += 1) {
+      const pick = seen.length <= LAMP_SAMPLE ? seen[i] : seen[Math.floor(this.rand() * seen.length)];
+      let score = 0;
+      for (const other of seen) {
+        if ((other.x - pick.x) ** 2 + (other.y - pick.y) ** 2 < LAMP_CROWD * LAMP_CROWD) score += 1;
+      }
+      if (avoid.some((spot) => (spot.x - pick.x) ** 2 + (spot.y - pick.y) ** 2 < LAMP_APART * LAMP_APART)) score -= 1000;
+      if (score > bestScore) {
+        bestScore = score;
+        best = pick;
+      }
+    }
+    return { x: best.x, y: best.y };
+  }
+
+  /** 풍등이 무리를 따라 날아가며, every초마다 둘레의 그림자에게 불티를 떨군다. */
+  private moveLamps(dt: number): void {
+    const s = this.state;
+    let kept = 0;
+    for (const lamp of s.lamps) {
+      lamp.life -= dt;
+      if (lamp.life <= 0) continue;
+      lamp.retarget -= dt;
+      if (lamp.retarget <= 0) {
+        lamp.retarget = LAMP_RETARGET;
+        // 가던 곳에서 가장 가까운 그림자를 따라간다. 둘레가 비었으면 다른 무리를 찾는다.
+        let next: { x: number; y: number } | null = null;
+        let best = LAMP_FOLLOW * LAMP_FOLLOW;
+        for (const e of s.enemies) {
+          if (e.hp <= 0) continue;
+          const d2 = (e.x - lamp.tx) ** 2 + (e.y - lamp.ty) ** 2;
+          if (d2 < best) {
+            best = d2;
+            next = e;
+          }
+        }
+        next ??= this.crowd([]);
+        if (next) {
+          lamp.tx = next.x;
+          lamp.ty = next.y;
+        }
+      }
+      const dx = lamp.tx - lamp.x;
+      const dy = lamp.ty - lamp.y;
+      const distance = Math.hypot(dx, dy);
+      if (distance > 0.001) {
+        const move = Math.min(distance, lamp.speed * dt);
+        lamp.x += (dx / distance) * move;
+        lamp.y += (dy / distance) * move;
+      }
+      lamp.tick -= dt;
+      if (lamp.tick <= 0) {
+        lamp.tick += lamp.every;
+        for (const e of s.enemies) {
+          if (e.hp <= 0) continue;
+          const reach = lamp.radius + ENEMIES[e.kind].radius;
+          // 둘레의 그림자가 한꺼번에 번쩍여 화면을 가리지 않게 짧게만 깜빡인다.
+          if ((e.x - lamp.x) ** 2 + (e.y - lamp.y) ** 2 < reach * reach) this.damage(e, lamp.damage, 'lamp', 0.04);
+        }
+      }
+      s.lamps[kept] = lamp;
+      kept += 1;
+    }
+    s.lamps.length = kept;
   }
 
   /** 종소리가 퍼지면서, 고리가 닿은 적을 한 번씩 때리고 바깥으로 밀어낸다. */

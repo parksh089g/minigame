@@ -44,6 +44,8 @@ import {
   beamStats,
   bellStats,
   depthRules,
+  lampStats,
+  torchStats,
   embersFor,
   endlessBossKind,
   maxAlive,
@@ -534,6 +536,109 @@ describe('무기', () => {
     expect(hits(EVOLVE_LEVEL, reach)).toBe(3);
   });
 
+  /** 제자리에 묶어 둔 돌그림자. 무기가 닿는지만 보려고 움직이지 않게 한다. */
+  const pinned = (x: number, y: number, hp = 5000): Enemy => ({ ...enemy('brute', x, y, hp), slow: 1e9, slowTo: 0.0001 });
+
+  it('횃불은 가까운 적 쪽을 부채꼴로 휘둘러, 부채꼴 안에 닿는 적만 한 번씩 벤다', () => {
+    const sim = quietSim();
+    sim.state.weapons = { torch: 1 };
+    sim.state.player.hp = 1e9;
+    sim.state.cd.torch = 0;
+    const stats = torchStats(1, modifiers({}, {}));
+    // 오른쪽 가까이에 겨눌 적, 그 옆(부채꼴 안), 뒤쪽(부채꼴 밖), 멀리(닿지 않음)
+    const aim = pinned(20, 0);
+    const side = pinned(20, 18);
+    const behind = pinned(-25, 0);
+    const far = pinned(stats.reach + ENEMIES.brute.radius + 4, 0);
+    sim.state.enemies.push(aim, side, behind, far);
+    sim.step(STEP, 0, 0);
+    expect(sim.events).toContainEqual(expect.objectContaining({ type: 'swing', angle: 0, count: 1 }));
+    expect(5000 - aim.hp).toBe(stats.damage);
+    expect(5000 - side.hp).toBe(stats.damage);
+    expect(behind.hp).toBe(5000);
+    expect(far.hp).toBe(5000);
+    // 재사용 시간이 지나야 다시 휘두른다.
+    advance(sim, stats.cooldown - 2 * STEP);
+    expect(5000 - aim.hp).toBe(stats.damage);
+    advance(sim, 3 * STEP);
+    expect(5000 - aim.hp).toBe(stats.damage * 2);
+    expect(sim.state.dealt?.torch).toBe(stats.damage * 4);
+  });
+
+  it('횃불은 4레벨부터 맞은편도 베고, 봉화는 벤 그림자를 밀쳐 내며, 둘레에 아무도 없으면 휘두르지 않는다', () => {
+    const swingAt = (level: number): { sim: Sim; aim: Enemy; behind: Enemy } => {
+      const sim = quietSim();
+      sim.state.weapons = { torch: level };
+      sim.state.player.hp = 1e9;
+      sim.state.cd.torch = 0;
+      const aim = pinned(20, 0);
+      const behind = pinned(-25, 0);
+      sim.state.enemies.push(aim, behind);
+      sim.step(STEP, 0, 0);
+      return { sim, aim, behind };
+    };
+    expect(swingAt(3).behind.hp).toBe(5000);
+    expect(swingAt(4).behind.hp).toBeLessThan(5000);
+    expect(swingAt(MAX_LEVEL).aim.kx ?? 0).toBe(0);
+    const evolved = swingAt(EVOLVE_LEVEL);
+    advance(evolved.sim, 0.5);
+    expect(evolved.aim.x).toBeGreaterThan(30);
+    expect(evolved.behind.x).toBeLessThan(-35);
+    // 둘레에 아무도 없으면 휘두르지 않고 기다린다.
+    const idle = quietSim();
+    idle.state.weapons = { torch: 1 };
+    idle.state.cd.torch = 0;
+    idle.state.enemies.push(pinned(200, 0));
+    expect(advance(idle, 1).some((event) => event.type === 'swing')).toBe(false);
+  });
+
+  it('풍등은 그림자가 모인 곳 위로 날아가서, 머무는 동안 둘레에 불티를 떨군다', () => {
+    const sim = quietSim();
+    sim.state.weapons = { lamp: 1 };
+    sim.state.player.hp = 1e9;
+    sim.state.cd.lamp = 0;
+    const stats = lampStats(1, modifiers({}, {}));
+    // 왼쪽에 하나, 오른쪽 위에 다섯이 모여 있다(서로 밀치지 않을 만큼 떨어져서). 풍등은 모인 쪽의 가운데로 간다.
+    const lone = pinned(-60, 0);
+    const crowd = [pinned(60, -60), pinned(77, -60), pinned(60, -43), pinned(43, -60), pinned(60, -77)];
+    sim.state.enemies.push(lone, ...crowd);
+    sim.step(STEP, 0, 0);
+    expect(sim.events).toContainEqual({ type: 'lamp' });
+    expect(sim.state.lamps).toHaveLength(1);
+    const lamp = sim.state.lamps[0];
+    expect(lamp.tx).toBeCloseTo(60, 2);
+    expect(lamp.ty).toBeCloseTo(-60, 2);
+    advance(sim, 1.5);
+    expect(Math.hypot(lamp.x - 60, lamp.y + 60)).toBeLessThan(1);
+    const burnt = 5000 - crowd[0].hp;
+    expect(burnt).toBeGreaterThan(0);
+    expect(burnt % stats.damage).toBe(0);
+    // 다 머물고 나면 사라진다. 그동안 모인 그림자는 거듭 다치고, 떨어진 하나는 다치지 않는다.
+    advance(sim, stats.duration);
+    expect(sim.state.lamps).not.toContain(lamp);
+    for (const foe of crowd) expect(5000 - foe.hp).toBeGreaterThan(burnt);
+    expect(lone.hp).toBe(5000);
+    expect(sim.state.dealt?.lamp).toBeGreaterThan(0);
+  });
+
+  it('풍등 여럿은 서로 다른 무리로 가고, 화면에 그림자가 없으면 띄우지 않는다', () => {
+    const sim = quietSim();
+    sim.state.weapons = { lamp: MAX_LEVEL };
+    sim.state.player.hp = 1e9;
+    sim.state.cd.lamp = 0;
+    sim.state.enemies.push(pinned(60, -60), pinned(64, -60), pinned(-60, 60), pinned(-64, 60), pinned(60, 60));
+    sim.step(STEP, 0, 0);
+    expect(sim.state.lamps).toHaveLength(lampStats(MAX_LEVEL, modifiers({}, {})).count);
+    expect(new Set(sim.state.lamps.map((lamp) => `${lamp.tx},${lamp.ty}`)).size).toBe(3);
+    const empty = quietSim();
+    empty.state.weapons = { lamp: 1 };
+    empty.state.cd.lamp = 0;
+    empty.state.enemies.push(pinned(400, 0));
+    empty.step(STEP, 0, 0);
+    expect(empty.state.lamps).toEqual([]);
+    expect(empty.state.cd.lamp).toBeGreaterThan(0);
+  });
+
   it('진화한 무기는 다른 모습으로 나간다', () => {
     const sim = newSim();
     sim.state.weapons = { ember: EVOLVE_LEVEL, lance: EVOLVE_LEVEL };
@@ -777,6 +882,19 @@ describe('약초 주머니와 부싯돌', () => {
     sim.state.player.hp = sim.maxHp - 0.01;
     advance(sim, 5);
     expect(sim.state.player.hp).toBe(sim.maxHp);
+  });
+
+  it('횃불잡이는 약초 주머니 없이도 상처가 저절로 아문다', () => {
+    const sim = quietSim(1, { hero: 'bearer' });
+    expect(sim.maxHp).toBe(100 + 10);
+    sim.state.player.hp = 50;
+    advance(sim, 10);
+    expect(sim.state.player.hp).toBeCloseTo(54, 1);
+    // 다른 캐릭터는 그대로다.
+    const keeper = quietSim(1);
+    keeper.state.player.hp = 50;
+    advance(keeper, 10);
+    expect(keeper.state.player.hp).toBe(50);
   });
 
   /** 난수가 늘 0이라 부싯돌이 반드시 터지는 판 */
@@ -3346,6 +3464,22 @@ describe('저장과 이어하기', () => {
     expect(Number.isFinite(sim.state.beamAngle)).toBe(true);
     expect(Number.isFinite(sim.state.cd.bell)).toBe(true);
     expect(Number.isFinite(sim.state.cd.moon)).toBe(true);
+  });
+
+  it('횃불과 풍등이 생기기 전에 저장한 판도 그대로 이어진다', () => {
+    const state = createRun(config);
+    const old = JSON.parse(JSON.stringify(state)) as Record<string, unknown> & { cd: Record<string, number> };
+    delete old.lamps;
+    delete old.cd.torch;
+    delete old.cd.lamp;
+    const restored = restoreRun(old);
+    expect(restored).not.toBeNull();
+    const sim = newSim(1, restored as RunState);
+    expect(sim.state.lamps).toEqual([]);
+    sim.state.weapons = { torch: 1, lamp: 1 };
+    expect(() => advance(sim, 5)).not.toThrow();
+    expect(Number.isFinite(sim.state.cd.torch)).toBe(true);
+    expect(Number.isFinite(sim.state.cd.lamp)).toBe(true);
   });
 
   it('끝난 판이나 엉뚱한 값은 이어하지 않는다', () => {

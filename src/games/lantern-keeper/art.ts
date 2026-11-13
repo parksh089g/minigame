@@ -15,6 +15,7 @@ export const LK = {
   stormer: ['lk-stormer-1', 'lk-stormer-2'],
   ringer: ['lk-ringer-1', 'lk-ringer-2'],
   mooner: ['lk-mooner-1', 'lk-mooner-2'],
+  bearer: ['lk-bearer-1', 'lk-bearer-2'],
   shade: ['lk-shade-1', 'lk-shade-2'],
   bat: ['lk-bat-1', 'lk-bat-2'],
   wisp: ['lk-wisp-1', 'lk-wisp-2'],
@@ -106,6 +107,7 @@ export const HERO_FRAMES: Readonly<Record<HeroId, readonly [string, string]>> = 
   stormer: LK.stormer,
   ringer: LK.ringer,
   mooner: LK.mooner,
+  bearer: LK.bearer,
 };
 
 /**
@@ -127,6 +129,16 @@ export const LOOK = {
   noticeFill: COLOR.ink,
   noticeEdge: COLOR.sky,
   beamCore: COLOR.white,
+  /** 횃불을 휘두른 자리(봉화는 붉게)와, 휘두르는 끝의 밝은 줄 */
+  torch: COLOR.orange,
+  torchEvo: COLOR.red,
+  torchEdge: COLOR.yellow,
+  /** 풍등의 종이 등과 불티가 떨어지는 둘레. 풍등 축제는 붉은 등이다. */
+  lamp: COLOR.yellow,
+  lampRim: COLOR.orange,
+  lampEvo: COLOR.orange,
+  lampEvoRim: COLOR.red,
+  lampCore: COLOR.white,
   bellEvo: COLOR.cyan,
   flint: COLOR.orange,
   bolt: COLOR.white,
@@ -244,6 +256,13 @@ const MOONER_TOP: Rows = recolor(
   KEEPER_TOP.map((row) => row.slice(0, 11)),
   { '4': 'd', '2': '1', '3': 'a' },
 ).map((row, index) => row + MOONER_MOON[index]);
+
+/** 횃불잡이: 잿빛 두건에 주황 옷, 손에는 등불 대신 불길이 붙은 횃불 */
+const BEARER_TORCH: Rows = ['.....', '..0..', '.040.', '04340', '03c30', '03c30', '.0d0.', '.010.', '.010.', '.010.', '.010.', '..0..', '.....', '.....'];
+const BEARER_TOP: Rows = recolor(
+  KEEPER_TOP.map((row) => row.slice(0, 11)),
+  { '4': 'e', '2': '3', '3': '4' },
+).map((row, index) => row + BEARER_TORCH[index]);
 
 const BAT_1: Rows = [
   '0............0',
@@ -982,6 +1001,8 @@ export function registerLanternTextures(scene: Phaser.Scene): void {
   addWithFlash(LK.ringer[1], [...RINGER_TOP, ...LEGS_2]);
   addWithFlash(LK.mooner[0], [...MOONER_TOP, ...LEGS_1]);
   addWithFlash(LK.mooner[1], [...MOONER_TOP, ...LEGS_2]);
+  addWithFlash(LK.bearer[0], [...BEARER_TOP, ...LEGS_1]);
+  addWithFlash(LK.bearer[1], [...BEARER_TOP, ...LEGS_2]);
   addWithFlash(LK.bat[0], BAT_1);
   addWithFlash(LK.bat[1], BAT_2);
   // 안개나방은 박쥐와 같은 모양에 날개만 잿빛이다.

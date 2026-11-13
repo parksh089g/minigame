@@ -565,6 +565,13 @@ export class LanternKeeperScene extends MiniGameScene {
           }
           board.play('bolt', now);
           break;
+        case 'swing':
+          this.view.swing(event.angle, event.arc, event.reach, event.count, event.evolved);
+          board.play('swing', now);
+          break;
+        case 'lamp':
+          board.play('lamp', now);
+          break;
         case 'bell':
           board.play('bell', now);
           // 새벽 종은 두 번 울린다.

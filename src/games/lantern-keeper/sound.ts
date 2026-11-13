@@ -49,6 +49,8 @@ export type SoundId =
   | 'volley'
   | 'strike'
   | 'bolt'
+  | 'swing'
+  | 'lamp'
   | 'bell'
   | 'flint'
   | 'vent'
@@ -212,6 +214,13 @@ export const SOUNDS: Readonly<Record<SoundId, readonly Note[]>> = {
   volley: [{ f: 740, to: 330, d: 0.11, v: 0.24 }],
   strike: [{ f: 160, to: 62, d: 0.09, type: 'triangle', v: 0.26 }],
   bolt: [{ f: 1500, to: 520, d: 0.05, type: 'sawtooth', v: 0.12 }],
+  // 횃불을 휘두른다: 바람을 가르는 짧은 소리. 자주 나므로 작게 둔다.
+  swing: [{ f: 520, to: 180, d: 0.09, type: 'triangle', v: 0.1 }],
+  // 풍등이 떠오른다: 위로 흔들리며 오르는 소리
+  lamp: [
+    { f: 440, to: 880, d: 0.18, type: 'sine', v: 0.1 },
+    { f: 660, to: 990, d: 0.12, type: 'sine', v: 0.06, at: 0.06 },
+  ],
   // 종소리: 댕 하고 한 번 울린다. 몇 초마다 나므로 등불 기둥의 종보다 낮고 작게 둔다.
   bell: [
     { f: 659, d: 0.2, type: 'triangle', v: 0.18 },
@@ -255,6 +264,7 @@ export const MIN_GAP_MS: Readonly<Partial<Record<SoundId, number>>> = {
   burst: 120,
   strike: 140,
   bolt: 170,
+  swing: 140,
   flint: 150,
   vent: 450,
   stomp: 90,

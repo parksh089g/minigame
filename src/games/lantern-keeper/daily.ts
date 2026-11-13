@@ -82,20 +82,37 @@ const OLD_HEROES = 4;
 export const GROVE_DAILY_FROM = 20_780;
 /** 빛버섯 숲이 생기기 전에 돌던 스테이지의 수 */
 const FOUR_STAGES = 4;
+/**
+ * 여섯 번째 캐릭터(횃불잡이)가 오늘의 판에 섞이기 시작하는 날(2026년 11월 26일). 그 전의 날은 캐릭터 다섯이 돌던 차례 그대로다.
+ * 캐릭터 여섯과 스테이지 다섯은 저마다 하루에 한 칸씩만 돌아도 서른 날 동안 모든 짝이 한 번씩 나오고, 이틀 내리 같은 것이 나오지 않는다.
+ */
+export const BEARER_DAILY_FROM = 20_783;
+/** 횃불잡이가 생기기 전에 돌던 캐릭터와, 그때 돌던 스테이지의 수 */
+const FIVE_HEROES = 5;
+const FIVE_STAGES = 5;
+/** 횃불잡이가 섞이는 첫날이 그 전날(바람 설원)과 같은 스테이지가 되지 않도록 스테이지의 차례를 한 칸 민다. */
+const BEARER_STAGE_SHIFT = 1;
 
 /**
- * 그날의 조건. 캐릭터는 하루에 한 칸씩 돌아가고, 스테이지는 캐릭터가 한 바퀴 돌 때마다 한 칸 더 밀려서
- * 이틀 내리 같은 것이 나오지 않고 모든 짝이 차례로 한 번씩 나온다.
+ * 그날의 조건. 캐릭터와 스테이지가 하루에 한 칸씩 돌아가서(캐릭터와 스테이지의 수가 같던 때는 스테이지가
+ * 캐릭터가 한 바퀴 돌 때마다 한 칸 더 밀려서) 이틀 내리 같은 것이 나오지 않고 모든 짝이 차례로 한 번씩 나온다.
  * 아직 열지 못한 캐릭터와 스테이지도 여기서는 쓸 수 있다.
  */
 export function dailyPlan(day: number): DailyPlan {
   const index = Math.max(0, Math.floor(day));
   return {
     day: index,
-    hero: HERO_ORDER[index % (index >= MOONER_DAILY_FROM ? HERO_ORDER.length : OLD_HEROES)],
+    hero: HERO_ORDER[index % heroCount(index)],
     stage: dailyStage(index),
     seed: mix(index) & 0x7fffffff,
   };
+}
+
+/** 그날 돌던 캐릭터의 수 */
+function heroCount(index: number): number {
+  if (index < MOONER_DAILY_FROM) return OLD_HEROES;
+  if (index < BEARER_DAILY_FROM) return FIVE_HEROES;
+  return HERO_ORDER.length;
 }
 
 /** 그날의 스테이지. 스테이지나 캐릭터가 늘어난 날보다 앞의 날은 그때 정해 둔 차례 그대로 둔다. */
@@ -103,7 +120,8 @@ function dailyStage(index: number): StageId {
   if (index < TUNDRA_DAILY_FROM) return STAGE_ORDER[index % OLD_STAGES];
   if (index < MOONER_DAILY_FROM) return STAGE_ORDER[(index + Math.floor(index / OLD_HEROES)) % FOUR_STAGES];
   if (index < GROVE_DAILY_FROM) return STAGE_ORDER[index % FOUR_STAGES];
-  return STAGE_ORDER[(index + Math.floor(index / HERO_ORDER.length)) % STAGE_ORDER.length];
+  if (index < BEARER_DAILY_FROM) return STAGE_ORDER[(index + Math.floor(index / FIVE_HEROES)) % FIVE_STAGES];
+  return STAGE_ORDER[(index + BEARER_STAGE_SHIFT) % STAGE_ORDER.length];
 }
 
 /**

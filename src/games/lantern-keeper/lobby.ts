@@ -51,7 +51,7 @@ const MARGIN = 12;
 const ROW_WIDTH = GAME_WIDTH - MARGIN * 2;
 const BUY_WIDTH = 62;
 const CARD_GAP = 6;
-/** 캐릭터 카드는 다섯이 한 줄에 놓여서, 사이를 조금 좁힌다. */
+/** 캐릭터 카드는 여섯이 한 줄에 놓여서, 사이를 조금 좁힌다. */
 const HERO_GAP = 4;
 const HERO_CARD = { width: (ROW_WIDTH - HERO_GAP * (HERO_ORDER.length - 1)) / HERO_ORDER.length, height: 62 } as const;
 /** 잠긴 카드에 적는 여는 조건: 무엇을("2:00", "새벽") 어떻게("버티기", "맞기"). 끝까지 버텨야 열리는 것은 새벽을 맞으라고 적는다. */
@@ -59,7 +59,7 @@ const unlockParts = (seconds: number): readonly [string, string] =>
   seconds >= RUN_SECONDS ? ['새벽', '맞기'] : [formatClock(seconds), '버티기'];
 /**
  * 잠긴 캐릭터 카드: 그림자를 조금 작게 그리고 그 아래에 여는 조건을 두 줄로 적는다.
- * 캐릭터가 다섯이라 카드가 좁아서, 한 줄로 적으면 글씨를 가장 작은 크기보다도 줄여야 했다.
+ * 캐릭터가 여섯이라 카드가 좁아서, 한 줄로 적으면 글씨를 가장 작은 크기보다도 줄여야 했다.
  */
 const LOCKED_HERO = { scale: 1.5, artY: 21, lines: [35, 47] } as const;
 /** 새로 들어와서 아직 눌러 보지 않은 캐릭터 카드의 오른쪽 위에 붙는 "새" */
