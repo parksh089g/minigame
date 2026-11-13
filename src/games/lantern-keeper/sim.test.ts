@@ -1440,6 +1440,8 @@ describe('캐릭터', () => {
       if (trait.area) expect(shown).toContain(`범위 ${percent(trait.area)}`);
       if (trait.xp) expect(shown).toContain(`경험치 ${percent(trait.xp)}`);
       if (trait.taken) expect(shown).toContain(`받는 피해 ${percent(trait.taken)}`);
+      // "받는 피해"와 헷갈리지 않게, 그 글을 뺀 나머지에서 찾는다.
+      if (trait.damage) expect(shown.replace(/받는 피해 [+-]\d+%/, '')).toContain(`피해 ${percent(trait.damage)}`);
       if (trait.maxHp) expect(shown).toContain(`최대 체력 ${trait.maxHp > 0 ? '+' : '-'}${Math.abs(trait.maxHp)}`);
     }
   });
@@ -1462,8 +1464,33 @@ describe('캐릭터', () => {
       expect(HEROES.ringer.trait.maxHp ?? 0).toBeGreaterThan(HEROES[id].trait.maxHp ?? 0);
       expect(HEROES.ringer.trait.speed ?? 1).toBeLessThan(HEROES[id].trait.speed ?? 1);
     }
-    // 가장 늦게 열린다.
-    expect(HEROES.ringer.unlockSeconds).toBe(Math.max(...HERO_ORDER.map((id) => HEROES[id].unlockSeconds)));
+  });
+
+  it('달잡이는 초승달로 시작하고, 더 세게 때리지만 같은 공격에 더 다친다', () => {
+    const hit = (hero: 'keeper' | 'mooner'): number => {
+      const sim = quietSim(1, { hero });
+      sim.state.weapons = {};
+      const before = sim.state.player.hp;
+      sim.state.enemies.push(enemy('slag', 2, 0, 1e9));
+      sim.step(STEP, 0, 0);
+      return before - sim.state.player.hp;
+    };
+    /** 같은 무기(불씨탄 1레벨)로 30초 동안 튼튼한 그림자 하나에게 준 피해 */
+    const dealt = (hero: 'keeper' | 'mooner'): number => {
+      const sim = quietSim(1, { hero });
+      sim.state.weapons = { ember: 1 };
+      sim.state.player.hp = 1e9;
+      sim.state.enemies.push(enemy('slag', 60, 0, 1e9));
+      advance(sim, 30);
+      return 1e9 - sim.state.enemies[0].hp;
+    };
+    expect(createRun({ ...config, hero: 'mooner' }).weapons).toEqual({ moon: 1 });
+    expect(hit('mooner')).toBeCloseTo(ENEMIES.slag.damage * (HEROES.mooner.trait.taken ?? 1), 5);
+    expect(hit('mooner')).toBeGreaterThan(hit('keeper'));
+    expect(dealt('mooner') / dealt('keeper')).toBeCloseTo(HEROES.mooner.trait.damage ?? 1, 2);
+    // 새벽을 한 번 맞아야 열려서, 가장 늦게 열린다.
+    expect(HEROES.mooner.unlockSeconds).toBe(RUN_SECONDS);
+    expect(HEROES.mooner.unlockSeconds).toBe(Math.max(...HERO_ORDER.map((id) => HEROES[id].unlockSeconds)));
   });
 
   it('번개잡이는 손이 잦아서 같은 무기를 더 자주 쓴다', () => {

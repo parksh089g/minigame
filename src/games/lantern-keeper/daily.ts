@@ -67,6 +67,13 @@ export interface DailyPlan {
 export const TUNDRA_DAILY_FROM = 20_773;
 /** 바람 설원이 생기기 전에 돌던 스테이지의 수 */
 const OLD_STAGES = 3;
+/**
+ * 다섯 번째 캐릭터(달잡이)가 오늘의 판에 섞이기 시작하는 날(2026년 11월 20일). 그 전의 날은 캐릭터 넷이 돌던 차례 그대로다.
+ * 캐릭터 다섯과 스테이지 넷은 저마다 하루에 한 칸씩만 돌아도 스무 날 동안 모든 짝이 한 번씩 나온다.
+ */
+export const MOONER_DAILY_FROM = 20_777;
+/** 달잡이가 생기기 전에 돌던 캐릭터의 수 */
+const OLD_HEROES = 4;
 
 /**
  * 그날의 조건. 캐릭터는 하루에 한 칸씩 돌아가고, 스테이지는 캐릭터가 한 바퀴 돌 때마다 한 칸 더 밀려서
@@ -75,13 +82,16 @@ const OLD_STAGES = 3;
  */
 export function dailyPlan(day: number): DailyPlan {
   const index = Math.max(0, Math.floor(day));
+  const fresh = index >= MOONER_DAILY_FROM;
   const stage =
     index < TUNDRA_DAILY_FROM
       ? STAGE_ORDER[index % OLD_STAGES]
-      : STAGE_ORDER[(index + Math.floor(index / HERO_ORDER.length)) % STAGE_ORDER.length];
+      : fresh
+        ? STAGE_ORDER[index % STAGE_ORDER.length]
+        : STAGE_ORDER[(index + Math.floor(index / OLD_HEROES)) % STAGE_ORDER.length];
   return {
     day: index,
-    hero: HERO_ORDER[index % HERO_ORDER.length],
+    hero: HERO_ORDER[index % (fresh ? HERO_ORDER.length : OLD_HEROES)],
     stage,
     seed: mix(index) & 0x7fffffff,
   };

@@ -239,7 +239,7 @@ export function modifiers(
   const m = (id: MetaId): number => meta[id] ?? 0;
   const b = (id: BoonId): number => boonLevel(boons, id);
   return {
-    damage: (1 + 0.1 * p('wick')) * (1 + 0.05 * m('might')) * (1 + BOON_VALUES.blaze * b('blaze')),
+    damage: (1 + 0.1 * p('wick')) * (1 + 0.05 * m('might')) * (trait.damage ?? 1) * (1 + BOON_VALUES.blaze * b('blaze')),
     cooldown: 0.93 ** p('hourglass') * (trait.cooldown ?? 1) * BOON_VALUES.haste ** b('haste'),
     speed: (1 + 0.08 * p('boots')) * (1 + 0.04 * m('swift')) * (trait.speed ?? 1),
     magnet: (1 + 0.3 * p('magnet')) * (1 + 0.15 * m('reach')),
