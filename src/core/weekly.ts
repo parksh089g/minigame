@@ -15,6 +15,22 @@ export const GENRE_LABEL: Record<Genre, string> = {
   action: '순발력',
 };
 
+/** [목표, 보상] 세 단계. 그 주에 어느 단계가 나올지는 날짜에서 뽑는다. */
+export type Tiers = readonly (readonly [goal: number, reward: number])[];
+
+/**
+ * 큰 게임 미션의 모양. 한 판이 길거나 판이 끝나지 않고 이어지는 게임(등불지기, 새싹 컴퍼니)은
+ * "이번 주의 게임"에 나오지 않는 대신, 몇 주에 한 번 이 모양으로 따로 나온다.
+ */
+export interface BigMission {
+  /** 목표를 받아 미션의 이름을 짓는다. 업적 화면 한 줄에 들어가게 짧게 */
+  title: (goal: number) => string;
+  /** 덧붙이는 한마디. 한글 14자 안팎 */
+  description: string;
+  /** 그 게임에 맞는 [목표, 보상] 세 단계 */
+  tiers: Tiers;
+}
+
 /** 미션을 정할 때 보는 게임의 모습 */
 export interface WeeklyGame {
   id: string;
@@ -22,6 +38,8 @@ export interface WeeklyGame {
   genre: Genre | null;
   /** 한 판이 짧아서 "이 게임 몇 판" 미션으로 내도 되는지 */
   quick: boolean;
+  /** 큰 게임이면 그 미션의 모양. 없으면 큰 게임 미션에 나오지 않는다. */
+  big?: BigMission;
 }
 
 /** 한 주의 미션 세 개. 쉬운 것부터 차례로 하나씩 나오고, 세이브에는 이 이름으로 남는다. */
@@ -40,7 +58,9 @@ export type MissionKind =
   /** 게임으로 코인 몇 개 */
   | 'coins'
   /** 오늘의 도전 몇 번 */
-  | 'daily';
+  | 'daily'
+  /** 큰 게임(등불지기, 새싹 컴퍼니) 가운데 하나를 몇 판. 새싹 컴퍼니는 출시 한 번이 한 판이다. */
+  | 'big';
 
 export interface WeeklyMission {
   id: MissionId;
@@ -53,9 +73,16 @@ export interface WeeklyMission {
   goal: number;
   /** 보상 코인 */
   reward: number;
-  /** 판 수를 세는 게임의 id. 갈래 미션과 게임 미션에만 있고, 없으면 모든 게임을 센다. */
+  /** 판 수를 세는 게임의 id. 갈래 미션, 게임 미션, 큰 게임 미션에만 있고, 없으면 모든 게임을 센다. */
   counts?: readonly string[];
 }
+
+/**
+ * 미션을 정하는 규칙의 판. 규칙이 바뀌면 1씩 올린다. 주간 기록에 그 주를 시작한 규칙을 적어 두어서,
+ * 새 버전이 깔려도 이미 채우던 그 주의 미션은 바뀌지 않는다(WeeklyState.rules).
+ * 1: 첫 규칙. 2: 보통 미션에 큰 게임 미션이 끼어든다.
+ */
+export const MISSION_RULES = 2;
 
 /** 세이브에 남기는 이번 주의 기록 */
 export interface WeeklyState {
@@ -72,9 +99,14 @@ export interface WeeklyState {
   /**
    * 이번 주의 "정해진 게임 몇 판" 미션에 뽑힌 게임의 id. 그 주의 첫 판을 기록할 때 적어 둔다.
    * 주 중간에 게임이 늘어난 버전이 깔려도 채우던 미션이 다른 게임으로 바뀌지 않게 하려는 것이다.
-   * 그런 미션이 없는 주에는 적지 않는다.
+   * 그런 미션이 없는 주에는 적지 않는다. 큰 게임 미션이 나온 주에는 그 게임을 적는다.
    */
   pick?: string;
+  /**
+   * 이 주의 미션을 정한 규칙의 판(MISSION_RULES). 그 주의 첫 판을 기록할 때 그때의 규칙이 적힌다.
+   * 이것이 생기기 전에 시작한 주의 기록에는 없고, 그때는 1이다.
+   */
+  rules?: number;
 }
 
 /** 지금 따지는 주와 그 주의 미션 */
@@ -97,10 +129,7 @@ const MAX_AHEAD_DAYS = DAYS_IN_WEEK;
 /** 날짜 수 0(1970년 1월 1일)은 목요일이라, 3을 더하면 월요일이 7의 배수가 된다. */
 const MONDAY_SHIFT = 3;
 
-/** [목표, 보상] 세 단계. 그 주에 어느 단계가 나올지는 날짜에서 뽑는다. */
-type Tiers = readonly (readonly [goal: number, reward: number])[];
-
-const TIERS: Record<MissionKind, Tiers> = {
+const TIERS: Record<Exclude<MissionKind, 'big'>, Tiers> = {
   plays: [[8, 25], [10, 30], [12, 35]],
   variety: [[3, 25], [4, 30], [5, 35]],
   genre: [[5, 45], [6, 50], [8, 60]],
@@ -144,8 +173,14 @@ export function daysLeft(weekKey: string, dateKey: string): number {
   return Math.min(DAYS_IN_WEEK, Math.max(1, DAYS_IN_WEEK - (today - start)));
 }
 
+/** 새 주간 기록. 새로 시작하는 주는 지금의 규칙으로 미션을 정한다. */
 export function createWeekly(): WeeklyState {
-  return { weekKey: null, plays: {}, coins: 0, dailyClears: 0, claimed: [] };
+  return { weekKey: null, plays: {}, coins: 0, dailyClears: 0, claimed: [], rules: MISSION_RULES };
+}
+
+/** 그 기록의 주가 미션을 정한 규칙의 판. 적혀 있지 않은 옛 기록은 1이다. */
+function rulesOf(state: WeeklyState): number {
+  return state.rules ?? 1;
 }
 
 const isMissionId = (value: unknown): value is MissionId =>
@@ -175,6 +210,8 @@ export function normalizeWeekly(raw: unknown): WeeklyState {
     }
   }
   const pick = typeof value.pick === 'string' && value.pick.length > 0 ? value.pick : null;
+  // 규칙의 판이 없으면 그 전의 기록이다(1). 이 버전이 모르는 새 판이면 아는 가장 새 판으로 본다.
+  const rules = count(value.rules) > 0 ? Math.min(MISSION_RULES, count(value.rules)) : null;
   return {
     weekKey,
     plays,
@@ -182,6 +219,7 @@ export function normalizeWeekly(raw: unknown): WeeklyState {
     dailyClears: count(value.dailyClears),
     claimed,
     ...(pick !== null ? { pick } : {}),
+    ...(rules !== null ? { rules } : {}),
   };
 }
 
@@ -224,8 +262,8 @@ function mission(
   weekKey: string,
   text: (goal: number) => { title: string; description: string },
   counts?: readonly string[],
+  tiers: Tiers = TIERS[kind as Exclude<MissionKind, 'big'>],
 ): WeeklyMission {
-  const tiers = TIERS[kind];
   const [goal, reward] = tiers[Math.floor(seededUnit(`${weekKey}:${id}`) * tiers.length)];
   return { id, kind, goal, reward, ...text(goal), ...(counts ? { counts } : {}) };
 }
@@ -294,6 +332,30 @@ function gameMission(
   );
 }
 
+/**
+ * 큰 게임 몇 판. 이 미션이 돌아올 때마다(turn) 큰 게임을 차례로 하나씩 고른다.
+ * 그 주에 이미 뽑아 둔 게임(pick)이 큰 게임이면 그 게임을 그대로 쓴다. 게임이 늘어도 채우던 미션이 바뀌지 않게.
+ */
+function bigMission(
+  id: MissionId,
+  weekKey: string,
+  games: readonly WeeklyGame[],
+  turn: number,
+  pick?: string,
+): WeeklyMission | null {
+  const big = games.filter((game): game is WeeklyGame & { big: BigMission } => game.big !== undefined);
+  if (big.length === 0) return null;
+  const game = big.find((candidate) => candidate.id === pick) ?? big[mod(turn, big.length)];
+  return mission(
+    id,
+    'big',
+    weekKey,
+    (goal) => ({ title: game.big.title(goal), description: game.big.description }),
+    [game.id],
+    game.big.tiers,
+  );
+}
+
 function coinsMission(id: MissionId, weekKey: string): WeeklyMission {
   return mission(id, 'coins', weekKey, (goal) => ({
     title: `코인 ${goal}개 모으기`,
@@ -311,9 +373,14 @@ function dailyMission(id: MissionId, weekKey: string): WeeklyMission {
 /**
  * 그 주의 미션 세 개(쉬운 것부터). 종류는 주마다 차례로 돌아가서 같은 미션이 잇달아 나오지 않고,
  * 목표의 크기와 어느 게임인지는 그 주의 날짜에서 뽑는다. 주의 이름이 잘못됐으면 빈 목록이다.
- * pick은 그 주에 이미 뽑아 둔 "이번 주의 게임"이다(WeeklyState.pick).
+ * pick은 그 주에 이미 뽑아 둔 게임이다(WeeklyState.pick). rules는 그 주를 시작한 규칙의 판이다(MISSION_RULES).
  */
-export function missionsFor(weekKey: string, games: readonly WeeklyGame[], pick?: string): WeeklyMission[] {
+export function missionsFor(
+  weekKey: string,
+  games: readonly WeeklyGame[],
+  pick?: string,
+  rules: number = MISSION_RULES,
+): WeeklyMission[] {
   const index = weekIndex(weekKey);
   if (index === null || weekKeyOf(weekKey) !== weekKey) return [];
 
@@ -322,11 +389,16 @@ export function missionsFor(weekKey: string, games: readonly WeeklyGame[], pick?
   const easy = playsFirst ? playsMission('easy', weekKey) : varietyMission('easy', weekKey);
 
   // 보통 미션: 퍼즐, 이번 주의 게임, 순발력이 차례로 돈다. 낼 수 없는 것은 건너뛴다.
+  // 규칙 2부터는 큰 게임이 한 자리 끼어서 네 주에 한 번 나오고, 나올 때마다 큰 게임을 번갈아 고른다.
   const makers = [
     () => genreMission('normal', weekKey, 'puzzle', games),
     () => gameMission('normal', weekKey, games, pick),
     () => genreMission('normal', weekKey, 'action', games),
   ];
+  if (rules >= 2 && games.some((game) => game.big !== undefined)) {
+    const cycle = makers.length + 1;
+    makers.unshift(() => bigMission('normal', weekKey, games, Math.floor(index / cycle), pick));
+  }
   let normal: WeeklyMission | null = null;
   for (let step = 0; step < makers.length && normal === null; step += 1) {
     normal = makers[mod(index + step, makers.length)]();
@@ -349,14 +421,16 @@ export function weekContext(
 ): WeekContext | null {
   const weekKey = currentWeekKey(state, todayKey);
   if (weekKey === null) return null;
-  // 그 주의 기록에 뽑아 둔 게임이 있으면 그대로 쓴다.
-  const pick = state.weekKey === weekKey ? state.pick : undefined;
-  return { weekKey, missions: missionsFor(weekKey, games, pick), games };
+  // 그 주의 기록이 있으면 뽑아 둔 게임과 그 주를 시작한 규칙을 그대로 쓴다. 없으면 지금의 규칙으로 새로 시작한다.
+  const recorded = state.weekKey === weekKey;
+  const pick = recorded ? state.pick : undefined;
+  const rules = recorded ? rulesOf(state) : MISSION_RULES;
+  return { weekKey, missions: missionsFor(weekKey, games, pick, rules), games };
 }
 
-/** 그 주의 미션 가운데 "정해진 게임 몇 판" 미션이 세는 게임. 그런 미션이 없는 주면 null. */
+/** 그 주의 미션 가운데 한 게임만 세는 미션("이번 주의 게임"이나 큰 게임)이 세는 게임. 그런 미션이 없는 주면 null. */
 export function pickedGame(week: WeekContext): string | null {
-  return week.missions.find((mission) => mission.kind === 'game')?.counts?.[0] ?? null;
+  return week.missions.find((mission) => mission.kind === 'game' || mission.kind === 'big')?.counts?.[0] ?? null;
 }
 
 /**
@@ -430,7 +504,7 @@ export function unclaimedFromLastWeek(
   if (state.weekKey === null || state.weekKey >= weekKey) return [];
   const past: WeekContext = {
     weekKey: state.weekKey,
-    missions: missionsFor(state.weekKey, games, state.pick),
+    missions: missionsFor(state.weekKey, games, state.pick, rulesOf(state)),
   };
   return claimableMissions(state, past);
 }

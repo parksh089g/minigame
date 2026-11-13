@@ -21,7 +21,7 @@ import {
 } from './save';
 import { createCosmetics } from './shop';
 import { MILESTONE_COINS, STAGE_COINS } from './stages';
-import { createWeekly, missionsFor, pickedGame, type WeekContext, type WeeklyGame } from './weekly';
+import { createWeekly, MISSION_RULES, missionsFor, pickedGame, type WeekContext, type WeeklyGame } from './weekly';
 
 const NOW = 1_700_000_000_000;
 
@@ -617,7 +617,14 @@ describe('주간 미션', () => {
 
   it('한 판마다 판 수와 얻은 코인을 주간 기록에 더한다', () => {
     const first = applyPlayResult(createDefaultSave(NOW), 'p1', 10, 2, NOW, null, week);
-    expect(first.save.weekly).toEqual({ weekKey: WEEK, plays: { p1: 1 }, coins: 2, dailyClears: 0, claimed: [] });
+    expect(first.save.weekly).toEqual({
+      weekKey: WEEK,
+      plays: { p1: 1 },
+      coins: 2,
+      dailyClears: 0,
+      claimed: [],
+      rules: MISSION_RULES,
+    });
     const second = applyPlayResult(first.save, 'p1', 30, 4, NOW + 1, null, week);
     expect(second.save.weekly.plays).toEqual({ p1: 2 });
     expect(second.save.weekly.coins).toBe(6);
@@ -689,6 +696,7 @@ describe('주간 미션', () => {
       dailyClears: 0,
       claimed: [],
       pick,
+      rules: MISSION_RULES,
     });
   });
 

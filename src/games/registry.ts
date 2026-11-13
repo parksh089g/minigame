@@ -4,7 +4,14 @@
  */
 import { SCENE } from '../config';
 import { challengeFor, dateKeyOf, type DailyChallenge } from '../core/daily';
-import { weekContext, type Genre, type WeekContext, type WeeklyGame, type WeeklyState } from '../core/weekly';
+import {
+  weekContext,
+  type BigMission,
+  type Genre,
+  type WeekContext,
+  type WeeklyGame,
+  type WeeklyState,
+} from '../core/weekly';
 import type { SpriteKey } from '../art/sprites';
 import { LANTERN_GAME_ID, LANTERN_SCENE } from './lantern-keeper/data';
 import { coinsFor as lanternCoins } from './lantern-keeper/rules';
@@ -44,6 +51,11 @@ export interface MiniGameInfo {
    * 오늘의 도전에서 빠지고 공용 결과 화면도 쓰지 않는다. 온라인 랭킹에는 그 기록(평판)으로 오른다.
    */
   ongoing?: boolean;
+  /**
+   * 한 판이 길거나 이어지는 큰 게임이면, 몇 주에 한 번 나오는 주간 미션의 모양(core/weekly.ts의 BigMission).
+   * 큰 게임은 "이번 주의 게임"에 나오지 않는 대신 이 미션으로 나온다.
+   */
+  bigMission?: BigMission;
 }
 
 export const GAMES: readonly MiniGameInfo[] = [
@@ -218,6 +230,16 @@ export const GAMES: readonly MiniGameInfo[] = [
     dailyTargets: [],
     // 이 앱의 대표 게임이라 허브 목록의 맨 앞에 놓는다.
     featured: true,
+    // 한 판이 길어서 몇 판만 묻는다.
+    bigMission: {
+      title: (goal) => `등불지기 ${goal}판`,
+      description: '이번 주의 큰 게임이에요',
+      tiers: [
+        [2, 50],
+        [3, 55],
+        [4, 60],
+      ],
+    },
   },
   {
     id: COMPANY_GAME_ID,
@@ -228,6 +250,17 @@ export const GAMES: readonly MiniGameInfo[] = [
     coinsFor: () => 1,
     dailyTargets: [],
     ongoing: true,
+    // 출시 한 번이 한 판이다. 예약해 둔 게임이 닫아 둔 동안 나온 것도 센다.
+    bigMission: {
+      title: (goal) => `새싹 컴퍼니 ${goal}번 출시`,
+      description: '업데이트도 출시로 세요',
+      // 이름이 업적 화면의 한 줄에 들어가도록 목표는 한 자리 수다.
+      tiers: [
+        [5, 50],
+        [7, 55],
+        [9, 60],
+      ],
+    },
   },
 ];
 
@@ -294,7 +327,7 @@ export function stageGames(games: readonly MiniGameInfo[] = GAMES): MiniGameInfo
 
 /**
  * 주간 미션이 보는 게임 목록. 플레이할 수 있는 게임만 들어가고, 오늘의 도전에 나오는 게임
- * (한 판이 짧고 혼자 하는 게임)만 "이 게임 몇 판" 미션으로 낸다.
+ * (한 판이 짧고 혼자 하는 게임)만 "이 게임 몇 판" 미션으로 낸다. 큰 게임은 큰 게임 미션으로 가끔 낸다.
  */
 export function weeklyGames(games: readonly MiniGameInfo[] = GAMES): WeeklyGame[] {
   return games
@@ -304,6 +337,7 @@ export function weeklyGames(games: readonly MiniGameInfo[] = GAMES): WeeklyGame[
       title: game.title,
       genre: game.genre ?? null,
       quick: game.dailyTargets.length > 0,
+      ...(game.bigMission ? { big: game.bigMission } : {}),
     }));
 }
 
