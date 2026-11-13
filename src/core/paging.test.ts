@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clampPage, layoutPages, pagedCapacity, pageOfIndex, pageSlice } from './paging';
+import { balancedRows, clampPage, layoutPages, pagedCapacity, pageOfIndex, pageSlice } from './paging';
 
 describe('layoutPages', () => {
   it('모두 들어가면 한 쪽이고 쪽 넘김 줄의 자리를 빼지 않는다', () => {
@@ -63,5 +63,22 @@ describe('쪽 번호', () => {
     expect(pageSlice(['a', 'b', 'c', 'd'], 0, 3)).toEqual(['a', 'b', 'c']);
     expect(pageSlice(['a', 'b', 'c', 'd'], 1, 3)).toEqual(['d']);
     expect(pageSlice(['a', 'b', 'c', 'd'], 2, 3)).toEqual([]);
+  });
+});
+
+describe('balancedRows', () => {
+  it('한 줄에 들어가면 한 줄, 넘치면 가장 적은 줄에 고르게 나눈다', () => {
+    expect(balancedRows(4, 4)).toEqual([4]);
+    expect(balancedRows(1, 4)).toEqual([1]);
+    expect(balancedRows(5, 4)).toEqual([3, 2]);
+    expect(balancedRows(6, 4)).toEqual([3, 3]);
+    expect(balancedRows(7, 4)).toEqual([4, 3]);
+    expect(balancedRows(9, 4)).toEqual([3, 3, 3]);
+  });
+
+  it('없거나 엉뚱한 값은 빈 줄이고, 한 줄의 개수는 적어도 하나다', () => {
+    expect(balancedRows(0, 4)).toEqual([]);
+    expect(balancedRows(-3, 4)).toEqual([]);
+    expect(balancedRows(3, 0)).toEqual([1, 1, 1]);
   });
 });

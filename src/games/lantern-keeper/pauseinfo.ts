@@ -7,44 +7,55 @@ import { FONT_SIZE, GAME_WIDTH, THEME, THEME_CSS } from '../../config';
 import { addText } from '../../core/ui';
 import type { PauseExtra } from '../../scenes/MiniGameScene';
 import { boonRows, levelLabel, passiveRows, percent, weaponRows, type PassiveRow, type WeaponRow } from './build';
-import { MAX_WEAPONS } from './data';
 import { iconKey } from './icons';
+import { weaponSlotCount } from './rules';
 import type { RunState } from './sim';
 
 /** 일시정지 카드의 너비. 이름과 막대가 한 줄에 들어가도록 기본보다 넓힌다. */
 const CARD_WIDTH = GAME_WIDTH - 16;
-/** 제목 줄, 항목 한 줄, 무기와 패시브 사이, 패시브 두 칸 사이 */
+/** 제목 줄, 항목 한 줄(넉넉할 때와 가장 좁힐 때), 무기와 패시브 사이, 패시브 두 칸 사이 */
 const HEAD = 14;
-const ROW = 19;
+const BASE_ROW = 19;
+const MIN_ROW = 14;
+/**
+ * 일시정지 카드에서 이 내용 말고 차지하는 높이(제목, 버튼 셋, 내용 아래의 틈)와 화면 위아래의 여백.
+ * PauseScene의 PANEL_HEIGHT(168)와 EXTRA.gap(8)에 위아래 2씩을 더한 값이다.
+ */
+const PAUSE_CHROME = 180;
 const SECTION_GAP = 5;
 const COLUMN_GAP = 8;
 /** 한 줄 안에서의 자리: 이름이 시작하는 곳, 레벨이 시작하는 곳, 피해 막대가 시작하는 곳과 그 길이 */
 const AT = { name: 22, level: 78, bar: 108, barWidth: 56, barHeight: 5 } as const;
 
-export function pauseInfo(state: RunState): PauseExtra {
+/**
+ * screenHeight는 게임 화면의 높이. 무기를 여섯까지 드는 잔치의 밤에서 끝없는 밤의 축복까지 받으면 줄이 많아서,
+ * 가장 짧은 화면에서는 줄 높이를 좁혀 카드가 화면 밖으로 넘치지 않게 한다.
+ */
+export function pauseInfo(state: RunState, screenHeight = Infinity): PauseExtra {
+  const room = screenHeight - PAUSE_CHROME;
   const weapons = weaponRows(state.weapons, state.dealt);
   const passives = passiveRows(state.passives);
   const passiveLines = Math.max(1, Math.ceil(passives.length / 2));
   // 끝없는 밤에서 받은 밤의 축복이 있으면 패시브 아래에 한 칸 더 보여 준다.
   const boons = boonRows(state.boons);
   const boonLines = Math.ceil(boons.length / 2);
+  const fixed = HEAD * 2 + SECTION_GAP + (boons.length > 0 ? SECTION_GAP + HEAD : 0);
+  const lines = weapons.length + passiveLines + boonLines;
+  const ROW = Math.max(MIN_ROW, Math.min(BASE_ROW, Math.floor((room - fixed) / lines)));
   return {
     width: CARD_WIDTH,
-    height:
-      HEAD +
-      weapons.length * ROW +
-      SECTION_GAP +
-      HEAD +
-      passiveLines * ROW +
-      (boons.length > 0 ? SECTION_GAP + HEAD + boonLines * ROW : 0),
+    height: fixed + lines * ROW,
     draw: (scene, left, top, width) => {
       let y = top;
-      addText(scene, left, y, `무기 ${weapons.length}/${MAX_WEAPONS}`, { size: FONT_SIZE.small, color: THEME_CSS.sub });
+      addText(scene, left, y, `무기 ${weapons.length}/${weaponSlotCount(state.feast)}`, {
+        size: FONT_SIZE.small,
+        color: THEME_CSS.sub,
+      });
       addText(scene, left + width, y, '준 피해', { size: FONT_SIZE.small, color: THEME_CSS.faint, originX: 1 });
       y += HEAD;
       const bars = scene.add.graphics();
       for (const row of weapons) {
-        drawWeapon(scene, bars, row, left, y, width);
+        drawWeapon(scene, bars, row, left, y, width, ROW);
         y += ROW;
       }
       y += SECTION_GAP;
@@ -60,7 +71,7 @@ export function pauseInfo(state: RunState): PauseExtra {
       }
       passives.forEach((row, index) => {
         const x = left + (index % 2) * (column + COLUMN_GAP);
-        drawPassive(scene, row, x, y + Math.floor(index / 2) * ROW, column);
+        drawPassive(scene, row, x, y + Math.floor(index / 2) * ROW, column, ROW);
       });
       if (boons.length === 0) return;
       y += passiveLines * ROW + SECTION_GAP;
@@ -68,7 +79,7 @@ export function pauseInfo(state: RunState): PauseExtra {
       y += HEAD;
       boons.forEach((row, index) => {
         const x = left + (index % 2) * (column + COLUMN_GAP);
-        drawPassive(scene, { ...row, label: `×${row.level}` }, x, y + Math.floor(index / 2) * ROW, column);
+        drawPassive(scene, { ...row, label: `×${row.level}` }, x, y + Math.floor(index / 2) * ROW, column, ROW);
       });
     },
   };
@@ -86,8 +97,9 @@ function drawWeapon(
   left: number,
   top: number,
   width: number,
+  rowHeight: number,
 ): void {
-  const middle = top + ROW / 2;
+  const middle = top + rowHeight / 2;
   drawIcon(scene, iconKey(row.icon), left, middle);
   addText(scene, left + AT.name, middle, row.name, { size: FONT_SIZE.small, originY: 0.5 });
   addText(scene, left + AT.level, middle, levelLabel(row), {
@@ -113,8 +125,9 @@ function drawPassive(
   left: number,
   top: number,
   width: number,
+  rowHeight: number,
 ): void {
-  const middle = top + ROW / 2;
+  const middle = top + rowHeight / 2;
   drawIcon(scene, iconKey(row.icon), left, middle);
   addText(scene, left + AT.name, middle, row.name, { size: FONT_SIZE.small, originY: 0.5 });
   addText(scene, left + width, middle, row.label ?? levelLabel(row), {

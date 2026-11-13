@@ -26,6 +26,7 @@ import {
   STAGES,
   WEAPON_ORDER,
   WEAPONS,
+  type FeastId,
   type HeroId,
   type MetaId,
   type StageId,
@@ -41,7 +42,7 @@ import {
   type DailyRecord,
   type FriendScore,
 } from './daily';
-import { clampDepth, depthName, isUnlocked, metaCost, type Levels } from './rules';
+import { clampDepth, depthName, isFeast, isUnlocked, metaCost, type Levels } from './rules';
 import { restoreRun, type RunState } from './sim';
 import { normalizeTips, OLD_HAND_TIPS, type TipId } from './tips';
 
@@ -82,6 +83,8 @@ export interface LanternMeta {
   known: string[];
   /** 새로 들어왔는데 아직 눌러 보지 않은 캐릭터. 준비 화면의 카드에 "새"가 붙는다. */
   fresh: HeroId[];
+  /** 준비 화면에서 고른 잔치의 밤(data.ts의 FEAST)의 난이도. 꺼져 있으면 null이고, 열리기 전에는 늘 null이다. */
+  feast: FeastId | null;
 }
 
 /** 지금 있는 캐릭터와 무기 모두. 처음 하는 사람은 이것을 다 아는 것으로 친다(모두 처음 보므로 따로 알리지 않는다). */
@@ -116,6 +119,7 @@ export function createDefaultMeta(): LanternMeta {
     friend: null,
     known: [...ALL_KNOWN],
     fresh: [],
+    feast: null,
   };
 }
 
@@ -168,7 +172,20 @@ export function normalizeMeta(raw: unknown): LanternMeta {
   meta.known = ALL_KNOWN.filter((id) => known.includes(id));
   const fresh = Array.isArray(data.fresh) ? data.fresh : [];
   meta.fresh = HERO_ORDER.filter((id) => fresh.includes(id));
+  meta.feast = isFeast(data.feast) && feastOpen(meta) ? data.feast : null;
   return meta;
+}
+
+/** 잔치의 밤을 켤 수 있는지: 새벽을 한 번이라도 맞았으면 열린다. */
+export function feastOpen(meta: Pick<LanternMeta, 'clears'>): boolean {
+  return meta.clears > 0;
+}
+
+/** 잔치의 밤을 그 난이도로 켜거나, null이면 끈다. 바뀌는 것이 없거나 아직 열리지 않았으면 그대로 돌려준다. */
+export function chooseFeast(meta: LanternMeta, level: FeastId | null): LanternMeta {
+  const next = isFeast(level) ? level : null;
+  if (meta.feast === next || (next !== null && !feastOpen(meta))) return meta;
+  return { ...meta, feast: next };
 }
 
 /** 그 스테이지에서 열려 있는 깊은 밤의 가장 깊은 단계 */

@@ -14,6 +14,8 @@ import { DAILY_REWARD, dailyPlan, dailyToday, dayLabel, friendToday, withRo } fr
 import { addCodexPage, startingTab } from './codexpage';
 import { addRankPage } from './rankpage';
 import {
+  FEAST,
+  FEAST_ORDER,
   HERO_ORDER,
   HEROES,
   LANTERN_GAME_ID,
@@ -23,22 +25,26 @@ import {
   STAGE_ORDER,
   STAGES,
   WEAPONS,
+  type FeastId,
   type HeroId,
   type MetaId,
   type StageId,
 } from './data';
+import { showFeastPicker } from './feastpick';
 import { iconKey } from './icons';
 import {
   buyMeta,
   chooseDepth,
+  chooseFeast,
   chooseHero,
   chooseStage,
   claimChallenge,
+  feastOpen,
   meetHero,
   openDepth,
   type LanternMeta,
 } from './meta';
-import { depthName, depthRules, formatClock, formatTimes, isUnlocked, metaCost } from './rules';
+import { depthName, depthRules, feastTitle, formatClock, formatTimes, isUnlocked, metaCost } from './rules';
 import { runDawned, type RunState } from './sim';
 
 const MARGIN = 12;
@@ -81,6 +87,10 @@ const SETTLE_LABEL = '하던 판을 마칠까요? 한 번 더!';
 const discardLabel = (saved: RunState | null): string => (runDawned(saved) ? SETTLE_LABEL : DISCARD.label);
 /** 스테이지 카드 아래의 한 줄: 스테이지 설명, 깊은 밤이 열린 스테이지에서는 단계를 고르는 줄 */
 const DEPTH_ROW = { height: 20, button: 26 } as const;
+/** "어디로 갈까" 줄의 오른쪽 끝에 놓는 잔치의 밤 단추: 높이, 왼쪽의 작은 네모, 안쪽 여백(폭은 글에 맞춘다) */
+const FEAST_TOGGLE = { height: 14, box: 8, pad: 5 } as const;
+/** 잔치의 밤의 난이도를 고르는 창은 준비 화면의 모든 것 위에 뜬다. */
+const FEAST_PICKER_DEPTH = 100;
 /** 고르는 구역(누가 갈까 ~ 스테이지 설명)의 높이 */
 const PICK_HEIGHT = 15 + HERO_CARD.height + 4 + DETAIL_HEIGHT + 15 + STAGE_CARD.height + 4 + DEPTH_ROW.height;
 /** 화면이 가장 짧을 때(400)의 배치를 기준으로 하고, 길면 구역 사이를 이만큼까지 벌린다. */
@@ -252,6 +262,7 @@ function addMainPage(
   y += DETAIL_HEIGHT + spread;
 
   addText(scene, MARGIN + 2, y, '어디로 갈까', { color: CSS.silver });
+  addFeastToggle(scene, handlers, refreshers, refresh, y - 1);
   y += 15;
   addStageCards(scene, handlers, refreshers, refresh, y);
   y += STAGE_CARD.height + 4;
@@ -702,6 +713,54 @@ function addStageCards(
         handlers.setMeta(after);
         sfx.click();
       }
+      refresh();
+    });
+  });
+}
+
+/**
+ * 잔치의 밤의 작은 단추. 누르면 잔치의 밤을 알려 주고 난이도를 고르는 창(feastpick.ts)이 뜬다.
+ * 고른 난이도는 다음 판부터 쓰인다(data.ts의 FEAST). 새벽을 한 번 맞기 전에는 보이지 않는다.
+ */
+function addFeastToggle(
+  scene: Phaser.Scene,
+  handlers: LobbyHandlers,
+  refreshers: Array<() => void>,
+  refresh: () => void,
+  top: number,
+): void {
+  if (!feastOpen(handlers.getMeta())) return;
+  const { height, box } = FEAST_TOGGLE;
+  const labelOf = (level: FeastId | null): string => (level ? feastTitle(level) : FEAST.name);
+  const frame = scene.add.graphics();
+  const label = addText(scene, 0, top + height / 2, '', { size: FONT_SIZE.small, originY: 0.5 });
+  // 가장 긴 이름에 맞춘 폭으로 줄의 오른쪽 끝에 붙인다. 난이도를 바꿔도 단추의 자리와 크기는 그대로다.
+  const textWidth = Math.max(...[null, ...FEAST_ORDER].map((level) => label.setText(labelOf(level)).width));
+  const width = Math.ceil(FEAST_TOGGLE.pad + box + FEAST_TOGGLE.pad + textWidth + FEAST_TOGGLE.pad);
+  const left = MARGIN + ROW_WIDTH - width;
+  label.setX(left + FEAST_TOGGLE.pad + box + FEAST_TOGGLE.pad);
+  const draw = (pressed: boolean): void => {
+    const level = handlers.getMeta().feast;
+    frame.clear();
+    drawPanel(frame, left, top, width, height, {
+      fill: pressed || level ? COLOR.navy : COLOR.charcoal,
+      border: level ? COLOR.yellow : COLOR.slate,
+      shadow: null,
+      radius: 5,
+    });
+    // 왼쪽의 작은 네모. 켜져 있으면 안을 채운다.
+    const boxX = left + FEAST_TOGGLE.pad;
+    const boxY = top + (height - box) / 2;
+    frame.lineStyle(1, level ? COLOR.yellow : COLOR.silver, 1).strokeRect(boxX + 0.5, boxY + 0.5, box - 1, box - 1);
+    if (level) frame.fillStyle(COLOR.yellow, 1).fillRect(boxX + 2, boxY + 2, box - 4, box - 4);
+    label.setText(labelOf(level)).setColor(level ? CSS.yellow : CSS.silver);
+  };
+  refreshers.push(() => draw(false));
+  // 단추가 작아서 누르는 자리는 옆과 위로 조금 넓힌다(아래는 스테이지 카드라 넓히지 않는다).
+  addTapZone(scene, left - 6, top - 5, width + 6 + MARGIN, height + 5, draw, () => {
+    sfx.click();
+    showFeastPicker(scene, FEAST_PICKER_DEPTH, handlers.getMeta().feast, (level) => {
+      handlers.setMeta(chooseFeast(handlers.getMeta(), level));
       refresh();
     });
   });

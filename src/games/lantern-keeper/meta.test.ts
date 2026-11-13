@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  FEAST_ORDER,
   HERO_ORDER,
   HEROES,
   MAX_DEPTH,
@@ -15,10 +16,12 @@ import {
   applyRun,
   buyMeta,
   chooseDepth,
+  chooseFeast,
   chooseHero,
   chooseStage,
   claimChallenge,
   createDefaultMeta,
+  feastOpen,
   hasNews,
   meetFriend,
   meetHero,
@@ -226,6 +229,40 @@ describe('도전 과제', () => {
     expect(claimChallenge(saved, 'dawn-1')).toBe(saved);
     const old = normalizeMeta({ clears: 2 });
     expect(claimChallenge(old, 'dawn-1').embers).toBe(30);
+  });
+});
+
+describe('잔치의 밤 고르기', () => {
+  it('새벽을 한 번 맞기 전에는 고를 수 없다', () => {
+    const fresh = createDefaultMeta();
+    expect(fresh.feast).toBeNull();
+    expect(feastOpen(fresh)).toBe(false);
+    expect(chooseFeast(fresh, 'normal')).toBe(fresh);
+    const cleared = applyRun(fresh, result({ seconds: 600, cleared: true }));
+    expect(feastOpen(cleared)).toBe(true);
+    // 판을 마친다고 저절로 켜지지는 않는다.
+    expect(cleared.feast).toBeNull();
+  });
+
+  it('열린 뒤에는 난이도를 고르거나 끌 수 있고, 바뀌는 것이 없으면 그대로 돌려준다', () => {
+    const open = { ...createDefaultMeta(), clears: 1 };
+    expect(chooseFeast(open, null)).toBe(open);
+    for (const level of FEAST_ORDER) {
+      const on = chooseFeast(open, level);
+      expect(on.feast).toBe(level);
+      expect(chooseFeast(on, level)).toBe(on);
+      expect(chooseFeast(on, null).feast).toBeNull();
+    }
+    expect(chooseFeast(chooseFeast(open, 'easy'), 'hard').feast).toBe('hard');
+  });
+
+  it('저장된 값은 열려 있고 아는 난이도일 때만 되살린다', () => {
+    for (const level of FEAST_ORDER) expect(normalizeMeta({ clears: 2, feast: level }).feast).toBe(level);
+    expect(normalizeMeta({ clears: 0, feast: 'easy' }).feast).toBeNull();
+    expect(normalizeMeta({ clears: 2, feast: true }).feast).toBeNull();
+    expect(normalizeMeta({ clears: 2, feast: 'wild' }).feast).toBeNull();
+    // 잔치의 밤이 생기기 전의 저장에는 없어서 꺼진 채로 시작한다.
+    expect(normalizeMeta({ clears: 2 }).feast).toBeNull();
   });
 });
 

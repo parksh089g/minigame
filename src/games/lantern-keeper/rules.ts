@@ -10,6 +10,9 @@ import {
   ENDLESS,
   ENEMIES,
   EVOLVE_LEVEL,
+  FEAST,
+  FEAST_LEVELS,
+  FEAST_ORDER,
   FLINT,
   GUARD,
   HERB_REGEN,
@@ -27,6 +30,7 @@ import {
   WEAPONS,
   type BoonId,
   type EnemyKind,
+  type FeastId,
   type HeroTrait,
   type MetaId,
   type PassiveId,
@@ -194,6 +198,17 @@ export function depthName(depth: number): string {
 /** 배율을 "×1.5"처럼 적는다. */
 export function formatTimes(value: number): string {
   return `×${Number(value.toFixed(2))}`;
+}
+
+/** 잔치의 밤의 이름과 난이도: "잔치의 밤 · 쉬움" */
+export function feastTitle(level: FeastId): string {
+  return `${FEAST.name} · ${FEAST_LEVELS[level].name}`;
+}
+
+/** 잔치의 밤의 난이도와, 점수와 불씨에 붙는 배율: "쉬움 · 점수와 불씨 ×0.6" */
+export function feastNote(level: FeastId): string {
+  const { name, reward } = FEAST_LEVELS[level];
+  return `${name} · 점수와 불씨 ${formatTimes(reward)}`;
 }
 
 // ---------------------------------------------------------------- 능력치
@@ -502,6 +517,23 @@ export const EMBER_BONUS = 5;
 export interface Build {
   weapons: Levels<WeaponId>;
   passives: Levels<PassiveId>;
+  /** 들 수 있는 무기의 수(weaponSlotCount). 없으면 MAX_WEAPONS */
+  slots?: number;
+}
+
+/** 잔치의 밤의 난이도인지. 보통 판(없음)이나 엉뚱한 값이면 false */
+export function isFeast(value: unknown): value is FeastId {
+  return typeof value === 'string' && (FEAST_ORDER as readonly string[]).includes(value);
+}
+
+/** 한 판에 들 수 있는 무기의 수. 잔치의 밤이면 더 많다. */
+export function weaponSlotCount(feast: unknown): number {
+  return isFeast(feast) ? FEAST.weapons : MAX_WEAPONS;
+}
+
+/** 잔치의 밤에서 점수와 불씨에 붙는 배율. 보통 판이면 1 */
+export function feastReward(feast: unknown): number {
+  return isFeast(feast) ? FEAST_LEVELS[feast].reward : 1;
 }
 
 /** 무기를 level까지 올렸을 때의 이름. 진화하면 이름이 바뀐다. */
@@ -538,7 +570,7 @@ export function ownedPassives(passives: Levels<PassiveId>): PassiveId[] {
  */
 export function upgradeOptions(build: Build, rand: Rand, count = 3, boons?: Levels<BoonId>): Upgrade[] {
   const pool: Upgrade[] = [];
-  const full = ownedWeapons(build.weapons).length >= MAX_WEAPONS;
+  const full = ownedWeapons(build.weapons).length >= (build.slots ?? MAX_WEAPONS);
   for (const id of WEAPON_ORDER) {
     const level = build.weapons[id] ?? 0;
     if (level === 0 && full) continue;
@@ -682,28 +714,33 @@ export interface RunSummary {
   bonusEmbers: number;
   /** 깊은 밤의 단계. 0이 보통 밤 */
   depth: number;
+  /** 잔치의 밤이었는지. 보통 판에는 없다. */
+  /** 잔치의 밤이면 그 난이도. 보통 판에는 없다. */
+  feast?: FeastId;
 }
 
 /**
  * 허브의 최고 기록과 랭킹에 쓰는 점수. 버틴 시간도 처치 수도 마지막 보스가 나타난 때까지만 세고,
  * 끝없는 밤으로 이어 갔으면 거기서 버틴 시간과 쓰러뜨린 수가 더해진다.
- * 깊은 밤에서는 단계의 배율이 통째로 곱해진다. 랭킹에 올릴 수 있는 가장 큰 점수를 넘지 않는다.
+ * 깊은 밤에서는 단계의 배율이 통째로 곱해지고, 잔치의 밤이면 그 난이도의 배율(feastReward)도 곱해진다.
+ * 랭킹에 올릴 수 있는 가장 큰 점수를 넘지 않는다.
  */
 export function scoreFor(run: RunSummary): number {
   const base = Math.floor(run.seconds) + run.countedKills + 150 * run.bossKills + (run.cleared ? 1000 : 0);
-  return Math.min(MAX_SCORE, Math.floor(base * depthRules(run.depth).score));
+  return Math.min(MAX_SCORE, Math.floor(base * depthRules(run.depth).score * feastReward(run.feast)));
 }
 
 /**
  * 판이 끝나고 받는 불씨. 오래 버틸수록, 많이 쓰러뜨릴수록 많다. 처치는 점수와 같은 수(countedKills)로 센다.
  * 끝없는 밤에서 버틴 시간과 쓰러뜨린 것도 같은 셈으로 더해진다.
- * lucky는 영구 강화 "불씨 복"의 단계로, 한 단계에 10%씩 더 준다. 깊은 밤에서는 단계의 배율도 곱해진다.
+ * lucky는 영구 강화 "불씨 복"의 단계로, 한 단계에 10%씩 더 준다. 깊은 밤에서는 단계의 배율도 곱해지고,
+ * 잔치의 밤에서는 그 난이도의 배율(feastReward)도 곱해진다.
  */
 export function embersFor(run: RunSummary, lucky = 0): number {
   const minutes = Math.floor(run.seconds / 60);
   const earned =
     minutes * 3 + Math.floor(run.countedKills / 40) + 8 * run.bossKills + (run.cleared ? 40 : 0) + run.bonusEmbers;
-  return Math.floor(earned * depthRules(run.depth).embers * (1 + 0.1 * Math.max(0, lucky)));
+  return Math.floor(earned * depthRules(run.depth).embers * (1 + 0.1 * Math.max(0, lucky)) * feastReward(run.feast));
 }
 
 /** 한 판에 받을 수 있는 허브 코인의 상한. 보통 밤을 완주했을 때 받는 만큼이다. */
