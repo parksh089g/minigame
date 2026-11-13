@@ -6,3 +6,6 @@ coverage
 .DS_Store
 *.tsbuildinfo
 .wrangler
+# 화면 점검(Playwright)이 남기는 것
+test-results
+playwright-report

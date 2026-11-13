@@ -11,6 +11,7 @@
     "server": "wrangler dev",
     "typecheck": "tsc --noEmit && tsc --noEmit -p worker",
     "test": "vitest run",
+    "e2e": "playwright test",
     "icons": "node scripts/gen-icons.mjs"
   },
   "engines": {
@@ -22,6 +23,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261110.1",
+    "@playwright/test": "1.63.0",
     "@types/node": "^22.20.5",
     "typescript": "^7.0.2",
     "vite": "^8.3.7",

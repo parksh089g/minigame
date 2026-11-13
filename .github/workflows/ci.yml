@@ -24,3 +24,26 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
+  e2e:
+    # 빌드한 앱을 실제 브라우저(Chromium)에 띄워 허브와 모든 게임이 두 화면 크기에서 오류 없이 열리는지 본다(e2e/).
+    name: 화면 점검
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      # 브라우저와 그것이 쓰는 시스템 꾸러미를 받는다. 받는 판은 package.json의 @playwright/test에 맞춰진다.
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e
+      # 실패하면 그때의 화면을 남겨서, 이 실행의 Actions 화면에서 받아 볼 수 있게 한다.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-results
+          path: test-results/
+          retention-days: 7
