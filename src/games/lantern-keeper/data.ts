@@ -497,7 +497,7 @@ export const BOONS: Record<BoonId, BoonInfo> = {
 
 export const BOON_ORDER: readonly BoonId[] = ['blaze', 'haste', 'bulwark', 'ward', 'bloom', 'breath'];
 
-export type WeaponId = 'ember' | 'aura' | 'firefly' | 'star' | 'lance' | 'oil' | 'bolt' | 'bell' | 'moon';
+export type WeaponId = 'ember' | 'aura' | 'firefly' | 'star' | 'lance' | 'oil' | 'bolt' | 'bell' | 'moon' | 'beam';
 export type PassiveId = 'wick' | 'hourglass' | 'boots' | 'magnet' | 'coat' | 'lens' | 'hood' | 'herb' | 'flint';
 
 /** 레벨업으로 올릴 수 있는 무기와 패시브의 최대 레벨 */
@@ -566,10 +566,15 @@ export const WEAPONS: Readonly<Record<WeaponId, WeaponInfo>> = {
     levels: ['가까운 적 쪽으로 날아갔다 돌아오며 두 번 벤다', '피해 +5', '더 멀리 날아간다', '한 개 더', '피해 +6, 재사용 -20%'],
     evolved: { name: '보름달', description: '크고 묵직한 달 셋이 지나는 길을 거듭 벤다' },
   },
+  beam: {
+    name: '등대빛',
+    levels: ['긴 빛줄기가 둘레를 훑으며 돈다', '피해 +4', '더 멀리 닿는다', '한 줄기 더', '피해 +6, 더 빨리 돈다'],
+    evolved: { name: '천 리 등대', description: '굵은 빛줄기 셋이 훨씬 멀리까지 훑는다' },
+  },
 };
 
 /** 선택지와 화면에 늘어놓는 순서 */
-export const WEAPON_ORDER: readonly WeaponId[] = ['ember', 'aura', 'firefly', 'star', 'lance', 'oil', 'bolt', 'bell', 'moon'];
+export const WEAPON_ORDER: readonly WeaponId[] = ['ember', 'aura', 'firefly', 'star', 'lance', 'oil', 'bolt', 'bell', 'moon', 'beam'];
 
 export interface PassiveInfo {
   name: string;

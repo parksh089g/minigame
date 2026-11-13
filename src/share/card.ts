@@ -25,6 +25,8 @@ export interface ShareCardInput {
   mascot: string;
   /** 최고 기록 자리에 대신 적을 한 줄. 판이 없는 게임(새싹 컴퍼니)이 회사의 모습을 적는다. */
   note?: string;
+  /** note 아래에 작게 적을 한 줄. note가 있을 때만 그린다. */
+  detail?: string;
   /** 받는 사람에게 건네는 말. 안 주면 "나도 도전하기" */
   invite?: string;
   /** 이름이 가리키는 그림을 (x, y)에 width × height로 그린다. */
@@ -50,6 +52,8 @@ const LOOK = {
   title: { offset: 122, size: 54, tile: 100, icon: 76, gap: 20, maxWidth: 540 },
   score: { offset: 250, size: 168, unit: 60, gap: 10, maxWidth: 520 },
   badge: { offset: 386, size: 40, height: 68, pad: 44, star: 46, starGap: 14 },
+  /** note 아래의 작은 줄. 이 줄이 있으면 note를 lift만큼 올려서 둘이 가운데에 놓이게 한다. */
+  detail: { offset: 428, size: 30, lift: 14 },
   button: { y: 764, width: 420, height: 76, lip: 8, size: 40 },
   host: { y: 872, size: 26, maxWidth: 640 },
 } as const;
@@ -193,7 +197,13 @@ export function drawShareCard(input: ShareCardInput): HTMLCanvasElement {
     input.paint(c, 'icon-star', middle + width / 2 + badge.starGap, starY, badge.star, badge.star);
   } else {
     const line = input.note ?? `최고 기록 ${input.best}`;
-    centered(c, line, middle, badgeY, fitSize(c, line, badge.size, LOOK.score.maxWidth), THEME_CSS.sub);
+    const detail = input.note !== undefined ? input.detail : undefined;
+    const lineY = detail ? badgeY - LOOK.detail.lift : badgeY;
+    centered(c, line, middle, lineY, fitSize(c, line, badge.size, LOOK.score.maxWidth), THEME_CSS.sub);
+    if (detail) {
+      const size = fitSize(c, detail, LOOK.detail.size, LOOK.score.maxWidth);
+      centered(c, detail, middle, panel.y + LOOK.detail.offset, size, THEME_CSS.sub);
+    }
   }
 
   // 받는 사람에게 건네는 말과 주소

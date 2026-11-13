@@ -4,6 +4,7 @@ import {
   displayHost,
   pickShareMethod,
   SHARE_PARAM,
+  sharedDay,
   sharedGame,
   sharedGameId,
   shareFileName,
@@ -34,6 +35,36 @@ describe('공유 주소 만들기', () => {
       const url = new URL(shareUrl('https://example.com/', game.id));
       expect(sharedGameId(url.search), game.id).toBe(game.id);
     }
+  });
+});
+
+describe('그날의 판을 가리키는 주소', () => {
+  it('날을 주면 게임 id 뒤에 붙인다', () => {
+    expect(shareUrl('https://example.com/?x=1#top', 'lantern-keeper', 20770)).toBe(
+      'https://example.com/?game=lantern-keeper&day=20770',
+    );
+    // 날을 주지 않으면 예전과 같은 주소다.
+    expect(shareUrl('https://example.com/', 'lantern-keeper')).toBe('https://example.com/?game=lantern-keeper');
+  });
+
+  it('만든 주소에서 같은 날을 다시 꺼낼 수 있다', () => {
+    const url = new URL(shareUrl('https://example.com/', 'lantern-keeper', 20770));
+    expect(sharedDay(url.search)).toBe(20770);
+    expect(sharedGameId(url.search)).toBe('lantern-keeper');
+  });
+
+  it('날이 없거나 날의 모양이 아니면 null이다', () => {
+    expect(sharedDay('')).toBeNull();
+    expect(sharedDay('?game=lantern-keeper')).toBeNull();
+    for (const bad of ['', 'abc', '-3', '1.5', '1e3', '12345678', ' 5']) {
+      expect(sharedDay(`?day=${encodeURIComponent(bad)}`), bad).toBeNull();
+    }
+    expect(sharedDay('?day=0')).toBe(0);
+  });
+
+  it('주소창에서 지울 때 날도 같이 지운다', () => {
+    expect(withoutShareParam('/', '?game=lantern-keeper&day=20770', '')).toBe('/');
+    expect(withoutShareParam('/', '?a=1&day=20770&game=duel', '#x')).toBe('/?a=1#x');
   });
 });
 

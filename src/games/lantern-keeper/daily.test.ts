@@ -4,6 +4,7 @@ import {
   createDaily,
   DAILY_REWARD,
   dailyPlan,
+  dailyShare,
   dailyToday,
   dayIndexOf,
   dayLabel,
@@ -14,7 +15,8 @@ import {
   withRo,
 } from './daily';
 import { rankDayOf } from '../../online/protocol';
-import { HERO_ORDER, STAGE_ORDER, WEAPON_ORDER, WEAPONS } from './data';
+import { HERO_ORDER, HEROES, STAGE_ORDER, STAGES, WEAPON_ORDER, WEAPONS } from './data';
+import { sharedDay, shareUrl } from '../../share/link';
 
 describe('오늘의 판: 날짜', () => {
   /** 한국 시각으로 적은 때 */
@@ -169,6 +171,33 @@ describe('오늘의 판: 기록', () => {
     });
     const record = addDailyRun(createDaily(), today, run(321, 77, true)).record;
     expect(normalizeDaily(JSON.parse(JSON.stringify(record)))).toEqual(record);
+  });
+});
+
+describe('오늘의 판: 결과 공유', () => {
+  // 2026년 11월 13일
+  const day = 20_770;
+
+  it('카드에 날짜와 이어 온 날 수, 그날의 캐릭터와 스테이지를 적는다', () => {
+    const plan = dailyPlan(day);
+    const share = dailyShare(day, 1234, 3);
+    expect(share.note).toBe('11월 13일 오늘의 판 · 3일째');
+    expect(share.detail).toBe(`${HEROES[plan.hero].name} · ${STAGES[plan.stage].name}`);
+    expect(share.text).toContain('11월 13일 오늘의 판');
+    expect(share.text).toContain('1234점');
+    expect(share.text).toContain('등불지기');
+  });
+
+  it('이어 온 날이 없으면 날 수를 적지 않는다', () => {
+    expect(dailyShare(day, 10, 0).note).toBe('11월 13일 오늘의 판');
+    expect(dailyShare(day, 10, 1).note).toBe('11월 13일 오늘의 판 · 1일째');
+  });
+
+  it('주소는 그날을 가리킨다', () => {
+    const share = dailyShare(day, 10, 1);
+    expect(share.day).toBe(day);
+    const url = new URL(shareUrl('https://example.com/', 'lantern-keeper', share.day));
+    expect(sharedDay(url.search)).toBe(day);
   });
 });
 

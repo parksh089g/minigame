@@ -348,6 +348,19 @@ export interface MoonStats {
   rehit: number;
 }
 
+export interface BeamStats {
+  /** 빛줄기의 수. 둘레에 고르게 벌려 선다. */
+  count: number;
+  /** 한 번 훑을 때의 피해 */
+  damage: number;
+  /** 빛줄기의 길이(px) */
+  length: number;
+  /** 보이는 굵기의 절반(px). 맞는지는 빛줄기의 가운데가 지나갔는지로만 따진다. */
+  width: number;
+  /** 도는 빠르기(라디안/초) */
+  spin: number;
+}
+
 const atLeast = (level: number, n: number): number => (level >= n ? 1 : 0);
 
 /** 이 레벨이면 최종 진화형인지 */
@@ -454,6 +467,22 @@ export function moonStats(level: number, mods: Modifiers): MoonStats {
     radius: (7 + 3 * evo) * mods.area,
     speed: evo ? 120 : 150,
     rehit: evo ? 0.3 : 0,
+  };
+}
+
+/**
+ * 등대빛: 플레이어에게서 뻗은 빛줄기가 둘레를 돌며 닿는 적을 모두 훑는다.
+ * 멀리까지 닿는 대신 같은 적을 한 바퀴에 줄기 수만큼만 때려서, 가까이 붙은 적을 빨리 녹이지는 못한다.
+ * 재사용 시간이 줄면 그만큼 빨리 돈다.
+ */
+export function beamStats(level: number, mods: Modifiers): BeamStats {
+  const evo = atLeast(level, EVOLVE_LEVEL);
+  return {
+    count: 1 + atLeast(level, 4) + evo,
+    damage: (10 + 4 * atLeast(level, 2) + 6 * atLeast(level, 5) + 4 * evo) * mods.damage,
+    length: (46 + 10 * atLeast(level, 3) + 14 * evo) * mods.area,
+    width: 3 + 2 * evo,
+    spin: (level >= 5 ? 2.8 : 2.2) / mods.cooldown,
   };
 }
 

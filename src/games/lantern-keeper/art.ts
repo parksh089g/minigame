@@ -112,6 +112,11 @@ export const LOOK = {
   fireEvo: COLOR.red,
   /** 종소리의 고리와, 부싯돌이 터진 자리 */
   bell: COLOR.yellow,
+  beam: COLOR.yellow,
+  /** 준비 화면에 잠깐 뜨는 한 줄의 띠와 테두리 */
+  noticeFill: COLOR.ink,
+  noticeEdge: COLOR.sky,
+  beamCore: COLOR.white,
   bellEvo: COLOR.cyan,
   flint: COLOR.orange,
   bolt: COLOR.white,

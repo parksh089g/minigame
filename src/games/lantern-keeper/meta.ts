@@ -239,14 +239,53 @@ const KEY = 'meta';
 const RUN_KEY = 'run';
 const FALLBACK_KEY = 'pocket-arcade:lantern-meta';
 const RUN_FALLBACK_KEY = 'pocket-arcade:lantern-run';
+/** 진행과 판을 저장한 때. 다른 곳이 그사이 더 새것을 저장했는지 이것으로 가린다. */
+const META_AT_KEY = 'meta-at';
+const RUN_AT_KEY = 'run-at';
+const META_AT_FALLBACK_KEY = 'pocket-arcade:lantern-meta-at';
+const RUN_AT_FALLBACK_KEY = 'pocket-arcade:lantern-run-at';
+/** 같은 기기에 열린 다른 곳과 진행을 주고받는 통로의 이름 */
+const CHANNEL_NAME = 'pocket-arcade:lantern';
 
-class MetaStore {
+/** 같은 기기에 열린 다른 곳과 주고받는 말. 저장은 보낸 곳이 이미 했다. */
+type Note =
+  /** 판 밖 진행(불씨, 강화, 기록)을 저장했다. */
+  | { kind: 'meta'; at: number; meta: LanternMeta }
+  /** 하던 판을 저장했다. run이 null이면 지웠다는 뜻이다. */
+  | { kind: 'run'; at: number; run: RunState | null };
+
+/** 다른 곳에서 바뀐 것. 판 밖 진행인지, 하던 판인지 */
+export interface StoreChange {
+  meta: boolean;
+  run: boolean;
+}
+
+type Listener = (change: StoreChange) => void;
+
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const toStamp = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0);
+
+/**
+ * 같은 기기에서 앱을 두 곳(설치한 앱과 브라우저 탭 같은)에 열어 두어도 서로의 진행을 덮어쓰지 않게 한다.
+ * 저장할 때마다 다른 곳에 바로 알려서 모두 같은 진행을 들고 있게 하고, 듣지 못했을 때(뒤에서 잠들어 있던 곳)를 위해
+ * 저장한 때를 함께 적어 두었다가 화면이 다시 보일 때와 준비 화면을 열 때 더 새것이 있으면 읽어 온다.
+ */
+export class MetaStore {
   data: LanternMeta = createDefaultMeta();
   /** 도중에 멈춘 판. 이어서 할 수 있다. */
   run: RunState | null = null;
   private idb: UseStore | null = null;
   private loaded: Promise<void> | null = null;
+  /** 처음 읽기를 마쳤는지 */
+  private ready = false;
   private writeQueue: Promise<void> = Promise.resolve();
+  /** 지금 가진 진행과 판을 저장한(또는 다른 곳에서 받은) 때. 다른 곳의 것은 이보다 새것만 받는다. */
+  private metaAt = 0;
+  private runAt = 0;
+  private channel: BroadcastChannel | null = null;
+  private readonly listeners = new Set<Listener>();
 
   /** 처음 부를 때만 실제로 읽는다. */
   load(): Promise<void> {
@@ -254,26 +293,102 @@ class MetaStore {
     return this.loaded;
   }
 
-  set(next: LanternMeta): void {
+  /**
+   * 기기에 저장된 것이 이 곳이 가진 것보다 새것이면 그것으로 바꾼다(다른 곳이 그사이 저장한 것).
+   * 아직 읽기 전이면 처음 읽기만 한다. 바뀐 것이 있으면 onChange로도 알린다.
+   */
+  async refresh(): Promise<void> {
+    if (!this.ready) {
+      await this.load();
+      return;
+    }
+    // 이 곳이 저장하던 것이 다 들어간 뒤에 읽는다.
+    await this.writeQueue;
+    const change: StoreChange = { meta: false, run: false };
+    const metaAt = toStamp(await this.readKey(META_AT_KEY, META_AT_FALLBACK_KEY));
+    if (metaAt > this.metaAt) {
+      const raw = await this.readKey(KEY, FALLBACK_KEY);
+      // 읽는 사이에 이 곳에서 저장했으면 그것을 둔다.
+      if (metaAt > this.metaAt) {
+        this.data = normalizeMeta(raw);
+        this.metaAt = metaAt;
+        change.meta = true;
+      }
+    }
+    const runAt = toStamp(await this.readKey(RUN_AT_KEY, RUN_AT_FALLBACK_KEY));
+    if (runAt > this.runAt) {
+      const raw = await this.readKey(RUN_KEY, RUN_FALLBACK_KEY);
+      if (runAt > this.runAt) {
+        this.run = restoreRun(raw);
+        this.runAt = runAt;
+        change.run = true;
+      }
+    }
+    if (change.meta || change.run) this.emit(change);
+  }
+
+  /** 다른 곳에서 저장한 진행이나 판을 받았을 때 불린다. 구독을 끊는 함수를 돌려준다. */
+  onChange(listener: Listener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  /** 대기 중인 저장이 끝날 때까지 기다린다. */
+  flush(): Promise<void> {
+    return this.writeQueue;
+  }
+
+  set(next: LanternMeta, now: number = Date.now()): void {
     this.data = next;
-    this.enqueue(KEY, FALLBACK_KEY, structuredClone(next));
+    // 다른 곳에서 받은 것보다 늘 뒤가 되게 한다. 같은 때(1ms 안)에 저장해도 이 저장이 새것이도록.
+    const at = Math.max(now, this.metaAt + 1);
+    this.metaAt = at;
+    const snapshot = structuredClone(next);
+    // 진행을 먼저, 저장한 때를 나중에 적는다. 다른 곳이 때를 먼저 읽으므로 새 때와 낡은 진행을 함께 읽는 일이 없다.
+    this.enqueue(KEY, FALLBACK_KEY, snapshot);
+    this.enqueue(META_AT_KEY, META_AT_FALLBACK_KEY, at);
+    this.post({ kind: 'meta', at, meta: snapshot });
   }
 
   /** 진행 중인 판을 저장한다. null이면 지운다. */
-  setRun(run: RunState | null): void {
+  setRun(run: RunState | null, now: number = Date.now()): void {
     this.run = run ? structuredClone(run) : null;
+    const at = Math.max(now, this.runAt + 1);
+    this.runAt = at;
     this.enqueue(RUN_KEY, RUN_FALLBACK_KEY, this.run);
+    this.enqueue(RUN_AT_KEY, RUN_AT_FALLBACK_KEY, at);
+    this.post({ kind: 'run', at, run: this.run });
   }
 
   private async read(): Promise<void> {
+    // 읽는 사이에 다른 곳이 저장한 것도 놓치지 않게 통로부터 연다.
+    this.openChannel();
     try {
       this.idb = createStore(DB_NAME, STORE_NAME);
       await get(KEY, this.idb);
     } catch {
       this.idb = null;
     }
-    this.data = normalizeMeta(await this.readKey(KEY, FALLBACK_KEY));
-    this.run = restoreRun(await this.readKey(RUN_KEY, RUN_FALLBACK_KEY));
+    // 읽는 사이에 다른 곳에서 더 새것을 받았으면 그것을 둔다. 때가 적혀 있지 않은 예전 저장은 0으로 친다.
+    const metaAt = toStamp(await this.readKey(META_AT_KEY, META_AT_FALLBACK_KEY));
+    const meta = normalizeMeta(await this.readKey(KEY, FALLBACK_KEY));
+    if (this.metaAt === 0 || metaAt > this.metaAt) {
+      this.data = meta;
+      this.metaAt = metaAt;
+    }
+    const runAt = toStamp(await this.readKey(RUN_AT_KEY, RUN_AT_FALLBACK_KEY));
+    const run = restoreRun(await this.readKey(RUN_KEY, RUN_FALLBACK_KEY));
+    if (this.runAt === 0 || runAt > this.runAt) {
+      this.run = run;
+      this.runAt = runAt;
+    }
+    this.ready = true;
+    // 뒤에서 잠들어 있다가 다시 보이면, 그사이 다른 곳이 저장한 것을 읽어 온다.
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) void this.refresh();
+      });
+    }
   }
 
   private async readKey(key: string, fallbackKey: string): Promise<unknown> {
@@ -312,6 +427,47 @@ class MetaStore {
       // 저장할 곳이 없으면 이번 세션 동안만 유지된다.
     }
   }
+
+  /** 다른 곳과 진행을 주고받는 통로를 연다. 지원하지 않는 브라우저에서는 아무 일도 하지 않는다. */
+  private openChannel(): void {
+    if (this.channel || typeof BroadcastChannel === 'undefined') return;
+    try {
+      this.channel = new BroadcastChannel(CHANNEL_NAME);
+      this.channel.onmessage = (event: MessageEvent<unknown>) => this.receive(event.data);
+      // 브라우저 밖(테스트)에서는 열어 둔 통로가 프로세스를 붙잡지 않게 한다.
+      (this.channel as { unref?: () => void }).unref?.();
+    } catch {
+      this.channel = null;
+    }
+  }
+
+  private post(note: Note): void {
+    try {
+      this.channel?.postMessage(note);
+    } catch {
+      // 다른 곳에 알리지 못해도 이 곳의 저장에는 영향이 없다.
+    }
+  }
+
+  /** 다른 곳에서 온 말을 받는다. 이 곳 것보다 새것만 받고, 저장은 보낸 곳이 이미 했으므로 다시 저장하지 않는다. */
+  private receive(raw: unknown): void {
+    if (!isObject(raw) || typeof raw.at !== 'number') return;
+    if (raw.kind === 'meta') {
+      if (raw.at <= this.metaAt) return;
+      this.data = normalizeMeta(raw.meta);
+      this.metaAt = raw.at;
+      this.emit({ meta: true, run: false });
+    } else if (raw.kind === 'run') {
+      if (raw.at <= this.runAt) return;
+      this.run = restoreRun(raw.run);
+      this.runAt = raw.at;
+      this.emit({ meta: false, run: true });
+    }
+  }
+
+  private emit(change: StoreChange): void {
+    for (const listener of this.listeners) listener(change);
+  }
 }
 
 export const metaStore = new MetaStore();
@@ -319,7 +475,8 @@ export const metaStore = new MetaStore();
 // 백업 파일과 기기 옮기기에 등불지기의 진행(불씨, 영구 강화, 하던 판)도 같이 실려 가게 한다.
 registerSavePart(LANTERN_GAME_ID, {
   async read(lean) {
-    await metaStore.load();
+    // 다른 곳(다른 탭)에서 더 늦게 저장한 것이 있으면 그것을 내보낸다.
+    await metaStore.refresh();
     return { meta: metaStore.data, run: lean ? null : metaStore.run };
   },
   async write(raw) {

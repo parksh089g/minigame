@@ -3,6 +3,7 @@ import { SCENE } from '../config';
 import type { Achievement } from '../core/achievements';
 import { APP_EVENT, type BackAware } from '../core/app-events';
 import type { PlayResult } from '../core/save';
+import type { ShareOverride } from '../share/link';
 import { sfx } from '../core/sfx';
 import { isUnlocked, nextLevel, stageRandom, STAGE_LEVELS } from '../core/stages';
 import { store } from '../core/store';
@@ -28,6 +29,8 @@ export interface ResultData {
   stats: readonly ResultStat[];
   /** 기록 아래에 덧붙이는 아이콘 한 줄. 화면이 짧아 자리가 없으면 보이지 않는다. */
   strip?: ResultStrip;
+  /** 공유 카드와 문구, 주소를 바꿔 적을 것. 없으면 여느 점수 카드를 보낸다. */
+  share?: ShareOverride;
 }
 
 /** 결과 화면의 기록 아래에 덧붙이는 아이콘 한 줄. 예: 무기마다 준 피해의 비중 */
@@ -81,6 +84,11 @@ export interface PauseData {
   quitWarning?: string;
   /** 지금까지의 점수를 기록하고 판을 끝낼 수 있으면 true. "기록하고 끝내기" 버튼이 생긴다. */
   canFinish?: boolean;
+  /**
+   * "처음부터 다시" 버튼에 대신 적을 이름. 그 버튼이 판을 새로 시작하지 않는 게임이 실제로 하는 일을 적는다
+   * (등불지기는 하던 판을 남겨 둔 채 준비 화면으로 간다).
+   */
+  restartLabel?: string;
   /** 처음에 보여 줄 쪽. 적지 않으면 버튼이 있는 첫 쪽이다. 'quit'은 그만둘지 한 번 더 묻는 쪽이다. */
   page?: 'menu' | 'howTo' | 'quit';
 }
@@ -192,6 +200,7 @@ export abstract class MiniGameScene extends Phaser.Scene implements BackAware {
       extra: this.pauseExtra(),
       quitWarning: this.quitWarning() ?? undefined,
       canFinish: this.canFinishEarly(),
+      restartLabel: this.restartLabel() ?? undefined,
     } satisfies PauseData);
   }
 
@@ -200,6 +209,14 @@ export abstract class MiniGameScene extends Phaser.Scene implements BackAware {
    * 기본은 묻지 않는다. 한 판이 길어서 실수로 버리면 아까운 게임이, 잃을 것이 있을 때만 글을 돌려준다.
    */
   protected quitWarning(): string | null {
+    return null;
+  }
+
+  /**
+   * 일시정지 화면의 "처음부터 다시" 버튼에 대신 적을 이름. 기본은 그대로 둔다.
+   * 그 버튼을 눌러도 판이 새로 시작되지 않는 게임이, 실제로 일어나는 일을 적어서 돌려준다.
+   */
+  protected restartLabel(): string | null {
     return null;
   }
 
@@ -240,6 +257,7 @@ export abstract class MiniGameScene extends Phaser.Scene implements BackAware {
     stats: readonly ResultStat[] = [],
     resultDelayMs = 900,
     strip?: ResultStrip,
+    share?: ShareOverride,
   ): void {
     if (this.finished) return;
     this.finished = true;
@@ -264,6 +282,7 @@ export abstract class MiniGameScene extends Phaser.Scene implements BackAware {
       result,
       stats,
       strip,
+      share,
     };
     this.time.delayedCall(resultDelayMs, () => {
       this.scene.pause();
