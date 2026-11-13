@@ -57,8 +57,6 @@ const HERO_CARD = { width: (ROW_WIDTH - HERO_GAP * (HERO_ORDER.length - 1)) / HE
 /** 잠긴 카드에 적는 여는 조건: 무엇을("2:00", "새벽") 어떻게("버티기", "맞기"). 끝까지 버텨야 열리는 것은 새벽을 맞으라고 적는다. */
 const unlockParts = (seconds: number): readonly [string, string] =>
   seconds >= RUN_SECONDS ? ['새벽', '맞기'] : [formatClock(seconds), '버티기'];
-/** 스테이지 카드처럼 한 줄에 적을 때의 여는 조건 */
-const unlockLabel = (seconds: number): string => unlockParts(seconds).join(' ');
 /**
  * 잠긴 캐릭터 카드: 그림자를 조금 작게 그리고 그 아래에 여는 조건을 두 줄로 적는다.
  * 캐릭터가 다섯이라 카드가 좁아서, 한 줄로 적으면 글씨를 가장 작은 크기보다도 줄여야 했다.
@@ -66,6 +64,11 @@ const unlockLabel = (seconds: number): string => unlockParts(seconds).join(' ');
 const LOCKED_HERO = { scale: 1.5, artY: 21, lines: [35, 47] } as const;
 /** 새로 들어와서 아직 눌러 보지 않은 캐릭터 카드의 오른쪽 위에 붙는 "새" */
 const FRESH_BADGE = { label: '새', height: 12, pad: 3, inset: 2 } as const;
+/**
+ * 잠긴 스테이지 카드: 띠의 왼쪽에 자물쇠, 그 오른쪽에 무엇을("7:00", "새벽"), 이름 자리에 어떻게("버티기", "맞기").
+ * 스테이지가 다섯이라 카드가 좁아서, 한 줄로 적으면 옆 카드까지 넘쳤다. lock은 띠의 왼쪽 끝에서 자물쇠 가운데까지.
+ */
+const LOCKED_STAGE = { lock: 5, scale: 0.75 } as const;
 /** 카드보다 긴 글은 카드에 맞춰 줄인다. */
 const fitText = (text: Phaser.GameObjects.Text, room: number): void => {
   if (text.width > room) text.setScale(room / text.width);
@@ -696,13 +699,18 @@ function addStageCards(
       });
       fitText(addText(scene, centerX, top + 22, stage.name, { color: CSS.white, bold: true, originX: 0.5 }), STAGE_CARD.width - 4);
     } else {
-      // 잠긴 곳: 캐릭터 카드처럼 띠에는 자물쇠만, 아래에는 여는 조건
-      scene.add.image(Math.round(centerX), strip.y + strip.height / 2, 'icon-lock').setScale(0.75);
-      addText(scene, centerX, top + 23, unlockLabel(stage.unlockSeconds), {
-        color: CSS.silver,
-        size: FONT_SIZE.small,
-        originX: 0.5,
-      });
+      // 잠긴 곳: 캐릭터 카드처럼 여는 조건을 두 쪽으로 나눠 적는다(띠에 "7:00", 이름 자리에 "버티기").
+      const [what, how] = unlockParts(stage.unlockSeconds);
+      const lockX = strip.x + LOCKED_STAGE.lock;
+      const middle = strip.y + strip.height / 2;
+      scene.add.image(Math.round(lockX), middle, 'icon-lock').setScale(LOCKED_STAGE.scale);
+      const textLeft = lockX + LOCKED_STAGE.lock;
+      const label = { color: CSS.silver, size: FONT_SIZE.small, originX: 0.5 } as const;
+      fitText(
+        addText(scene, (textLeft + strip.x + strip.width) / 2, middle, what, { ...label, originY: 0.5 }),
+        strip.x + strip.width - textLeft,
+      );
+      fitText(addText(scene, centerX, top + 23, how, label), STAGE_CARD.width - 4);
     }
     refreshers.push(() => draw(false));
     addTapZone(scene, x, top, STAGE_CARD.width, STAGE_CARD.height, draw, () => {
