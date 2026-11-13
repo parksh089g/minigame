@@ -87,7 +87,7 @@ export class GameHud {
   }
 }
 
-/** 화면 가운데(centerY 높이)에 큰 글자를 잠깐 띄운다. */
+/** 화면 가운데(centerY 높이)에 큰 글자를 잠깐 띄운다. size를 주면 그 크기로 띄운다(아래에 붙는 작은 줄). */
 export function showBanner(
   scene: Phaser.Scene,
   centerY: number,
@@ -95,9 +95,10 @@ export function showBanner(
   color: string,
   durationMs: number,
   depth: number,
+  size: number = FONT_SIZE.huge,
 ): void {
   const banner = addText(scene, GAME_WIDTH / 2, Math.round(centerY), label, {
-    size: FONT_SIZE.huge,
+    size,
     color,
     originX: 0.5,
     originY: 0.5,

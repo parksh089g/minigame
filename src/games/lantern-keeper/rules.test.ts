@@ -7,6 +7,9 @@ import {
   ENDLESS,
   ENEMIES,
   EVOLVE_LEVEL,
+  FEAST,
+  FEAST_LEVELS,
+  FEAST_ORDER,
   MAX_DEPTH,
   GUARD,
   MAX_LEVEL,
@@ -73,6 +76,10 @@ import {
   upgradeOptions,
   upgradeTitle,
   weaponName,
+  weaponSlotCount,
+  feastNote,
+  feastReward,
+  feastTitle,
   xpToNext,
   type Build,
   type RunSummary,
@@ -408,6 +415,31 @@ describe('레벨업 선택지', () => {
     expect(seen.size).toBe(WEAPON_ORDER.length);
   });
 
+  it('잔치의 밤에서는 무기 여섯 칸이 찰 때까지 새 무기가 나온다', () => {
+    expect(weaponSlotCount(undefined)).toBe(MAX_WEAPONS);
+    expect(weaponSlotCount(null)).toBe(MAX_WEAPONS);
+    expect(weaponSlotCount(true)).toBe(MAX_WEAPONS);
+    expect(weaponSlotCount('wild')).toBe(MAX_WEAPONS);
+    for (const level of FEAST_ORDER) expect(weaponSlotCount(level)).toBe(FEAST.weapons);
+    expect(FEAST.weapons).toBeGreaterThan(MAX_WEAPONS);
+    const rand = seededRandom(13);
+    // 넷을 든 채로도 새 무기가 나온다.
+    const four: Build = { weapons: { ember: 1, aura: 1, lance: 1, bolt: 1 }, passives: {}, slots: FEAST.weapons };
+    const fresh = new Set<WeaponId>();
+    for (let i = 0; i < 300; i += 1) {
+      for (const option of upgradeOptions(four, rand)) if (option.type === 'weapon' && !four.weapons[option.id]) fresh.add(option.id);
+    }
+    expect(fresh.size).toBe(WEAPON_ORDER.length - 4);
+    // 여섯이 차면 더는 나오지 않는다.
+    const six: Build = { ...four, weapons: { ...four.weapons, star: 1, moon: 1 } };
+    expect(ownedWeapons(six.weapons)).toHaveLength(FEAST.weapons);
+    for (let i = 0; i < 200; i += 1) {
+      for (const option of upgradeOptions(six, rand)) {
+        if (option.type === 'weapon') expect(six.weapons[option.id]).toBe(1);
+      }
+    }
+  });
+
   it('패시브 칸이 다 차면 새 패시브는 나오지 않고, 든 것만 더 올릴 수 있다', () => {
     const all = Object.keys(PASSIVES) as PassiveId[];
     expect(all.length).toBeGreaterThan(MAX_PASSIVES);
@@ -482,6 +514,43 @@ describe('결과와 보상', () => {
     expect(scoreFor(endless) - scoreFor(dawn)).toBe(300 + 3000 + 150 * 3);
     // 불씨는 버틴 5분(15)과 쓰러뜨린 3000(75), 보스 셋(24)만큼 는다.
     expect(embersFor(endless) - embersFor(dawn)).toBe(15 + 75 + 24);
+  });
+
+  it('잔치의 밤의 점수와 불씨에는 난이도의 배율이 붙는다', () => {
+    const plain = run({ seconds: 900, endlessSeconds: 300, kills: 9000, bossKills: 8, cleared: true, depth: 2 });
+    const earned = 15 * 3 + Math.floor(9000 / 40) + 8 * 8 + 40;
+    for (const level of FEAST_ORDER) {
+      const feast: RunSummary = { ...plain, feast: level };
+      const { reward } = FEAST_LEVELS[level];
+      expect(feastReward(level)).toBe(reward);
+      expect(scoreFor(feast)).toBe(Math.floor((900 + 9000 + 150 * 8 + 1000) * depthRules(2).score * reward));
+      expect(embersFor(feast, 2)).toBe(Math.floor(earned * depthRules(2).embers * 1.2 * reward));
+    }
+    // 보통 판이나 엉뚱한 값에는 배율이 붙지 않는다.
+    expect(feastReward(undefined)).toBe(1);
+    expect(feastReward('wild')).toBe(1);
+    expect(scoreFor({ ...plain, feast: undefined })).toBe(scoreFor(plain));
+    expect(embersFor({ ...plain, feast: undefined })).toBe(embersFor(plain));
+  });
+
+  it('잔치의 밤은 쉬울수록 경험치를 많이 주고, 점수와 불씨의 배율은 작다', () => {
+    const levels = FEAST_ORDER.map((level) => FEAST_LEVELS[level]);
+    for (let i = 1; i < levels.length; i += 1) {
+      expect(levels[i].xp).toBeLessThan(levels[i - 1].xp);
+      expect(levels[i].reward).toBeGreaterThan(levels[i - 1].reward);
+    }
+    for (const level of levels) {
+      // 무기 칸이 늘어난 만큼 어느 난이도든 경험치를 더 주고, 어느 난이도든 보통 판보다 점수를 더 주지는 않는다.
+      expect(level.xp).toBeGreaterThan(1);
+      expect(level.reward).toBeGreaterThan(0);
+      expect(level.reward).toBeLessThan(1);
+    }
+  });
+
+  it('잔치의 밤의 이름과 한 줄 설명', () => {
+    expect(feastTitle('easy')).toBe(`${FEAST.name} · 쉬움`);
+    expect(feastNote('easy')).toBe(`쉬움 · 점수와 불씨 ${formatTimes(FEAST_LEVELS.easy.reward)}`);
+    for (const level of FEAST_ORDER) expect(feastNote(level)).toContain(FEAST_LEVELS[level].name);
   });
 
   it('점수는 랭킹이 받는 가장 큰 값을 넘지 않는다', () => {

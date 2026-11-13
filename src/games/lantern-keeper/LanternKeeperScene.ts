@@ -12,7 +12,8 @@ import type { SharedStart } from '../../share/link';
 import { LOOK, registerLanternTextures } from './art';
 import { damageRanking } from './build';
 import { newlyDone } from './challenges';
-import { CHEST, ENEMIES, LANTERN_GAME_ID, LANTERN_SCENE, STAGES, WEAPONS } from './data';
+import { CHEST, ENEMIES, FEAST, FEAST_LEVELS, LANTERN_GAME_ID, LANTERN_SCENE, STAGES, WEAPONS } from './data';
+import { FEAST_COLOR } from './feastpick';
 import { RunEffects } from './effects';
 import { BOSS_BAR_HEIGHT, HP_DANGER, HUD_HEIGHT, RunHud } from './hud';
 import { iconKey } from './icons';
@@ -21,16 +22,18 @@ import { BOON_HEADER, levelUpHeader, showChoices, TICKET_HEADER } from './levelu
 import { buildLobby, parentPage, type LobbyPage } from './lobby';
 import { DAILY_REWARD, dailyPlan, dailyShare, dailyToday, dayIndexOf, SHARED_DAY_PASSED } from './daily';
 import { showDawnChoice } from './dawn';
-import { applyRun, learnTip, metaStore, newDepth, newUnlocks, type StoreChange } from './meta';
+import { applyRun, feastOpen, learnTip, metaStore, newDepth, newUnlocks, type StoreChange } from './meta';
 import { BOSS_SONG, FINAL_SONG, LOBBY_SONG, STAGE_SONGS } from './music';
 import { pauseInfo } from './pauseinfo';
 import {
   depthName,
   depthRules,
   embersFor,
+  feastNote,
   formatClock,
   formatTimes,
   isEvolved,
+  isFeast,
   ownedWeapons,
   scoreFor,
   seededRandom,
@@ -304,6 +307,7 @@ export class LanternKeeperScene extends MiniGameScene {
             stage: metaStore.data.stage,
             depth: metaStore.data.depth,
             seed: Math.floor(Math.random() * 0x7fffffff),
+            feast: feastOpen(metaStore.data) ? metaStore.data.feast : null,
           });
     if (!saved) metaStore.setRun(null);
     // 오늘의 판은 적이 나오는 차례와 강화 선택지도 씨앗을 따른다. 이어서 할 때는 멈춘 시각을 섞어 새로 뽑는다.
@@ -316,10 +320,17 @@ export class LanternKeeperScene extends MiniGameScene {
 
     this.view = new RunView(this, centerY, this.sim, { top: HUD_HEIGHT, bar: BOSS_BAR_HEIGHT });
     this.effects = new RunEffects(this, DEPTH.fx, HUD_HEIGHT);
-    this.hud = new RunHud(this, { top: DEPTH.hud, field: DEPTH.field }, GAME_WIDTH / 2, this.view.centerY, () => {
-      sfx.click();
-      this.pauseGame();
-    });
+    this.hud = new RunHud(
+      this,
+      { top: DEPTH.hud, field: DEPTH.field },
+      GAME_WIDTH / 2,
+      this.view.centerY,
+      () => {
+        sfx.click();
+        this.pauseGame();
+      },
+      this.sim.slots,
+    );
     this.stick = new Joystick(this, HUD_HEIGHT, DEPTH.stick);
     this.view.sync(this.sim, 0, 0);
     this.drawHud();
@@ -371,7 +382,17 @@ export class LanternKeeperScene extends MiniGameScene {
     }).setDepth(DEPTH.banner);
     const depth = this.sim.state.depth;
     if (this.sim.state.daily !== undefined) showBanner(this, height * 0.3, '오늘의 판', CSS.yellow, 1600, DEPTH.banner);
-    else if (depth) showBanner(this, height * 0.3, depthName(depth), CSS.sky, 1600, DEPTH.banner);
+    else {
+      // 잔치의 밤이면 그 이름과 난이도를 먼저, 깊은 밤이면 그 단계를 아래에 띄운다.
+      let y = height * 0.3;
+      const feast = this.sim.state.feast;
+      if (isFeast(feast)) {
+        showBanner(this, y, FEAST.name, CSS.orange, 1600, DEPTH.banner);
+        showBanner(this, y + 38, FEAST_LEVELS[feast].name, FEAST_COLOR[feast], 1600, DEPTH.banner, FONT_SIZE.large);
+        y += 80;
+      }
+      if (depth) showBanner(this, y, depthName(depth), CSS.sky, 1600, DEPTH.banner);
+    }
   }
 
   override update(_time: number, delta: number): void {
@@ -862,7 +883,7 @@ export class LanternKeeperScene extends MiniGameScene {
 
   /** 멈춘 김에 지금 빌드(무기와 패시브의 이름과 레벨, 무기마다 준 피해)를 볼 수 있게 한다. */
   protected override pauseExtra(): PauseExtra {
-    return pauseInfo(this.sim.state);
+    return pauseInfo(this.sim.state, this.scale.height);
   }
 
   private endRun(): void {
@@ -906,6 +927,8 @@ export class LanternKeeperScene extends MiniGameScene {
     // 완주해서 이 스테이지의 다음 깊은 밤이 열렸으면 함께 알린다.
     const deeper = newDepth(before, metaStore.data, stage);
     if (deeper) opened.push(deeper);
+    // 처음 새벽을 맞으면 잔치의 밤도 열린다.
+    if (!feastOpen(before) && feastOpen(metaStore.data)) opened.push(FEAST.name);
 
     // 끝나는 장면: 새벽이 오면 어둠이 걷히며 남은 그림자가 흩어지고, 쓰러지면 등불이 꺼지듯 어두워진다.
     // 끝없는 밤에서 쓰러졌으면 새벽을 맞은 기록은 남지만 장면은 등불이 꺼지는 쪽이다.
@@ -962,6 +985,8 @@ export class LanternKeeperScene extends MiniGameScene {
     if (feats.length > 0) {
       stats.push(['도전 과제 달성', feats.length === 1 ? feats[0].title : `${feats[0].title} 외 ${feats.length - 1}`]);
     }
+    // 잔치의 밤이었으면 난이도와, 점수와 불씨에 붙은 배율을 보여 준다.
+    if (isFeast(summary.feast)) stats.unshift([FEAST.name, feastNote(summary.feast)]);
     // 깊은 밤에서는 점수에 배율이 붙었다는 것을 보여 준다.
     if (summary.depth > 0) {
       const rules = depthRules(summary.depth);

@@ -53,3 +53,16 @@ export function pageSlice<T>(items: readonly T[], page: number, perPage: number)
 export function pageOfIndex(index: number, perPage: number): number {
   return Math.max(0, Math.floor(index / Math.max(1, Math.floor(perPage))));
 }
+
+/**
+ * count개를 한 줄에 perRow개까지 놓을 때 줄마다 몇 개씩 놓을지. 줄 수는 가장 적게, 줄마다의 개수는 고르게 나눈다.
+ * 예: 4개씩이면 6개는 [3, 3], 5개는 [3, 2], 4개는 [4]
+ */
+export function balancedRows(count: number, perRow: number): number[] {
+  const n = Math.max(0, Math.floor(count));
+  if (n === 0) return [];
+  const rows = Math.ceil(n / Math.max(1, Math.floor(perRow)));
+  const base = Math.floor(n / rows);
+  const extra = n % rows;
+  return Array.from({ length: rows }, (_, index) => base + (index < extra ? 1 : 0));
+}

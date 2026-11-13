@@ -10,11 +10,12 @@ import {
   ELITE,
   ENDLESS,
   ENEMIES,
+  FEAST,
+  FEAST_LEVELS,
   FLINT,
   HEROES,
   MAX_LEVEL,
   MAX_PASSIVES,
-  MAX_WEAPONS,
   MID_BOSS_COUNT,
   MID_BOSS_EVERY,
   PLAYER_BASE,
@@ -25,6 +26,7 @@ import {
   type BoonId,
   type BurstInfo,
   type EnemyKind,
+  type FeastId,
   type HeroId,
   type MetaId,
   type PassiveId,
@@ -66,6 +68,8 @@ import {
   starStats,
   ticketOptions,
   upgradeOptions,
+  isFeast,
+  weaponSlotCount,
   xpToNext,
   type DepthRules,
   type Levels,
@@ -114,6 +118,8 @@ export interface Enemy {
   ky?: number;
   /** 부싯돌이 터져서 쓰러진 것. 다시 터지지 않는다. */
   sparked?: boolean;
+  /** 잔치의 밤에서 쓰러뜨리면 무기 강화권도 주는 정예(FEAST.ticketElites) */
+  ticket?: boolean;
 }
 
 /** 등불 기둥. 닿으면 불이 켜지고, 켜져 있는 동안 둘레의 그림자를 태운다. */
@@ -260,6 +266,8 @@ export interface RunState {
   seed: number;
   /** 오늘의 판이면 그날(daily.ts의 dayIndexOf). 보통 판에는 없다. */
   daily?: number;
+  /** 잔치의 밤(data.ts의 FEAST)이면 그 난이도. 보통 판에는 없다. */
+  feast?: FeastId;
   player: {
     x: number;
     y: number;
@@ -460,6 +468,8 @@ export interface RunConfig {
   daily?: number;
   /** 새벽을 맞았을 때 끝없는 밤으로 이어 갈지 물을지. 안 주면 새벽에서 판이 끝난다. */
   endless?: boolean;
+  /** 잔치의 밤의 난이도. 안 주거나 null이면 보통 판 */
+  feast?: FeastId | null;
 }
 
 /** 끝없는 밤이 얹는 난이도가 없을 때의 값 */
@@ -535,6 +545,7 @@ export function createRun(config: RunConfig): RunState {
     seed: config.seed ?? 1,
     ...(config.daily !== undefined ? { daily: config.daily } : {}),
     ...(config.endless ? { endlessOpen: true } : {}),
+    ...(isFeast(config.feast) ? { feast: config.feast } : {}),
     player: {
       x: 0,
       y: 0,
@@ -681,7 +692,15 @@ export class Sim {
 
   private computeMods(): Modifiers {
     const s = this.state;
-    return modifiers(s.passives, s.meta, HEROES[s.hero].trait, s.boons);
+    const mods = modifiers(s.passives, s.meta, HEROES[s.hero].trait, s.boons);
+    // 잔치의 밤은 무기 칸이 많은 만큼 빨리 자란다. 얼마나 빨리 자라는지는 난이도에 따른다.
+    if (isFeast(s.feast)) mods.xp *= FEAST_LEVELS[s.feast].xp;
+    return mods;
+  }
+
+  /** 이 판에 들 수 있는 무기의 수 */
+  get slots(): number {
+    return weaponSlotCount(this.state.feast);
   }
 
   get maxHp(): number {
@@ -775,14 +794,19 @@ export class Sim {
   private draw(): Upgrade[] {
     const s = this.state;
     // 끝없는 밤에서는 더 올릴 것이 없는 자리를 밤의 축복이 채운다.
-    return upgradeOptions({ weapons: s.weapons, passives: s.passives }, this.rand, 3, s.endless ? (s.boons ?? {}) : undefined);
+    return upgradeOptions(
+      { weapons: s.weapons, passives: s.passives, slots: this.slots },
+      this.rand,
+      3,
+      s.endless ? (s.boons ?? {}) : undefined,
+    );
   }
 
   /** 뽑아 둔 선택지가 지금 가진 것과 맞는지. 그사이에 강화권을 썼거나 저장된 값이 엉뚱하면 맞지 않는다. */
   private fits(offer: readonly Upgrade[]): boolean {
     const s = this.state;
     if (offer.length === 0) return false;
-    const full = ownedWeapons(s.weapons).length >= MAX_WEAPONS;
+    const full = ownedWeapons(s.weapons).length >= this.slots;
     const fullPassives = ownedPassives(s.passives).length >= MAX_PASSIVES;
     return offer.every((upgrade) => {
       if (upgrade.type === 'weapon') {
@@ -876,6 +900,7 @@ export class Sim {
       cleared: this.dawned,
       bonusEmbers: s.bonusEmbers,
       depth: clampDepth(s.depth),
+      ...(isFeast(s.feast) ? { feast: s.feast } : {}),
     };
   }
 
@@ -1152,7 +1177,9 @@ export class Sim {
       s.elites = elites + 1;
       const [x, y] = this.edgePoint();
       const kind = STAGES[s.stage].elite;
-      this.makeEnemy(kind, x, y);
+      const elite = this.makeEnemy(kind, x, y);
+      // 잔치의 밤에서는 몇몇 정예가 무기 강화권도 지니고 온다.
+      if (isFeast(s.feast) && FEAST.ticketElites.includes(elites)) elite.ticket = true;
       this.events.push({ type: 'elite', kind });
     }
 
@@ -2245,8 +2272,12 @@ export class Sim {
           this.events.push({ type: 'ticket' });
         }
       } else if (info.elite) {
-        // 정예는 보물 상자를 떨어뜨린다.
+        // 정예는 보물 상자를 떨어뜨린다. 강화권을 지닌 정예(잔치의 밤)는 쓰러지는 자리에서 강화권도 준다.
         this.dropGem(e.x, e.y, 0, 'chest');
+        if (e.ticket) {
+          s.pendingTickets += 1;
+          this.events.push({ type: 'ticket' });
+        }
       } else {
         // 난수는 한 번만 뽑아서 무엇을 떨어뜨릴지 정한다.
         const roll = this.rand();

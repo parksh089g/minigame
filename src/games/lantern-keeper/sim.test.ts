@@ -9,6 +9,9 @@ import {
   ENDLESS,
   ENEMIES,
   EVOLVE_LEVEL,
+  FEAST,
+  FEAST_LEVELS,
+  FEAST_ORDER,
   FLINT,
   GUARD,
   HERO_ORDER,
@@ -31,6 +34,7 @@ import {
   SURGES,
   WEAPON_ORDER,
   type EnemyKind,
+  type FeastId,
   type PassiveId,
 } from './data';
 import {
@@ -2198,6 +2202,35 @@ describe('정예 그림자와 보물 상자', () => {
     }
   });
 
+  it('잔치의 밤에서는 어느 난이도든 정해진 정예 둘이 무기 강화권을 지니고 온다', () => {
+    const carried = (feast: FeastId | null): boolean[] =>
+      ELITE.times.map((time, index) => {
+        const sim = eliteSim({ feast });
+        sim.state.elites = index;
+        sim.state.t = time - 0.05;
+        advance(sim, 0.2);
+        expect(sim.state.enemies).toHaveLength(1);
+        return sim.state.enemies[0].ticket === true;
+      });
+    for (const level of FEAST_ORDER) {
+      const feast = carried(level);
+      expect(feast).toEqual(ELITE.times.map((_, index) => FEAST.ticketElites.includes(index)));
+      expect(feast.filter(Boolean)).toHaveLength(2);
+    }
+    // 보통 판의 정예는 지니고 오지 않는다.
+    expect(carried(null).some(Boolean)).toBe(false);
+  });
+
+  it('강화권을 지닌 정예가 쓰러지면 보물 상자와 함께 강화권을 준다', () => {
+    const sim = new Sim(eliteSim({ feast: 'normal' }).state, () => 0.5);
+    sim.state.elites = ELITE.times.length;
+    sim.state.enemies.push({ ...enemy('prowler', 100, 0, 0), ticket: true });
+    sim.step(STEP, 0, 0);
+    expect(sim.state.gems.map((gem) => gem.kind)).toEqual(['xp', 'chest']);
+    expect(sim.state.pendingTickets).toBe(1);
+    expect(sim.events.filter((event) => event.type === 'ticket')).toHaveLength(1);
+  });
+
   it('상자를 주우면 가진 무기나 패시브 하나가 한 단계 오른다', () => {
     for (let seed = 1; seed <= 12; seed += 1) {
       const sim = quietSim(seed);
@@ -2311,6 +2344,60 @@ describe('정예 그림자와 보물 상자', () => {
     sim.state.player.inv = 1e9;
     sim.state.t = ELITE.times[3] - 0.05;
     expect(advance(sim, 0.2).filter((event) => event.type === 'elite')).toHaveLength(1);
+  });
+});
+
+describe('잔치의 밤', () => {
+  it('고르고 시작한 판만 무기 여섯 칸이고, 판의 기록에도 난이도가 남는다', () => {
+    const plain = newSim(1);
+    expect(plain.state.feast).toBeUndefined();
+    expect(plain.slots).toBe(MAX_WEAPONS);
+    expect('feast' in plain.summary()).toBe(false);
+    expect(createRun({ ...config, feast: null }).feast).toBeUndefined();
+
+    for (const level of FEAST_ORDER) {
+      const feast = newSim(1, createRun({ ...config, feast: level }));
+      expect(feast.state.feast).toBe(level);
+      expect(feast.slots).toBe(FEAST.weapons);
+      expect(feast.summary().feast).toBe(level);
+      // 저장했다가 이어 해도 그대로다.
+      const copy = JSON.parse(JSON.stringify(feast.state)) as RunState;
+      expect(looksLikeRun(copy)).toBe(true);
+      expect(newSim(2, copy).slots).toBe(FEAST.weapons);
+    }
+  });
+
+  it('빛 조각에서 난이도만큼 경험치를 더 받는다', () => {
+    const gain = (feast: FeastId | null): number => {
+      const sim = quietSim(1, { feast });
+      const p = sim.state.player;
+      sim.state.gems.push({ x: p.x, y: p.y, value: 2, kind: 'xp', pulled: false });
+      sim.step(STEP, 0, 0);
+      expect(p.level).toBe(1);
+      return p.xp;
+    };
+    const plain = gain(null);
+    expect(plain).toBeGreaterThan(0);
+    for (const level of FEAST_ORDER) expect(gain(level)).toBeCloseTo(plain * FEAST_LEVELS[level].xp, 6);
+  });
+
+  it('무기를 넷 들고도 레벨업에 새 무기가 나오고, 여섯을 들면 더 나오지 않는다', () => {
+    const offered = (feast: FeastId | null, weapons: RunState['weapons']): Set<string> => {
+      const fresh = new Set<string>();
+      for (let seed = 1; seed <= 60; seed += 1) {
+        const sim = quietSim(seed, { feast });
+        sim.state.weapons = { ...weapons };
+        sim.state.pendingLevelUps = 1;
+        for (const option of sim.options()) {
+          if (option.type === 'weapon' && !weapons[option.id]) fresh.add(option.id);
+        }
+      }
+      return fresh;
+    };
+    const four = { ember: 1, aura: 1, lance: 1, bolt: 1 };
+    expect(offered(null, four).size).toBe(0);
+    expect(offered('hard', four).size).toBeGreaterThan(0);
+    expect(offered('hard', { ...four, star: 1, moon: 1 }).size).toBe(0);
   });
 });
 
@@ -2911,6 +2998,20 @@ describe('자동 플레이로 본 밸런스', () => {
     expect(levels.filter((level) => level === EVOLVE_LEVEL).length).toBeGreaterThanOrEqual(2);
     expect(Math.max(...levels)).toBe(EVOLVE_LEVEL);
   }, 20000);
+
+  it('잔치의 밤에서는 같은 영구 강화로 무기 여섯을 다 들고, 보통 판에서 드는 것보다 많이 진화한다', () => {
+    const meta = { vigor: 5, swift: 5, might: 5, greed: 5, reach: 3 };
+    const result = playRun(1, 'kite', { ...config, meta, feast: 'normal' }, 600);
+    expect(result.over).toBeNull();
+    expect(result.feast).toBe('normal');
+    const levels = Object.values(result.weapons);
+    expect(levels).toHaveLength(FEAST.weapons);
+    expect(levels.filter((level) => level === EVOLVE_LEVEL).length).toBeGreaterThan(MAX_WEAPONS);
+    // 쉬울수록 같은 때에 레벨이 높다.
+    const easy = playRun(1, 'kite', { ...config, meta, feast: 'easy' }, 300);
+    const hard = playRun(1, 'kite', { ...config, meta, feast: 'hard' }, 300);
+    expect(easy.level).toBeGreaterThan(hard.level);
+  }, 30000);
 
   it('적의 수가 상한을 크게 넘지 않는다', () => {
     const result = playRun(4, 'kite', { ...config, meta: { vigor: 5, might: 5, swift: 5 } }, 400);
