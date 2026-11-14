@@ -626,7 +626,17 @@ export type WeaponId =
   | 'beam'
   | 'torch'
   | 'lamp';
-export type PassiveId = 'wick' | 'hourglass' | 'boots' | 'magnet' | 'coat' | 'lens' | 'hood' | 'herb' | 'flint';
+export type PassiveId =
+  | 'wick'
+  | 'hourglass'
+  | 'boots'
+  | 'magnet'
+  | 'coat'
+  | 'lens'
+  | 'hood'
+  | 'herb'
+  | 'flint'
+  | 'mirror';
 
 /** 레벨업으로 올릴 수 있는 무기와 패시브의 최대 레벨 */
 export const MAX_LEVEL = 5;
@@ -785,7 +795,21 @@ export const PASSIVES: Readonly<Record<PassiveId, PassiveInfo>> = {
   herb: { name: '약초 주머니', perLevel: '1초마다 체력 +0.2' },
   // 선택 카드에는 이 글 대신 그 레벨에서의 확률을 적는다(rules.ts의 upgradeDescription).
   flint: { name: '부싯돌', perLevel: '쓰러진 그림자가 터질 확률 +7%' },
+  // 선택 카드에는 이 글 대신 그 레벨에서의 덤의 힘을 적는다(rules.ts의 upgradeDescription).
+  mirror: { name: '손거울', perLevel: '무기마다 하나 더, 그 하나의 피해 +20%' },
 };
+
+/**
+ * 덤: 무기가 한 번에 내는 것(탄환, 별, 달, 풍등, 반딧불, 빛줄기, 번개 줄기, 종소리, 불길, 휘두르는 쪽)에 하나가 더 붙는다.
+ * 덤의 힘은 그 한 개가 주는 피해의 몫이다. 0.2면 다섯 번에 한 번 값만큼만 아프고, 1이면 온전한 한 개다.
+ * 1을 넘으면 넘는 만큼이 또 한 개가 된다(1.3이면 온전한 한 개와 0.3짜리 한 개).
+ * "한 개 더"는 한 발짜리 무기의 피해를 곱절로 만드는 가장 센 능력이라, 한 번에 다 주지 않고 레벨마다 조금씩 채운다.
+ * 둘레를 태우는 등불 고리에는 붙지 않는다.
+ */
+export const ECHO = {
+  /** 손거울 한 레벨이 덤의 힘에 더하는 값. MAX_LEVEL이면 온전한 한 개가 된다. */
+  perLevel: 0.2,
+} as const;
 
 /** 약초 주머니가 레벨 하나당 1초에 채워 주는 체력 */
 export const HERB_REGEN = 0.2;
@@ -918,7 +942,9 @@ export type MetaId =
   | 'kindle'
   | 'trove'
   | 'bounty'
-  | 'vigil';
+  | 'vigil'
+  | 'hefty'
+  | 'echo';
 
 export interface MetaInfo {
   name: string;
@@ -950,6 +976,12 @@ export const META: Readonly<Record<MetaId, MetaInfo>> = {
   trove: { name: '묵직한 상자', perLevel: '상자가 한 번 더 올릴 확률 +20%', maxLevel: 3, baseCost: 55, needsDawn: true },
   bounty: { name: '줍는 복', perLevel: '자석과 불꽃 단지 확률 +15%', maxLevel: 3, baseCost: 50, needsDawn: true },
   vigil: { name: '너른 축복', perLevel: '밤의 축복 선택지 +1', maxLevel: 1, baseCost: 250, needsDawn: true },
+  // 날아가는 것의 크기와 개수. 모든 판이 세지는 것이라 값을 낮게 잡았다.
+  // 크기는 공격 범위를 통째로 넓히지 않고 날아가는 것(불씨탄의 탄환, 빛화살, 초승달, 반딧불)의 몸집만 키운다.
+  // 범위를 통째로 넓히면 조금만 올려도 깊은 밤이 눈에 띄게 쉬워진다(12% 넓히자 4단계의 완주가 열에 넷에서 여섯으로 늘었다).
+  // 개수는 판 안의 손거울이 하는 일을 한 레벨이 안 되게 미리 얹어 준다.
+  hefty: { name: '큼직한 불씨', perLevel: '탄환·화살·달·반딧불 크기 +10%', maxLevel: 3, baseCost: 40, needsDawn: true },
+  echo: { name: '곁불', perLevel: '무기마다 하나 더, 그 하나의 피해 +5%', maxLevel: 3, baseCost: 50, needsDawn: true },
 };
 
 /** 새벽을 맞은 뒤에 열리는 영구 강화가 한 단계마다 바꾸는 값 */
@@ -960,6 +992,10 @@ export const META_STEP = {
   trove: 0.2,
   /** 줍는 복: 자석과 불꽃 단지가 떨어질 확률에 더해지는 몫. 회복 떡은 늘리지 않는다(늘리면 깊은 밤이 눈에 띄게 쉬워진다). */
   bounty: 0.15,
+  /** 큼직한 불씨: 날아가는 것(불씨탄의 탄환, 빛화살, 초승달, 반딧불)의 몸집에 더해지는 몫 */
+  hefty: 0.1,
+  /** 곁불: 덤의 힘(ECHO)에 더해지는 값 */
+  echo: 0.05,
 } as const;
 
 export const META_ORDER: readonly MetaId[] = [
@@ -979,4 +1015,6 @@ export const META_ORDER: readonly MetaId[] = [
   'trove',
   'bounty',
   'vigil',
+  'hefty',
+  'echo',
 ];

@@ -55,6 +55,8 @@ import {
   endlessBossKind,
   endlessScale,
   enemyHp,
+  faintSlow,
+  fanAngles,
   fireflyStats,
   HEAL_AMOUNT,
   isEvolved,
@@ -72,24 +74,29 @@ import {
   ownedPassives,
   ownedWeapons,
   pickSpawnKind,
+  ringSpots,
+  sideTurn,
   spawnPerSecond,
   speedScale,
   starStats,
   swapOption,
   ticketOptions,
   upgradeOptions,
+  volley,
   isFeast,
   weaponSlotCount,
   xpToNext,
   type Build,
   type DepthRules,
   type Levels,
+  type OilStats,
   type TorchStats,
   type Modifiers,
   type Rand,
   type RunSummary,
   type Upgrade,
 } from './rules';
+import { MIRROR_DAILY_FROM } from './daily';
 import {
   GUST,
   gustAt,
@@ -126,6 +133,9 @@ export interface Enemy {
   fireflyCd: number;
   /** 등대빛에 다시 맞을 수 있을 때까지(초). 같은 빛줄기가 지나가는 동안 거듭 맞지 않게 한다. */
   beamCd?: number;
+  /** 약한 덤으로 붙은 반딧불과 빛줄기에 다시 맞을 수 있을 때까지(초). 온전한 것과 따로 세어서 서로의 차례를 빼앗지 않는다. */
+  fireflyEchoCd?: number;
+  beamEchoCd?: number;
   /** 보스의 다음 행동까지, 뛰는 적의 다음 뜀이나 착지까지, 쏘는 적의 다음 발사까지, 터지는 적이 터질 때까지(초) */
   timer: number;
   /**
@@ -208,6 +218,8 @@ export interface Shot {
   look: ShotLook;
   /** 이미 맞힌 적. 관통할 때 같은 적을 두 번 때리지 않는다. */
   hit: number[];
+  /** 약한 덤이면 그 힘(0~1). 온전한 것에는 없다. 화면에서 그만큼 흐리게 그린다. */
+  power?: number;
 }
 
 export interface Gem {
@@ -233,6 +245,8 @@ export interface Strike {
   radius: number;
   damage: number;
   evolved: boolean;
+  /** 약한 덤이면 그 힘(0~1). 온전한 것에는 없다. 화면에서 그만큼 흐리게 그린다. */
+  power?: number;
 }
 
 /** 보스가 쏜 빛덩이. 플레이어가 닿으면 다친다. */
@@ -262,6 +276,8 @@ export interface Fire {
   /** 닿은 적의 이동 속도 배율 */
   slow: number;
   evolved: boolean;
+  /** 약한 덤이면 그 힘(0~1). 온전한 것에는 없다. 화면에서 그만큼 흐리게 그린다. */
+  power?: number;
 }
 
 /** 종소리: 울린 자리에서 둘레로 퍼져 나가는 고리 */
@@ -282,6 +298,8 @@ export interface Wave {
   /** 이미 닿은 적. 한 번의 종소리는 같은 적을 한 번만 때린다. */
   hit: number[];
   evolved: boolean;
+  /** 약한 덤이면 그 힘(0~1). 온전한 것에는 없다. 화면에서 그만큼 흐리게 그린다. */
+  power?: number;
 }
 
 /** 초승달: 겨눈 쪽으로 날아갔다가 플레이어에게 돌아온다 */
@@ -308,6 +326,8 @@ export interface Moon {
   /** 남은 시간(초). 돌아오지 못하고 떠도는 일이 없게 한다. */
   life: number;
   evolved: boolean;
+  /** 약한 덤이면 그 힘(0~1). 온전한 것에는 없다. 화면에서 그만큼 흐리게 그린다. */
+  power?: number;
 }
 
 /** 풍등: 그림자가 모인 곳(tx, ty) 위로 날아가서, 머무는 동안 every초마다 둘레에 불티를 떨군다. */
@@ -328,6 +348,8 @@ export interface Lamp {
   /** 남은 시간(초) */
   life: number;
   evolved: boolean;
+  /** 약한 덤이면 그 힘(0~1). 온전한 것에는 없다. 화면에서 그만큼 흐리게 그린다. */
+  power?: number;
 }
 
 export interface RunState {
@@ -545,10 +567,13 @@ export type SimEvent =
   | { type: 'levelup' }
   | { type: 'shoot' }
   | { type: 'strike'; x: number; y: number; radius: number }
-  /** 번갯불이 지나간 길. points는 x, y가 번갈아 들어 있다. */
-  | { type: 'bolt'; points: number[]; evolved: boolean }
-  /** 횃불을 휘둘렀다. angle 쪽으로 arc만큼 벌어진 부채꼴을 count쪽(둘이면 맞은편도) 벤다. */
-  | { type: 'swing'; angle: number; arc: number; reach: number; count: number; evolved: boolean }
+  /** 번갯불이 지나간 길. points는 x, y가 번갈아 들어 있다. power는 약한 덤으로 붙은 줄기일 때의 힘 */
+  | { type: 'bolt'; points: number[]; evolved: boolean; power?: number }
+  /**
+   * 횃불을 휘둘렀다. angle 쪽으로 arc만큼 벌어진 부채꼴을 count쪽 벤다(둘째는 맞은편, 그 뒤는 양옆. rules.ts의 sideTurn).
+   * faint는 마지막 쪽이 약한 덤일 때의 힘
+   */
+  | { type: 'swing'; angle: number; arc: number; reach: number; count: number; evolved: boolean; faint?: number }
   /** 풍등을 띄웠다 */
   | { type: 'lamp' }
   /** 화면 가까이의 불구멍에서 불길이 솟기 시작했다 */
@@ -621,10 +646,11 @@ export interface RunConfig {
 /** 끝없는 밤이 얹는 난이도가 없을 때의 값 */
 const NO_ENDLESS = { hp: 1, damage: 1, speed: 1 } as const;
 
+/** 약한 덤에만 그 힘을 적어 둔다. 온전한 것에는 아무것도 붙이지 않아서, 덤이 없는 판의 상태는 예전과 같다. */
+const faint = (power: number): { power?: number } => (power < 1 ? { power } : {});
+
 const CELL = 20;
 const BUCKETS = 4096;
-const EMBER_RADIUS = 3;
-const FIREFLY_RADIUS = 4;
 const EMBER_RANGE = 130;
 const LANCE_RANGE = 170;
 /** 꿰뚫는 화살은 사라질 때까지 몇이든 꿰뚫는다. */
@@ -649,6 +675,9 @@ const LAMP_APART = 40;
 /** 풍등이 갈 곳을 다시 정하는 간격(초)과, 따라갈 그림자를 찾는 둘레(px) */
 export const LAMP_RETARGET = 0.5;
 const LAMP_FOLLOW = 40;
+/** 덤으로 남기는 불길(등잔 기름)을 놓을 때 살펴보는 거리(px)와, 플레이어에게서 떨어뜨리는 거리(불길 반지름의 몇 배) */
+const OIL_ECHO_RANGE = 140;
+const OIL_ECHO_STEP = 1.5;
 /** 종소리가 퍼지는 빠르기(px/초)와, 두 번 울릴 때의 사이(초) */
 const BELL_SPEED = 170;
 const BELL_GAP = 0.3;
@@ -683,6 +712,15 @@ const SPIT = { speed: 46, life: 2.6, radius: 3 } as const;
 const SPIT_LIMIT = 6;
 /** 되살아날 때: 채워지는 체력 비율, 무적 시간(초), 둘레의 적을 밀어내는 반경과 피해 */
 const REVIVE = { hp: 0.5, invulnerable: 2.5, radius: 64, damage: 40 } as const;
+
+/**
+ * 손거울이 들어오기 전의 오늘의 판인지(daily.ts의 MIRROR_DAILY_FROM).
+ * 그런 판은 그날 먼저 한 사람과 같은 조건이 되게 예전 규칙대로 돈다:
+ * 손거울이 레벨업 선택지에 나오지 않고, 불씨탄과 반딧불이 공격 범위에 따라 커지지 않는다.
+ */
+function beforeMirror(daily: number | undefined): boolean {
+  return daily !== undefined && daily < MIRROR_DAILY_FROM;
+}
 
 export function createRun(config: RunConfig): RunState {
   const hero = config.hero ?? 'keeper';
@@ -743,7 +781,8 @@ export function createRun(config: RunConfig): RunState {
     revives: config.meta.second ? 1 : 0,
     rerolls: Math.max(0, Math.floor(config.meta.reroll ?? 0)),
     banishes: Math.max(0, Math.min(META.sift.maxLevel, Math.floor(config.meta.sift ?? 0))),
-    banned: [],
+    // 오늘의 판에는 손거울이 정해 둔 날부터 나온다. 그 전의 날에는 처음부터 골라낸 것으로 쳐서 선택지에 나오지 않는다.
+    banned: beforeMirror(config.daily) ? ['mirror'] : [],
     dealt: {},
     nextUid: 1,
     over: null,
@@ -847,6 +886,8 @@ export class Sim {
     if (typeof state.cd.lamp !== 'number') state.cd.lamp = 0.8;
     // 골라내기가 생기기 전에 저장한 판에는 골라낸 것이 없다. 엉뚱한 값이어도 비워서 시작한다.
     if (!Array.isArray(state.banned)) state.banned = [];
+    // 손거울이 들어오기 전에 하다가 저장한 오늘의 판도, 그날 먼저 마친 사람과 같이 손거울 없이 이어 간다.
+    if (beforeMirror(state.daily) && !state.banned.includes('mirror')) state.banned.push('mirror');
     // 도감이 생기기 전에 저장한 판: 지금 싸움터에 있는 것부터 만난 것으로 적는다.
     if (!Array.isArray(state.seen)) {
       state.seen = [];
@@ -872,6 +913,7 @@ export class Sim {
     const mods = modifiers(s.passives, s.meta, HEROES[s.hero].trait, s.boons);
     // 잔치의 밤은 무기 칸이 많은 만큼 빨리 자란다. 얼마나 빨리 자라는지는 난이도에 따른다.
     if (isFeast(s.feast)) mods.xp *= FEAST_LEVELS[s.feast].xp;
+    if (beforeMirror(s.daily)) mods.bulk = 1;
     return mods;
   }
 
@@ -1591,6 +1633,8 @@ export class Sim {
       if (e.slow > 0) e.slow -= dt;
       if (e.fireflyCd > 0) e.fireflyCd -= dt;
       if (e.beamCd && e.beamCd > 0) e.beamCd -= dt;
+      if (e.fireflyEchoCd && e.fireflyEchoCd > 0) e.fireflyEchoCd -= dt;
+      if (e.beamEchoCd && e.beamEchoCd > 0) e.beamEchoCd -= dt;
       // 종소리에 밀려나는 중이면 남은 거리를 조금씩 물러난다.
       if (e.kx || e.ky) {
         const kx = e.kx ?? 0;
@@ -2132,19 +2176,22 @@ export class Sim {
           const stats = emberStats(w.ember, this.mods);
           const base = Math.atan2(target.y - p.y, target.x - p.x);
           const look: ShotLook = isEvolved(w.ember) ? 'emberEvo' : 'ember';
-          for (let i = 0; i < stats.count; i += 1) {
-            const angle = base + (i - (stats.count - 1) / 2) * 0.22;
+          const powers = volley(stats.count, this.mods.echo);
+          const angles = fanAngles(powers, 0.22);
+          for (let i = 0; i < powers.length; i += 1) {
+            const angle = base + angles[i];
             s.shots.push({
               x: p.x,
               y: p.y,
               vx: Math.cos(angle) * stats.speed,
               vy: Math.sin(angle) * stats.speed,
-              damage: stats.damage,
+              damage: stats.damage * powers[i],
               pierce: stats.pierce,
               life: 1,
-              radius: EMBER_RADIUS,
+              radius: stats.radius,
               look,
               hit: [],
+              ...faint(powers[i]),
             });
           }
           s.cd.ember = stats.cooldown;
@@ -2175,16 +2222,21 @@ export class Sim {
     if (w.firefly) {
       const stats = fireflyStats(w.firefly, this.mods);
       s.fireflyAngle = (s.fireflyAngle + stats.spin * dt) % (Math.PI * 2);
-      for (let k = 0; k < stats.count; k += 1) {
-        const angle = s.fireflyAngle + (k / stats.count) * Math.PI * 2;
+      const powers = volley(stats.count, this.mods.echo);
+      const spots = ringSpots(powers);
+      for (let k = 0; k < powers.length; k += 1) {
+        const angle = s.fireflyAngle + spots[k] * Math.PI * 2;
         const fx = p.x + Math.cos(angle) * stats.orbit;
         const fy = p.y + Math.sin(angle) * stats.orbit;
+        // 약한 덤은 다시 맞기까지의 시간을 따로 센다. 온전한 반딧불이 때릴 차례를 빼앗지 않는다.
+        const weak = powers[k] < 1;
         for (const e of enemies) {
-          if (e.hp <= 0 || e.fireflyCd > 0) continue;
-          const reach = FIREFLY_RADIUS + ENEMIES[e.kind].radius;
+          if (e.hp <= 0 || (weak ? (e.fireflyEchoCd ?? 0) : e.fireflyCd) > 0) continue;
+          const reach = stats.size + ENEMIES[e.kind].radius;
           if ((e.x - fx) ** 2 + (e.y - fy) ** 2 < reach * reach) {
-            this.damage(e, stats.damage, 'firefly');
-            e.fireflyCd = stats.rehit;
+            this.damage(e, stats.damage * powers[k], 'firefly');
+            if (weak) e.fireflyEchoCd = stats.rehit;
+            else e.fireflyCd = stats.rehit;
           }
         }
       }
@@ -2196,9 +2248,16 @@ export class Sim {
       const sweep = stats.spin * dt;
       const turn = ((s.beamAngle ?? 0) + sweep) % full;
       s.beamAngle = turn;
-      const gap = full / stats.count;
+      // 온전한 빛줄기는 둘레에 고르게 서고, 약한 덤은 첫 두 줄기의 한가운데에 선다(ringSpots).
+      const powers = volley(stats.count, this.mods.echo);
+      const whole = powers.filter((power) => power >= 1).length;
+      const weak = powers.length > whole ? powers[whole] : 0;
+      const gap = full / whole;
       for (const e of enemies) {
-        if (e.hp <= 0 || (e.beamCd ?? 0) > 0) continue;
+        if (e.hp <= 0) continue;
+        const ready = !((e.beamCd ?? 0) > 0);
+        const echoReady = weak > 0 && !((e.beamEchoCd ?? 0) > 0);
+        if (!ready && !echoReady) continue;
         const dx = e.x - p.x;
         const dy = e.y - p.y;
         const radius = ENEMIES[e.kind].radius;
@@ -2209,10 +2268,15 @@ export class Sim {
         // 굵기로 재면 바짝 붙은 적은 한 번 지나가는 동안 거듭 맞으므로, 빛줄기의 가운데가 지나간 때만 센다.
         // 플레이어를 덮고 선 적은 어느 쪽에 있는지가 걸음마다 뒤집히므로, 한쪽(0)에 있는 것으로 친다.
         const bearing = d2 < radius * radius ? 0 : Math.atan2(dy, dx);
-        const behind = (((turn - bearing) % gap) + gap) % gap;
-        if (behind > sweep + 1e-9) continue;
-        this.damage(e, stats.damage, 'beam');
-        e.beamCd = BEAM_REHIT;
+        if (ready && (((turn - bearing) % gap) + gap) % gap <= sweep + 1e-9) {
+          this.damage(e, stats.damage, 'beam');
+          e.beamCd = BEAM_REHIT;
+        }
+        // 약한 덤은 온전한 줄기와 따로 세어서, 서로 때릴 차례를 빼앗지 않는다.
+        if (echoReady && e.hp > 0 && (((turn + gap / 2 - bearing) % full) + full) % full <= sweep + 1e-9) {
+          this.damage(e, stats.damage * weak, 'beam');
+          e.beamEchoCd = BEAM_REHIT;
+        }
       }
     }
 
@@ -2228,15 +2292,17 @@ export class Sim {
         if (seen.length === 0) {
           s.cd.star = 0.2;
         } else {
-          for (let i = 0; i < stats.count; i += 1) {
+          const powers = volley(stats.count, this.mods.echo);
+          for (let i = 0; i < powers.length; i += 1) {
             const target = seen[Math.floor(this.rand() * seen.length)];
             s.strikes.push({
               x: target.x,
               y: target.y,
               delay: 0.35 + i * 0.12,
               radius: stats.radius,
-              damage: stats.damage,
+              damage: stats.damage * powers[i],
               evolved: isEvolved(w.star),
+              ...faint(powers[i]),
             });
           }
           s.cd.star = stats.cooldown;
@@ -2257,19 +2323,22 @@ export class Sim {
           const stats = lanceStats(w.lance, this.mods);
           const base = Math.atan2(target.y - p.y, target.x - p.x);
           const look: ShotLook = isEvolved(w.lance) ? 'lanceEvo' : 'lance';
-          for (let i = 0; i < stats.count; i += 1) {
-            const angle = base + (i - (stats.count - 1) / 2) * 0.2;
+          const powers = volley(stats.count, this.mods.echo);
+          const angles = fanAngles(powers, 0.2);
+          for (let i = 0; i < powers.length; i += 1) {
+            const angle = base + angles[i];
             s.shots.push({
               x: p.x,
               y: p.y,
               vx: Math.cos(angle) * stats.speed,
               vy: Math.sin(angle) * stats.speed,
-              damage: stats.damage,
+              damage: stats.damage * powers[i],
               pierce: PIERCE_ALL,
               life: stats.life,
               radius: stats.radius,
               look,
               hit: [],
+              ...faint(powers[i]),
             });
           }
           s.cd.lance = stats.cooldown;
@@ -2293,6 +2362,7 @@ export class Sim {
           here.damage = stats.damage;
           here.slow = stats.slow;
           here.evolved = isEvolved(w.oil);
+          delete here.power;
         } else {
           s.fires.push({
             x: p.x,
@@ -2306,6 +2376,7 @@ export class Sim {
             evolved: isEvolved(w.oil),
           });
         }
+        this.spillOil(stats, isEvolved(w.oil));
       }
     }
 
@@ -2313,8 +2384,10 @@ export class Sim {
       s.cd.bolt -= dt;
       if (s.cd.bolt <= 0) {
         const stats = boltStats(w.bolt, this.mods);
+        // 덤으로 붙은 줄기는 맨 나중에 쳐서, 앞의 줄기가 치지 않은 그림자로 간다.
+        const powers = volley(stats.chains, this.mods.echo);
         const struck: Enemy[] = [];
-        for (let chain = 0; chain < stats.chains; chain += 1) {
+        for (let chain = 0; chain < powers.length; chain += 1) {
           // 플레이어에게서 가장 가까운 적을 치고, 거기서 가까운 다음 적으로 튄다.
           const points = [p.x, p.y];
           let fromX = p.x;
@@ -2333,13 +2406,15 @@ export class Sim {
             }
             if (!target) break;
             struck.push(target);
-            this.damage(target, stats.damage, 'bolt');
+            this.damage(target, stats.damage * powers[chain], 'bolt');
             points.push(target.x, target.y);
             fromX = target.x;
             fromY = target.y;
             range = stats.hop;
           }
-          if (points.length > 2) this.events.push({ type: 'bolt', points, evolved: isEvolved(w.bolt) });
+          if (points.length > 2) {
+            this.events.push({ type: 'bolt', points, evolved: isEvolved(w.bolt), ...faint(powers[chain]) });
+          }
         }
         s.cd.bolt = struck.length > 0 ? stats.cooldown : 0.15;
       }
@@ -2356,18 +2431,21 @@ export class Sim {
           s.cd.bell = 0.2;
         } else {
           const evolved = isEvolved(w.bell);
-          for (let i = 0; i < stats.rings; i += 1) {
+          // 덤으로 붙은 종소리는 약한 만큼 덜 밀어내고 덜 늦춘다.
+          const powers = volley(stats.rings, this.mods.echo);
+          for (let i = 0; i < powers.length; i += 1) {
             s.waves.push({
               x: p.x,
               y: p.y,
               radius: 0,
               max: stats.radius,
               delay: i * BELL_GAP,
-              damage: stats.damage,
-              push: stats.push,
-              slow: stats.slow,
+              damage: stats.damage * powers[i],
+              push: stats.push * powers[i],
+              slow: faintSlow(stats.slow, powers[i]),
               hit: [],
               evolved,
+              ...faint(powers[i]),
             });
           }
           s.cd.bell = stats.cooldown;
@@ -2407,7 +2485,8 @@ export class Sim {
         const stats = lampStats(w.lamp, this.mods);
         const evolved = isEvolved(w.lamp);
         const picked: { x: number; y: number }[] = [];
-        for (let i = 0; i < stats.count; i += 1) {
+        const powers = volley(stats.count, this.mods.echo);
+        for (let i = 0; i < powers.length; i += 1) {
           const crowd = this.crowd(picked);
           if (!crowd) break;
           picked.push(crowd);
@@ -2418,12 +2497,13 @@ export class Sim {
             ty: crowd.y,
             retarget: LAMP_RETARGET,
             speed: stats.speed,
-            damage: stats.damage,
+            damage: stats.damage * powers[i],
             radius: stats.radius,
             every: stats.tick,
             tick: stats.tick,
             life: stats.duration,
             evolved,
+            ...faint(powers[i]),
           });
         }
         if (picked.length > 0) {
@@ -2451,8 +2531,10 @@ export class Sim {
         if (target) {
           const stats = moonStats(w.moon, this.mods);
           const base = Math.atan2(target.y - p.y, target.x - p.x);
-          for (let i = 0; i < stats.count; i += 1) {
-            const angle = base + (i - (stats.count - 1) / 2) * MOON_SPREAD;
+          const powers = volley(stats.count, this.mods.echo);
+          const angles = fanAngles(powers, MOON_SPREAD);
+          for (let i = 0; i < powers.length; i += 1) {
+            const angle = base + angles[i];
             s.moons.push({
               x: p.x,
               y: p.y,
@@ -2461,13 +2543,14 @@ export class Sim {
               left: stats.reach,
               back: false,
               speed: stats.speed,
-              damage: stats.damage,
+              damage: stats.damage * powers[i],
               radius: stats.radius,
               rehit: stats.rehit,
               sweep: stats.rehit,
               hit: [],
               life: MOON_LIFE,
               evolved: isEvolved(w.moon),
+              ...faint(powers[i]),
             });
           }
           s.cd.moon = stats.cooldown;
@@ -2487,6 +2570,8 @@ export class Sim {
     const s = this.state;
     const p = s.player;
     const half = stats.arc / 2;
+    // 온전한 쪽들(앞의 count쪽)은 서로 겹치지 않아서 한 번만 벤다. 덤으로 붙은 쪽은 닿는 적을 저마다 한 번씩 더 벤다.
+    const powers = volley(stats.count, this.mods.echo);
     for (const e of s.enemies) {
       if (e.hp <= 0) continue;
       const info = ENEMIES[e.kind];
@@ -2494,26 +2579,97 @@ export class Sim {
       const dy = e.y - p.y;
       const distance = Math.hypot(dx, dy);
       if (distance > stats.reach + info.radius) continue;
+      let power = 0;
       if (distance > info.radius) {
         const bearing = Math.atan2(dy, dx);
         const spare = Math.asin(info.radius / distance);
-        let inside = false;
-        for (let k = 0; k < stats.count && !inside; k += 1) {
-          const side = angle + k * Math.PI;
-          inside = Math.abs(Math.atan2(Math.sin(bearing - side), Math.cos(bearing - side))) <= half + spare;
-        }
-        if (!inside) continue;
+        const inside = (k: number): boolean => {
+          const side = angle + sideTurn(k);
+          return Math.abs(Math.atan2(Math.sin(bearing - side), Math.cos(bearing - side))) <= half + spare;
+        };
+        for (let k = 0; k < stats.count && power === 0; k += 1) if (inside(k)) power = 1;
+        for (let k = stats.count; k < powers.length; k += 1) if (inside(k)) power += powers[k];
+        if (power === 0) continue;
+      } else {
+        // 플레이어와 겹쳐 선 적은 어느 쪽에 있든 맞는다.
+        power = 1;
+        for (let k = stats.count; k < powers.length; k += 1) power += powers[k];
       }
-      this.damage(e, stats.damage, 'torch');
-      // 보스는 밀리지 않는다. 끝없는 밤에서 세진 그림자는 그만큼 덜 밀린다.
+      this.damage(e, stats.damage * power, 'torch');
+      // 보스는 밀리지 않는다. 끝없는 밤에서 세진 그림자는 그만큼 덜 밀린다. 약한 덤만 닿았으면 그만큼 덜 민다.
       if (stats.push > 0 && !info.boss) {
-        const push = stats.push / this.late.damage;
+        const push = (stats.push * Math.min(1, power)) / this.late.damage;
         const scale = distance > 0.001 ? push / distance : 0;
         e.kx = (e.kx ?? 0) + (distance > 0.001 ? dx * scale : push);
         e.ky = (e.ky ?? 0) + dy * scale;
       }
     }
-    this.events.push({ type: 'swing', angle, arc: stats.arc, reach: stats.reach, count: stats.count, evolved });
+    const last = powers[powers.length - 1];
+    this.events.push({
+      type: 'swing',
+      angle,
+      arc: stats.arc,
+      reach: stats.reach,
+      count: powers.length,
+      evolved,
+      ...(last < 1 ? { faint: last } : {}),
+    });
+  }
+
+  /**
+   * 덤으로 남기는 불길(등잔 기름): 가장 가까운 그림자 쪽으로 한 걸음 떨어진 자리에 하나 더 남긴다.
+   * 덤이 둘이면 둘째는 맞은편에 남긴다. 둘레에 그림자가 없으면 남기지 않는다.
+   * 그 자리에 더 센 불길이 이미 있으면 그대로 두고, 아니면 그 불길을 다시 살린다.
+   * 약한 덤은 덜 아픈 만큼 덜 늦춘다(rules.ts의 faintSlow).
+   */
+  private spillOil(stats: OilStats, evolved: boolean): void {
+    const extras = volley(0, this.mods.echo);
+    if (extras.length === 0) return;
+    const s = this.state;
+    const p = s.player;
+    let target: Enemy | null = null;
+    let best = OIL_ECHO_RANGE * OIL_ECHO_RANGE;
+    for (const e of s.enemies) {
+      if (e.hp <= 0) continue;
+      const d2 = (e.x - p.x) ** 2 + (e.y - p.y) ** 2;
+      if (d2 < best) {
+        best = d2;
+        target = e;
+      }
+    }
+    if (!target) return;
+    const base = Math.atan2(target.y - p.y, target.x - p.x);
+    const step = stats.radius * OIL_ECHO_STEP;
+    extras.forEach((power, j) => {
+      const angle = base + sideTurn(j);
+      const x = p.x + Math.cos(angle) * step;
+      const y = p.y + Math.sin(angle) * step;
+      const damage = stats.damage * power;
+      const there = s.fires.find((fire) => (fire.x - x) ** 2 + (fire.y - y) ** 2 < (fire.radius * 0.5) ** 2);
+      if (!there) {
+        s.fires.push({
+          x,
+          y,
+          radius: stats.radius,
+          life: stats.duration,
+          tick: 0,
+          every: stats.tick,
+          damage,
+          slow: faintSlow(stats.slow, power),
+          evolved,
+          ...faint(power),
+        });
+        return;
+      }
+      if (there.damage > damage) return;
+      there.life = stats.duration;
+      there.radius = stats.radius;
+      there.damage = damage;
+      there.slow = faintSlow(stats.slow, power);
+      there.evolved = evolved;
+      if (power < 1) there.power = power;
+      else delete there.power;
+    });
   }
 
   /**
@@ -2715,8 +2871,9 @@ export class Sim {
             // 맞은 적은 살짝 밀려난다.
             if (!ENEMIES[e.kind].boss) {
               const speed = Math.hypot(shot.vx, shot.vy) || 1;
-              e.x += (shot.vx / speed) * 2;
-              e.y += (shot.vy / speed) * 2;
+              const nudge = 2 * (shot.power ?? 1);
+              e.x += (shot.vx / speed) * nudge;
+              e.y += (shot.vy / speed) * nudge;
             }
             shot.hit.push(e.uid);
             shot.pierce -= 1;
