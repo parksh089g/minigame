@@ -20,22 +20,32 @@ const TILE_INSET = 9;
 const TEXT_LEFT = TILE_INSET + TILE + 8;
 /** 이름과 설명 사이 */
 const TEXT_GAP = 2;
-/** 글 덩어리 위아래로 카드 안에 남기는 여백. 글자가 카드 테두리(2px)에 닿지 않게 한다. */
-const TEXT_PAD = 2;
 /**
  * 머리글이 첫 카드 위로 차지하는 높이. 보통은 제목과 한 줄 설명이고,
  * 카드가 다 들어가지 않을 때는 한 줄 설명을 빼고 제목만 둔다.
  */
 const HEADER_HEIGHT = { full: 54, compact: 36 } as const;
-/** 마지막 카드 아래에 남기는 여백 */
-const BOTTOM_ROOM = 10;
 /** 카드 아래에 붙는 작은 버튼(다시 뽑기) */
 const EXTRA = { width: 136, height: 26, gap: 8 } as const;
+/** 카드가 많을 때 간격을 좁히기 전에 카드를 이 높이까지는 낮춰 본다(core/paging.ts의 fitStack). */
+const ROOMY_HEIGHT = 50;
 /**
- * 카드가 많아 머리글 아래에 다 들어가지 않을 때(잔치의 밤의 강화권은 여섯 장까지 된다) 줄이는 정도(core/paging.ts의 fitStack).
- * 카드는 가장 긴 글이 테두리 안에 드는 데까지만 낮추고, 아이콘 칸(TILE)의 위아래에도 2px씩은 남긴다.
+ * 카드가 머리글 아래에 다 들어가지 않을 때(잔치의 밤의 강화권은 여섯 장까지 된다) 차례로 줄여 보는 것.
+ * 앞의 것으로 들어가면 거기서 멈춘다. 카드는 가장 긴 글이 테두리 안에 드는 데까지만 낮추고, 그래도 모자라면
+ * 머리글의 한 줄 설명을 빼고, 카드 설명을 작은 글씨(잔치의 밤을 고르는 창의 설명과 같은 크기)로 쓰고,
+ * 마지막에는 여백을 좁힌다. 글의 높이는 기기마다 1~2px씩 다르게 재지므로 마지막 단계에 그만큼의 틈을 둔다.
+ * - gap: 카드를 ROOMY_HEIGHT 밑으로 낮춰야 할 때의 카드 사이 간격
+ * - bottom: 마지막 카드(또는 다시 뽑기) 아래에 남기는 여백
+ * - pad: 카드 안에서 글 덩어리 위아래로 남기는 여백. 카드 테두리가 2px이고 글 상자에도 1px 여유가 있어서
+ *   1이어도 글자가 테두리에 닿지 않는다.
  */
-const SQUEEZE = { roomy: 50, gap: 4 } as const;
+const FITTINGS = [
+  { header: HEADER_HEIGHT.full, small: false, gap: 4, bottom: 10, pad: 2 },
+  { header: HEADER_HEIGHT.compact, small: false, gap: 4, bottom: 10, pad: 2 },
+  { header: HEADER_HEIGHT.compact, small: true, gap: 4, bottom: 10, pad: 2 },
+  { header: HEADER_HEIGHT.compact, small: true, gap: 2, bottom: 4, pad: 1 },
+] as const;
+type Fitting = (typeof FITTINGS)[number];
 /** 움직이던 손가락으로 엉뚱한 것을 고르지 않도록 잠깐 뒤부터 누를 수 있다. */
 const ARM_DELAY_MS = 380;
 
@@ -153,32 +163,31 @@ export function showChoices(
     card.title.height + TEXT_GAP + card.description.height;
 
   const below = extra ? EXTRA.gap + EXTRA.height : 0;
-  // 머리글이 HUD 아래에 오고 마지막 카드 아래에 여백이 남도록, 카드가 많으면 낮추고 간격을 좁힌다.
-  // 카드는 가장 긴 글이 테두리 안에 드는 데까지만 낮춘다.
-  const plan = (headerHeight: number) => {
-    const room = height - clearTop - headerHeight - BOTTOM_ROOM - below;
-    const least = Math.max(TILE + 4, ...cards.map((card) => textHeight(card) + TEXT_PAD * 2));
-    const size = fitStack(cards.length, room, { height: CARD_HEIGHT, gap: CARD_GAP }, { ...SQUEEZE, least });
-    return { headerHeight, size, fits: stackHeight(cards.length, size) <= room };
+  // 머리글이 HUD 아래에 오고 마지막 카드 아래에 여백이 남도록, 카드가 많으면 FITTINGS의 차례대로 줄여 본다.
+  const plan = (fitting: Fitting) => {
+    const room = height - clearTop - fitting.header - fitting.bottom - below;
+    const tallest = Math.max(...cards.map(textHeight));
+    const least = Math.max(TILE + 4, Math.ceil(tallest + fitting.pad * 2));
+    const squeeze = { roomy: ROOMY_HEIGHT, gap: fitting.gap, least };
+    const size = fitStack(cards.length, room, { height: CARD_HEIGHT, gap: CARD_GAP }, squeeze);
+    return { fitting, size, fits: stackHeight(cards.length, size) <= room };
   };
-  let layout = plan(HEADER_HEIGHT.full);
-  // 그래도 모자라면(가장 작은 화면에 설명이 두 줄인 카드가 여섯 장) 머리글의 한 줄 설명을 빼고,
-  // 그래도 모자라면 카드 설명을 작은 글씨(잔치의 밤을 고르는 창의 설명과 같은 크기)로 쓴다.
-  if (!layout.fits) layout = plan(HEADER_HEIGHT.compact);
-  if (!layout.fits) {
-    for (const card of cards) card.description.setFontSize(FONT_SIZE.small);
-    layout = plan(HEADER_HEIGHT.compact);
+  let layout = plan(FITTINGS[0]);
+  for (const fitting of FITTINGS.slice(1)) {
+    if (layout.fits) break;
+    if (fitting.small) for (const card of cards) card.description.setFontSize(FONT_SIZE.small);
+    layout = plan(fitting);
   }
-  const { headerHeight, size } = layout;
+  const { fitting, size } = layout;
   const stack = stackHeight(cards.length, size);
   const total = stack + below;
   // 가운데에 두되, 카드가 많아 길어져도 머리글이 위쪽 HUD를 덮지 않게 내린다.
-  // 화면이 아주 짧을 때는 마지막 카드가 잘리지 않는 데까지만 내린다.
-  const centered = Math.round((height - total) / 2) + Math.round(headerHeight / 4);
-  const top = Math.max(centered, Math.min(clearTop + headerHeight, height - total - BOTTOM_ROOM));
+  // 그래도 다 들어가지 않을 만큼 화면이 짧으면 마지막 카드가 잘리지 않는 데까지만 내린다.
+  const centered = Math.round((height - total) / 2) + Math.round(fitting.header / 4);
+  const top = Math.max(centered, Math.min(clearTop + fitting.header, height - total - fitting.bottom));
 
   keep(
-    addText(scene, GAME_WIDTH / 2, top - headerHeight + 2, header.title, {
+    addText(scene, GAME_WIDTH / 2, top - fitting.header + 2, header.title, {
       size: FONT_SIZE.large,
       bold: true,
       color: header.color,
@@ -186,7 +195,7 @@ export function showChoices(
       shadow: header.shadow,
     }),
   );
-  if (headerHeight === HEADER_HEIGHT.full) {
+  if (fitting.header === HEADER_HEIGHT.full) {
     keep(addText(scene, GAME_WIDTH / 2, top - 22, header.subtitle, { color: CSS.silver, originX: 0.5 }));
   }
 
