@@ -97,6 +97,9 @@ export const SC = {
   sofa: 'sc-sofa',
   snack: 'sc-snack',
   nap: 'sc-nap',
+  idea: 'sc-idea',
+  bug: 'sc-bug',
+  pair: 'sc-pair',
 } as const;
 
 export const COMPUTER_SIZE = { width: 26, height: 22 } as const;
@@ -456,6 +459,45 @@ const ARTS: Record<string, Art> = {
     draw(c) {
       stroke(c, 'M4 15h8l-8 9h8', '#8d7aa8', 2.6);
       stroke(c, 'M15 4h8l-8 9h8', '#a892e6', 2.6);
+    },
+  },
+  /** 아이디어 카드: 흰 동그라미 안의 반짝이 */
+  'sc-idea': {
+    width: 16,
+    height: 16,
+    view: [22, 22],
+    draw(c) {
+      oval(c, 11, 11, 11, 11, WHITE);
+      oval(c, 11, 11, 9.4, 9.4, '#fff3c4');
+      fill(c, 'M11 3c.9 4.9 3.1 7.1 8 8-4.9.9-7.1 3.1-8 8-.9-4.9-3.100-7.100-8-8 4.900-.9 7.100-3.100 8-8z', '#f5a700');
+    },
+  },
+  /** 버그 카드: 흰 동그라미 안의 붉은 벌레 */
+  'sc-bug': {
+    width: 16,
+    height: 16,
+    view: [22, 22],
+    draw(c) {
+      oval(c, 11, 11, 11, 11, WHITE);
+      stroke(c, 'M6 9.500l-2.600-1.500M5.500 13H2.500M6 16.500l-2.400 1.800M16 9.500l2.600-1.500M16.500 13h3M16 16.500l2.400 1.800', '#4a3f5c', 1.3);
+      oval(c, 11, 6.6, 3.4, 2.8, '#4a3f5c');
+      oval(c, 11, 12.6, 5.6, 6, '#e8505b');
+      stroke(c, 'M11 7v11.500', '#4a3f5c', 1.1);
+      oval(c, 8.4, 11.2, 1.1, 1.1, '#4a3f5c');
+      oval(c, 13.6, 11.2, 1.1, 1.1, '#4a3f5c');
+      oval(c, 8.8, 15, 1, 1, '#4a3f5c');
+      oval(c, 13.2, 15, 1, 1, '#4a3f5c');
+    },
+  },
+  /** 협업 카드: 흰 동그라미 안의 맞물린 고리 둘 */
+  'sc-pair': {
+    width: 16,
+    height: 16,
+    view: [22, 22],
+    draw(c) {
+      oval(c, 11, 11, 11, 11, WHITE);
+      stroke(c, 'M4.300 11a4.200 4.200 0 1 0 8.400 0a4.200 4.200 0 1 0-8.400 0', '#7c6cf0', 2.2);
+      stroke(c, 'M9.300 11a4.200 4.200 0 1 0 8.400 0a4.200 4.200 0 1 0-8.400 0', '#2fae93', 2.2);
     },
   },
   /** 급한 의뢰: 자명종 */

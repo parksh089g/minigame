@@ -45,6 +45,40 @@ export interface Effect {
   amount: number;
 }
 
+// ───────── 특별 업무 카드 ─────────
+
+/**
+ * 프로젝트의 카드 가운데 몇 장은 특별한 카드로 나온다. 업무의 종류(기획, 그림, 코딩, 검사)는 그대로이고,
+ * 하는 동안이나 끝냈을 때 한 가지 일이 더 일어난다.
+ * - idea(아이디어): 끝내면 그때 일하고 있는 친구 모두가 응원을 받는다.
+ * - bug(버그): 절반쯤 하면 버그가 나와서 일이 멈춘다. 그 자리를 눌러 잡으면 잎사귀를 받고, 두면 얼마 뒤에 저절로 사라진다.
+ * - pair(협업): 옆자리 친구가 일하는 동안 더 빨리 한다.
+ */
+export const SPECIAL_KINDS = ['idea', 'bug', 'pair'] as const;
+export type SpecialKind = (typeof SPECIAL_KINDS)[number];
+
+export const SPECIALS: Readonly<Record<SpecialKind, { name: string; description: string }>> = {
+  idea: { name: '아이디어', description: '끝내면 일하는 친구 모두가 응원을 받아요' },
+  bug: { name: '버그', description: '하다가 버그가 나오면 그 자리를 눌러 잡아요' },
+  pair: { name: '협업', description: '옆자리 친구가 일하는 동안 더 빨라요' },
+};
+
+export const SPECIAL = {
+  /** 이 사무실 단계(0부터)부터 나온다. 옥탑방에서는 카드 맡기기부터 익힌다. */
+  unlockOffice: 1,
+  /** 카드 한 장이 특별한 카드가 되는 확률 */
+  chance: 0.18,
+  /** 아이디어: 응원 한 번의 이만큼 배 동안 모두가 응원을 받는다. */
+  idea: { cheer: 2 },
+  /**
+   * 버그: 카드의 일을 at만큼 했을 때 나온다. 잡지 않으면 wait초 동안 일이 멈춘다.
+   * 잡으면 rewardSeconds초 동안 출시작이 버는 만큼을 받고, 적어도 minReward(사무실 단계가 오를 때마다 네 배)는 받는다.
+   */
+  bug: { at: 0.5, wait: 8, rewardSeconds: 20, minReward: 20 },
+  /** 협업: 일하고 있는 옆자리 한 명마다 이만큼 빨라진다. */
+  pair: { boost: 0.5 },
+} as const;
+
 // ───────── 직원 ─────────
 
 export interface StaffDef {
@@ -146,6 +180,9 @@ export const TIPS = {
   update: '이미 낸 게임을 다시 만들면 업데이트가 돼요',
   move: '평판이 찼어요. 잎사귀를 모아 이사해요',
   hire: '빈 자리를 누르면 새 친구를 뽑을 수 있어요',
+  bug: '버그가 나왔어요! 그 자리를 눌러서 잡아요',
+  idea: '반짝이는 카드를 끝내면 모두가 응원을 받아요',
+  pair: '고리가 달린 카드는 옆자리가 일할 때 빨라요',
   goals: '목표 버튼에서 오늘의 목표를 볼 수 있어요',
   play: '수익을 누르면 낸 게임을 할 수 있어요',
   train: '직원 창에서 교육하면 그 친구가 빨라져요',

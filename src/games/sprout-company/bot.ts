@@ -22,6 +22,7 @@ import {
   hireBlock,
   hireCost,
   isReady,
+  isStuck,
   leadBlock,
   moveBlock,
   moveOffice,
@@ -31,6 +32,7 @@ import {
   projectWork,
   promoteLead,
   release,
+  squash,
   startProject,
   train,
   trainBlock,
@@ -136,6 +138,7 @@ export function runBot(state: CompanyState, seconds: number, options: BotOptions
   let startedAt = 0;
   const idleFor = state.desks.map(() => 0);
   const restFor = state.desks.map(() => 0);
+  const stuckFor = state.desks.map(() => 0);
   let waiting = 0;
   const last = OFFICES.length - 1;
   for (let time = 0; time < seconds; time += STEP) {
@@ -143,7 +146,7 @@ export function runBot(state: CompanyState, seconds: number, options: BotOptions
     if (!state.project) {
       waiting += STEP;
       if (waiting >= options.reaction * 2) {
-        startProject(state, pickProject(state));
+        startProject(state, pickProject(state), options.random);
         startedAt = time;
         waiting = 0;
       }
@@ -159,6 +162,7 @@ export function runBot(state: CompanyState, seconds: number, options: BotOptions
     while (idleFor.length < state.desks.length) {
       idleFor.push(0);
       restFor.push(0);
+      stuckFor.push(0);
     }
     for (let index = 0; index < state.desks.length; index += 1) {
       const desk = state.desks[index];
@@ -167,7 +171,15 @@ export function runBot(state: CompanyState, seconds: number, options: BotOptions
         idleFor[index] += STEP;
         const card = bestCardFor(state, index);
         if (card >= 0 && idleFor[index] >= options.reaction && assign(state, card, index)) idleFor[index] = 0;
+      } else if (isStuck(state, index)) {
+        // 버그가 나오면 부지런한 사람은 곧 눌러서 잡는다. 느긋한 사람은 지나가게 둔다.
+        stuckFor[index] += STEP;
+        if (Number.isFinite(options.cheerGap) && stuckFor[index] >= options.reaction) {
+          squash(state, index);
+          stuckFor[index] = 0;
+        }
       } else if (desk.cheer <= 0) {
+        stuckFor[index] = 0;
         restFor[index] += STEP;
         if (restFor[index] >= options.cheerGap) {
           cheer(state, index);

@@ -51,6 +51,18 @@ describe('처음 안내', () => {
     state.leaves = 0;
     expect(drain(state)).toEqual(['hire']);
 
+    // 특별한 카드는 처음 나올 때마다 하나씩 알려 준다.
+    state.inbox = [{ kind: 'plan', left: 1, total: 1, special: 'pair' }];
+    expect(drain(state)).toEqual(['pair']);
+    state.inbox = [{ kind: 'plan', left: 1, total: 1, special: 'idea' }];
+    expect(drain(state)).toEqual(['idea']);
+    state.desks[0].task = { kind: 'plan', left: 1, total: 2, special: 'bug' };
+    expect(drain(state)).toEqual([]);
+    state.desks[0].task.stuck = 3;
+    expect(drain(state)).toEqual(['bug']);
+    state.inbox = [];
+    state.desks[0].task = null;
+
     state.releases = 3;
     state.goals = createGoals('2026-11-12', 1);
     // 게임을 몇 개 내고 나면, 낸 게임을 직접 할 수 있다는 것도 알려 준다.

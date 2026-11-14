@@ -36,6 +36,8 @@ import {
   PROJECTS,
   QUEUE,
   RUSH,
+  SPECIAL,
+  SPECIAL_KINDS,
   SPECIALTY_BOOST,
   STAFF,
   STAFF_ORDER,
@@ -56,6 +58,7 @@ import {
   type PerkId,
   type ProjectDef,
   type ProjectId,
+  type SpecialKind,
   type StaffDef,
   type StaffId,
   type TaskKind,
@@ -82,6 +85,12 @@ export interface Task {
   total: number;
   /** 급한 의뢰의 카드. 프로젝트의 카드로 세지 않는다. */
   rush?: boolean;
+  /** 특별한 카드의 종류. 보통 카드에는 없다. */
+  special?: SpecialKind;
+  /** 버그에 막혀서 일이 멈춘 시간이 얼마나 남았는지(초). 막히지 않았으면 없다. */
+  stuck?: number;
+  /** 버그 카드의 버그를 이미 잡았거나 버그가 지나갔다. */
+  fixed?: boolean;
 }
 
 /** 강화 id → 레벨. 없는 id는 0레벨이다. */
@@ -543,15 +552,31 @@ function refill(state: CompanyState): void {
   }
 }
 
+/** 특별한 카드가 나오는 사무실인가 */
+export function specialsOpen(state: CompanyState): boolean {
+  return state.office >= SPECIAL.unlockOffice;
+}
+
+/** 카드 몇 장을 특별한 카드로 바꾼다. random은 0 이상 1 미만의 수를 준다. */
+function sprinkle(state: CompanyState, cards: Task[], random: () => number): void {
+  if (!specialsOpen(state)) return;
+  for (const card of cards) {
+    if (random() >= SPECIAL.chance) continue;
+    card.special = SPECIAL_KINDS[Math.min(SPECIAL_KINDS.length - 1, Math.floor(random() * SPECIAL_KINDS.length))];
+  }
+}
+
 /**
  * 프로젝트를 시작한다. 카드가 일감함에 놓이고, 다 놓지 못한 것은 쌓아 둔다.
  * 하던 프로젝트가 있으면 시작하지 못한다.
+ * random을 주면 카드 몇 장이 특별한 카드로 나온다(SPECIAL). 주지 않으면 모두 보통 카드다.
  */
-export function startProject(state: CompanyState, id: ProjectId): boolean {
+export function startProject(state: CompanyState, id: ProjectId, random?: () => number): boolean {
   if (state.project || !isUnlocked(state, id) || departmentsMissing(state, id) > 0) return false;
   const def: ProjectDef = PROJECTS[id];
   const work = projectWork(state, id);
   state.backlog = def.cards.map((kind) => ({ kind, left: work, total: work }));
+  if (random) sprinkle(state, state.backlog, random);
   state.project = { id, done: 0, total: def.cards.length };
   refill(state);
   return true;
@@ -575,8 +600,11 @@ export interface Release {
   reputation: number;
 }
 
-/** 다 만든 프로젝트를 출시한다. 아직 덜 됐으면 null. 예약해 둔 게임이 있으면 맨 앞의 것을 바로 시작한다. */
-export function release(state: CompanyState): Release | null {
+/**
+ * 다 만든 프로젝트를 출시한다. 아직 덜 됐으면 null. 예약해 둔 게임이 있으면 맨 앞의 것을 바로 시작한다.
+ * random은 이어서 시작하는 게임의 특별한 카드를 정하는 데 쓴다(startProject).
+ */
+export function release(state: CompanyState, random?: () => number): Release | null {
   if (!state.project || !isReady(state)) return null;
   const id = state.project.id;
   const bonus = projectBonus(state, id);
@@ -591,7 +619,7 @@ export function release(state: CompanyState): Release | null {
   // 급한 의뢰의 카드는 프로젝트와 상관없이 남는다.
   state.inbox = state.inbox.filter((task) => task.rush);
   state.backlog = [];
-  startQueued(state);
+  startQueued(state, random);
   return { id, version, bonus, reputation };
 }
 
@@ -624,15 +652,15 @@ export function dequeue(state: CompanyState, index: number): boolean {
 }
 
 /** 만드는 게임이 없으면 예약 줄의 맨 앞부터 시작한다. 시작할 수 없게 된 것은 건너뛴다. */
-function startQueued(state: CompanyState): void {
+function startQueued(state: CompanyState, random?: () => number): void {
   while (!state.project && state.queue.length > 0) {
-    startProject(state, state.queue.shift() as ProjectId);
+    startProject(state, state.queue.shift() as ProjectId, random);
   }
 }
 
 /** 예약이 있고 지금 게임을 다 만들었으면 저절로 출시한다. 출시했으면 그 결과를 돌려준다. */
-function releaseQueued(state: CompanyState): Release | null {
-  return state.queue.length > 0 && isReady(state) ? release(state) : null;
+function releaseQueued(state: CompanyState, random?: () => number): Release | null {
+  return state.queue.length > 0 && isReady(state) ? release(state, random) : null;
 }
 
 // ───────── 일 시키기 ─────────
@@ -664,6 +692,38 @@ export function bestCardFor(state: CompanyState, index: number): number {
   return best;
 }
 
+/** 이 책상의 카드가 버그에 막혀 있는가 */
+export function isStuck(state: CompanyState, index: number): boolean {
+  return (state.desks[index]?.task?.stuck ?? 0) > 0;
+}
+
+/** 버그를 잡으면 받는 잎사귀 */
+export function bugReward(state: CompanyState): number {
+  const least = SPECIAL.bug.minReward * 4 ** state.office;
+  return Math.round(Math.max(least, incomePerSecond(state) * SPECIAL.bug.rewardSeconds));
+}
+
+/** 이 책상에 나온 버그를 잡는다. 일이 다시 나아가고 잎사귀를 받는다. 받은 잎사귀를 돌려주고, 버그가 없으면 0이다. */
+export function squash(state: CompanyState, index: number): number {
+  const task = state.desks[index]?.task;
+  if (!task || !isStuck(state, index)) return 0;
+  delete task.stuck;
+  task.fixed = true;
+  const reward = bugReward(state);
+  state.leaves += reward;
+  return reward;
+}
+
+/** 옆자리에서 일하고 있는 친구의 수. 버그에 막힌 친구는 세지 않는다. */
+export function busyNeighbors(state: CompanyState, index: number): number {
+  return neighbors(state, index).filter((at) => state.desks[at].task !== null && !isStuck(state, at)).length;
+}
+
+/** 이 책상이 이 카드를 할 때 협업으로 붙는 배수. 협업 카드가 아니면 1 */
+export function pairBoost(state: CompanyState, index: number, task: Task): number {
+  return task.special === 'pair' ? 1 + SPECIAL.pair.boost * busyNeighbors(state, index) : 1;
+}
+
 /** 응원 한 번이 이어지는 시간(초) */
 export function cheerSeconds(state: CompanyState): number {
   return CHEER_SECONDS * (1 + companyBonus(state, 'cheer'));
@@ -681,6 +741,12 @@ export function cheer(state: CompanyState, index: number): boolean {
 /** 시간이 흐르는 동안 일어난 일 */
 export type CompanyEvent =
   | { type: 'task'; desk: number; kind: TaskKind; rush: boolean }
+  /** 아이디어 카드를 끝내서 일하는 친구 모두가 응원을 받았다. */
+  | { type: 'idea'; desk: number }
+  /** 버그가 나와서 그 자리의 일이 멈췄다. */
+  | { type: 'bug'; desk: number }
+  /** 잡지 않은 버그가 저절로 사라졌다. */
+  | { type: 'bugGone'; desk: number }
   | { type: 'release'; release: Release }
   | { type: 'rushOffer' }
   | { type: 'rushWon'; reward: number }
@@ -698,7 +764,7 @@ export function advance(state: CompanyState, dt: number, random: () => number = 
   if (!(dt > 0)) return NOTHING;
   state.leaves += incomePerSecond(state) * dt;
   const events = work(state, dt, random);
-  const released = releaseQueued(state);
+  const released = releaseQueued(state, random);
   if (released) events.push({ type: 'release', release: released });
   tickRush(state, dt, random, events);
   return events;
@@ -728,7 +794,17 @@ function work(state: CompanyState, dt: number, random: () => number): CompanyEve
       }
       continue;
     }
-    const speed = plainSpeed(state, index) * skill(state, index, task.kind);
+    if (task.stuck !== undefined) {
+      // 버그에 막힌 동안에는 일도 기운도 그대로다. 잡지 않고 두면 얼마 뒤에 저절로 사라진다.
+      task.stuck -= dt;
+      if (task.stuck <= 0) {
+        delete task.stuck;
+        task.fixed = true;
+        done.push({ type: 'bugGone', desk: index });
+      }
+      continue;
+    }
+    const speed = plainSpeed(state, index) * skill(state, index, task.kind) * pairBoost(state, index, task);
     // 응원과 기운은 남은 동안만 빠르다. 한 번에 긴 시간을 흘려도 끝난 뒤는 보통 속도로 센다.
     const cheered = Math.min(desk.cheer, dt);
     const peppy = open ? Math.min(desk.energy * stamina, dt) : 0;
@@ -739,11 +815,27 @@ function work(state: CompanyState, dt: number, random: () => number): CompanyEve
       (both * CHEER_BOOST * pep + (cheered - both) * CHEER_BOOST + (peppy - both) * pep + (dt - Math.max(cheered, peppy)));
     desk.cheer = Math.max(0, desk.cheer - dt);
     if (open) desk.energy = Math.max(0, desk.energy - dt / stamina);
+    if (task.special === 'bug' && !task.fixed) {
+      // 버그 카드는 정해진 만큼 하면 버그가 나와서 멈춘다.
+      const mark = task.total * (1 - SPECIAL.bug.at);
+      if (task.left <= mark) {
+        task.left = mark;
+        task.stuck = SPECIAL.bug.wait;
+        done.push({ type: 'bug', desk: index });
+        continue;
+      }
+    }
     if (task.left <= 0) {
       desk.task = null;
       desk.cheer = 0;
       done.push({ type: 'task', desk: index, kind: task.kind, rush: task.rush === true });
       bumpGoals(state.goals, 'task');
+      if (task.special === 'idea') {
+        // 아이디어가 번뜩이면 그때 일하고 있는 친구 모두가 응원을 받는다.
+        const seconds = cheerSeconds(state) * SPECIAL.idea.cheer;
+        for (const other of state.desks) if (other.task) other.cheer = Math.max(other.cheer, seconds);
+        done.push({ type: 'idea', desk: index });
+      }
       if (task.rush) {
         const rush = state.rush;
         if (rush && (rush.done += 1) >= rush.total) {
@@ -1042,7 +1134,7 @@ export function catchUp(state: CompanyState, seconds: number): Away | null {
     releaseDone();
     const working = state.desks.some((desk) => desk.task !== null);
     if (!working && (state.lead === 0 || state.inbox.length === 0)) break;
-    tasks += work(state, 1, fixed).length;
+    tasks += work(state, 1, fixed).filter((event) => event.type === 'task').length;
   }
   releaseDone();
   return { seconds: counted, leaves, tasks, capped: seconds > AWAY.maxSeconds, releases };
@@ -1501,6 +1593,7 @@ const toCount = (value: unknown, max = Number.MAX_SAFE_INTEGER): number => Math.
 const isStaffId = (value: unknown): value is StaffId => typeof value === 'string' && value in STAFF;
 const isProjectId = (value: unknown): value is ProjectId => typeof value === 'string' && value in PROJECTS;
 const isTaskKind = (value: unknown): value is TaskKind => (TASK_KINDS as readonly unknown[]).includes(value);
+const isSpecialKind = (value: unknown): value is SpecialKind => (SPECIAL_KINDS as readonly unknown[]).includes(value);
 const isDepartmentId = (value: unknown): value is DepartmentId => typeof value === 'string' && value in DEPARTMENTS;
 
 function normalizeLevels(raw: unknown, scope: EquipmentDef['scope']): Levels {
@@ -1523,6 +1616,12 @@ function normalizeTask(raw: unknown): Task | null {
   if (left <= 0) return null;
   const task: Task = { kind: raw.kind, left, total };
   if (raw.rush === true) task.rush = true;
+  else if (isSpecialKind(raw.special)) {
+    task.special = raw.special;
+    if (raw.fixed === true) task.fixed = true;
+    const stuck = toNumber(raw.stuck, 0, SPECIAL.bug.wait);
+    if (task.special === 'bug' && !task.fixed && stuck > 0) task.stuck = stuck;
+  }
   return task;
 }
 
