@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { STAGE_HEARTS, STAGE_LEVELS, stageRandom } from '../core/stages';
 import * as colorSort from './color-sort/rules';
 import * as logicTiles from './logic-tiles/rules';
+import * as matchThree from './match-three/rules';
 import * as numberPuzzle from './number-puzzle/rules';
 import * as parkingOut from './parking-out/rules';
 import * as pathLink from './path-link/rules';
@@ -20,7 +21,7 @@ const ALL_LEVELS = Array.from({ length: STAGE_LEVELS }, (_, index) => index + 1)
 const SAMPLE_LEVELS = [1, 2, 3, 5, 8, 13, 21, 34, 50, 67, 84, 99, STAGE_LEVELS];
 
 describe('단계 모드를 하는 게임', () => {
-  it('일곱 게임이고 모두 플레이할 수 있다', () => {
+  it('여덟 게임이고 모두 플레이할 수 있다', () => {
     expect(stageGames().map((game) => game.id)).toEqual([
       'color-sort',
       'pin-pull',
@@ -29,6 +30,7 @@ describe('단계 모드를 하는 게임', () => {
       'logic-tiles',
       'number-puzzle',
       'path-link',
+      'match-three',
     ]);
     expect(stageGames().every((game) => game.sceneKey !== null && !game.versus)).toBe(true);
   });
@@ -272,4 +274,111 @@ describe('길 잇기의 단계', () => {
       expect(run).toMatchObject({ timeLeft: pathLink.START_SECONDS, score: 0, boardsCleared: 0 });
     }
   }, 60_000);
+});
+
+describe('세 개 맞추기의 단계', () => {
+  it('조각이 적고 목표가 하나인 판에서 시작해, 조각이 가장 많고 목표가 셋인 판으로 끝난다', () => {
+    const first = matchThree.levelSpec(1);
+    const last = matchThree.levelSpec(STAGE_LEVELS);
+    expect(first).toEqual(matchThree.LEVEL_SPECS[0]);
+    expect(last).toEqual(matchThree.LEVEL_SPECS[matchThree.LEVEL_SPECS.length - 1]);
+    expect(first.kinds).toBe(matchThree.MIN_KINDS);
+    expect(first.goals).toBe(1);
+    expect(last.kinds).toBe(matchThree.MAX_KINDS);
+    expect(last.goals).toBe(3);
+    for (const [index, spec] of matchThree.LEVEL_SPECS.entries()) {
+      expect(spec.goals).toBeLessThanOrEqual(spec.kinds);
+      expect(spec.moves).toBeGreaterThan(0);
+      if (index === 0) continue;
+      // 조각의 갈래와 한 번에 모아야 하는 양(횟수 하나에 모을 조각)은 줄지 않는다.
+      const before = matchThree.LEVEL_SPECS[index - 1];
+      expect(spec.kinds).toBeGreaterThanOrEqual(before.kinds);
+      if (spec.kinds === before.kinds) {
+        expect((spec.goals * spec.count) / spec.moves).toBeGreaterThanOrEqual(
+          (before.goals * before.count) / before.moves,
+        );
+      }
+    }
+  });
+
+  it('같은 단계는 언제나 같은 판이고, 새로 들어오는 조각도 같은 차례로 나온다', () => {
+    for (const level of SAMPLE_LEVELS) {
+      const plan = matchThree.levelPlan(level);
+      expect(matchThree.levelPlan(level)).toEqual(plan);
+      const one = matchThree.refillRandom(plan.seed);
+      const other = matchThree.refillRandom(plan.seed);
+      for (let index = 0; index < 20; index += 1) expect(one()).toBe(other());
+    }
+    expect(matchThree.levelPlan(1).board).not.toEqual(matchThree.levelPlan(2).board);
+  });
+
+  it('어느 단계든 그 난이도의 조각과 횟수와 목표를 지키고, 처음 판은 바로 둘 수 있다', () => {
+    for (const level of ALL_LEVELS) {
+      const plan = matchThree.levelPlan(level);
+      const spec = matchThree.levelSpec(level);
+      expect(plan.level).toBe(level);
+      expect(plan.kinds, `${level}단계`).toBe(spec.kinds);
+      expect(plan.moves, `${level}단계`).toBe(spec.moves);
+      expect(plan.goals, `${level}단계`).toHaveLength(spec.goals);
+      expect(new Set(plan.goals.map((goal) => goal.kind)).size, `${level}단계`).toBe(spec.goals);
+      for (const goal of plan.goals) {
+        expect(goal.kind).toBeGreaterThanOrEqual(0);
+        expect(goal.kind).toBeLessThan(spec.kinds);
+        expect(goal.count).toBe(spec.count);
+      }
+      expect(plan.board).toHaveLength(matchThree.CELLS);
+      expect(plan.board.every((piece) => piece.kind < spec.kinds && !piece.burst), `${level}단계`).toBe(true);
+      expect(matchThree.hasMatch(plan.board), `${level}단계`).toBe(false);
+      expect(matchThree.hasMove(plan.board), `${level}단계`).toBe(true);
+    }
+  }, 60_000);
+
+  it('어느 단계든 풀이꾼이 횟수를 남기고 깬다', () => {
+    for (const level of ALL_LEVELS) {
+      const left = matchThree.solveLevel(matchThree.levelPlan(level));
+      expect(left, `${level}단계`).not.toBeNull();
+      expect(left ?? 0, `${level}단계`).toBeGreaterThanOrEqual(matchThree.SOLVER_MARGIN);
+    }
+  }, 60_000);
+
+  it('풀이꾼이 고른 자리를 그대로 따라 두면 깬다', () => {
+    for (const level of SAMPLE_LEVELS) {
+      const plan = matchThree.levelPlan(level);
+      const random = matchThree.refillRandom(plan.seed);
+      let run = matchThree.startLevel(plan);
+      while (!matchThree.isLevelCleared(run) && run.movesLeft > 0) {
+        const move = matchThree.solverMove(run);
+        if (!move) break;
+        const turn = matchThree.playSwap(run.board, move.a, move.b, plan.kinds, random);
+        if (!turn) break;
+        run = matchThree.afterTurn(run, turn);
+      }
+      expect(matchThree.isLevelCleared(run), `${level}단계`).toBe(true);
+      expect(matchThree.isLevelFailed(run), `${level}단계`).toBe(false);
+    }
+  });
+
+  it('아무 자리나 맨 먼저 보이는 대로 두면 못 깨는 단계가 있다', () => {
+    // 횟수가 넉넉하기만 하면 단계가 아니다: 뒤쪽 단계는 목표를 보고 두어야 깬다.
+    const failed = ALL_LEVELS.filter((level) => {
+      const plan = matchThree.levelPlan(level);
+      const random = matchThree.refillRandom(plan.seed);
+      let run = matchThree.startLevel(plan);
+      while (!matchThree.isLevelCleared(run) && run.movesLeft > 0) {
+        const [move] = matchThree.findMoves(run.board);
+        const turn = matchThree.playSwap(run.board, move.a, move.b, plan.kinds, random);
+        if (!turn) break;
+        run = matchThree.afterTurn(run, turn);
+      }
+      return !matchThree.isLevelCleared(run);
+    });
+    expect(failed.length, `못 깬 단계: ${failed.join(', ')}`).toBeGreaterThan(10);
+  }, 60_000);
+
+  it('범위를 벗어난 단계 번호는 처음이나 끝의 단계로 맞춘다', () => {
+    expect(matchThree.levelPlan(0)).toEqual(matchThree.levelPlan(1));
+    expect(matchThree.levelPlan(STAGE_LEVELS + 5)).toEqual(matchThree.levelPlan(STAGE_LEVELS));
+    expect(matchThree.levelPlan(2.9)).toEqual(matchThree.levelPlan(2));
+    expect(matchThree.levelPlan(Number.NaN)).toEqual(matchThree.levelPlan(1));
+  });
 });

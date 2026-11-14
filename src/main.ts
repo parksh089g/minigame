@@ -23,6 +23,7 @@ import { MemoryCardsScene } from './games/memory-cards/MemoryCardsScene';
 import { MergeTilesScene } from './games/merge-tiles/MergeTilesScene';
 import { NumberPuzzleScene } from './games/number-puzzle/NumberPuzzleScene';
 import { ParkingOutScene } from './games/parking-out/ParkingOutScene';
+import { MatchThreeScene } from './games/match-three/MatchThreeScene';
 import { PathLinkScene } from './games/path-link/PathLinkScene';
 import { PinPullScene } from './games/pin-pull/PinPullScene';
 import { ScrewSortScene } from './games/screw-sort/ScrewSortScene';
@@ -112,6 +113,7 @@ async function boot(): Promise<void> {
       LogicTilesScene,
       NumberPuzzleScene,
       PathLinkScene,
+      MatchThreeScene,
       BlockFillScene,
       ChosungQuizScene,
       DuelScene,

@@ -202,6 +202,16 @@ export const GAMES: readonly MiniGameInfo[] = [
     genre: 'puzzle',
   },
   {
+    id: 'match-three',
+    title: '세 개 맞추기',
+    icon: 'icon-match',
+    sceneKey: SCENE.matchThree,
+    coinsFor: (score) => Math.floor(score / 250),
+    dailyTargets: [1500, 3000, 4500],
+    genre: 'puzzle',
+    stageMode: true,
+  },
+  {
     id: 'chosung-quiz',
     title: '초성 퀴즈',
     icon: 'icon-chosung',

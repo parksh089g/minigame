@@ -27,6 +27,7 @@ export const RANKED_GAMES = [
   'chosung-quiz',
   'lantern-keeper',
   'sprout-company',
+  'match-three',
 ] as const;
 
 export type RankedGame = (typeof RANKED_GAMES)[number];

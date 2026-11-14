@@ -192,4 +192,5 @@ export const SCENE = {
   pathLink: 'PathLink',
   blockFill: 'BlockFill',
   chosungQuiz: 'ChosungQuiz',
+  matchThree: 'MatchThree',
 } as const;
