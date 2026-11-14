@@ -26,6 +26,7 @@ import {
   CELLS,
   cellOf,
   chainOf,
+  clockRuns,
   colOf,
   COLS,
   findMoves,
@@ -42,6 +43,7 @@ import {
   secondsBack,
   START_SECONDS,
   startLevel,
+  type BoardPhase,
   type Direction,
   type LevelRun,
   type Move,
@@ -89,8 +91,6 @@ const TICK_FROM_SECONDS = 5;
 
 const DEPTH = { board: 1, piece: 5, select: 6, effect: 20, hud: 30, hint: 32, banner: 40 } as const;
 
-type Phase = 'idle' | 'busy' | 'over';
-
 /** 손가락 하나가 누른 조각. 한 번 누른 동안에는 한 번만 바꾼다. */
 interface Touch {
   id: number;
@@ -132,7 +132,7 @@ export class MatchThreeScene extends MiniGameScene {
   private boardTop = 0;
   private bounds!: Phaser.Geom.Rectangle;
 
-  private phase: Phase = 'idle';
+  private phase: BoardPhase = 'idle';
   private kinds = ARCADE_KINDS;
   private random: () => number = Math.random;
   private touch: Touch | null = null;
@@ -220,14 +220,15 @@ export class MatchThreeScene extends MiniGameScene {
     if (!this.playing) return;
     // 탭이 가려졌다 돌아와도 시간이 한꺼번에 흐르지 않게 한 프레임의 길이를 제한한다.
     const dt = Math.min(deltaMs, 100) / 1000;
+    if (this.phase === 'idle') {
+      this.pulseBursts(time);
+      this.idle += dt;
+      if (this.idle >= HINT_SECONDS) this.showMoveHint();
+    }
+
     // 조각이 사라지고 떨어지는 동안에는 시간이 흐르지 않는다: 길게 이어진 연쇄가 시간을 잡아먹지 않는다.
-    if (this.phase !== 'idle') return;
-
-    this.pulseBursts(time);
-    this.idle += dt;
-    if (this.idle >= HINT_SECONDS) this.showMoveHint();
-
-    if (this.stageLevel !== null) return;
+    // 맞지 않는 바꾸기가 되돌아오는 동안에는 흐른다(clockRuns).
+    if (this.stageLevel !== null || !clockRuns(this.phase)) return;
     if (!this.gate.open) {
       if (this.gate.wait(dt)) this.hideHints();
       return;
@@ -576,6 +577,8 @@ export class MatchThreeScene extends MiniGameScene {
     const turn = playSwap(this.board, a, b, this.kinds, this.random);
     if (!turn) {
       // 맞는 줄이 생기지 않는다: 갔다가 제자리로 돌아온다. 단계 모드의 횟수도 줄지 않는다.
+      // 돌아오는 동안 손은 먹지 않지만 점수 도전의 시계는 흐른다.
+      this.phase = 'bounce';
       slide(first, to.x, to.y, true);
       slide(second, at.x, at.y, true);
       sfx.deny();
