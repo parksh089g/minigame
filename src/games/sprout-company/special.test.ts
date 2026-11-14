@@ -353,7 +353,7 @@ describe('특별한 카드의 저장', () => {
 
   it('이상한 값은 버린다', () => {
     const state = company(1);
-    state.project = { id: 'memory-cards', done: 0, total: 5 };
+    state.project = { id: 'memory-cards', done: 0, total: 5, care: 0 };
     const raw = JSON.parse(JSON.stringify(state)) as { inbox: unknown[] };
     raw.inbox = [
       { kind: 'plan', left: 5, total: 10, special: 'dance' },
@@ -376,7 +376,7 @@ describe('자동 플레이', () => {
   it('부지런한 사람은 버그를 잡아서, 지나가게 두는 사람보다 버그 카드를 빨리 끝낸다', () => {
     const until = (cheerGap: number): number => {
       const state = company(1);
-      state.project = { id: 'memory-cards', done: 0, total: 1 };
+      state.project = { id: 'memory-cards', done: 0, total: 1, care: 0 };
       state.inbox = [card('bug', 400)];
       // 자동 플레이는 부를 때마다 누르기까지의 시간을 새로 세므로, 그 시간보다 길게 끊어서 부른다.
       for (let time = 0; time < 600; time += 2) {
