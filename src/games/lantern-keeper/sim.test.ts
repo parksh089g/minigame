@@ -24,6 +24,7 @@ import {
   PASSIVES,
   META,
   META_ORDER,
+  META_STEP,
   MID_BOSS_COUNT,
   MID_BOSS_EVERY,
   MID_BOSS_TIERS,
@@ -3057,6 +3058,162 @@ describe('영구 강화', () => {
     expect(newSim(1, old).rerolls).toBe(0);
   });
 
+  it('골라내기는 산 만큼만 쓸 수 있고, 뺀 것은 그 판의 레벨업에 다시 나오지 않는다', () => {
+    const none = newSim();
+    expect(none.banishes).toBe(0);
+    expect(none.banish(none.options()[0])).toBeNull();
+
+    const sim = newSim(1, createRun({ ...config, meta: { sift: 2 } }));
+    expect(sim.banishes).toBe(2);
+    const first = sim.options();
+    const out = first[1];
+    if (out.type !== 'weapon' && out.type !== 'passive') throw new Error('첫 선택지는 무기나 패시브다');
+    const next = sim.banish(out);
+    // 나머지 둘은 그대로이고, 뺀 자리에만 새것이 온다.
+    expect(next).toHaveLength(3);
+    expect(next![0]).toEqual(first[0]);
+    expect(next![2]).toEqual(first[2]);
+    expect(next![1]).not.toMatchObject({ id: out.id });
+    expect(new Set(next!.map((option) => ('id' in option ? option.id : option.type))).size).toBe(3);
+    expect(sim.options()).toEqual(next);
+    expect(sim.banishes).toBe(1);
+    expect(sim.state.banned).toEqual([out.id]);
+    // 고르던 채로 저장했다가 이어도 같은 선택지이고, 쓴 횟수도 그대로다.
+    const resumed = newSim(99, JSON.parse(JSON.stringify(sim.state)) as RunState);
+    expect(resumed.options()).toEqual(next);
+    expect(resumed.banishes).toBe(1);
+
+    // 회복과 불씨, 지금 선택지에 없는 것은 뺄 수 없고 횟수도 줄지 않는다.
+    expect(sim.banish({ type: 'heal' })).toBeNull();
+    expect(sim.banish(out)).toBeNull();
+    expect(sim.banishes).toBe(1);
+
+    // 그 판이 끝날 때까지 레벨업에 다시 나오지 않는다. 다시 뽑아도 마찬가지다.
+    for (let i = 0; i < 60; i += 1) {
+      const options = sim.options();
+      expect(options).not.toContainEqual(expect.objectContaining({ id: out.id }));
+      sim.applyUpgrade(options[0]);
+    }
+    // 골라내기가 생기기 전에 저장한 판에는 횟수도 뺀 것도 없다.
+    const old = JSON.parse(JSON.stringify(createRun(config))) as RunState;
+    delete old.banishes;
+    delete old.banned;
+    expect(newSim(1, old).banishes).toBe(0);
+    expect(newSim(1, old).options()).toHaveLength(3);
+    expect(newSim(1, old).state.banned).toEqual([]);
+    // 뺀 것의 목록에 엉뚱한 값이 저장되어 있으면 비워서 시작한다.
+    const odd = { ...(JSON.parse(JSON.stringify(createRun(config))) as RunState), banned: 'ember' as unknown as string[] };
+    expect(newSim(1, odd).state.banned).toEqual([]);
+  });
+
+  it('가진 것을 골라내면 레벨업에는 나오지 않지만 강화권과 보물 상자로는 오른다', () => {
+    const sim = newSim(1, createRun({ ...config, meta: { sift: 1 } }));
+    sim.state.spawnDebt = -1e6;
+    sim.state.offer = [
+      { type: 'weapon', id: 'ember', level: 2 },
+      { type: 'passive', id: 'wick', level: 1 },
+      { type: 'passive', id: 'coat', level: 1 },
+    ];
+    expect(sim.banish({ type: 'weapon', id: 'ember', level: 2 })).toHaveLength(3);
+    for (let i = 0; i < 20; i += 1) {
+      expect(sim.options()).not.toContainEqual(expect.objectContaining({ id: 'ember' }));
+      sim.reroll();
+      sim.state.rerolls = 1;
+    }
+    expect(sim.ticketChoices()).toContainEqual({ type: 'weapon', id: 'ember', level: 2 });
+    // 가진 것이 불씨탄뿐이므로 상자는 그것을 올린다.
+    sim.state.gems.push({ x: sim.state.player.x, y: sim.state.player.y, value: 0, kind: 'chest', pulled: false });
+    sim.step(STEP, 0, 0);
+    expect(sim.state.weapons.ember).toBe(2);
+  });
+
+  it('더 나올 것이 없을 때 골라내면 그 자리를 회복이나 불씨가 채운다', () => {
+    const sim = newSim(1, createRun({ ...config, meta: { sift: 3 } }));
+    // 무기 칸과 패시브 칸이 다 찼고, 덜 올린 것은 둘뿐이다.
+    sim.state.weapons = { ember: MAX_LEVEL, star: MAX_LEVEL, lance: MAX_LEVEL, oil: 4 };
+    sim.state.passives = { wick: MAX_LEVEL, coat: MAX_LEVEL, boots: MAX_LEVEL, lens: MAX_LEVEL, hood: MAX_LEVEL, herb: 4 };
+    expect(sim.options().map((option) => option.type).sort()).toEqual(['heal', 'passive', 'weapon']);
+    const afterOil = sim.banish({ type: 'weapon', id: 'oil', level: MAX_LEVEL })!;
+    expect(afterOil.map((option) => option.type).sort()).toEqual(['embers', 'heal', 'passive']);
+    // 회복과 불씨가 이미 나와 있으면 채울 것이 없어서 그 자리가 빈다.
+    const afterHerb = sim.banish({ type: 'passive', id: 'herb', level: MAX_LEVEL })!;
+    expect(afterHerb.map((option) => option.type).sort()).toEqual(['embers', 'heal']);
+    expect(sim.banishes).toBe(1);
+    sim.applyUpgrade(afterHerb[0]);
+    expect(sim.options().map((option) => option.type)).toEqual(['heal', 'embers']);
+  });
+
+  it('오래가는 기둥불은 등불 기둥이 타는 시간을 늘린다', () => {
+    /** kindle단계를 들고 간 판에서 기둥이 seconds초 동안 타는지 */
+    const burns = (kindle: number, seconds: number): void => {
+      const sim = quietSim(1, { meta: { kindle } });
+      sim.state.player.hp = 1e9;
+      sim.state.postsSpawned = POSTS.times.length;
+      sim.state.posts = [{ x: 8, y: 0, lit: 0, tick: 0 }];
+      sim.step(STEP, 0, 0);
+      expect(advance(sim, seconds - 0.5)).not.toContainEqual(expect.objectContaining({ type: 'dim' }));
+      expect(advance(sim, 1)).toContainEqual({ type: 'dim', x: 8, y: 0 });
+    };
+    burns(0, POSTS.seconds);
+    burns(1, POSTS.seconds + META_STEP.kindle);
+    burns(3, POSTS.seconds + 6);
+    // 엉뚱하게 큰 값이 저장되어 있어도 최대 단계까지만 친다.
+    burns(99, POSTS.seconds + META_STEP.kindle * META.kindle.maxLevel);
+  });
+
+  it('묵직한 상자는 보물 상자가 가끔 한 단계를 더 올려 주게 한다', () => {
+    const open = (trove: number): { chests: number; doubles: number } => {
+      const sim = quietSim(5, { meta: { trove } });
+      sim.state.weapons = { ember: 1, star: 1 };
+      sim.state.passives = { wick: 1, coat: 1 };
+      const left = (): number =>
+        [...Object.values(sim.state.weapons), ...Object.values(sim.state.passives)].reduce((sum, level) => sum + MAX_LEVEL - (level ?? 0), 0);
+      let doubles = 0;
+      while (left() > 0) {
+        const before = left();
+        sim.state.gems.push({ x: sim.state.player.x, y: sim.state.player.y, value: 0, kind: 'chest', pulled: false });
+        sim.step(STEP, 0, 0);
+        const event = sim.events.find((e) => e.type === 'chest');
+        if (event?.type !== 'chest') throw new Error('상자를 열었어야 한다');
+        // 한 단계 더 올랐으면 무엇이 올랐는지도 함께 알린다.
+        expect(before - left()).toBe(event.extra ? 2 : 1);
+        if (event.extra) doubles += 1;
+      }
+      return { chests: sim.state.chests ?? 0, doubles };
+    };
+    // 넷을 끝까지 올리는 데 열여섯 단계가 든다.
+    expect(open(0)).toEqual({ chests: 16, doubles: 0 });
+    const heavy = open(3);
+    expect(heavy.chests + heavy.doubles).toBe(16);
+    expect(heavy.doubles).toBeGreaterThanOrEqual(3);
+    expect(heavy.doubles).toBeLessThanOrEqual(8);
+  });
+
+  it('줍는 복은 자석과 불꽃 단지가 떨어질 확률을 늘리고, 회복 떡은 그대로 둔다', () => {
+    const dropWith = (roll: number, bounty: number): string[] => {
+      const sim = new Sim(quietSim(1, { meta: { bounty } }).state, () => roll);
+      sim.state.enemies.push(enemy('shade', 100, 0, 0));
+      sim.step(STEP, 0, 0);
+      return sim.state.gems.map((gem) => gem.kind);
+    };
+    // 사지 않았으면: 회복 떡 0.8%, 자석 0.12%, 불꽃 단지 0.1%
+    expect(dropWith(0.0079, 0)).toEqual(['xp', 'heal']);
+    expect(dropWith(0.0081, 0)).toEqual(['xp', 'pull']);
+    expect(dropWith(0.0095, 0)).toEqual(['xp', 'blast']);
+    expect(dropWith(0.011, 0)).toEqual(['xp']);
+    // 다 사면(+45%) 자석과 불꽃 단지의 몫이 넓어져서, 떨어지지 않던 값에서도 떨어진다.
+    expect(dropWith(0.0095, 3)).toEqual(['xp', 'pull']);
+    expect(dropWith(0.011, 3)).toEqual(['xp', 'blast']);
+    expect(dropWith(0.0113, 3)).toEqual(['xp']);
+    // 회복 떡이 떨어지는 값의 범위는 달라지지 않는다.
+    expect(dropWith(0.0079, 3)).toEqual(['xp', 'heal']);
+    expect(dropWith(0.0081, 3)).toEqual(['xp', 'pull']);
+    // 한 단계에 15%씩이다.
+    expect(dropWith(0.0093, 0)).toEqual(['xp', 'blast']);
+    expect(dropWith(0.0093, 1)).toEqual(['xp', 'pull']);
+    expect(META_STEP.bounty).toBeCloseTo(0.15);
+  });
+
   it('밝은 출발은 시작하자마자 강화를 그만큼 고르게 한다', () => {
     const sim = newSim(1, createRun({ ...config, meta: { headstart: 2 } }));
     expect(sim.state.player.level).toBe(3);
@@ -3240,6 +3397,12 @@ describe('끝없는 밤', () => {
     // 고르던 채로 저장했다가 이어도 같은 선택지다(나갔다 들어와서 다시 뽑지 못한다).
     const copy = JSON.parse(JSON.stringify(sim.state)) as RunState;
     expect(newSim(99, copy).boonChoices()).toEqual(choices);
+
+    // 영구 강화 "너른 축복"을 샀으면 넷 가운데에서 고른다.
+    const wide = atDawn({ meta: { vigil: 1 } });
+    wide.chooseDawn(true);
+    expect(wide.boonChoices()).toHaveLength(4);
+    expect(new Set(wide.boonChoices().map((u) => (u.type === 'boon' ? u.id : ''))).size).toBe(4);
 
     const picked = choices[1];
     sim.takeBoon(picked);

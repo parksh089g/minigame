@@ -42,7 +42,7 @@ import {
   type DailyRecord,
   type FriendScore,
 } from './daily';
-import { clampDepth, depthName, isFeast, isUnlocked, metaCost, type Levels } from './rules';
+import { clampDepth, depthName, isFeast, isUnlocked, metaCost, metaLocked, type Levels } from './rules';
 import { restoreRun, type RunState } from './sim';
 import { normalizeTips, OLD_HAND_TIPS, type TipId } from './tips';
 
@@ -79,7 +79,7 @@ export interface LanternMeta {
   daily: DailyRecord;
   /** 공유받은 주소에 실려 온 친구의 오늘의 판 점수(daily.ts). 그날 동안 넘어 볼 기록으로 보인다. */
   friend: FriendScore | null;
-  /** 들어온 줄 아는 캐릭터와 무기와 스테이지. 업데이트로 여기 없는 것이 생기면 준비 화면이 한 번 알린다(announceNews). */
+  /** 들어온 줄 아는 캐릭터와 무기와 스테이지와 영구 강화. 업데이트로 여기 없는 것이 생기면 준비 화면이 한 번 알린다(announceNews). */
   known: string[];
   /** 새로 들어왔는데 아직 눌러 보지 않은 캐릭터. 준비 화면의 카드에 "새"가 붙는다. */
   fresh: HeroId[];
@@ -87,8 +87,8 @@ export interface LanternMeta {
   feast: FeastId | null;
 }
 
-/** 지금 있는 캐릭터와 무기와 스테이지 모두. 처음 하는 사람은 이것을 다 아는 것으로 친다(모두 처음 보므로 따로 알리지 않는다). */
-const ALL_KNOWN: readonly string[] = [...HERO_ORDER, ...WEAPON_ORDER, ...STAGE_ORDER];
+/** 지금 있는 캐릭터와 무기와 스테이지와 영구 강화 모두. 처음 하는 사람은 이것을 다 아는 것으로 친다(모두 처음 보므로 따로 알리지 않는다). */
+const ALL_KNOWN: readonly string[] = [...HERO_ORDER, ...WEAPON_ORDER, ...STAGE_ORDER, ...META_ORDER];
 /**
  * 들어온 줄 아는 것(known)이 적혀 있지 않은 예전 저장이 알던 것: 다섯 번째 캐릭터 달잡이와 열 번째 무기 등대빛이
  * 들어오기 전의 캐릭터 넷과 무기 아홉. 그 뒤로 들어온 것은 known에 없으면 알린다.
@@ -102,6 +102,23 @@ const OLD_KNOWN: readonly string[] = [
  * 적어 둔 known에 스테이지가 하나도 없으면 이 넷을 아는 것으로 친다. 그래야 빛버섯 숲만 한 번 알린다.
  */
 const OLD_STAGES: readonly StageId[] = ['meadow', 'marsh', 'ridge', 'tundra'];
+/**
+ * 영구 강화도 알리게 되기 전(새벽을 맞아야 열리는 다섯 가지가 들어오기 전)의 저장이 알던 영구 강화 열한 가지.
+ * 적어 둔 known에 영구 강화가 하나도 없으면 이 열한 가지를 아는 것으로 친다. 그래야 새로 들어온 것만 한 번 알린다.
+ */
+const OLD_UPGRADES: readonly MetaId[] = [
+  'vigor',
+  'swift',
+  'might',
+  'greed',
+  'reach',
+  'mend',
+  'lucky',
+  'second',
+  'armor',
+  'reroll',
+  'headstart',
+];
 
 export function createDefaultMeta(): LanternMeta {
   return {
@@ -130,6 +147,7 @@ export function createDefaultMeta(): LanternMeta {
 
 const isHero = (value: unknown): value is HeroId => typeof value === 'string' && value in HEROES;
 const isStage = (value: unknown): value is StageId => typeof value === 'string' && value in STAGES;
+const isUpgrade = (value: unknown): value is MetaId => typeof value === 'string' && value in META;
 
 const count = (value: unknown): number =>
   typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
@@ -173,9 +191,11 @@ export function normalizeMeta(raw: unknown): LanternMeta {
   meta.friend = normalizeFriend(data.friend);
   // 들어온 줄 아는 것이 적혀 있지 않으면, 처음 하는 사람은 지금 것을 모두 아는 것으로 치고
   // 그 전부터 하던 사람은 달잡이와 등대빛이 들어오기 전의 것만 아는 것으로 친다. 그래야 두 가지를 한 번 알린다.
-  // 스테이지가 하나도 적혀 있지 않으면 빛버섯 숲이 들어오기 전의 넷을 아는 것으로 친다.
+  // 스테이지가 하나도 적혀 있지 않으면 빛버섯 숲이 들어오기 전의 넷을, 영구 강화가 하나도 적혀 있지 않으면
+  // 새벽을 맞아야 열리는 다섯 가지가 들어오기 전의 열한 가지를 아는 것으로 친다.
   const saved: unknown[] = Array.isArray(data.known) ? data.known : meta.runs > 0 ? [...OLD_KNOWN] : [...ALL_KNOWN];
-  const known = saved.some(isStage) ? saved : [...saved, ...OLD_STAGES];
+  const staged = saved.some(isStage) ? saved : [...saved, ...OLD_STAGES];
+  const known = staged.some(isUpgrade) ? staged : [...staged, ...OLD_UPGRADES];
   meta.known = ALL_KNOWN.filter((id) => known.includes(id));
   const fresh = Array.isArray(data.fresh) ? data.fresh : [];
   meta.fresh = HERO_ORDER.filter((id) => fresh.includes(id));
@@ -233,11 +253,11 @@ export function newDepth(before: LanternMeta, after: LanternMeta, stage: StageId
   return opened > openDepth(before, stage) ? `${STAGES[stage].name} ${depthName(opened)}` : null;
 }
 
-/** 불씨로 영구 강화를 한 단계 올린다. 돈이 모자라거나 최대 단계면 그대로 돌려준다. */
+/** 불씨로 영구 강화를 한 단계 올린다. 돈이 모자라거나 최대 단계이거나 아직 잠겨 있으면 그대로 돌려준다. */
 export function buyMeta(meta: LanternMeta, id: MetaId): LanternMeta {
   const level = meta.upgrades[id] ?? 0;
   const cost = metaCost(id, level);
-  if (cost === null || meta.embers < cost) return meta;
+  if (cost === null || meta.embers < cost || metaLocked(id, meta.clears)) return meta;
   return { ...meta, embers: meta.embers - cost, upgrades: { ...meta.upgrades, [id]: level + 1 } };
 }
 
@@ -284,11 +304,12 @@ export function readEntries(meta: LanternMeta, ids: readonly string[]): LanternM
   return unread.length === meta.unread.length ? meta : { ...meta, unread };
 }
 
-/** 업데이트로 새로 들어왔는데 아직 알리지 않은 캐릭터와 무기와 스테이지 */
+/** 업데이트로 새로 들어왔는데 아직 알리지 않은 캐릭터와 무기와 스테이지와 영구 강화 */
 export interface News {
   heroes: HeroId[];
   weapons: WeaponId[];
   stages: StageId[];
+  upgrades: MetaId[];
 }
 
 export function unknownNews(meta: LanternMeta): News {
@@ -296,24 +317,31 @@ export function unknownNews(meta: LanternMeta): News {
     heroes: HERO_ORDER.filter((id) => !meta.known.includes(id)),
     weapons: WEAPON_ORDER.filter((id) => !meta.known.includes(id)),
     stages: STAGE_ORDER.filter((id) => !meta.known.includes(id)),
+    upgrades: META_ORDER.filter((id) => !meta.known.includes(id)),
   };
 }
 
 export const hasNews = (news: News): boolean =>
-  news.heroes.length > 0 || news.weapons.length > 0 || news.stages.length > 0;
+  news.heroes.length > 0 || news.weapons.length > 0 || news.stages.length > 0 || news.upgrades.length > 0;
 
-/** 새로 들어온 것을 알리는 한 줄. 예: "새 캐릭터 달잡이 · 새 무기 등대빛 · 새 스테이지 빛버섯 숲" */
+/**
+ * 새로 들어온 것을 알리는 한 줄. 예: "새 캐릭터 달잡이 · 새 무기 등대빛 · 새 스테이지 빛버섯 숲 · 새 영구 강화 5가지".
+ * 영구 강화는 여럿이 한꺼번에 들어오면 이름을 늘어놓지 않고 몇 가지인지만 적는다(준비 화면의 한 줄에 다 들어가지 않는다).
+ */
 export function newsLine(news: News): string {
   const parts: string[] = [];
   if (news.heroes.length > 0) parts.push(`새 캐릭터 ${news.heroes.map((id) => HEROES[id].name).join(', ')}`);
   if (news.weapons.length > 0) parts.push(`새 무기 ${news.weapons.map((id) => WEAPONS[id].name).join(', ')}`);
   if (news.stages.length > 0) parts.push(`새 스테이지 ${news.stages.map((id) => STAGES[id].name).join(', ')}`);
+  if (news.upgrades.length === 1) parts.push(`새 영구 강화 ${META[news.upgrades[0]].name}`);
+  else if (news.upgrades.length > 1) parts.push(`새 영구 강화 ${news.upgrades.length}가지`);
   return parts.join(' · ');
 }
 
 /**
  * 새로 들어온 것을 알렸다고 적는다. 새 캐릭터는 눌러 볼 때까지 카드에 "새"가 붙고(fresh),
- * 새 무기는 도감에서 새로 열린 항목처럼 들여다볼 때까지 점이 붙는다(unread). 알릴 것이 없으면 그대로 돌려준다.
+ * 새 무기는 도감에서 새로 열린 항목처럼 들여다볼 때까지 점이 붙는다(unread). 스테이지와 영구 강화는 한 줄로만 알린다.
+ * 알릴 것이 없으면 그대로 돌려준다.
  */
 export function announceNews(meta: LanternMeta): LanternMeta {
   const news = unknownNews(meta);

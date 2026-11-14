@@ -72,6 +72,14 @@ describe('도전 과제 목록', () => {
     }, 0);
     expect(META_ORDER).toEqual(expect.arrayContaining(['armor', 'reroll', 'headstart']));
     expect(rewards).toBeGreaterThan(added);
+    // 새벽 뒤에 열리는 다섯까지 모두 사는 값도 보상을 다 모은 것보다는 적다.
+    const all = META_ORDER.reduce((sum, id) => {
+      let cost = 0;
+      for (let level = 0; level < META[id].maxLevel; level += 1) cost += metaCost(id, level) ?? 0;
+      return sum + cost;
+    }, 0);
+    expect(all).toBeGreaterThan(3000);
+    expect(rewards).toBeGreaterThan(all);
   });
 });
 

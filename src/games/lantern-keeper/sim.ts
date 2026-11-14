@@ -17,6 +17,8 @@ import {
   HEROES,
   MAX_LEVEL,
   MAX_PASSIVES,
+  META,
+  META_STEP,
   MID_BOSS_COUNT,
   MID_BOSS_EVERY,
   PLAYER_BASE,
@@ -40,8 +42,10 @@ import {
   auraStats,
   bellStats,
   boltStats,
+  boonChoiceCount,
   boonLevel,
   boonOptions,
+  canBanish,
   chestUpgrade,
   clampDepth,
   damageScale,
@@ -71,11 +75,13 @@ import {
   spawnPerSecond,
   speedScale,
   starStats,
+  swapOption,
   ticketOptions,
   upgradeOptions,
   isFeast,
   weaponSlotCount,
   xpToNext,
+  type Build,
   type DepthRules,
   type Levels,
   type TorchStats,
@@ -431,6 +437,10 @@ export interface RunState {
   revives: number;
   /** 레벨업 선택지를 다시 뽑을 수 있는 남은 횟수. 없으면 0이다. 다시 뽑기가 생기기 전에 저장한 판에는 없다. */
   rerolls?: number;
+  /** 레벨업 선택지에서 하나를 골라낼 수 있는 남은 횟수(영구 강화 "골라내기"). 골라내기가 생기기 전에 저장한 판에는 없다. */
+  banishes?: number;
+  /** 이번 판에서 골라낸 무기와 패시브의 이름. 레벨업 선택지에 다시 나오지 않는다. */
+  banned?: string[];
   /** 무기마다 지금까지 준 피해. 결과 화면과 일시정지 화면에서 비중으로 보여 준다. 이것이 생기기 전에 저장한 판에는 없다. */
   dealt?: Levels<WeaponId>;
   /**
@@ -571,7 +581,8 @@ export type SimEvent =
   /** 정예 그림자가 나타났다 */
   | { type: 'elite'; kind: EnemyKind }
   /** 보물 상자를 열었다. upgrade는 오른 것, 올릴 것이 없어 불씨를 받았으면 null */
-  | { type: 'chest'; upgrade: Upgrade | null }
+  /** extra는 영구 강화 "묵직한 상자"로 한 단계가 더 올랐을 때 그것 */
+  | { type: 'chest'; upgrade: Upgrade | null; extra?: Upgrade }
   | { type: 'ticket' }
   /** 끝없는 밤에서 밤의 축복을 고를 때가 됐다 */
   | { type: 'boon' }
@@ -731,6 +742,8 @@ export function createRun(config: RunConfig): RunState {
     pendingTickets: 0,
     revives: config.meta.second ? 1 : 0,
     rerolls: Math.max(0, Math.floor(config.meta.reroll ?? 0)),
+    banishes: Math.max(0, Math.min(META.sift.maxLevel, Math.floor(config.meta.sift ?? 0))),
+    banned: [],
     dealt: {},
     nextUid: 1,
     over: null,
@@ -795,6 +808,10 @@ export class Sim {
   readonly depth: DepthRules;
   /** 끝없는 밤이 지금 얹는 난이도. 걸음마다 새로 셈한다. */
   private late: { hp: number; damage: number; speed: number } = NO_ENDLESS;
+  /** 등불 기둥이 켜져 있는 시간(초). 영구 강화 "오래가는 기둥불"이 늘린다. */
+  private readonly postSeconds: number;
+  /** 자석과 불꽃 단지가 떨어질 확률에 곱해지는 값. 영구 강화 "줍는 복"이 늘린다. */
+  private readonly toyRate: number;
 
   private readonly heads = new Int32Array(BUCKETS);
   private next = new Int32Array(512);
@@ -805,6 +822,8 @@ export class Sim {
   ) {
     this.mods = this.computeMods();
     this.depth = depthRules(state.depth ?? 0);
+    this.postSeconds = POSTS.seconds + META_STEP.kindle * this.metaLevel('kindle');
+    this.toyRate = 1 + META_STEP.bounty * this.metaLevel('bounty');
     // 무기별 피해량은 없어도 되는 항목이다. 예전 저장이나 엉뚱한 값이면 비워서 시작한다.
     const dealt: unknown = state.dealt;
     if (typeof dealt !== 'object' || dealt === null || Array.isArray(dealt)) state.dealt = {};
@@ -826,12 +845,20 @@ export class Sim {
     if (!Array.isArray(state.lamps)) state.lamps = [];
     if (typeof state.cd.torch !== 'number') state.cd.torch = 0.5;
     if (typeof state.cd.lamp !== 'number') state.cd.lamp = 0.8;
+    // 골라내기가 생기기 전에 저장한 판에는 골라낸 것이 없다. 엉뚱한 값이어도 비워서 시작한다.
+    if (!Array.isArray(state.banned)) state.banned = [];
     // 도감이 생기기 전에 저장한 판: 지금 싸움터에 있는 것부터 만난 것으로 적는다.
     if (!Array.isArray(state.seen)) {
       state.seen = [];
       for (const e of state.enemies) this.note(e.kind);
       if (state.posts.length > 0) this.note('post');
     }
+  }
+
+  /** 이 판에 들고 온 영구 강화의 단계. 엉뚱한 값은 0과 최대 단계 사이로 맞춘다. */
+  private metaLevel(id: MetaId): number {
+    const level = this.state.meta[id];
+    return typeof level === 'number' && Number.isFinite(level) ? Math.max(0, Math.min(META[id].maxLevel, Math.floor(level))) : 0;
   }
 
   /** 이 판에서 만난 것으로 적어 둔다. */
@@ -923,7 +950,7 @@ export class Sim {
       Array.isArray(s.boonOffer) &&
       s.boonOffer.length > 0 &&
       s.boonOffer.every((u) => u.type === 'boon' && u.id in BOONS && u.level === boonLevel(s.boons, u.id) + 1);
-    if (!fits) s.boonOffer = boonOptions(s.boons ?? {}, this.rand);
+    if (!fits) s.boonOffer = boonOptions(s.boons ?? {}, this.rand, boonChoiceCount(s.meta));
     return s.boonOffer as Upgrade[];
   }
 
@@ -944,12 +971,13 @@ export class Sim {
   private draw(): Upgrade[] {
     const s = this.state;
     // 끝없는 밤에서는 더 올릴 것이 없는 자리를 밤의 축복이 채운다.
-    return upgradeOptions(
-      { weapons: s.weapons, passives: s.passives, slots: this.slots },
-      this.rand,
-      3,
-      s.endless ? (s.boons ?? {}) : undefined,
-    );
+    return upgradeOptions(this.build, this.rand, 3, s.endless ? (s.boons ?? {}) : undefined);
+  }
+
+  /** 레벨업 선택지를 뽑을 때 보는 것: 가진 것과 무기 칸의 수, 골라낸 것 */
+  private get build(): Build {
+    const s = this.state;
+    return { weapons: s.weapons, passives: s.passives, slots: this.slots, banned: s.banned ?? [] };
   }
 
   /** 뽑아 둔 선택지가 지금 가진 것과 맞는지. 그사이에 강화권을 썼거나 저장된 값이 엉뚱하면 맞지 않는다. */
@@ -958,7 +986,9 @@ export class Sim {
     if (offer.length === 0) return false;
     const full = ownedWeapons(s.weapons).length >= this.slots;
     const fullPassives = ownedPassives(s.passives).length >= MAX_PASSIVES;
+    const banned = s.banned ?? [];
     return offer.every((upgrade) => {
+      if (canBanish(upgrade) && banned.includes(upgrade.id)) return false;
       if (upgrade.type === 'weapon') {
         const level = s.weapons[upgrade.id] ?? 0;
         return upgrade.level === level + 1 && upgrade.level <= MAX_LEVEL && (level > 0 || !full);
@@ -985,6 +1015,28 @@ export class Sim {
     this.state.rerolls = this.rerolls - 1;
     this.state.offer = this.draw();
     return this.state.offer;
+  }
+
+  /** 레벨업 선택지에서 하나를 골라낼 수 있는 남은 횟수 */
+  get banishes(): number {
+    return Math.max(0, this.state.banishes ?? 0);
+  }
+
+  /**
+   * 골라내기를 한 번 써서 레벨업 선택지의 하나를 이번 판에서 뺀다. 그 자리에는 새것이 하나 나오고 나머지는 그대로다.
+   * 뺀 것은 레벨업에 다시 나오지 않는다(이미 가진 것이면 강화권과 보물 상자로는 여전히 오른다).
+   * 남은 횟수가 없거나 뺄 수 없는 것(회복, 불씨, 밤의 축복)이거나 지금 선택지에 없는 것이면 null
+   */
+  banish(upgrade: Upgrade): Upgrade[] | null {
+    const s = this.state;
+    if (this.banishes <= 0 || !canBanish(upgrade)) return null;
+    const offer = this.options();
+    const index = offer.findIndex((option) => option.type === upgrade.type && 'id' in option && option.id === upgrade.id);
+    if (index < 0) return null;
+    s.banishes = this.banishes - 1;
+    s.banned = [...(s.banned ?? []), upgrade.id];
+    s.offer = swapOption(offer, index, this.build, this.rand, s.endless ? (s.boons ?? {}) : undefined);
+    return s.offer;
   }
 
   /** 레벨업에서 고른 강화를 반영한다. */
@@ -2761,7 +2813,7 @@ export class Sim {
     for (const post of posts) {
       if (post.lit <= 0) {
         if ((p.x - post.x) ** 2 + (p.y - post.y) ** 2 < touch * touch) {
-          post.lit = POSTS.seconds;
+          post.lit = this.postSeconds;
           post.tick = 0;
           this.events.push({ type: 'light', x: post.x, y: post.y });
         }
@@ -2865,10 +2917,12 @@ export class Sim {
         }
       } else {
         // 난수는 한 번만 뽑아서 무엇을 떨어뜨릴지 정한다.
+        // 영구 강화 "줍는 복"은 자석과 불꽃 단지가 떨어질 확률만 늘린다. 회복 떡은 그대로여서 버티는 힘은 달라지지 않는다.
         const roll = this.rand();
+        const pull = HEAL_DROP_CHANCE + PULL_DROP_CHANCE * this.toyRate;
         if (roll < HEAL_DROP_CHANCE) this.dropGem(e.x, e.y, HEAL_DROP_VALUE, 'heal');
-        else if (roll < HEAL_DROP_CHANCE + PULL_DROP_CHANCE) this.dropGem(e.x, e.y, 0, 'pull');
-        else if (roll < HEAL_DROP_CHANCE + PULL_DROP_CHANCE + BLAST_DROP_CHANCE) this.dropGem(e.x, e.y, 0, 'blast');
+        else if (roll < pull) this.dropGem(e.x, e.y, 0, 'pull');
+        else if (roll < pull + BLAST_DROP_CHANCE * this.toyRate) this.dropGem(e.x, e.y, 0, 'blast');
         // 부싯돌이 있을 때만 난수를 더 뽑는다. 없는 판의 흐름은 달라지지 않는다.
         if (this.mods.spark > 0 && !e.sparked && this.rand() < this.mods.spark) sparks.push(e.x, e.y, e.maxHp);
       }
@@ -2959,8 +3013,15 @@ export class Sim {
       const upgrade = chestUpgrade({ weapons: s.weapons, passives: s.passives }, this.rand);
       if (upgrade) this.grant(upgrade);
       else s.bonusEmbers += CHEST.embers;
+      // 영구 강화 "묵직한 상자": 가끔 한 단계를 더 올려 준다. 샀을 때만 난수를 더 뽑아서 없는 판의 흐름은 달라지지 않는다.
+      const trove = this.metaLevel('trove');
+      const extra =
+        upgrade && trove > 0 && this.rand() < trove * META_STEP.trove
+          ? chestUpgrade({ weapons: s.weapons, passives: s.passives }, this.rand)
+          : null;
+      if (extra) this.grant(extra);
       s.chests = (s.chests ?? 0) + 1;
-      this.events.push({ type: 'chest', upgrade });
+      this.events.push({ type: 'chest', upgrade, ...(extra ? { extra } : {}) });
       return;
     }
     p.xp += gem.value * this.mods.xp;

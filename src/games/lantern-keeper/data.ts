@@ -913,7 +913,12 @@ export type MetaId =
   | 'second'
   | 'armor'
   | 'reroll'
-  | 'headstart';
+  | 'headstart'
+  | 'sift'
+  | 'kindle'
+  | 'trove'
+  | 'bounty'
+  | 'vigil';
 
 export interface MetaInfo {
   name: string;
@@ -921,6 +926,8 @@ export interface MetaInfo {
   maxLevel: number;
   /** 첫 단계 가격. 단계가 오를 때마다 이만큼씩 비싸진다. */
   baseCost: number;
+  /** 새벽을 한 번 맞아야 살 수 있는 것. 그 전에는 목록에 잠긴 채로 보인다. */
+  needsDawn?: boolean;
 }
 
 export const META: Readonly<Record<MetaId, MetaInfo>> = {
@@ -936,7 +943,24 @@ export const META: Readonly<Record<MetaId, MetaInfo>> = {
   armor: { name: '질긴 가죽', perLevel: '받는 피해 -4%', maxLevel: 5, baseCost: 20 },
   reroll: { name: '다시 뽑기', perLevel: '레벨업 선택지 다시 뽑기 +1번', maxLevel: 3, baseCost: 40 },
   headstart: { name: '밝은 출발', perLevel: '시작할 때 강화 하나 더 고르기', maxLevel: 2, baseCost: 50 },
+  // 새벽을 맞은 뒤에 열리는 것들. 능력치를 더 얹지 않고 판에서 할 수 있는 일을 넓힌다.
+  // 다 사면 남던 불씨를 쓸 곳이고, 값이 비싸서 새벽을 몇 번 더 맞아야 다 모인다.
+  sift: { name: '골라내기', perLevel: '레벨업 선택지 빼기 +1번', maxLevel: 3, baseCost: 70, needsDawn: true },
+  kindle: { name: '오래가는 기둥불', perLevel: '등불 기둥 타는 시간 +2초', maxLevel: 3, baseCost: 50, needsDawn: true },
+  trove: { name: '묵직한 상자', perLevel: '상자가 한 번 더 올릴 확률 +20%', maxLevel: 3, baseCost: 55, needsDawn: true },
+  bounty: { name: '줍는 복', perLevel: '자석과 불꽃 단지 확률 +15%', maxLevel: 3, baseCost: 50, needsDawn: true },
+  vigil: { name: '너른 축복', perLevel: '밤의 축복 선택지 +1', maxLevel: 1, baseCost: 250, needsDawn: true },
 };
+
+/** 새벽을 맞은 뒤에 열리는 영구 강화가 한 단계마다 바꾸는 값 */
+export const META_STEP = {
+  /** 오래가는 기둥불: 등불 기둥이 더 타는 시간(초) */
+  kindle: 2,
+  /** 묵직한 상자: 보물 상자가 한 단계를 더 올려 줄 확률 */
+  trove: 0.2,
+  /** 줍는 복: 자석과 불꽃 단지가 떨어질 확률에 더해지는 몫. 회복 떡은 늘리지 않는다(늘리면 깊은 밤이 눈에 띄게 쉬워진다). */
+  bounty: 0.15,
+} as const;
 
 export const META_ORDER: readonly MetaId[] = [
   'vigor',
@@ -950,4 +974,9 @@ export const META_ORDER: readonly MetaId[] = [
   'armor',
   'reroll',
   'headstart',
+  'sift',
+  'kindle',
+  'trove',
+  'bounty',
+  'vigil',
 ];
