@@ -582,6 +582,8 @@ export interface Build {
   passives: Levels<PassiveId>;
   /** 들 수 있는 무기의 수(weaponSlotCount). 없으면 MAX_WEAPONS */
   slots?: number;
+  /** 이번 판에서 골라낸 무기와 패시브의 이름(영구 강화 "골라내기"). 레벨업 선택지에 다시 나오지 않는다. */
+  banned?: readonly string[];
 }
 
 /** 잔치의 밤의 난이도인지. 보통 판(없음)이나 엉뚱한 값이면 false */
@@ -632,47 +634,84 @@ export function ownedPassives(passives: Levels<PassiveId>): PassiveId[] {
  * boons를 주면(끝없는 밤) 빈자리를 회복과 불씨 대신 밤의 축복이 채운다.
  */
 export function upgradeOptions(build: Build, rand: Rand, count = 3, boons?: Levels<BoonId>): Upgrade[] {
-  const pool: Upgrade[] = [];
-  const full = ownedWeapons(build.weapons).length >= (build.slots ?? MAX_WEAPONS);
-  for (const id of WEAPON_ORDER) {
-    const level = build.weapons[id] ?? 0;
-    if (level === 0 && full) continue;
-    if (level < MAX_LEVEL) pool.push({ type: 'weapon', id, level: level + 1 });
-  }
-  // 패시브도 칸이 다 차면 새 것은 나오지 않는다.
-  const fullPassives = ownedPassives(build.passives).length >= MAX_PASSIVES;
-  for (const id of Object.keys(PASSIVES) as PassiveId[]) {
-    const level = build.passives[id] ?? 0;
-    if (level === 0 && fullPassives) continue;
-    if (level < MAX_LEVEL) pool.push({ type: 'passive', id, level: level + 1 });
-  }
-
-  // 가진 무기를 올리는 쪽이 조금 더 자주 나오게 해서 빌드가 흩어지지 않게 한다.
-  const weight = (u: Upgrade): number =>
-    u.type === 'weapon' ? (u.level > 1 ? 3 : 2) : u.type === 'passive' ? (u.level > 1 ? 2 : 1.5) : 1;
-
+  const pool = optionPool(build);
   const picked: Upgrade[] = [];
-  while (picked.length < count && pool.length > 0) {
-    const total = pool.reduce((sum, u) => sum + weight(u), 0);
-    let roll = rand() * total;
-    let index = pool.length - 1;
-    for (let i = 0; i < pool.length; i += 1) {
-      roll -= weight(pool[i]);
-      if (roll < 0) {
-        index = i;
-        break;
-      }
-    }
-    picked.push(pool[index]);
-    pool.splice(index, 1);
-  }
+  while (picked.length < count && pool.length > 0) picked.push(takeWeighted(pool, rand));
   if (boons && picked.length < count) picked.push(...boonOptions(boons, rand, count - picked.length));
   if (picked.length < count) picked.push({ type: 'heal' });
   if (picked.length < count) picked.push({ type: 'embers' });
   return picked;
 }
 
-/** 밤의 축복 선택지: 여섯 가지 가운데 겹치지 않게 count개. 어느 것이나 같은 확률로 나온다. */
+/** 레벨업에 나올 수 있는 것 모두: 아직 덜 올린 무기와 패시브. 칸이 찼으면 가진 것만 나오고, 골라낸 것은 빠진다. */
+function optionPool(build: Build): Upgrade[] {
+  const pool: Upgrade[] = [];
+  const banned = build.banned ?? [];
+  const full = ownedWeapons(build.weapons).length >= (build.slots ?? MAX_WEAPONS);
+  for (const id of WEAPON_ORDER) {
+    const level = build.weapons[id] ?? 0;
+    if ((level === 0 && full) || banned.includes(id)) continue;
+    if (level < MAX_LEVEL) pool.push({ type: 'weapon', id, level: level + 1 });
+  }
+  // 패시브도 칸이 다 차면 새 것은 나오지 않는다.
+  const fullPassives = ownedPassives(build.passives).length >= MAX_PASSIVES;
+  for (const id of Object.keys(PASSIVES) as PassiveId[]) {
+    const level = build.passives[id] ?? 0;
+    if ((level === 0 && fullPassives) || banned.includes(id)) continue;
+    if (level < MAX_LEVEL) pool.push({ type: 'passive', id, level: level + 1 });
+  }
+  return pool;
+}
+
+/** pool에서 하나를 뽑아 꺼낸다. 가진 무기를 올리는 쪽이 조금 더 자주 나오게 해서 빌드가 흩어지지 않게 한다. */
+function takeWeighted(pool: Upgrade[], rand: Rand): Upgrade {
+  const weight = (u: Upgrade): number =>
+    u.type === 'weapon' ? (u.level > 1 ? 3 : 2) : u.type === 'passive' ? (u.level > 1 ? 2 : 1.5) : 1;
+  const total = pool.reduce((sum, u) => sum + weight(u), 0);
+  let roll = rand() * total;
+  let index = pool.length - 1;
+  for (let i = 0; i < pool.length; i += 1) {
+    roll -= weight(pool[i]);
+    if (roll < 0) {
+      index = i;
+      break;
+    }
+  }
+  return pool.splice(index, 1)[0];
+}
+
+/** 같은 것을 올리는 선택지인지(레벨은 보지 않는다) */
+export const sameUpgrade = (a: Upgrade, b: Upgrade): boolean =>
+  a.type === b.type && ('id' in a ? a.id : '') === ('id' in b ? b.id : '');
+
+/** 골라낼 수 있는 선택지인지: 무기와 패시브만 골라낸다. 회복과 불씨와 밤의 축복은 뺄 수 없다. */
+export function canBanish(upgrade: Upgrade): upgrade is Upgrade & { type: 'weapon' | 'passive' } {
+  return upgrade.type === 'weapon' || upgrade.type === 'passive';
+}
+
+/**
+ * 골라내기: 선택지의 index번째 자리에 새것을 하나 뽑아 넣는다. 나머지 선택지는 그대로 둔다.
+ * 뺀 것은 build.banned에 이미 들어 있어야 한다. 더 나올 것이 없으면 회복이나 불씨가(끝없는 밤에서는 밤의 축복이) 채운다.
+ */
+export function swapOption(
+  offer: readonly Upgrade[],
+  index: number,
+  build: Build,
+  rand: Rand,
+  boons?: Levels<BoonId>,
+): Upgrade[] {
+  const rest = offer.filter((_, i) => i !== index);
+  const fresh = (candidates: readonly Upgrade[]): Upgrade[] =>
+    candidates.filter((candidate) => !rest.some((kept) => sameUpgrade(kept, candidate)));
+  const pool = fresh(optionPool(build));
+  // 더 나올 무기나 패시브가 없을 때만 채울 것을 찾는다(밤의 축복을 뽑느라 난수를 헛되이 쓰지 않는다).
+  const filler = (): Upgrade[] =>
+    fresh([...(boons ? boonOptions(boons, rand, BOON_ORDER.length) : []), { type: 'heal' }, { type: 'embers' }]);
+  const next: Upgrade | undefined = pool.length > 0 ? takeWeighted(pool, rand) : filler()[0];
+  // 채울 것이 하나도 없으면(회복과 불씨가 이미 둘 다 나와 있으면) 그 자리를 비운다.
+  return next ? offer.map((upgrade, i) => (i === index ? next : upgrade)) : rest;
+}
+
 /**
  * 보물 상자가 올려 줄 것 하나: 가진 무기나 패시브 가운데 아직 끝까지 올리지 않은 것.
  * 새 것을 주거나 진화시키지는 않는다. 올릴 것이 없으면 null(상자는 대신 불씨를 준다).
@@ -691,6 +730,7 @@ export function chestUpgrade(build: Build, rand: Rand): Upgrade | null {
   return pool[Math.min(pool.length - 1, Math.floor(rand() * pool.length))];
 }
 
+/** 밤의 축복 선택지: 여섯 가지 가운데 겹치지 않게 count개. 어느 것이나 같은 확률로 나온다. */
 export function boonOptions(boons: Levels<BoonId>, rand: Rand, count = 3): Upgrade[] {
   const pool = [...BOON_ORDER];
   const picked: Upgrade[] = [];
@@ -818,6 +858,16 @@ export const COIN_CAP = 150;
  */
 export function coinsFor(score: number): number {
   return Math.min(COIN_CAP, Math.floor(score / 60));
+}
+
+/** 아직 살 수 없는 영구 강화인지: 새벽을 한 번 맞아야 열리는 것이 있다(clears는 새벽을 맞은 횟수). */
+export function metaLocked(id: MetaId, clears: number): boolean {
+  return META[id].needsDawn === true && clears < 1;
+}
+
+/** 밤의 축복을 고를 때 나오는 선택지의 수. 영구 강화 "너른 축복"이 하나 늘린다. */
+export function boonChoiceCount(meta: Levels<MetaId>): number {
+  return 3 + Math.max(0, Math.min(META.vigil.maxLevel, Math.floor(meta.vigil ?? 0)));
 }
 
 /** level단계에서 다음 단계로 올리는 값. 최대 단계면 null. */

@@ -16,11 +16,13 @@ import {
   type WeaponId,
 } from '../src/games/lantern-keeper/data';
 import { iconKey } from '../src/games/lantern-keeper/icons';
+import { upgradeTitle, type Upgrade } from '../src/games/lantern-keeper/rules';
 import { hiddenTexts, it, openApp, startScene, tapText, textPoint, textsOutsideCards, waitForScene } from './app';
 
-/** 강화권 창과 레벨업 창의 머리글(levelup.ts) */
+/** 강화권 창, 레벨업 창, 골라내기 화면의 머리글(levelup.ts) */
 const TICKET_TITLE = '무기 강화권';
 const LEVEL_UP_TITLE = '레벨 업!';
+const BANISH_TITLE = '골라내기';
 
 /**
  * 창이 뜨거나 판이 이어지기를 기다리는 시간. 창은 게임 시간으로 잠깐 뒤에 뜨고(강화권은 0.55초) 처음 뜰 때는 글자와
@@ -38,6 +40,11 @@ interface LanternView {
       pendingTickets: number;
       pendingLevelUps: number;
     };
+    /** 남은 다시 뽑기와 골라내기 */
+    rerolls: number;
+    banishes: number;
+    /** 지금 레벨업 창에 나온 선택지 */
+    options(): Upgrade[];
   };
   pauseGame(): void;
 }
@@ -83,12 +90,20 @@ async function hudHeight(page: Page): Promise<number> {
 const phaseOf = (page: Page): Promise<string> =>
   page.evaluate((key) => (window.__pocketArcade?.scene.getScene(key) as unknown as LanternView | null)?.phase ?? '', LANTERN_SCENE);
 
-it('등불지기 잔치의 밤: 고르는 창, 강화권 카드 넷~여섯 장(진화 카드 포함), 일시정지 빌드, 레벨업 창이 가려지지 않는다', async ({ page }) => {
+/** 지금 레벨업 창에 나온 선택지와, 이번 판에 남은 다시 뽑기와 골라내기 */
+const levelUpOf = (page: Page): Promise<{ options: Upgrade[]; rerolls: number; banishes: number }> =>
+  page.evaluate((key) => {
+    const sim = (window.__pocketArcade?.scene.getScene(key) as unknown as LanternView).sim!;
+    return { options: sim.options(), rerolls: sim.rerolls, banishes: sim.banishes };
+  }, LANTERN_SCENE);
+
+it('등불지기 잔치의 밤: 고르는 창, 강화권 카드 넷~여섯 장(진화 카드 포함), 일시정지 빌드, 레벨업 창, 골라내기 화면이 가려지지 않는다', async ({ page }) => {
   // 판을 하나 끝까지 하는 셈이라 화면 점검 하나보다 오래 걸린다.
   test.slow();
   await openApp(page);
-  // 새벽을 한 번 봐서 잔치의 밤을 고를 수 있고, 아직 고르지 않은 저장
-  await seedLanternMeta(page, { clears: 1, runs: 1, bestSeconds: 600 });
+  // 새벽을 한 번 봐서 잔치의 밤을 고를 수 있고, 아직 고르지 않은 저장.
+  // 영구 강화 "다시 뽑기"와 "골라내기"를 사 두어서 레벨업 창에 작은 버튼이 둘 다 나온다.
+  await seedLanternMeta(page, { clears: 1, runs: 1, bestSeconds: 600, upgrades: { reroll: 2, sift: 2 } });
   await page.reload();
   await waitForScene(page, 'Hub');
   await startScene(page, LANTERN_SCENE);
@@ -151,14 +166,43 @@ it('등불지기 잔치의 밤: 고르는 창, 강화권 카드 넷~여섯 장(�
   await tapText(page, SCENE.pause, '계속하기');
   await expect.poll(() => phaseOf(page), WAIT).toBe('run');
 
-  // 레벨업 창: 카드 셋과 다시 뽑기
+  // 레벨업 창: 카드 셋 아래에 다시 뽑기와 골라내기가 나란히 놓인다.
+  const expectClear = async (title: string, name: string): Promise<void> => {
+    const hidden = await hiddenTexts(page, LANTERN_SCENE, { from: title, clearTop: await hudHeight(page) });
+    expect(hidden, name).toEqual([]);
+    expect(await textsOutsideCards(page, LANTERN_SCENE, title), `${name}의 카드`).toEqual([]);
+  };
   await page.evaluate((key) => {
     (window.__pocketArcade?.scene.getScene(key) as unknown as LanternView).sim!.state.pendingLevelUps = 1;
   }, LANTERN_SCENE);
   await expect.poll(() => textPoint(page, LANTERN_SCENE, LEVEL_UP_TITLE), { ...WAIT, message: '레벨업 창이 떠야 한다' }).not.toBeNull();
-  const hidden = await hiddenTexts(page, LANTERN_SCENE, { from: LEVEL_UP_TITLE, clearTop: await hudHeight(page) });
-  expect(hidden, '레벨업 창').toEqual([]);
-  expect(await textsOutsideCards(page, LANTERN_SCENE, LEVEL_UP_TITLE), '레벨업 창의 카드').toEqual([]);
+  const before = await levelUpOf(page);
+  expect(before.rerolls, '산 만큼 다시 뽑을 수 있어야 한다').toBe(2);
+  expect(before.banishes, '산 만큼 골라낼 수 있어야 한다').toBe(2);
+  expect(await textPoint(page, LANTERN_SCENE, `다시 뽑기 ${before.rerolls}`), '다시 뽑기 버튼').not.toBeNull();
+  expect(await textPoint(page, LANTERN_SCENE, `골라내기 ${before.banishes}`), '골라내기 버튼').not.toBeNull();
+  await expectClear(LEVEL_UP_TITLE, '레벨업 창');
+
+  // 골라내기 화면: 같은 카드에 머리글이 바뀌고 그만두기 버튼이 하나 놓인다. 창이 뜨고 잠깐은 눌리지 않으므로 바뀔 때까지 다시 누른다.
+  await expect(async () => {
+    await tapText(page, LANTERN_SCENE, `골라내기 ${before.banishes}`);
+    expect(await textPoint(page, LANTERN_SCENE, BANISH_TITLE)).not.toBeNull();
+  }).toPass(WAIT);
+  expect(await textPoint(page, LANTERN_SCENE, '그만두기'), '그만두기 버튼').not.toBeNull();
+  await expectClear(BANISH_TITLE, '골라내기 화면');
+
+  // 맨 위 카드를 빼면 그 자리에 다른 것이 나온 레벨업 창으로 돌아오고, 골라내기가 한 번 줄어든다.
+  const banished = before.options[0];
+  await expect(async () => {
+    await tapText(page, LANTERN_SCENE, upgradeTitle(banished));
+    expect(await textPoint(page, LANTERN_SCENE, LEVEL_UP_TITLE)).not.toBeNull();
+  }).toPass(WAIT);
+  const after = await levelUpOf(page);
+  expect(after.banishes, '골라내기를 한 번 썼다').toBe(before.banishes - 1);
+  expect(after.options.map(upgradeTitle), '뺀 것은 다시 나오지 않는다').not.toContain(upgradeTitle(banished));
+  expect(after.options.slice(1), '나머지 카드는 그대로다').toEqual(before.options.slice(1));
+  expect(await textPoint(page, LANTERN_SCENE, `골라내기 ${after.banishes}`), '남은 골라내기').not.toBeNull();
+  await expectClear(LEVEL_UP_TITLE, '골라낸 뒤의 레벨업 창');
 });
 
 it('결과 카드: 기록 일곱 줄과 랭킹 줄에 무기 여섯의 피해 줄까지 가려지지 않고 들어간다', async ({ page }) => {

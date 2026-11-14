@@ -25,8 +25,10 @@ const TEXT_GAP = 2;
  * 카드가 다 들어가지 않을 때는 한 줄 설명을 빼고 제목만 둔다.
  */
 const HEADER_HEIGHT = { full: 54, compact: 36 } as const;
-/** 카드 아래에 붙는 작은 버튼(다시 뽑기) */
-const EXTRA = { width: 136, height: 26, gap: 8 } as const;
+/** 카드 아래에 붙는 작은 버튼(다시 뽑기, 골라내기). 하나면 가운데에 두고, 둘이면 between만큼 띄워 카드 폭에 나란히 놓는다. */
+const EXTRA = { width: 136, height: 26, gap: 8, between: 8 } as const;
+/** 고를 수 없는 카드(골라내기에서 회복과 불씨처럼 뺄 수 없는 것)는 이만큼 흐리게 보인다. */
+const DIM_ALPHA = 0.4;
 /** 카드가 많을 때 간격을 좁히기 전에 카드를 이 높이까지는 낮춰 본다(core/paging.ts의 fitStack). */
 const ROOMY_HEIGHT = 50;
 /**
@@ -35,7 +37,7 @@ const ROOMY_HEIGHT = 50;
  * 머리글의 한 줄 설명을 빼고, 카드 설명을 작은 글씨(잔치의 밤을 고르는 창의 설명과 같은 크기)로 쓰고,
  * 마지막에는 여백을 좁힌다. 글의 높이는 기기마다 1~2px씩 다르게 재지므로 마지막 단계에 그만큼의 틈을 둔다.
  * - gap: 카드를 ROOMY_HEIGHT 밑으로 낮춰야 할 때의 카드 사이 간격
- * - bottom: 마지막 카드(또는 다시 뽑기) 아래에 남기는 여백
+ * - bottom: 마지막 카드(또는 카드 아래의 작은 버튼) 아래에 남기는 여백
  * - pad: 카드 안에서 글 덩어리 위아래로 남기는 여백. 카드 테두리가 2px이고 글 상자에도 1px 여유가 있어서
  *   1이어도 글자가 테두리에 닿지 않는다.
  */
@@ -93,6 +95,20 @@ export const TICKET_HEADER: ChoiceHeader = {
   shadow: CSS.blue,
 };
 
+/** 영구 강화 "골라내기"로 레벨업 선택지 가운데 뺄 것을 고를 때의 머리글 */
+export const BANISH_HEADER: ChoiceHeader = {
+  title: '골라내기',
+  subtitle: '이번 판에서 뺄 것을 골라요',
+  color: CSS.orange,
+  shadow: CSS.red,
+};
+
+/** 카드 아래에 두는 작은 버튼. 누르면 강화 선택 화면이 사라지고 onTap이 불린다. */
+export interface ChoiceExtra {
+  label: string;
+  onTap: () => void;
+}
+
 /** 끝없는 밤에서 밤의 축복을 고를 때의 머리글 */
 export const BOON_HEADER: ChoiceHeader = {
   title: '밤의 축복',
@@ -113,8 +129,10 @@ export function showChoices(
   onPick: (upgrade: Upgrade) => void,
   /** 화면 위쪽에서 이 높이까지는 HUD가 쓰므로 머리글을 그 아래에 둔다. */
   clearTop = 0,
-  /** 카드 아래에 두는 작은 버튼. 누르면 이 화면이 사라지고 onTap이 불린다(다시 뽑기에 쓴다). */
-  extra?: { label: string; onTap: () => void },
+  /** 카드 아래에 두는 작은 버튼(다시 뽑기, 골라내기). 둘까지 나란히 놓는다. */
+  extras: readonly ChoiceExtra[] = [],
+  /** 고를 수 있는 카드인지. 고를 수 없는 카드는 흐리게 보이고 눌리지 않는다(골라내기에서 뺄 수 없는 것). */
+  pickable: (upgrade: Upgrade) => boolean = () => true,
 ): void {
   const { width, height } = scene.scale;
   const parts: Phaser.GameObjects.GameObject[] = [];
@@ -162,7 +180,7 @@ export function showChoices(
   const textHeight = (card: (typeof cards)[number]): number =>
     card.title.height + TEXT_GAP + card.description.height;
 
-  const below = extra ? EXTRA.gap + EXTRA.height : 0;
+  const below = extras.length > 0 ? EXTRA.gap + EXTRA.height : 0;
   // 머리글이 HUD 아래에 오고 마지막 카드 아래에 여백이 남도록, 카드가 많으면 FITTINGS의 차례대로 줄여 본다.
   const plan = (fitting: Fitting) => {
     const room = height - clearTop - fitting.header - fitting.bottom - below;
@@ -205,28 +223,33 @@ export function showChoices(
     armed = true;
   });
 
-  if (extra) {
-    const x = Math.round((GAME_WIDTH - EXTRA.width) / 2);
+  // 작은 버튼은 하나면 가운데에, 둘이면 카드의 양쪽 끝에 맞춰 나란히 놓는다.
+  const shownExtras = extras.slice(0, 2);
+  const extraWidth = shownExtras.length > 1 ? (CARD_WIDTH - EXTRA.between) / 2 : EXTRA.width;
+  const extrasLeft = Math.round((GAME_WIDTH - (shownExtras.length * extraWidth + (shownExtras.length - 1) * EXTRA.between)) / 2);
+  shownExtras.forEach((extra, index) => {
+    const x = extrasLeft + index * (extraWidth + EXTRA.between);
     const y = top + stack + EXTRA.gap;
     const frame = keep(scene.add.graphics());
     const draw = (pressed: boolean): void => {
       frame.clear();
-      drawPanel(frame, x, y, EXTRA.width, EXTRA.height, {
+      drawPanel(frame, x, y, extraWidth, EXTRA.height, {
         fill: pressed ? COLOR.navy : COLOR.ink,
         border: pressed ? COLOR.sky : COLOR.slate,
         shadow: null,
       });
     };
     draw(false);
-    keep(
-      addText(scene, GAME_WIDTH / 2, y + EXTRA.height / 2, extra.label, {
+    const label = keep(
+      addText(scene, x + extraWidth / 2, y + EXTRA.height / 2, extra.label, {
         color: CSS.cyan,
         originX: 0.5,
         originY: 0.5,
       }),
     );
+    if (label.width > extraWidth - 8) label.setScale((extraWidth - 8) / label.width);
     keep(
-      addTapZone(scene, x, y, EXTRA.width, EXTRA.height, (pressed) => draw(pressed && armed), () => {
+      addTapZone(scene, x, y, extraWidth, EXTRA.height, (pressed) => draw(pressed && armed), () => {
         if (!armed || picked) return;
         picked = true;
         sfx.click();
@@ -235,7 +258,7 @@ export function showChoices(
         extra.onTap();
       }),
     );
-  }
+  });
 
   cards.forEach((card, index) => {
     const y = top + index * (size.height + size.gap);
@@ -262,6 +285,10 @@ export function showChoices(
     card.title.setY(textTop);
     card.mark.setY(textTop);
     card.description.setY(textTop + card.title.height + TEXT_GAP);
+    if (!pickable(card.upgrade)) {
+      for (const part of [card.frame, card.icon, card.title, card.mark, card.description]) part.setAlpha(DIM_ALPHA);
+      return;
+    }
     keep(
       addTapZone(scene, left, y, CARD_WIDTH, size.height, (pressed) => draw(pressed && armed), () => {
         if (!armed || picked) return;

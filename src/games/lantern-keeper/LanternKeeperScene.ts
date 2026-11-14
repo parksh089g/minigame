@@ -18,7 +18,7 @@ import { RunEffects } from './effects';
 import { BOSS_BAR_HEIGHT, HP_DANGER, HUD_HEIGHT, RunHud } from './hud';
 import { iconKey } from './icons';
 import { Joystick } from './joystick';
-import { BOON_HEADER, levelUpHeader, showChoices, TICKET_HEADER } from './levelup';
+import { BANISH_HEADER, BOON_HEADER, levelUpHeader, showChoices, TICKET_HEADER, type ChoiceExtra } from './levelup';
 import { buildLobby, parentPage, type LobbyPage } from './lobby';
 import {
   DAILY_REWARD,
@@ -49,6 +49,7 @@ import {
 import { BOSS_SONG, FINAL_SONG, LOBBY_SONG, STAGE_SONGS } from './music';
 import { pauseInfo } from './pauseinfo';
 import {
+  canBanish,
   depthName,
   depthRules,
   embersFor,
@@ -58,6 +59,7 @@ import {
   isEvolved,
   isFeast,
   ownedWeapons,
+  sameUpgrade,
   scoreFor,
   seededRandom,
   upgradeTitle,
@@ -644,8 +646,16 @@ export class LanternKeeperScene extends MiniGameScene {
           const p = sim.state.player;
           const up = event.upgrade;
           showBanner(this, this.scale.height * 0.3, '보물 상자!', CSS.yellow, 1800, DEPTH.banner);
-          // 무엇이 올랐는지는 그 아래에 한 줄로 알린다.
-          this.showGain(up && 'level' in up ? `${upgradeTitle(up)} ${up.level}레벨` : `불씨 +${CHEST.embers}`);
+          // 무엇이 올랐는지는 그 아래에 한 줄로 알린다. 영구 강화 "묵직한 상자"로 하나가 더 올랐으면 함께 적는다.
+          const gained = (upgrade: Upgrade): string => ('level' in upgrade ? `${upgradeTitle(upgrade)} ${upgrade.level}레벨` : '');
+          const extra = event.extra;
+          this.showGain(
+            up && 'level' in up
+              ? extra && sameUpgrade(up, extra)
+                ? gained(extra)
+                : [up, ...(extra ? [extra] : [])].map(gained).join(' · ')
+              : `불씨 +${CHEST.embers}`,
+          );
           this.view.burst(sim, p.x, p.y, 18);
           this.effects.flash(0.3, 260);
           board.play('chest', now);
@@ -793,27 +803,57 @@ export class LanternKeeperScene extends MiniGameScene {
       vibrate(15);
     }
     this.drawHud();
+    const options = this.sim.options();
     const rerolls = this.sim.rerolls;
+    // 골라낼 것(무기나 패시브)이 선택지에 있을 때만 골라내기를 보인다.
+    const banishes = options.some(canBanish) ? this.sim.banishes : 0;
+    // 버튼이 둘이면 나란히 놓이므로 남은 횟수를 짧게 적는다.
+    const left = (name: string, count: number): string =>
+      rerolls > 0 && banishes > 0 ? `${name} ${count}` : `${name} (${count}번 남음)`;
+    const extras: ChoiceExtra[] = [];
+    // 영구 강화 "다시 뽑기"를 샀고 이번 판에 아직 남아 있으면 선택지를 새로 뽑을 수 있다.
+    if (rerolls > 0) {
+      extras.push({
+        label: left('다시 뽑기', rerolls),
+        onTap: () => {
+          this.sim.reroll();
+          this.openLevelUp(true);
+        },
+      });
+    }
+    // 영구 강화 "골라내기"도 같다. 누르면 뺄 것을 고르는 화면으로 바뀐다.
+    if (banishes > 0) extras.push({ label: left('골라내기', banishes), onTap: () => this.openBanish() });
     showChoices(
       this,
       levelUpHeader(this.sim.state.player.level),
-      this.sim.options(),
+      options,
       DEPTH.panel,
       (upgrade) => {
         this.sim.applyUpgrade(upgrade);
         this.afterPick(upgrade);
       },
       HUD_HEIGHT,
-      // 영구 강화 "다시 뽑기"를 샀고 이번 판에 아직 남아 있으면 선택지를 새로 뽑을 수 있다.
-      rerolls > 0
-        ? {
-            label: `다시 뽑기 (${rerolls}번 남음)`,
-            onTap: () => {
-              this.sim.reroll();
-              this.openLevelUp(true);
-            },
-          }
-        : undefined,
+      extras,
+    );
+  }
+
+  /**
+   * 골라내기: 레벨업 선택지 가운데 이번 판에서 뺄 것을 고른다. 고르면 그 자리에 새것이 나온 레벨업 화면으로 돌아가고,
+   * 그만두면 쓰지 않고 돌아간다. 회복과 불씨처럼 뺄 수 없는 것은 흐리게 보인다.
+   */
+  private openBanish(): void {
+    showChoices(
+      this,
+      BANISH_HEADER,
+      this.sim.options(),
+      DEPTH.panel,
+      (upgrade) => {
+        this.sim.banish(upgrade);
+        this.openLevelUp(true);
+      },
+      HUD_HEIGHT,
+      [{ label: '그만두기', onTap: () => this.openLevelUp(true) }],
+      canBanish,
     );
   }
 
