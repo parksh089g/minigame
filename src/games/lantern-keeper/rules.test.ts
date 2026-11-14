@@ -522,10 +522,28 @@ describe('레벨업 선택지', () => {
 
   it('무기 강화권은 가진 무기 가운데 덜 올린 것을 모두 보여 준다', () => {
     expect(ticketOptions({ ember: 3, bolt: MAX_LEVEL, aura: EVOLVE_LEVEL })).toEqual([
-      { type: 'weapon', id: 'ember', level: 4 },
       { type: 'weapon', id: 'bolt', level: EVOLVE_LEVEL },
+      { type: 'weapon', id: 'ember', level: 4 },
     ]);
     expect(ticketOptions({ ember: EVOLVE_LEVEL })).toEqual([{ type: 'heal' }, { type: 'embers' }]);
+  });
+
+  it('무기 강화권은 진화하는 것을 맨 위에, 나머지는 레벨이 높은 차례로, 같으면 도감의 차례로 둔다', () => {
+    const weapons = { ember: 2, aura: 4, firefly: MAX_LEVEL, star: 2, lance: 4, oil: 1 };
+    const options = ticketOptions(weapons);
+    expect(options.map((option) => (option.type === 'weapon' ? option.id : option.type))).toEqual([
+      'firefly',
+      'aura',
+      'lance',
+      'ember',
+      'star',
+      'oil',
+    ]);
+    expect(options[0]).toEqual({ type: 'weapon', id: 'firefly', level: EVOLVE_LEVEL });
+    // 도감의 차례: 같은 레벨끼리는 ownedWeapons의 차례를 그대로 따른다.
+    const owned = ownedWeapons(weapons);
+    expect(owned.indexOf('aura')).toBeLessThan(owned.indexOf('lance'));
+    expect(owned.indexOf('ember')).toBeLessThan(owned.indexOf('star'));
   });
 });
 

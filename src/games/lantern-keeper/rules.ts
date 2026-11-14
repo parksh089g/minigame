@@ -705,14 +705,18 @@ export function boonOptions(boons: Levels<BoonId>, rand: Rand, count = 3): Upgra
 /**
  * 무기 강화권으로 고를 수 있는 것: 가진 무기 가운데 아직 더 올릴 수 있는 것 전부.
  * MAX_LEVEL인 무기에 쓰면 최종 진화형(EVOLVE_LEVEL)이 된다. 진화는 이 길로만 할 수 있다.
+ * 잔치의 밤에서는 여섯 장까지 되므로, 진화하는 것을 맨 위에 두고 나머지는 레벨이 높은 차례로 둔다.
+ * 레벨이 같으면 도감의 차례(위쪽 칸 줄의 차례)를 따른다.
  * 올릴 무기가 없으면 회복과 불씨 가운데에서 고른다.
  */
 export function ticketOptions(weapons: Levels<WeaponId>): Upgrade[] {
-  const options: Upgrade[] = [];
+  const options: Array<Upgrade & { type: 'weapon' }> = [];
   for (const id of ownedWeapons(weapons)) {
     const level = weapons[id] ?? 0;
     if (level < EVOLVE_LEVEL) options.push({ type: 'weapon', id, level: level + 1 });
   }
+  // sort는 같은 값끼리의 차례를 그대로 둔다.
+  options.sort((a, b) => b.level - a.level);
   return options.length > 0 ? options : [{ type: 'heal' }, { type: 'embers' }];
 }
 
@@ -777,7 +781,6 @@ export interface RunSummary {
   bonusEmbers: number;
   /** 깊은 밤의 단계. 0이 보통 밤 */
   depth: number;
-  /** 잔치의 밤이었는지. 보통 판에는 없다. */
   /** 잔치의 밤이면 그 난이도. 보통 판에는 없다. */
   feast?: FeastId;
 }

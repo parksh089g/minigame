@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { COLOR, CSS, FONT_SIZE, GAME_WIDTH } from '../../config';
 import { vibrate } from '../../core/haptics';
+import { fitStack, stackHeight } from '../../core/paging';
 import { sfx } from '../../core/sfx';
 import { addTapZone, addText, drawPanel } from '../../core/ui';
 import { MAX_LEVEL } from './data';
@@ -19,12 +20,32 @@ const TILE_INSET = 9;
 const TEXT_LEFT = TILE_INSET + TILE + 8;
 /** 이름과 설명 사이 */
 const TEXT_GAP = 2;
-/** 머리글(제목과 한 줄 설명)이 첫 카드 위로 차지하는 높이 */
-const HEADER_HEIGHT = 54;
-/** 마지막 카드 아래에 남기는 여백 */
-const BOTTOM_ROOM = 10;
+/**
+ * 머리글이 첫 카드 위로 차지하는 높이. 보통은 제목과 한 줄 설명이고,
+ * 카드가 다 들어가지 않을 때는 한 줄 설명을 빼고 제목만 둔다.
+ */
+const HEADER_HEIGHT = { full: 54, compact: 36 } as const;
 /** 카드 아래에 붙는 작은 버튼(다시 뽑기) */
 const EXTRA = { width: 136, height: 26, gap: 8 } as const;
+/** 카드가 많을 때 간격을 좁히기 전에 카드를 이 높이까지는 낮춰 본다(core/paging.ts의 fitStack). */
+const ROOMY_HEIGHT = 50;
+/**
+ * 카드가 머리글 아래에 다 들어가지 않을 때(잔치의 밤의 강화권은 여섯 장까지 된다) 차례로 줄여 보는 것.
+ * 앞의 것으로 들어가면 거기서 멈춘다. 카드는 가장 긴 글이 테두리 안에 드는 데까지만 낮추고, 그래도 모자라면
+ * 머리글의 한 줄 설명을 빼고, 카드 설명을 작은 글씨(잔치의 밤을 고르는 창의 설명과 같은 크기)로 쓰고,
+ * 마지막에는 여백을 좁힌다. 글의 높이는 기기마다 1~2px씩 다르게 재지므로 마지막 단계에 그만큼의 틈을 둔다.
+ * - gap: 카드를 ROOMY_HEIGHT 밑으로 낮춰야 할 때의 카드 사이 간격
+ * - bottom: 마지막 카드(또는 다시 뽑기) 아래에 남기는 여백
+ * - pad: 카드 안에서 글 덩어리 위아래로 남기는 여백. 카드 테두리가 2px이고 글 상자에도 1px 여유가 있어서
+ *   1이어도 글자가 테두리에 닿지 않는다.
+ */
+const FITTINGS = [
+  { header: HEADER_HEIGHT.full, small: false, gap: 4, bottom: 10, pad: 2 },
+  { header: HEADER_HEIGHT.compact, small: false, gap: 4, bottom: 10, pad: 2 },
+  { header: HEADER_HEIGHT.compact, small: true, gap: 4, bottom: 10, pad: 2 },
+  { header: HEADER_HEIGHT.compact, small: true, gap: 2, bottom: 4, pad: 1 },
+] as const;
+type Fitting = (typeof FITTINGS)[number];
 /** 움직이던 손가락으로 엉뚱한 것을 고르지 않도록 잠깐 뒤부터 누를 수 있다. */
 const ARM_DELAY_MS = 380;
 
@@ -103,17 +124,70 @@ export function showChoices(
     return item;
   };
 
-  const cards = options.length * CARD_HEIGHT + (options.length - 1) * CARD_GAP;
-  const total = cards + (extra ? EXTRA.gap + EXTRA.height : 0);
-  // 가운데에 두되, 카드가 넷이라 길어져도 머리글이 위쪽 HUD를 덮지 않게 내린다.
-  // 화면이 아주 짧을 때는 마지막 카드가 잘리지 않는 데까지만 내린다.
-  const centered = Math.round((height - total) / 2) + 14;
-  const top = Math.max(centered, Math.min(clearTop + HEADER_HEIGHT, height - total - BOTTOM_ROOM));
   const left = Math.round((GAME_WIDTH - CARD_WIDTH) / 2);
-
   keep(scene.add.rectangle(0, 0, width, height, COLOR.ink, 0.66).setOrigin(0, 0));
+
+  // 카드의 글을 먼저 만들어 높이를 잰 뒤에 카드의 크기와 자리를 정한다.
+  const cards = options.map((upgrade) => {
+    // 진화하는 선택지는 테두리를 밝게 해서 눈에 띄게 한다.
+    const special = evolves(upgrade);
+    return {
+      upgrade,
+      special,
+      frame: keep(scene.add.graphics()),
+      icon: keep(scene.add.image(0, 0, iconKey(upgradeIcon(upgrade))).setScale(ICON_SCALE)),
+      title: keep(
+        addText(scene, left + TEXT_LEFT, 0, upgradeTitle(upgrade), {
+          bold: true,
+          color: special ? CSS.white : TITLE_COLOR[upgrade.type],
+        }),
+      ),
+      mark: keep(
+        addText(scene, left + CARD_WIDTH - 10, 0, badge(upgrade), {
+          color: special ? CSS.yellow : CSS.white,
+          bold: special,
+          originX: 1,
+        }),
+      ),
+      description: keep(
+        addText(scene, left + TEXT_LEFT, 0, upgradeDescription(upgrade), {
+          color: CSS.silver,
+          wrapWidth: CARD_WIDTH - TEXT_LEFT - 8,
+          lineSpacing: 1,
+        }),
+      ),
+    };
+  });
+  /** 이름과 설명을 합친 글 덩어리의 높이 */
+  const textHeight = (card: (typeof cards)[number]): number =>
+    card.title.height + TEXT_GAP + card.description.height;
+
+  const below = extra ? EXTRA.gap + EXTRA.height : 0;
+  // 머리글이 HUD 아래에 오고 마지막 카드 아래에 여백이 남도록, 카드가 많으면 FITTINGS의 차례대로 줄여 본다.
+  const plan = (fitting: Fitting) => {
+    const room = height - clearTop - fitting.header - fitting.bottom - below;
+    const tallest = Math.max(...cards.map(textHeight));
+    const least = Math.max(TILE + 4, Math.ceil(tallest + fitting.pad * 2));
+    const squeeze = { roomy: ROOMY_HEIGHT, gap: fitting.gap, least };
+    const size = fitStack(cards.length, room, { height: CARD_HEIGHT, gap: CARD_GAP }, squeeze);
+    return { fitting, size, fits: stackHeight(cards.length, size) <= room };
+  };
+  let layout = plan(FITTINGS[0]);
+  for (const fitting of FITTINGS.slice(1)) {
+    if (layout.fits) break;
+    if (fitting.small) for (const card of cards) card.description.setFontSize(FONT_SIZE.small);
+    layout = plan(fitting);
+  }
+  const { fitting, size } = layout;
+  const stack = stackHeight(cards.length, size);
+  const total = stack + below;
+  // 가운데에 두되, 카드가 많아 길어져도 머리글이 위쪽 HUD를 덮지 않게 내린다.
+  // 그래도 다 들어가지 않을 만큼 화면이 짧으면 마지막 카드가 잘리지 않는 데까지만 내린다.
+  const centered = Math.round((height - total) / 2) + Math.round(fitting.header / 4);
+  const top = Math.max(centered, Math.min(clearTop + fitting.header, height - total - fitting.bottom));
+
   keep(
-    addText(scene, GAME_WIDTH / 2, top - 52, header.title, {
+    addText(scene, GAME_WIDTH / 2, top - fitting.header + 2, header.title, {
       size: FONT_SIZE.large,
       bold: true,
       color: header.color,
@@ -121,7 +195,9 @@ export function showChoices(
       shadow: header.shadow,
     }),
   );
-  keep(addText(scene, GAME_WIDTH / 2, top - 22, header.subtitle, { color: CSS.silver, originX: 0.5 }));
+  if (fitting.header === HEADER_HEIGHT.full) {
+    keep(addText(scene, GAME_WIDTH / 2, top - 22, header.subtitle, { color: CSS.silver, originX: 0.5 }));
+  }
 
   let armed = false;
   let picked = false;
@@ -131,7 +207,7 @@ export function showChoices(
 
   if (extra) {
     const x = Math.round((GAME_WIDTH - EXTRA.width) / 2);
-    const y = top + cards + EXTRA.gap;
+    const y = top + stack + EXTRA.gap;
     const frame = keep(scene.add.graphics());
     const draw = (pressed: boolean): void => {
       frame.clear();
@@ -161,66 +237,39 @@ export function showChoices(
     );
   }
 
-  options.forEach((upgrade, index) => {
-    const y = top + index * (CARD_HEIGHT + CARD_GAP);
-    const frame = keep(scene.add.graphics());
-    // 진화하는 선택지는 테두리를 밝게 해서 눈에 띄게 한다.
-    const special = evolves(upgrade);
+  cards.forEach((card, index) => {
+    const y = top + index * (size.height + size.gap);
     const tileX = left + TILE_INSET;
-    const tileY = y + (CARD_HEIGHT - TILE) / 2;
+    const tileY = y + Math.round((size.height - TILE) / 2);
     const draw = (pressed: boolean): void => {
-      frame.clear();
-      drawPanel(frame, left, y, CARD_WIDTH, CARD_HEIGHT, {
+      card.frame.clear();
+      drawPanel(card.frame, left, y, CARD_WIDTH, size.height, {
         fill: pressed ? COLOR.navy : COLOR.charcoal,
-        border: pressed ? COLOR.sky : special ? COLOR.yellow : COLOR.slate,
+        border: pressed ? COLOR.sky : card.special ? COLOR.yellow : COLOR.slate,
         shadow: COLOR.ink,
       });
-      drawPanel(frame, tileX, tileY, TILE, TILE, {
+      drawPanel(card.frame, tileX, tileY, TILE, TILE, {
         fill: pressed ? COLOR.charcoal : COLOR.navy,
-        border: special ? COLOR.yellow : undefined,
+        border: card.special ? COLOR.yellow : undefined,
         shadow: null,
         radius: 8,
       });
     };
     draw(false);
-    keep(
-      scene.add
-        .image(tileX + TILE / 2, tileY + TILE / 2, iconKey(upgradeIcon(upgrade)))
-        .setScale(ICON_SCALE),
-    );
-    const title = keep(
-      addText(scene, left + TEXT_LEFT, y, upgradeTitle(upgrade), {
-        bold: true,
-        color: special ? CSS.white : TITLE_COLOR[upgrade.type],
-      }),
-    );
-    const mark = keep(
-      addText(scene, left + CARD_WIDTH - 10, y, badge(upgrade), {
-        color: special ? CSS.yellow : CSS.white,
-        bold: special,
-        originX: 1,
-      }),
-    );
-    const description = keep(
-      addText(scene, left + TEXT_LEFT, y, upgradeDescription(upgrade), {
-        color: CSS.silver,
-        wrapWidth: CARD_WIDTH - TEXT_LEFT - 8,
-        lineSpacing: 1,
-      }),
-    );
+    card.icon.setPosition(tileX + TILE / 2, tileY + TILE / 2);
     // 설명이 한 줄이든 두 줄이든 글 덩어리가 카드 가운데에 오게 한다.
-    const textTop = Math.round(y + (CARD_HEIGHT - title.height - TEXT_GAP - description.height) / 2);
-    title.setY(textTop);
-    mark.setY(textTop);
-    description.setY(textTop + title.height + TEXT_GAP);
+    const textTop = Math.round(y + (size.height - textHeight(card)) / 2);
+    card.title.setY(textTop);
+    card.mark.setY(textTop);
+    card.description.setY(textTop + card.title.height + TEXT_GAP);
     keep(
-      addTapZone(scene, left, y, CARD_WIDTH, CARD_HEIGHT, (pressed) => draw(pressed && armed), () => {
+      addTapZone(scene, left, y, CARD_WIDTH, size.height, (pressed) => draw(pressed && armed), () => {
         if (!armed || picked) return;
         picked = true;
         sfx.click();
         vibrate(8);
         for (const part of parts) part.destroy();
-        onPick(upgrade);
+        onPick(card.upgrade);
       }),
     );
   });

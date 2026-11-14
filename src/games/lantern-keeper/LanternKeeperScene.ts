@@ -109,6 +109,11 @@ const ENDING_MS = { cleared: 2100, dead: 1800 } as const;
 /** 화면 아래의 한 줄 안내가 떠 있는 시간(초)과, 그 끝에서 흐려지는 시간(초) */
 const TIP = { seconds: 4, fade: 0.5 } as const;
 /**
+ * 판을 시작할 때 알림이 셋(잔치의 밤, 난이도, 깊은 밤) 쌓이면 묶음을 이만큼 올린다.
+ * 그대로 두면 가장 작은 화면(320×568)에서 맨 아래 줄이 화면 가운데의 캐릭터 머리에 닿는다.
+ */
+const STACKED_BANNER_LIFT = 24;
+/**
  * 화면 전체 연출(fx)은 싸움 화면보다 위, 조작 표시보다 아래.
  * HUD는 선택 화면(panel)보다 위에 있어서, 고르는 동안에도 체력과 든 무기가 보인다.
  */
@@ -440,8 +445,9 @@ export class LanternKeeperScene extends MiniGameScene {
     if (this.sim.state.daily !== undefined) showBanner(this, height * 0.3, '오늘의 판', CSS.yellow, 1600, DEPTH.banner);
     else {
       // 잔치의 밤이면 그 이름과 난이도를 먼저, 깊은 밤이면 그 단계를 아래에 띄운다.
-      let y = height * 0.3;
+      // 셋이 쌓이면 맨 아래 줄이 캐릭터의 머리에 닿지 않게 묶음을 조금 올린다.
       const feast = this.sim.state.feast;
+      let y = height * 0.3 - (isFeast(feast) && depth ? STACKED_BANNER_LIFT : 0);
       if (isFeast(feast)) {
         showBanner(this, y, FEAST.name, CSS.orange, 1600, DEPTH.banner);
         showBanner(this, y + 38, FEAST_LEVELS[feast].name, FEAST_COLOR[feast], 1600, DEPTH.banner, FONT_SIZE.large);
@@ -758,8 +764,10 @@ export class LanternKeeperScene extends MiniGameScene {
     this.tipLeft = TIP.seconds;
   }
 
-  /** 떠 있는 안내와 기다리는 안내를 모두 치운다. */
+  /** 떠 있는 안내(움직이는 법 안내까지)와 기다리는 안내를 모두 치운다. */
   private clearTips(): void {
+    this.hint?.destroy();
+    this.hint = undefined;
     this.tip?.destroy();
     this.tip = undefined;
     this.tipQueue.length = 0;

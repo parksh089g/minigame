@@ -26,7 +26,11 @@ import { askNickname } from './nickname';
 import type { RankingData } from './RankingScene';
 
 const PANEL_WIDTH = 204;
-const STAT_ROW = 16;
+/**
+ * 기록 한 줄의 높이. 아이콘 줄(STRIP)까지 넣으면 화면을 넘칠 때는 그 줄을 빼기 전에 tight로 먼저 좁혀 본다.
+ * 잔치의 밤처럼 무기가 여섯이라 아이콘 줄이 두 줄이 되는 판도 가장 작은 화면에서 피해 나눔이 남게 하려는 것이다.
+ */
+const STAT_ROW = { normal: 16, tight: 14 } as const;
 /** 오늘의 도전 결과나 새로 달성한 업적, 다 채운 주간 미션을 알리는 줄의 높이 */
 const EXTRA_ROW = 24;
 /** 기록 아래에 덧붙는 아이콘 한 줄: 작은 설명 글씨의 높이와 아이콘 줄의 높이, 아이콘과 글자 사이, 칸 사이(넓을 때와 좁을 때) */
@@ -83,15 +87,17 @@ export class ResultScene extends Phaser.Scene implements BackAware {
     // 아이콘이 많으면 두 줄로 고르게 나눈다.
     const stripRows = strip ? balancedRows(strip.chips.length, STRIP.perRow) : [];
     const stripHeight = STRIP.caption + STRIP.row * stripRows.length;
-    const sizeWith = (withStrip: boolean): { statsHeight: number; cardHeight: number } => {
-      const inner = stats.length * STAT_ROW + (withStrip ? stripHeight : 0);
+    const sizeWith = (withStrip: boolean, statRow: number): { statsHeight: number; cardHeight: number } => {
+      const inner = stats.length * statRow + (withStrip ? stripHeight : 0);
       const statsHeight = inner > 0 ? inner + 12 : 0;
       return { statsHeight, cardHeight: 106 + statsHeight + 28 + extraRows * EXTRA_ROW + 6 };
     };
+    const fits = (statRow: number): boolean => sizeWith(true, statRow).cardHeight + buttonsHeight + 4 <= height;
     // 알릴 것이 많은 판에 화면까지 짧으면 다 들어가지 않는다. 그때는 카드 위의 캐릭터를 먼저 빼고,
-    // 그래도 넘치면 아이콘 줄을 뺀다.
-    const showStrip = strip !== undefined && sizeWith(true).cardHeight + buttonsHeight + 4 <= height;
-    const { statsHeight, cardHeight } = sizeWith(showStrip);
+    // 그래도 넘치면 기록 줄의 간격을 좁혀 보고, 그래도 넘치면 아이콘 줄을 뺀다.
+    const showStrip = strip !== undefined && (fits(STAT_ROW.normal) || fits(STAT_ROW.tight));
+    const statRow = showStrip && !fits(STAT_ROW.normal) ? STAT_ROW.tight : STAT_ROW.normal;
+    const { statsHeight, cardHeight } = sizeWith(showStrip, statRow);
     const showMascot = MASCOT.above + cardHeight + buttonsHeight + 4 <= height;
     const above = showMascot ? MASCOT.above : 0;
     const total = above + cardHeight + buttonsHeight;
@@ -180,7 +186,7 @@ export class ResultScene extends Phaser.Scene implements BackAware {
       for (const [label, value] of stats) {
         addText(this, innerLeft + 2, y, label, { color: THEME_CSS.sub });
         addText(this, innerRight - 2, y, value, { originX: 1 });
-        y += STAT_ROW;
+        y += statRow;
       }
       if (strip && showStrip) {
         this.addStrip(strip, stripRows, innerLeft + 2, y, innerRight - innerLeft - 4);
