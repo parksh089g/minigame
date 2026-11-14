@@ -26,6 +26,7 @@ import {
   INBOX_SLOTS,
   LEAD,
   LEVEL_SPEED,
+  MAX_FLOWERS,
   OFFICE_COINS,
   OFFICES,
   OLD_HAND_TIPS,
@@ -35,6 +36,7 @@ import {
   PROJECT_ORDER,
   PROJECTS,
   QUEUE,
+  RATING,
   RUSH,
   SPECIAL,
   SPECIAL_KINDS,
@@ -91,6 +93,10 @@ export interface Task {
   stuck?: number;
   /** 버그 카드의 버그를 이미 잡았거나 버그가 지나갔다. */
   fixed?: boolean;
+  /** 버그를 눌러서 잡았다(지나가게 둔 것이 아니다). 평가에서 정성을 더 받는다. */
+  caught?: boolean;
+  /** 하는 동안 응원을 한 번이라도 받았다. 평가에서 정성을 받는다. */
+  cheered?: boolean;
 }
 
 /** 강화 id → 레벨. 없는 id는 0레벨이다. */
@@ -119,6 +125,8 @@ export interface ActiveProject {
   /** 끝낸 카드의 수 */
   done: number;
   total: number;
+  /** 끝낸 카드들이 받은 정성 점수의 합. 출시할 때 평가가 된다(RATING). */
+  care: number;
 }
 
 /** 들어와서 받을지 기다리는 급한 의뢰 */
@@ -170,6 +178,10 @@ export interface CompanyState {
   releases: number;
   /** 프로젝트 id → 그 게임을 직접 해서 딴 별의 수. 딴 별은 줄지 않는다. */
   stars: Partial<Record<ProjectId, number>>;
+  /** 프로젝트 id → 그 게임을 내면서 받은 가장 좋은 평가(꽃의 수) */
+  flowers: Partial<Record<ProjectId, number>>;
+  /** 지금까지 난 대박의 수 */
+  hits: number;
   /** 지금 와 있는 지원자. 채용 화면을 처음 열 때 정하고, 뽑을 때까지 바뀌지 않는다. */
   candidates: StaffId[] | null;
   /** 팀장의 단계. 0이면 팀장이 없다. */
@@ -234,6 +246,8 @@ export function createCompany(boss: StaffId, now = 0): CompanyState {
     released: {},
     releases: 0,
     stars: {},
+    flowers: {},
+    hits: 0,
     candidates: null,
     lead: 0,
     leadWait: 0,
@@ -577,7 +591,7 @@ export function startProject(state: CompanyState, id: ProjectId, random?: () => 
   const work = projectWork(state, id);
   state.backlog = def.cards.map((kind) => ({ kind, left: work, total: work }));
   if (random) sprinkle(state, state.backlog, random);
-  state.project = { id, done: 0, total: def.cards.length };
+  state.project = { id, done: 0, total: def.cards.length, care: 0 };
   refill(state);
   return true;
 }
@@ -596,31 +610,93 @@ export interface Release {
   id: ProjectId;
   /** 이번 출시로 된 횟수. 1이면 첫 출시, 2부터는 업데이트 */
   version: number;
+  /** 받은 잎사귀. 평가와 대박까지 넣은 것이다. */
   bonus: number;
+  /** 오른 평판. 대박까지 넣은 것이다. */
   reputation: number;
+  /** 평가로 받은 꽃의 수(1~MAX_FLOWERS) */
+  flowers: number;
+  /** 대박이 났는가 */
+  hit: boolean;
+}
+
+// ───────── 출시 평가 ─────────
+
+/** 이 책상의 친구가 이 업무에 맞는가: 특기나 부서가 맞거나, 무엇이든 고르게 하는 사장이다. */
+export function fits(state: CompanyState, index: number, kind: TaskKind): boolean {
+  const desk = state.desks[index];
+  if (!desk?.staff) return false;
+  return desk.staff === state.boss || skill(state, index, kind) > 1;
+}
+
+/** 이 책상이 이 카드를 지금 끝내면 받는 정성 점수 */
+export function careFor(state: CompanyState, index: number, task: Task): number {
+  if (task.special === 'bug' && task.fixed && !task.caught) return 0;
+  return (
+    (fits(state, index, task.kind) ? RATING.fit : 0) + (task.cheered ? RATING.cheer : 0) + (task.caught ? RATING.catch : 0)
+  );
+}
+
+/** 정성 점수의 몫(0~1)이 꽃 몇 송이인가 */
+export function flowersFor(share: number): number {
+  return 1 + RATING.shares.filter((least) => share >= least).length;
+}
+
+/**
+ * 지금 만드는 게임이 여태 끝낸 카드만으로 받는 꽃의 수. 남은 카드도 지금처럼 하면 이대로 평가를 받는다.
+ * 끝낸 카드가 없으면 0이다.
+ */
+export function flowersNow(state: CompanyState): number {
+  const project = state.project;
+  if (!project || project.done <= 0) return 0;
+  return flowersFor(Math.min(1, project.care / (project.done * RATING.full)));
+}
+
+/** 그 게임을 내면서 받은 가장 좋은 평가. 아직 내지 않았으면 0 */
+export function bestFlowers(state: CompanyState, id: ProjectId): number {
+  return state.flowers[id] ?? 0;
+}
+
+/** 꽃이 이만큼일 때 출시 보너스에 곱하는 값 */
+export function flowersBonus(flowers: number): number {
+  return RATING.bonus[Math.min(MAX_FLOWERS, Math.max(1, Math.round(flowers))) - 1];
+}
+
+/** 지금 만드는 게임을 지금의 평가대로 내면 받는 잎사귀(대박은 뺀 것). 만드는 게임이 없으면 0 */
+export function ratedBonus(state: CompanyState): number {
+  const project = state.project;
+  if (!project) return 0;
+  return Math.round(projectBonus(state, project.id) * flowersBonus(flowersNow(state)));
 }
 
 /**
  * 다 만든 프로젝트를 출시한다. 아직 덜 됐으면 null. 예약해 둔 게임이 있으면 맨 앞의 것을 바로 시작한다.
- * random은 이어서 시작하는 게임의 특별한 카드를 정하는 데 쓴다(startProject).
+ * 카드마다 쌓인 정성으로 평가(꽃)를 받고, 꽃이 많으면 보너스가 커진다(RATING).
+ * random을 주면 꽃의 수에 따라 대박이 날 수 있고, 이어서 시작하는 게임에 특별한 카드가 나온다(startProject).
+ * 주지 않으면 대박도 특별한 카드도 없다.
  */
 export function release(state: CompanyState, random?: () => number): Release | null {
   if (!state.project || !isReady(state)) return null;
   const id = state.project.id;
-  const bonus = projectBonus(state, id);
-  const reputation = projectReputation(state, id);
+  const flowers = flowersNow(state);
+  const chance = RATING.hitChance[flowers - 1];
+  const hit = random !== undefined && chance > 0 && random() < chance;
+  const bonus = ratedBonus(state) * (hit ? RATING.hit.bonus : 1);
+  const reputation = projectReputation(state, id) * (hit ? RATING.hit.reputation : 1);
   const version = versionOf(state, id) + 1;
   state.leaves += bonus;
   state.reputation += reputation;
   state.released[id] = version;
   state.releases += 1;
+  state.flowers[id] = Math.max(bestFlowers(state, id), flowers);
+  if (hit) state.hits += 1;
   bumpGoals(state.goals, 'release');
   state.project = null;
   // 급한 의뢰의 카드는 프로젝트와 상관없이 남는다.
   state.inbox = state.inbox.filter((task) => task.rush);
   state.backlog = [];
   startQueued(state, random);
-  return { id, version, bonus, reputation };
+  return { id, version, bonus, reputation, flowers, hit };
 }
 
 // ───────── 예약 줄 ─────────
@@ -709,6 +785,7 @@ export function squash(state: CompanyState, index: number): number {
   if (!task || !isStuck(state, index)) return 0;
   delete task.stuck;
   task.fixed = true;
+  task.caught = true;
   const reward = bugReward(state);
   state.leaves += reward;
   return reward;
@@ -734,13 +811,15 @@ export function cheer(state: CompanyState, index: number): boolean {
   const desk = state.desks[index];
   if (!desk?.task) return false;
   desk.cheer = cheerSeconds(state);
+  desk.task.cheered = true;
   bumpGoals(state.goals, 'cheer');
   return true;
 }
 
 /** 시간이 흐르는 동안 일어난 일 */
 export type CompanyEvent =
-  | { type: 'task'; desk: number; kind: TaskKind; rush: boolean }
+  /** 업무 하나가 끝났다. care는 그 카드가 받은 정성 점수(급한 의뢰의 카드는 0) */
+  | { type: 'task'; desk: number; kind: TaskKind; rush: boolean; care: number }
   /** 아이디어 카드를 끝내서 일하는 친구 모두가 응원을 받았다. */
   | { type: 'idea'; desk: number }
   /** 버그가 나와서 그 자리의 일이 멈췄다. */
@@ -828,12 +907,17 @@ function work(state: CompanyState, dt: number, random: () => number): CompanyEve
     if (task.left <= 0) {
       desk.task = null;
       desk.cheer = 0;
-      done.push({ type: 'task', desk: index, kind: task.kind, rush: task.rush === true });
+      const care = task.rush || !state.project ? 0 : careFor(state, index, task);
+      done.push({ type: 'task', desk: index, kind: task.kind, rush: task.rush === true, care });
       bumpGoals(state.goals, 'task');
       if (task.special === 'idea') {
         // 아이디어가 번뜩이면 그때 일하고 있는 친구 모두가 응원을 받는다.
         const seconds = cheerSeconds(state) * SPECIAL.idea.cheer;
-        for (const other of state.desks) if (other.task) other.cheer = Math.max(other.cheer, seconds);
+        for (const other of state.desks) {
+          if (!other.task) continue;
+          other.cheer = Math.max(other.cheer, seconds);
+          other.task.cheered = true;
+        }
         done.push({ type: 'idea', desk: index });
       }
       if (task.rush) {
@@ -847,6 +931,7 @@ function work(state: CompanyState, dt: number, random: () => number): CompanyEve
         }
       } else if (state.project) {
         state.project.done = Math.min(state.project.total, state.project.done + 1);
+        state.project.care += care;
       }
       // 기운이 바닥난 채로 일을 마쳤으면 다음 일을 받기 전에 쉬러 간다.
       if (open && canRest(state, desk)) desk.resting = true;
@@ -1615,10 +1700,12 @@ function normalizeTask(raw: unknown): Task | null {
   const left = toNumber(raw.left, 0, total);
   if (left <= 0) return null;
   const task: Task = { kind: raw.kind, left, total };
+  if (raw.cheered === true) task.cheered = true;
   if (raw.rush === true) task.rush = true;
   else if (isSpecialKind(raw.special)) {
     task.special = raw.special;
     if (raw.fixed === true) task.fixed = true;
+    if (task.special === 'bug' && task.fixed && raw.caught === true) task.caught = true;
     const stuck = toNumber(raw.stuck, 0, SPECIAL.bug.wait);
     if (task.special === 'bug' && !task.fixed && stuck > 0) task.stuck = stuck;
   }
@@ -1706,7 +1793,10 @@ export function normalizeCompany(raw: unknown): CompanyState | null {
   for (const id of PROJECT_ORDER) {
     const stars = isObject(raw.stars) ? toCount(raw.stars[id], PLAY_STARS.count) : 0;
     if (stars > 0) state.stars[id] = stars;
+    const flowers = isObject(raw.flowers) ? toCount(raw.flowers[id], MAX_FLOWERS) : 0;
+    if (flowers > 0 && versionOf(state, id) > 0) state.flowers[id] = flowers;
   }
+  state.hits = toCount(raw.hits);
   const total = PROJECT_ORDER.reduce((sum, id) => sum + versionOf(state, id), 0);
   state.releases = Math.max(total, toCount(raw.releases));
 
@@ -1753,7 +1843,11 @@ export function normalizeCompany(raw: unknown): CompanyState | null {
     const waiting = [...plain, ...backlog];
     const left = Math.min(cards, waiting.length + working);
     const kept = waiting.slice(0, Math.max(0, left - working));
-    state.project = { id: raw.project.id, total: cards, done: cards - left };
+    const done = cards - left;
+    // 정성은 끝낸 카드가 받을 수 있는 만큼까지만 읽는다. 평가가 생기기 전의 세이브는 카드마다 맞는 친구가 한 것으로 친다.
+    const most = done * (RATING.full + RATING.catch);
+    const care = typeof raw.project.care === 'number' ? toNumber(raw.project.care, 0, most) : done * RATING.fit;
+    state.project = { id: raw.project.id, total: cards, done, care };
     state.inbox = [...urgent, ...kept.slice(0, plain.length)];
     state.backlog = kept.slice(plain.length);
     refill(state);

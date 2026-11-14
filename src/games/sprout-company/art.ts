@@ -100,11 +100,24 @@ export const SC = {
   idea: 'sc-idea',
   bug: 'sc-bug',
   pair: 'sc-pair',
+  flower: 'sc-flower',
+  flowerOff: 'sc-flower-off',
 } as const;
 
 export const COMPUTER_SIZE = { width: 26, height: 22 } as const;
 
 /** 화면이 켜진 모니터. (x, y)는 왼쪽 위, 받침은 아래로 붙는다. */
+/** 22×22 칸에 꽃잎 다섯 장의 꽃을 그린다. 어느 바탕에서도 보이게 흰 테두리를 두른다. */
+function flower(c: Ctx, petal: string, middle: string): void {
+  const petals = Array.from({ length: 5 }, (_, index) => {
+    const angle = -Math.PI / 2 + (index * Math.PI * 2) / 5;
+    return [11 + Math.cos(angle) * 5.6, 11 + Math.sin(angle) * 5.6] as const;
+  });
+  for (const [x, y] of petals) oval(c, x, y, 5.2, 5.2, WHITE);
+  for (const [x, y] of petals) oval(c, x, y, 4.1, 4.1, petal);
+  oval(c, 11, 11, 3.3, 3.3, middle);
+}
+
 function monitor(c: Ctx, x: number, y: number, w: number, h: number, frame: string, screen: string): void {
   box(c, x + w / 2 - 2, y + h - 1, 4, 4, 1, '#b9b3c9');
   box(c, x + w / 2 - 5, y + h + 2, 10, 2.4, 1.2, '#b9b3c9');
@@ -498,6 +511,24 @@ const ARTS: Record<string, Art> = {
       oval(c, 11, 11, 11, 11, WHITE);
       stroke(c, 'M4.300 11a4.200 4.200 0 1 0 8.400 0a4.200 4.200 0 1 0-8.400 0', '#7c6cf0', 2.2);
       stroke(c, 'M9.300 11a4.200 4.200 0 1 0 8.400 0a4.200 4.200 0 1 0-8.400 0', '#2fae93', 2.2);
+    },
+  },
+  /** 출시 평가의 꽃 한 송이 */
+  'sc-flower': {
+    width: 16,
+    height: 16,
+    view: [22, 22],
+    draw(c) {
+      flower(c, '#ff8fb0', '#ffd24a');
+    },
+  },
+  /** 아직 피지 않은 꽃 */
+  'sc-flower-off': {
+    width: 16,
+    height: 16,
+    view: [22, 22],
+    draw(c) {
+      flower(c, '#d6cee6', '#bfb4d6');
     },
   },
   /** 급한 의뢰: 자명종 */

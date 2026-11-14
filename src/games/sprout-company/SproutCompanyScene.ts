@@ -40,6 +40,7 @@ import {
   INBOX_SLOTS,
   LEAD,
   LEVEL_SPEED,
+  MAX_FLOWERS,
   OFFICES,
   PERK_ORDER,
   PERKS,
@@ -48,6 +49,7 @@ import {
   PROJECT_ORDER,
   PROJECTS,
   QUEUE,
+  RATING,
   RUSH,
   SPECIALS,
   SPECIALTY_BOOST,
@@ -75,6 +77,7 @@ import {
   advance,
   assign,
   availableProjects,
+  bestFlowers,
   awayRate,
   bossFor,
   breakOpen,
@@ -102,6 +105,7 @@ import {
   equipmentBlock,
   equipmentCost,
   equipmentLevel,
+  flowersNow,
   formatDuration,
   formatLeaves,
   formatRate,
@@ -133,6 +137,7 @@ import {
   perkLevel,
   projectBonus,
   projectReputation,
+  ratedBonus,
   promoteLead,
   queueBlock,
   release,
@@ -174,6 +179,8 @@ const MARGIN = 8;
 const INNER = W - MARGIN * 2;
 
 const STRIP = { top: 42, height: 40 } as const;
+/** 만드는 게임의 진행 막대의 너비. 그 옆에 평가의 꽃이 놓인다. */
+const STRIP_BAR = 70;
 const ROOM_TOP = 88;
 const BUTTON_HEIGHT = 32;
 const INBOX_HEIGHT = 42;
@@ -977,7 +984,8 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
   private syncStrip(): void {
     const state = this.state;
     const project = state.project;
-    const signature = project ? `${project.id}|${project.done}|${isReady(state)}` : 'none';
+    const flowers = flowersNow(state);
+    const signature = project ? `${project.id}|${project.done}|${isReady(state)}|${flowers}` : 'none';
     if (signature === this.stripSignature) return;
     this.stripSignature = signature;
 
@@ -1010,26 +1018,21 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
     strip.add([title, tag]);
 
     const barLeft = MARGIN + 40;
-    // 카드가 많은 게임은 숫자가 길어서 막대를 줄인다.
-    const barWidth = ready ? 78 : project.total >= 10 ? 96 : 108;
-    const share = project.done / project.total;
-    strip.add(addRoundRect(this, barLeft, top + 23, barWidth, 7, 3.5, THEME.dim));
-    if (share > 0) strip.add([...new Pill(this, barLeft, top + 23, 7, THEME.mintDeep).setLength(Math.max(7, barWidth * share)).parts]);
-
     if (ready) {
+      // 다 만들었으면 막대 대신 받을 평가를 크게 보여 준다.
+      strip.add(this.flowerRow(barLeft + 5, top + 27, 10, 1, flowers));
       this.button(strip, MARGIN + INNER - 82, top + 5, 76, 28, '출시하기', 'pink', () => this.releaseProject());
       return;
     }
-    strip.add(
-      addText(this, barLeft + barWidth + 5, top + 26, `${project.done}/${project.total}`, {
-        size: FONT_SIZE.small,
-        color: THEME_CSS.sub,
-        originY: 0.5,
-      }),
-    );
-    // 출시하면 받는 것
+    const barWidth = STRIP_BAR;
+    const share = project.done / project.total;
+    strip.add(addRoundRect(this, barLeft, top + 23, barWidth, 7, 3.5, THEME.dim));
+    if (share > 0) strip.add([...new Pill(this, barLeft, top + 23, 7, THEME.mintDeep).setLength(Math.max(7, barWidth * share)).parts]);
+    // 여태 끝낸 카드로 받는 평가. 끝낸 카드가 없으면 모두 피지 않은 꽃이다.
+    strip.add(this.flowerRow(barLeft + barWidth + 9, top + 26.5, 8, 1, flowers));
+    // 출시하면 받는 것. 잎사귀는 지금의 평가대로 받는 만큼이다.
     const right = MARGIN + INNER - 8;
-    const bonus = addText(this, right, top + 5, `+${formatLeaves(projectBonus(state, project.id))}`, {
+    const bonus = addText(this, right, top + 5, `+${formatLeaves(ratedBonus(state))}`, {
       size: FONT_SIZE.small,
       color: THEME_CSS.good,
       originX: 1,
@@ -1045,6 +1048,16 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
       this.add.image(bonus.x - bonus.width - 6, top + 11, SC.leaf).setDisplaySize(10, 10),
       this.add.image(reputation.x - reputation.width - 6, top + 26, 'icon-star').setDisplaySize(10, 10),
     ]);
+  }
+
+  /**
+   * 평가의 꽃을 한 줄로 놓는다. x는 첫 꽃의 가운데, y는 줄의 가운데, lit은 핀 꽃의 수다.
+   * 만든 그림들을 돌려주므로 받는 쪽에서 컨테이너에 넣거나 움직인다.
+   */
+  private flowerRow(x: number, y: number, size: number, gap: number, lit: number): Phaser.GameObjects.Image[] {
+    return Array.from({ length: MAX_FLOWERS }, (_, index) =>
+      this.add.image(x + index * (size + gap), y, index < lit ? SC.flower : SC.flowerOff).setDisplaySize(size, size),
+    );
   }
 
   private releaseProject(): void {
@@ -1074,14 +1087,26 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
 
   /** 출시를 알린다. 직접 누른 출시와 예약으로 저절로 된 출시가 함께 쓴다. */
   private celebrate(result: Release): void {
-    this.play('release');
-    vibrate([12, 50, 12]);
+    this.play(result.hit ? 'hit' : 'release');
+    vibrate(result.hit ? [20, 40, 20, 40, 60] : [12, 50, 12]);
     const centerY = (ROOM_TOP + this.roomBottom) / 2;
-    showBanner(this, centerY, result.version === 1 ? '출시!' : '업데이트!', THEME_CSS.accent, 1500, DEPTH.banner);
+    const life = result.hit ? 2400 : 1700;
+    const title = result.hit ? '대박!' : result.version === 1 ? '출시!' : '업데이트!';
+    showBanner(this, centerY - 14, title, THEME_CSS.accent, life, DEPTH.banner);
+    this.showRating(centerY + 10, result, life);
     const bounds = new Phaser.Geom.Rectangle(0, 0, W, this.scale.height);
     floatText(this, 70, 44, `+${formatLeaves(result.bonus)}`, THEME_CSS.good, bounds, DEPTH.fx);
     floatText(this, W - 40, 44, `평판 +${result.reputation}`, THEME_CSS.accent, bounds, DEPTH.fx);
     this.burst(W / 2, STRIP.top + STRIP.height / 2, 10, 46);
+    if (result.hit) {
+      // 대박이 나면 방 여기저기에서 반짝이가 이어서 터진다.
+      for (let index = 0; index < 5; index += 1) {
+        this.time.delayedCall(140 * index, () => {
+          if (!this.sys.isActive()) return;
+          this.burst(40 + Math.random() * (W - 80), centerY - 30 + Math.random() * 60, 8, 40);
+        });
+      }
+    }
 
     const coins = this.recordRelease();
     if (coins > 0) floatText(this, W / 2, 60, `코인 +${coins}`, THEME_CSS.accent, bounds, DEPTH.fx);
@@ -1089,6 +1114,48 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
     this.selected = 0;
     this.save();
     this.refreshNow();
+  }
+
+  /**
+   * 출시 알림 아래에 평가를 띄운다: 꽃이 한 송이씩 피고, 그 아래에 평가로 더 받은 것을 적는다.
+   * life는 알림이 떠 있는 시간(ms)이다.
+   */
+  private showRating(y: number, result: Release, life: number): void {
+    const size = 15;
+    const gap = 2;
+    const left = W / 2 - ((MAX_FLOWERS - 1) * (size + gap)) / 2;
+    const row = this.flowerRow(left, y, size, gap, result.flowers);
+    row.forEach((flower, index) => {
+      const scale = flower.scale;
+      flower.setDepth(DEPTH.banner).setScale(0);
+      this.tweens.add({ targets: flower, scale, delay: 120 + index * 90, duration: 220, ease: 'Back.Out' });
+      this.tweens.add({ targets: flower, alpha: 0, delay: life * 0.6, duration: life * 0.4, onComplete: () => flower.destroy() });
+    });
+    const extra = Math.round((RATING.bonus[result.flowers - 1] - 1) * 100);
+    let note = '';
+    if (result.hit) note = `잎사귀 ${RATING.hit.bonus}배 · 평판 ${RATING.hit.reputation}배`;
+    else if (extra > 0) note = `정성 보너스 +${extra}%`;
+    if (note) showBanner(this, y + 18, note, THEME_CSS.good, life, DEPTH.banner, FONT_SIZE.normal);
+  }
+
+  /** 끝난 카드가 받은 정성만큼 그 자리에서 작은 꽃이 떠오른다. */
+  private popCare(x: number, y: number, care: number): void {
+    const count = Math.min(care, RATING.full + RATING.catch);
+    for (let index = 0; index < count; index += 1) {
+      const flower = this.add
+        .image(x + (index - (count - 1) / 2) * 10, y, SC.flower)
+        .setDisplaySize(9, 9)
+        .setDepth(DEPTH.fx);
+      this.tweens.add({
+        targets: flower,
+        y: y - 16,
+        alpha: 0,
+        delay: 80 * index,
+        duration: 620,
+        ease: 'Quad.Out',
+        onComplete: () => flower.destroy(),
+      });
+    }
   }
 
   // ───────── 사무실과 책상 ─────────
@@ -1473,6 +1540,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
       if (view) {
         const color = event.rush ? THEME_CSS.accent : TASK_COLORS[event.kind].css;
         floatText(this, view.x + view.width / 2, view.y + 22, `${TASKS[event.kind].name} 끝`, color, bounds, DEPTH.fx);
+        this.popCare(view.x + view.width / 2, view.y + 30, event.care);
       }
       this.play(!event.rush && isReady(this.state) ? 'ready' : 'done');
     } else if (event.type === 'idea') {
@@ -1689,6 +1757,8 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
     else if (state.queue.length > 0) text = `다 만들면 저절로 출시해요. 다음은 ${PROJECTS[state.queue[0]].title}`;
     else if (foundBlock(state) === null && Math.floor(this.clock / 4) % 2 === 1) {
       text = `자회사를 세우면 열매 ${fruitFor(state.reputation)}개를 받아요`;
+    } else if (state.project && state.releases > 0 && Math.floor(this.clock / 4) % 2 === 1) {
+      text = '맞는 친구가 응원받으며 하면 꽃이 피어요';
     } else text = '일하는 친구를 누르면 응원으로 빨라져요';
     if (this.hint.text !== text) this.hint.setText(text);
     const color = rush || bugged ? THEME_CSS.accent : THEME_CSS.sub;
@@ -2034,9 +2104,11 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
     const queueOpen = QUEUE.unlockOffice <= state.office;
     const bottom = this.listPanel(panel, 'project', '프로젝트', ids, 38, queueOpen ? 54 : 18, (id: ProjectId, middle, left, width) => {
       const def = PROJECTS[id];
-      panel.add(this.add.image(left + 24, middle, def.icon).setDisplaySize(24, 24));
-      const title = addText(this, left + 42, middle - 14, def.title, { color: THEME_CSS.inkDeep });
       const version = versionOf(state, id) + 1;
+      // 낸 적이 있는 게임은 그림 아래에 가장 좋았던 평가를 꽃으로 보여 준다.
+      panel.add(this.add.image(left + 24, version > 1 ? middle - 3 : middle, def.icon).setDisplaySize(24, 24));
+      if (version > 1) panel.add(this.flowerRow(left + 12, middle + 14, 6, 0, bestFlowers(state, id)));
+      const title = addText(this, left + 42, middle - 14, def.title, { color: THEME_CSS.inkDeep });
       const tag = addText(this, title.x + title.width + 4, middle - 12, versionText(version), {
         size: FONT_SIZE.small,
         color: version === 1 ? THEME_CSS.good : THEME_CSS.lilacDeep,

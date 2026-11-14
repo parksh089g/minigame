@@ -88,8 +88,14 @@ describe('처음 안내', () => {
     // 사옥에 오면 부서를, 만드는 게임이 있으면 예약을 알려 준다.
     state.office = OFFICES.length - 1;
     expect(drain(state)).toEqual(['dept']);
-    state.project = { id: 'lightning-tap', done: 0, total: 4 };
-    expect(drain(state)).toEqual(['queue']);
+    state.project = { id: 'lightning-tap', done: 0, total: 4, care: 0 };
+    expect(drain(state)).toEqual(['care', 'queue']);
+
+    // 꽃 네 송이를 받은 게임이 생기면 대박을 알려 준다.
+    state.flowers['lightning-tap'] = 3;
+    expect(drain(state)).toEqual([]);
+    state.flowers['lightning-tap'] = 4;
+    expect(drain(state)).toEqual(['hit']);
 
     // 평판이 차면 자회사를, 세우고 나면 열매를 쓰는 곳을 알려 준다.
     state.reputation = BRANCH.reputation;

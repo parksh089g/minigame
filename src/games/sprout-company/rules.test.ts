@@ -20,6 +20,7 @@ import {
   PLAY_TRIP,
   PROJECT_ORDER,
   PROJECTS,
+  RATING,
   QUEUE,
   RUSH,
   SPECIALTY_BOOST,
@@ -244,7 +245,7 @@ describe('프로젝트', () => {
     const state = createCompany('sprout');
     expect(startProject(state, 'lightning-tap')).toBe(true);
     expect(state.inbox.map((task) => task.kind)).toEqual(PROJECTS['lightning-tap'].cards);
-    expect(state.project).toEqual({ id: 'lightning-tap', done: 0, total: 4 });
+    expect(state.project).toEqual({ id: 'lightning-tap', done: 0, total: 4, care: 0 });
     expect(startProject(state, 'stack-tower')).toBe(false);
   });
 
@@ -282,7 +283,7 @@ describe('프로젝트', () => {
     assign(state, 0, 0);
     expect(advance(state, work / 2)).toHaveLength(0);
     expect(state.desks[0].task?.left).toBeCloseTo(work / 2);
-    expect(advance(state, work / 2 + 0.01)).toEqual([{ type: 'task', desk: 0, kind: 'plan', rush: false }]);
+    expect(advance(state, work / 2 + 0.01)).toEqual([{ type: 'task', desk: 0, kind: 'plan', rush: false, care: RATING.fit }]);
     expect(state.desks[0].task).toBeNull();
     expect(state.project?.done).toBe(1);
     expect(isReady(state)).toBe(false);
@@ -312,7 +313,7 @@ describe('프로젝트', () => {
     const bonus = projectBonus(state, 'lightning-tap');
     const leaves = state.leaves;
     const result = release(state);
-    expect(result).toEqual({ id: 'lightning-tap', version: 1, bonus, reputation: PROJECTS['lightning-tap'].reputation });
+    expect(result).toMatchObject({ id: 'lightning-tap', version: 1, bonus, reputation: PROJECTS['lightning-tap'].reputation, hit: false });
     expect(state.leaves).toBeCloseTo(leaves + bonus);
     expect(state.reputation).toBe(PROJECTS['lightning-tap'].reputation);
     expect(state.project).toBeNull();
@@ -1257,7 +1258,8 @@ describe('세이브 읽기', () => {
     expect(state.releases).toBe(2);
     // 하던 프로젝트는 남은 카드를 세어서 맞춘다: 책상에 하나, 일감함에 하나가 남았다.
     expect(state.inbox).toHaveLength(1);
-    expect(state.project).toEqual({ id: 'lightning-tap', total: 4, done: 2 });
+    // 평가가 생기기 전의 세이브라 정성은 카드마다 맞는 친구가 한 것으로 친다.
+    expect(state.project).toEqual({ id: 'lightning-tap', total: 4, done: 2, care: 2 * RATING.fit });
     expect(state.candidates).toEqual(['cat']);
     expect(state.lead).toBe(LEAD.levels.length);
     expect(state.leadWait).toBe(LEAD.levels[LEAD.levels.length - 1].delay);

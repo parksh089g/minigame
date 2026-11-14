@@ -153,7 +153,7 @@ export function runBot(state: CompanyState, seconds: number, options: BotOptions
     } else if (isReady(state)) {
       waiting += STEP;
       if (waiting >= options.reaction) {
-        release(state);
+        release(state, options.random);
         report.releases += 1;
         report.slowest = Math.max(report.slowest, time - startedAt);
         waiting = 0;
