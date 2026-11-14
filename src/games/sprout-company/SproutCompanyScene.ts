@@ -49,6 +49,7 @@ import {
   PROJECTS,
   QUEUE,
   RUSH,
+  SPECIALS,
   SPECIALTY_BOOST,
   STAFF,
   TASKS,
@@ -117,6 +118,7 @@ import {
   hirePool,
   incomePerSecond,
   isReady,
+  isStuck,
   joinBlock,
   joinDepartment,
   leadBlock,
@@ -136,8 +138,10 @@ import {
   release,
   seedLeaves,
   setStars,
+  pairBoost,
   skill,
   specialtyOf,
+  squash,
   starsOf,
   startProject,
   swapDesks,
@@ -180,6 +184,10 @@ const TILE_GAP = 4;
 /** 책상 한 칸의 높이는 화면 길이와 줄 수에 맞춰 이 사이에서 정한다. named보다 낮으면 이름을 적지 않는다. */
 const TILE_HEIGHT = { min: 58, max: 104, named: 80 } as const;
 const CARD = { width: 23, height: 30, step: 27 } as const;
+
+/** 특별한 카드에 다는 그림의 크기: 카드와 말풍선 귀퉁이에 달 때, 버그가 나왔을 때 */
+const BADGE = 11;
+const BUG_SIZE = 17;
 
 const DEPTH = { fx: 40, guide: 45, panel: 60, banner: 80 } as const;
 
@@ -291,6 +299,8 @@ interface DeskWork {
   /** 쉬는 중일 때 다는 그림 */
   nap: Phaser.GameObjects.Image;
   tag: Phaser.GameObjects.Text;
+  /** 특별한 카드를 맡았을 때 말풍선 귀퉁이에 다는 그림. 버그가 나오면 말풍선 한가운데로 커진다. */
+  badge: Phaser.GameObjects.Image;
 }
 
 const staffDef = (id: StaffId): StaffDef => STAFF[id];
@@ -1038,7 +1048,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
   }
 
   private releaseProject(): void {
-    const result = release(this.state);
+    const result = release(this.state, Math.random);
     if (result) this.celebrate(result);
   }
 
@@ -1241,6 +1251,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
         energyShown: '',
         nap: this.add.image(bubbleX, y + 13, SC.nap).setVisible(false),
         tag: addText(this, x + 21, y + 5, '2배', { size: FONT_SIZE.small, color: THEME_CSS.accent }).setVisible(false),
+        badge: this.add.image(bubbleX - 9, y + 4, SC.idea).setDisplaySize(BADGE, BADGE).setVisible(false),
       };
       view.work = work;
       room.add([
@@ -1255,6 +1266,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
         ...work.energy.parts,
         work.nap,
         work.tag,
+        work.badge,
       ]);
 
       // 무엇을 잘하는지 왼쪽 위에 달아 둔다. 사장은 별이다.
@@ -1317,15 +1329,18 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
     const card = state.inbox[this.selected];
     const calling = !task && !resting && card !== undefined;
     // 고른 카드의 업무를 남보다 잘하는 친구(특기이거나 그 부서에 든 친구)는 얼마나 빠른지를 달아 둔다.
-    const fit = calling ? skill(state, view.index, card.kind) : 1;
+    // 협업 카드는 지금 옆자리가 일하고 있는 만큼을 더 쳐서 보여 준다.
+    const fit = calling ? skill(state, view.index, card.kind) * pairBoost(state, view.index, card) : 1;
     const match = fit > 1;
     const rush = task?.rush === true;
-    const signature = `${task?.kind ?? ''}|${rush}|${cheered}|${calling}|${fit}|${view.pressed}|${resting}`;
+    const special = task?.special ?? '';
+    const stuck = isStuck(state, view.index);
+    const signature = `${task?.kind ?? ''}|${rush}|${cheered}|${calling}|${fit}|${view.pressed}|${resting}|${special}|${stuck}`;
 
     if (signature !== view.shown) {
       view.shown = signature;
       view.frame.setTint(view.pressed ? THEME.dim : THEME.white).setAlpha(task ? 0.55 : calling ? 0.95 : 0.4);
-      const border = cheered ? THEME.gold : match ? TASK_COLORS[card.kind].deep : calling ? THEME.pink : null;
+      const border = stuck ? THEME.coral : cheered ? THEME.gold : match ? TASK_COLORS[card.kind].deep : calling ? THEME.pink : null;
       view.border.setVisible(border !== null);
       if (border !== null) view.border.setTint(border);
 
@@ -1336,8 +1351,18 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
       if (task) {
         // 급한 의뢰의 업무는 말풍선의 테두리와 막대가 붉다.
         work.bubble.setTexture(bubbleTexture(this, task.kind, rush));
-        work.bubbleIcon.setTexture(taskTexture(task.kind)).setDisplaySize(13, 13);
-        work.bar.setColor(rush ? THEME.coral : TASK_COLORS[task.kind].deep);
+        work.bubbleIcon.setTexture(taskTexture(task.kind)).setDisplaySize(13, 13).setVisible(!stuck);
+        work.bar.setColor(rush || stuck ? THEME.coral : TASK_COLORS[task.kind].deep);
+      }
+      // 특별한 카드는 말풍선 귀퉁이에 그림을 달고, 버그가 나오면 말풍선 한가운데에 크게 띄운다.
+      work.badge.setVisible(special !== '');
+      if (task?.special) {
+        const size = stuck ? BUG_SIZE : BADGE;
+        work.badge
+          .setTexture(SC[task.special])
+          .setDisplaySize(size, size)
+          .setPosition(stuck ? view.bubbleX : view.bubbleX - 9, view.y + (stuck ? 13 : 4))
+          .setAngle(0);
       }
       work.tag.setText(timesText(fit)).setVisible(match);
       if (view.body && staffDef(desk.staff).look) view.body.setTexture(staffTexture(desk.staff, cheered ? 'cheer' : 'idle'));
@@ -1374,9 +1399,11 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
       const share = Phaser.Math.Clamp(1 - task.left / task.total, 0, 1);
       work.bar.setVisible(share > 0).setLength(Math.max(6, length * share));
     }
-    // 일하는 동안에는 몸이 살짝 들썩인다.
+    // 버그는 잡을 때까지 좌우로 꿈틀거린다.
+    if (stuck) work.badge.setAngle(Math.sin(this.clock * 14) * 14);
+    // 일하는 동안에는 몸이 살짝 들썩인다. 버그에 막히면 멈춘다.
     if (view.body) {
-      const bob = task ? Math.sin(this.clock * (cheered ? 18 : 9) + view.index * 1.7) * (cheered ? 1.5 : 0.8) : 0;
+      const bob = task && !stuck ? Math.sin(this.clock * (cheered ? 18 : 9) + view.index * 1.7) * (cheered ? 1.5 : 0.8) : 0;
       view.body.y = view.bodyY + bob;
     }
   }
@@ -1397,9 +1424,20 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
       return;
     }
     if (desk.task) {
+      // 버그가 나온 자리는 눌러서 잡는다. 잡으면 잎사귀를 받고, 응원도 함께 받는다.
+      const reward = squash(state, index);
       cheer(state, index);
+      vibrate(reward > 0 ? 12 : 6);
+      if (reward > 0) {
+        this.play('squash');
+        const bounds = new Phaser.Geom.Rectangle(0, 0, W, this.scale.height);
+        floatText(this, view.x + view.width / 2, view.y + 22, `잡았다 +${formatLeaves(reward)}`, THEME_CSS.good, bounds, DEPTH.fx);
+        this.burst(view.bubbleX, view.y + 13, 6, 24);
+        this.save();
+        this.refreshNow();
+        return;
+      }
       this.play('cheer');
-      vibrate(6);
       this.burst(view.x + view.width / 3, view.deskTop - 22, 3, 18);
       return;
     }
@@ -1437,6 +1475,22 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
         floatText(this, view.x + view.width / 2, view.y + 22, `${TASKS[event.kind].name} 끝`, color, bounds, DEPTH.fx);
       }
       this.play(!event.rush && isReady(this.state) ? 'ready' : 'done');
+    } else if (event.type === 'idea') {
+      // 아이디어가 번뜩이면 일하는 자리마다 반짝이가 튄다.
+      this.play('idea');
+      showBanner(this, centerY, '번뜩! 모두 응원', THEME_CSS.accent, 900, DEPTH.banner);
+      this.state.desks.forEach((desk, index) => {
+        const at = this.desks[index];
+        if (desk.task && at) this.burst(at.x + at.width / 3, at.deskTop - 22, 3, 18);
+      });
+    } else if (event.type === 'bug') {
+      this.play('bug');
+      vibrate(10);
+      const view = this.desks[event.desk];
+      if (view) floatText(this, view.x + view.width / 2, view.y + 22, '버그!', THEME_CSS.accent, bounds, DEPTH.fx);
+    } else if (event.type === 'bugGone') {
+      const view = this.desks[event.desk];
+      if (view) floatText(this, view.x + view.width / 2, view.y + 22, '놓쳤어요', THEME_CSS.sub, bounds, DEPTH.fx);
     } else if (event.type === 'rushOffer') {
       this.play('rushIn');
       vibrate(10);
@@ -1481,7 +1535,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
     const shown = Math.min(state.inbox.length, INBOX_SLOTS);
     if (this.selected >= shown) this.selected = 0;
     const more = cardsWaiting(state) - shown;
-    const cards = state.inbox.slice(0, shown).map((task) => `${task.kind}${task.rush ? '!' : ''}`);
+    const cards = state.inbox.slice(0, shown).map((task) => `${task.kind}${task.rush ? '!' : ''}${task.special ?? ''}`);
     const signature = `${cards.join(',')}|${more}|${this.selected}|${state.project?.id ?? ''}|${isReady(state)}`;
     if (signature === this.inboxSignature) return;
     this.inboxSignature = signature;
@@ -1527,11 +1581,16 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
         : null;
       if (edge) parts.push(edge);
       const icon = this.add.image(x + CARD.width / 2, y + 13, taskTexture(kind)).setDisplaySize(15, 15);
+      // 특별한 카드는 오른쪽 위 귀퉁이에 그림을 단다.
+      const badge = task.special
+        ? this.add.image(x + CARD.width - 4, y + 3, SC[task.special]).setDisplaySize(BADGE, BADGE)
+        : null;
       const draw = (pressed: boolean): void => {
         const offset = pressed ? 2 : 0;
         face.setY(y + offset);
         edge?.setY(y + offset);
         icon.setY(y + 13 + offset);
+        badge?.setY(y + 3 + offset);
       };
       const zone = addTapZone(this, x - (step - CARD.width) / 2, top, step, INBOX_HEIGHT - 2, draw, () => {
         if (this.selected === index) return;
@@ -1539,7 +1598,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
         sfx.tick();
         this.refreshNow();
       });
-      inbox.add([...parts, icon, zone]);
+      inbox.add(badge ? [...parts, icon, badge, zone] : [...parts, icon, zone]);
     }
     if (more > 0) {
       inbox.add(
@@ -1615,7 +1674,12 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
     let text: string;
     const rush = state.rush;
     const idle = state.desks.some((desk) => desk.staff !== null && desk.task === null && !desk.resting);
+    const bugged = state.desks.some((_, index) => isStuck(state, index));
+    // 고른 카드가 특별한 카드면 그 카드가 무엇을 하는지 적는다.
+    const picked = state.inbox[this.selected]?.special;
     if (rush) text = `급한 의뢰 ${rush.done}/${rush.total}  남은 시간 ${Math.max(0, Math.ceil(rush.left))}초`;
+    else if (bugged) text = '버그가 나왔어요! 그 자리를 눌러 잡아요';
+    else if (picked && idle) text = SPECIALS[picked].description;
     else if (isReady(state)) text = '다 만들었어요! 출시하기를 눌러요';
     else if (!state.project) text = state.releases === 0 ? '게임 고르기를 눌러 첫 게임을 만들어요' : '다음에 만들 게임을 골라요';
     else if (state.inbox.length > 0 && idle) {
@@ -1627,7 +1691,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
       text = `자회사를 세우면 열매 ${fruitFor(state.reputation)}개를 받아요`;
     } else text = '일하는 친구를 누르면 응원으로 빨라져요';
     if (this.hint.text !== text) this.hint.setText(text);
-    const color = rush ? THEME_CSS.accent : THEME_CSS.sub;
+    const color = rush || bugged ? THEME_CSS.accent : THEME_CSS.sub;
     if (this.hintColor !== color) {
       this.hintColor = color;
       this.hint.setColor(color);
@@ -2004,7 +2068,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
       }
       const making = state.project?.id === id;
       const button = this.button(panel, left + width - 58, middle - 13, 48, 26, making ? '만드는 중' : '만들기', 'pink', () => {
-        if (!startProject(state, id)) return;
+        if (!startProject(state, id, Math.random)) return;
         this.selected = 0;
         this.closePanel();
         sfx.go();

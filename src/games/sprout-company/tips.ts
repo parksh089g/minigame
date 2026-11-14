@@ -3,7 +3,7 @@
  * 어떤 때에 어떤 안내가 뜨는지만 여기에 두고, 글은 data.ts에, 화면에 띄우는 일은 씬에 있다.
  * 본 안내는 회사의 세이브에 적혀서 다시 뜨지 않는다.
  */
-import { BREAK, DEPARTMENT, PERK_ORDER, QUEUE, TIP_IDS, TRAINING, type TipId } from './data';
+import { BREAK, DEPARTMENT, PERK_ORDER, QUEUE, TIP_IDS, TRAINING, type SpecialKind, type TipId } from './data';
 import {
   departmentCount,
   equipmentBlock,
@@ -18,6 +18,10 @@ import {
   type CompanyState,
 } from './rules';
 
+/** 그 특별한 카드가 일감함이나 책상 위에 있는가 */
+const holds = (state: CompanyState, special: SpecialKind): boolean =>
+  state.inbox.some((task) => task.special === special) || state.desks.some((desk) => desk.task?.special === special);
+
 /** 안내마다 그것이 뜰 때 */
 const WHEN: Readonly<Record<TipId, (state: CompanyState) => boolean>> = {
   income: (state) => state.releases >= 1,
@@ -25,6 +29,9 @@ const WHEN: Readonly<Record<TipId, (state: CompanyState) => boolean>> = {
   update: (state) => state.releases >= 2 && state.project === null,
   move: (state) => moveBlock(state) === 'poor' || moveBlock(state) === null,
   hire: (state) => state.office >= 1 && hasFreeDesk(state) && hirePool(state).length > 0,
+  bug: (state) => state.desks.some((desk) => (desk.task?.stuck ?? 0) > 0),
+  idea: (state) => holds(state, 'idea'),
+  pair: (state) => holds(state, 'pair'),
   goals: (state) => state.releases >= 3 && state.goals.list.length > 0,
   train: (state) => state.office >= TRAINING.unlockOffice && state.desks.some((_, index) => trainBlock(state, index) === null),
   lead: (state) => state.lead === 0 && leadBlock(state) === null,
