@@ -153,6 +153,8 @@ export const ACHIEVEMENTS: readonly Achievement[] = [
   { id: 'path-600', group: 'score', title: '길의 달인', description: '길 잇기 600점 이상', goal: 600, reward: 50, measure: bestOf('path-link') },
   { id: 'block-800', group: 'score', title: '빈틈없이', description: '블록 800점 이상', goal: 800, reward: 20, measure: bestOf('block-fill') },
   { id: 'block-1600', group: 'score', title: '블록의 달인', description: '블록 1600점 이상', goal: 1600, reward: 50, measure: bestOf('block-fill') },
+  { id: 'match-3000', group: 'score', title: '착착 맞추기', description: '맞추기 3000점 이상', goal: 3000, reward: 20, measure: bestOf('match-three') },
+  { id: 'match-6000', group: 'score', title: '맞추기의 달인', description: '맞추기 6000점 이상', goal: 6000, reward: 50, measure: bestOf('match-three') },
   { id: 'chosung-500', group: 'score', title: '낱말 박사', description: '초성 퀴즈 500점 이상', goal: 500, reward: 20, measure: bestOf('chosung-quiz') },
   { id: 'chosung-1000', group: 'score', title: '초성의 달인', description: '초성 퀴즈 1000점 이상', goal: 1000, reward: 50, measure: bestOf('chosung-quiz') },
   { id: 'lantern-3000', group: 'score', title: '꺼지지 않는 불', description: '등불지기 3000점 이상', goal: 3000, reward: 20, measure: bestOf('lantern-keeper') },

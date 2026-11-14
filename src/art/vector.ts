@@ -723,6 +723,27 @@ const ICONS: Record<string, Art> = {
       }
     },
   },
+  /** 세 개 맞추기: 아홉 조각이 놓인 판에서 가운데 줄의 별 셋이 나란히 맞았다 */
+  'icon-match': {
+    width: 32,
+    height: 32,
+    draw(c) {
+      roundRect(c, 2, 4, 28, 27, 6, '#e6cfc6');
+      roundRect(c, 2, 2, 28, 27, 6, '#ffffff');
+      roundRect(c, 3.500, 10.700, 25, 9.600, 4.800, '#ffe9a8');
+      const dot = (x: number, y: number, color: string): void => {
+        oval(c, x, y, 3.200, 3.200, color);
+        oval(c, x - 1, y - 1.200, 1.100, 0.700, 'rgba(255, 255, 255, 0.7)', -0.6);
+      };
+      dot(8, 6.900, '#7dbef2');
+      dot(16, 6.900, '#e06d75');
+      dot(24, 6.900, '#7fd3ae');
+      for (const x of [8, 16, 24]) softPath(c, starPath(x, 15.700, 3.900), '#f2a93b', 1.200);
+      dot(8, 24.300, '#9684e0');
+      dot(16, 24.300, '#7fd3ae');
+      dot(24, 24.300, '#7dbef2');
+    },
+  },
   /** 초성 퀴즈: 글자 조각 두 개에 적힌 초성 ㅊ과 ㅅ. 글꼴이 준비되기 전에도 그릴 수 있게 획으로 긋는다. */
   'icon-chosung': {
     width: 32,
