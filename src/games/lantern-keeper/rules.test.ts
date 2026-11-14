@@ -36,8 +36,10 @@ import {
   auraStats,
   bellStats,
   boltStats,
+  boonChoiceCount,
   boonLevel,
   boonOptions,
+  canBanish,
   chestUpgrade,
   clampDepth,
   COIN_CAP,
@@ -58,6 +60,7 @@ import {
   lanceStats,
   maxAlive,
   metaCost,
+  metaLocked,
   midBossTier,
   modifiers,
   moonStats,
@@ -74,6 +77,7 @@ import {
   spawnPerSecond,
   speedScale,
   starStats,
+  swapOption,
   ticketOptions,
   upgradeDescription,
   upgradeOptions,
@@ -504,6 +508,55 @@ describe('레벨업 선택지', () => {
     expect(seen.size).toBe(all.length);
   });
 
+  it('골라낸 것은 선택지에 나오지 않고, 골라낸 것이 없으면 뽑히는 차례가 예전과 같다', () => {
+    const banned = ['star', 'wick', 'ember'];
+    const rand = seededRandom(8);
+    for (let i = 0; i < 200; i += 1) {
+      for (const option of upgradeOptions({ ...fresh, banned }, rand)) {
+        if ('id' in option) expect(banned).not.toContain(option.id);
+      }
+    }
+    // 오늘의 판은 씨앗으로 선택지를 뽑으므로, 골라내기를 넣으면서 뽑는 차례가 바뀌면 안 된다.
+    expect(upgradeOptions(fresh, seededRandom(3))).toEqual(upgradeOptions({ ...fresh, banned: [] }, seededRandom(3)));
+    // 골라내기가 들어오기 전의 규칙으로 뽑아 둔 값이다.
+    expect(upgradeOptions(fresh, seededRandom(3))).toEqual([
+      { type: 'passive', id: 'hourglass', level: 1 },
+      { type: 'weapon', id: 'ember', level: 2 },
+      { type: 'weapon', id: 'moon', level: 1 },
+    ]);
+  });
+
+  it('골라내면 그 자리에만 새것이 오고, 무기와 패시브만 골라낼 수 있다', () => {
+    expect(canBanish({ type: 'weapon', id: 'star', level: 1 })).toBe(true);
+    expect(canBanish({ type: 'passive', id: 'wick', level: 2 })).toBe(true);
+    expect(canBanish({ type: 'boon', id: 'blaze', level: 1 })).toBe(false);
+    expect(canBanish({ type: 'heal' })).toBe(false);
+    expect(canBanish({ type: 'embers' })).toBe(false);
+
+    const rand = seededRandom(5);
+    for (let i = 0; i < 100; i += 1) {
+      const offer = upgradeOptions(fresh, rand);
+      const index = i % 3;
+      const out = offer[index];
+      if (!canBanish(out)) throw new Error('무기나 패시브가 나와야 한다');
+      const next = swapOption(offer, index, { ...fresh, banned: [out.id] }, rand);
+      expect(next).toHaveLength(3);
+      next.forEach((option, at) => {
+        if (at !== index) expect(option).toEqual(offer[at]);
+      });
+      expect(next[index]).not.toMatchObject({ id: out.id });
+      expect(new Set(next.map((u) => `${u.type}:${'id' in u ? u.id : ''}`)).size).toBe(3);
+    }
+    // 끝없는 밤에서는 더 나올 것이 없는 자리를 밤의 축복이 채운다.
+    const last: Build = { weapons: { ember: MAX_LEVEL - 1 }, passives: {}, slots: 1, banned: ['ember'] };
+    for (const id of (Object.keys(PASSIVES) as PassiveId[]).slice(0, MAX_PASSIVES)) last.passives[id] = MAX_LEVEL;
+    const offer = [{ type: 'weapon', id: 'ember', level: MAX_LEVEL }, { type: 'boon', id: 'blaze', level: 1 }] as const;
+    const filled = swapOption(offer, 0, last, seededRandom(2), {});
+    expect(filled[0]).toMatchObject({ type: 'boon', level: 1 });
+    expect(filled[0]).not.toMatchObject({ id: 'blaze' });
+    expect(filled[1]).toEqual(offer[1]);
+  });
+
   it('레벨업으로는 진화하지 못하고, 5레벨 무기에 강화권을 써야 진화한다', () => {
     const build: Build = { weapons: { star: MAX_LEVEL }, passives: {} };
     const rand = seededRandom(4);
@@ -709,6 +762,26 @@ describe('결과와 보상', () => {
   it('첫 판을 2분쯤 버티면 가장 싼 영구 강화를 하나 살 수 있다', () => {
     const cheapest = Math.min(...META_ORDER.map((id) => metaCost(id, 0) ?? Infinity));
     expect(embersFor(run({ seconds: 150, kills: 250 }))).toBeGreaterThanOrEqual(cheapest);
+  });
+
+  it('새벽을 맞아야 열리는 영구 강화는 그때까지 잠겨 있다', () => {
+    const late = META_ORDER.filter((id) => META[id].needsDawn);
+    expect(late).toEqual(['sift', 'kindle', 'trove', 'bounty', 'vigil']);
+    // 잠기는 것은 목록의 끝에 모여 있어서, 처음 하는 사람에게는 늘 보던 열한 가지가 먼저 보인다.
+    expect(META_ORDER.slice(-late.length)).toEqual(late);
+    for (const id of META_ORDER) {
+      expect(metaLocked(id, 0)).toBe(late.includes(id));
+      expect(metaLocked(id, 1)).toBe(false);
+      expect(metaLocked(id, 30)).toBe(false);
+    }
+  });
+
+  it('너른 축복은 밤의 축복 선택지를 하나 늘린다', () => {
+    expect(boonChoiceCount({})).toBe(3);
+    expect(boonChoiceCount({ vigil: 1 })).toBe(4);
+    expect(boonChoiceCount({ vigil: 99 })).toBe(3 + META.vigil.maxLevel);
+    expect(boonChoiceCount({ vigil: -2 })).toBe(3);
+    expect(3 + META.vigil.maxLevel).toBeLessThan(BOON_ORDER.length);
   });
 
   it('영구 강화는 단계가 오를수록 비싸지고 최대 단계에서 멈춘다', () => {

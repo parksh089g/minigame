@@ -44,7 +44,7 @@ import {
   openDepth,
   type LanternMeta,
 } from './meta';
-import { depthName, depthRules, feastTitle, formatClock, formatTimes, isUnlocked, metaCost } from './rules';
+import { depthName, depthRules, feastTitle, formatClock, formatTimes, isUnlocked, metaCost, metaLocked } from './rules';
 import { runDawned, type RunState } from './sim';
 
 const MARGIN = 12;
@@ -82,6 +82,8 @@ const STAGE_CARD = {
   foes: 2,
 } as const;
 const DETAIL_HEIGHT = 56;
+/** 새벽을 한 번 맞아야 살 수 있는 영구 강화의 값 자리에 적는 말 */
+const UPGRADE_LOCKED = '새벽 뒤에';
 const UPGRADE_BUTTON_HEIGHT = 24;
 /** 하던 판을 버리고 새로 시작할 때 한 번 더 묻는 말과, 그 물음이 살아 있는 시간 */
 const DISCARD = { label: '하던 판을 버릴까요? 한 번 더!', ms: 3000 } as const;
@@ -210,7 +212,7 @@ export function buildLobby(
     for (const fn of refreshers) fn();
   };
 
-  if (page === 'upgrades') addUpgradeRows(scene, handlers, refreshers, refresh, list ?? 0);
+  if (page === 'upgrades') addUpgradeRows(scene, handlers, refreshers, refresh, list);
   else if (page === 'challenges') addChallengeRows(scene, handlers, refreshers, refresh, list);
   else if (page === 'codex') addCodexPage(scene, handlers, startingTab(handlers, list));
   else if (page === 'daily') addDailyPage(scene, handlers, refreshers, height);
@@ -873,16 +875,27 @@ function addUpgradeRows(
   handlers: LobbyHandlers,
   refreshers: Array<() => void>,
   refresh: () => void,
-  list: number,
+  list: number | undefined,
 ): void {
-  const shown = listSlice(scene, META_ORDER, list, (next) => handlers.onPage('upgrades', next));
+  // 어느 묶음을 볼지 정해지지 않았으면, 아직 더 올릴 수 있는 첫 강화가 있는 묶음을 연다.
+  // 앞쪽을 다 올린 사람은 뒤쪽 묶음(새벽을 맞아야 열리는 것)에서 시작한다.
+  const meta = handlers.getMeta();
+  const open = META_ORDER.findIndex(
+    (id) => !metaLocked(id, meta.clears) && (meta.upgrades[id] ?? 0) < META[id].maxLevel,
+  );
+  const start = list ?? pageOfIndex(Math.max(0, open), listLayout(scene, META_ORDER.length).perPage);
+  const shown = listSlice(scene, META_ORDER, start, (next) => handlers.onPage('upgrades', next));
   shown.forEach((id: MetaId, index) => {
     const item = META[id];
     const y = LIST.top + index * LIST_STEP;
     const panel = scene.add.graphics();
     drawPanel(panel, MARGIN, y, ROW_WIDTH, LIST.row, DARK_PANEL);
     const name = addText(scene, MARGIN + 8, y + 3, item.name, { bold: true, color: CSS.white });
-    addText(scene, MARGIN + 8, y + 17, item.perLevel, { color: CSS.silver, size: FONT_SIZE.small });
+    // 설명이 사는 버튼 밑으로 들어가지 않게, 긴 것은 버튼 앞까지만 차도록 줄인다.
+    fitText(
+      addText(scene, MARGIN + 8, y + 17, item.perLevel, { color: CSS.silver, size: FONT_SIZE.small }),
+      ROW_WIDTH - BUY_WIDTH - 5 - 8 - 4,
+    );
     const pips = scene.add.graphics();
     const pipsLeft = Math.round(name.x + name.width) + 6;
 
@@ -915,7 +928,12 @@ function addUpgradeRows(
         pips.fillStyle(i < level ? COLOR.yellow : COLOR.ink, 1);
         pips.fillRect(pipsLeft + i * 6, y + 7, 4, 4);
       }
-      if (cost === null) {
+      // 새벽을 맞아야 열리는 것은 그때까지 이름과 하는 일만 보이고, 값 자리에 여는 조건이 적힌다.
+      const locked = metaLocked(id, current.clears);
+      name.setColor(locked ? CSS.silver : CSS.white);
+      if (locked) {
+        button.setLabel(UPGRADE_LOCKED).setStyle('neutral').setEnabled(false);
+      } else if (cost === null) {
         button.setLabel('최대').setStyle('neutral').setEnabled(false);
       } else {
         const affordable = current.embers >= cost;
