@@ -493,6 +493,22 @@ export function secondsBack(turn: Turn): number {
   return Math.min(MAX_TURN_SECONDS, turn.bursts * BURST_SECONDS);
 }
 
+/**
+ * 판이 지금 무엇을 하는가.
+ * idle은 손을 기다리는 중, bounce는 맞지 않는 바꾸기가 제자리로 되돌아오는 중,
+ * busy는 맞은 조각이 사라지고 떨어지는 중, over는 판이 끝난 뒤다. idle이 아니면 손이 먹지 않는다.
+ */
+export type BoardPhase = 'idle' | 'bounce' | 'busy' | 'over';
+
+/**
+ * 점수 도전의 시계가 흐르는 때인가. 맞은 조각이 사라지고 떨어지는 동안에만 선다.
+ * 맞지 않는 바꾸기가 되돌아오는 동안에도 서면, 맞지 않는 자리를 이어서 건드리는 것만으로
+ * 시간을 쓰지 않고 다음 자리를 찾을 수 있다. 돌려받는 시간(secondsBack)이 적은 까닭이 그것으로 무너진다.
+ */
+export function clockRuns(phase: BoardPhase): boolean {
+  return phase === 'idle' || phase === 'bounce';
+}
+
 // ───────── 단계 모드 ─────────
 
 /** 단계 모드의 난이도 한 칸 */

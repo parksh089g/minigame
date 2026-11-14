@@ -9,6 +9,7 @@ import {
   CELLS,
   chainOf,
   clearingOf,
+  clockRuns,
   COLS,
   findMoves,
   hasMatch,
@@ -427,6 +428,17 @@ describe('점수 도전의 시간', () => {
 
   it('점수 도전은 조각이 가장 많은 판이다', () => {
     expect(ARCADE_KINDS).toBe(MAX_KINDS);
+  });
+
+  it('시계는 맞은 조각이 사라지고 떨어지는 동안에만 선다', () => {
+    expect(clockRuns('idle')).toBe(true);
+    expect(clockRuns('busy')).toBe(false);
+    expect(clockRuns('over')).toBe(false);
+  });
+
+  it('맞지 않는 바꾸기가 되돌아오는 동안에도 시계는 흐른다', () => {
+    // 여기서 시계가 서면 맞지 않는 자리를 이어서 건드리는 것으로 시간을 쓰지 않고 다음 자리를 찾을 수 있다.
+    expect(clockRuns('bounce')).toBe(true);
   });
 });
 

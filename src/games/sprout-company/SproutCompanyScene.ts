@@ -181,6 +181,8 @@ const INNER = W - MARGIN * 2;
 const STRIP = { top: 42, height: 40 } as const;
 /** 만드는 게임의 진행 막대의 너비. 그 옆에 평가의 꽃이 놓인다. */
 const STRIP_BAR = 70;
+/** 몇 번째 출시인지 적은 글과 그 옆에 놓인 것(출시하기 버튼, 받을 잎사귀, 평가의 꽃) 사이에 두는 틈 */
+const STRIP_TAG_GAP = 3;
 const ROOM_TOP = 88;
 const BUTTON_HEIGHT = 32;
 const INBOX_HEIGHT = 42;
@@ -445,6 +447,11 @@ function timesText(value: number): string {
 /** 몇 번째 출시인지 적는다. 처음은 새 게임이고 그 뒤로는 업데이트다. */
 function versionText(version: number): string {
   return version <= 1 ? '새 게임' : `업데이트 ${version - 1}`;
+}
+
+/** 글이 room보다 넓으면 그 너비에 차도록 줄인다. 좁으면 그대로 둔다. */
+function fitWidth(text: Phaser.GameObjects.Text, room: number): void {
+  if (text.width > room) text.setScale(Math.max(0, room) / text.width);
 }
 
 /**
@@ -1020,8 +1027,17 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
     const barLeft = MARGIN + 40;
     if (ready) {
       // 다 만들었으면 막대 대신 받을 평가를 크게 보여 준다.
-      strip.add(this.flowerRow(barLeft + 5, top + 27, 10, 1, flowers));
-      this.button(strip, MARGIN + INNER - 82, top + 5, 76, 28, '출시하기', 'pink', () => this.releaseProject());
+      const flower = { size: 10, gap: 1 };
+      const flowersLeft = barLeft + flower.size / 2;
+      strip.add(this.flowerRow(flowersLeft, top + 27, flower.size, flower.gap, flowers));
+      const buttonLeft = MARGIN + INNER - 82;
+      // 이름이 길어서 몇 번째 출시인지가 출시하기 버튼 밑으로 들어가면, 아랫줄의 꽃 옆으로 내린다.
+      if (tag.x + tag.width > buttonLeft - STRIP_TAG_GAP) {
+        const flowersRight = flowersLeft + (MAX_FLOWERS - 1) * (flower.size + flower.gap) + flower.size / 2;
+        tag.setOrigin(0, 0.5).setPosition(flowersRight + STRIP_TAG_GAP, top + 27);
+        fitWidth(tag, buttonLeft - STRIP_TAG_GAP - tag.x);
+      }
+      this.button(strip, buttonLeft, top + 5, 76, 28, '출시하기', 'pink', () => this.releaseProject());
       return;
     }
     const barWidth = STRIP_BAR;
@@ -1042,12 +1058,15 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
       color: THEME_CSS.accent,
       originX: 1,
     });
+    const leafX = bonus.x - bonus.width - 6;
     strip.add([
       bonus,
       reputation,
-      this.add.image(bonus.x - bonus.width - 6, top + 11, SC.leaf).setDisplaySize(10, 10),
+      this.add.image(leafX, top + 11, SC.leaf).setDisplaySize(10, 10),
       this.add.image(reputation.x - reputation.width - 6, top + 26, 'icon-star').setDisplaySize(10, 10),
     ]);
+    // 받을 잎사귀의 숫자가 길어져서 이름 줄까지 오면, 몇 번째 출시인지를 그 앞까지만 차게 줄인다.
+    fitWidth(tag, leafX - 5 - STRIP_TAG_GAP - tag.x);
   }
 
   /**

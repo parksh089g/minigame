@@ -9,6 +9,7 @@ import { SCENE } from '../src/config';
 import { GAMES } from '../src/games/registry';
 import { dayIndexOf } from '../src/games/lantern-keeper/daily';
 import { LANTERN_GAME_ID, LANTERN_SCENE } from '../src/games/lantern-keeper/data';
+import { areAdjacent, CELLS, COLS, isValidSwap, type Piece } from '../src/games/match-three/rules';
 import {
   activeScenes,
   expectRendering,
@@ -98,6 +99,73 @@ it('등불지기: 출발해서 움직이고, 멈췄다가 이어 할 수 있다'
   await tapText(page, SCENE.pause, '계속하기');
   await expect.poll(() => activeScenes(page), { message: '판으로 돌아가야 한다' }).not.toContain(SCENE.pause);
   expect(await activeScenes(page)).toContain(LANTERN_SCENE);
+});
+
+/** 세 개 맞추기 장면에서 이 점검이 들여다보는 것 */
+interface MatchThreeView {
+  board: Piece[];
+  phase: string;
+  timeLeft: number;
+  trySwap(a: number, b: number): void;
+  events: {
+    on(event: 'update', listener: (time: number, delta: number) => void): void;
+    off(event: 'update', listener: (time: number, delta: number) => void): void;
+  };
+}
+
+it('세 개 맞추기: 맞지 않는 자리를 이어서 바꿔도 점수 도전의 시계가 멈추지 않는다', async ({ page }) => {
+  await openApp(page);
+  await startScene(page, SCENE.matchThree);
+  const board = await page.evaluate(
+    (key) => (window.__pocketArcade?.scene.getScene(key) as unknown as MatchThreeView).board,
+    SCENE.matchThree,
+  );
+  // 맞바꿔도 줄이 생기지 않는, 그림이 서로 다른 이웃한 두 칸
+  const pairs = Array.from({ length: CELLS }, (_, cell) => [cell + 1, cell + COLS].map((other) => ({ a: cell, b: other }))).flat();
+  const pair = pairs.find(
+    ({ a, b }) => b < CELLS && areAdjacent(a, b) && board[a].kind !== board[b].kind && !isValidSwap(board, a, b),
+  );
+  if (!pair) throw new Error('맞지 않는 자리를 찾지 못했다');
+
+  // 되돌아오는 조각을 기다렸다가 곧바로 다시 바꾸기를 여섯 번 한다. 처음 바꾸기가 시계를 연다.
+  // 그동안 게임이 센 시간(한 프레임에 0.1초까지 센다)과 시계가 준 시간을 프레임마다 같은 자리에서 잰다.
+  const SWAPS = 6;
+  const measured = await page.evaluate(
+    ([key, a, b, wanted]) =>
+      new Promise<{ swaps: number; played: number; spent: number }>((resolve, reject) => {
+        const scene = window.__pocketArcade?.scene.getScene(key) as unknown as MatchThreeView;
+        let from: number | null = null;
+        let swaps = 0;
+        let played = 0;
+        const giveUp = setTimeout(() => {
+          scene.events.off('update', onUpdate);
+          reject(new Error(`바꾸기 ${swaps}번에서 멈췄다(phase ${scene.phase})`));
+        }, 30_000);
+        // 장면의 update보다 먼저 불린다. 여기서 본 시계는 앞 프레임까지 준 값이다.
+        function onUpdate(_time: number, delta: number): void {
+          if (from === null) from = scene.timeLeft;
+          else if (swaps >= wanted && scene.phase === 'idle') {
+            clearTimeout(giveUp);
+            scene.events.off('update', onUpdate);
+            resolve({ swaps, played, spent: from - scene.timeLeft });
+            return;
+          }
+          if (scene.phase === 'idle' && swaps < wanted) {
+            scene.trySwap(a, b);
+            if (scene.phase !== 'idle') swaps += 1;
+          }
+          played += Math.min(delta, 100) / 1000;
+        }
+        scene.events.on('update', onUpdate);
+      }),
+    [SCENE.matchThree, pair.a, pair.b, SWAPS] as const,
+  );
+  expect(measured.swaps, '맞지 않는 바꾸기를 다 해 봐야 한다').toBe(SWAPS);
+  // 한 프레임이 아무리 길어도 바꾸기 한 번에 한 프레임(0.1초까지 센다)은 지나간다.
+  expect(measured.played, '되돌아오는 시간만큼은 흘렀어야 한다').toBeGreaterThan(0.5);
+  // 되돌아오는 동안 시계가 서면, 그동안 지나간 프레임만큼 준 시간이 센 시간보다 모자란다.
+  expect(measured.spent, '시계는 게임이 센 시간만큼 줄어야 한다').toBeGreaterThan(measured.played - 0.05);
+  expect(measured.spent).toBeLessThan(measured.played + 0.05);
 });
 
 it('공유 주소로 들어오면 허브를 거치지 않고 그 게임이 열리고, 주소의 표시는 지워진다', async ({ page }) => {

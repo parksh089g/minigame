@@ -17,6 +17,8 @@ import {
 } from '../src/games/lantern-keeper/data';
 import { iconKey } from '../src/games/lantern-keeper/icons';
 import { upgradeTitle, type Upgrade } from '../src/games/lantern-keeper/rules';
+import { COMPANY_SCENE, GUIDE_STEPS, OFFICES, PROJECT_ORDER, PROJECTS, RATING } from '../src/games/sprout-company/data';
+import { createCompany, type CompanyState } from '../src/games/sprout-company/rules';
 import { hiddenTexts, it, openApp, startScene, tapText, textPoint, textsOutsideCards, waitForScene } from './app';
 
 /** 강화권 창, 레벨업 창, 골라내기 화면의 머리글(levelup.ts) */
@@ -203,6 +205,55 @@ it('등불지기 잔치의 밤: 고르는 창, 강화권 카드 넷~여섯 장(�
   expect(after.options.slice(1), '나머지 카드는 그대로다').toEqual(before.options.slice(1));
   expect(await textPoint(page, LANTERN_SCENE, `골라내기 ${after.banishes}`), '남은 골라내기').not.toBeNull();
   await expectClear(LEVEL_UP_TITLE, '골라낸 뒤의 레벨업 창');
+});
+
+/**
+ * 새싹 컴퍼니의 회사를 앱이 읽기 전에 넣어 둔다. 저장하는 곳과 이름은 sprout-company/store.ts(DB_NAME, STORE_NAME, KEY)와 같다.
+ * 저장이 읽히지 않으면 회사를 새로 세우므로 출시하기 버튼이 없어서 점검이 바로 실패한다.
+ */
+async function seedCompany(page: Page, state: CompanyState): Promise<void> {
+  await page.evaluate(
+    (value) =>
+      new Promise<void>((resolve, reject) => {
+        const open = indexedDB.open('pocket-arcade-company');
+        open.onupgradeneeded = () => open.result.createObjectStore('kv');
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const tx = open.result.transaction('kv', 'readwrite');
+          tx.objectStore('kv').put(value, 'state');
+          tx.oncomplete = () => {
+            open.result.close();
+            resolve();
+          };
+          tx.onerror = () => reject(tx.error);
+        };
+      }),
+    state,
+  );
+}
+
+it('새싹 컴퍼니: 이름이 가장 긴 게임을 다 만들었을 때도 띠의 글자가 출시하기 버튼에 가려지지 않는다', async ({ page }) => {
+  await openApp(page);
+  // 가장 큰 사무실에서, 이름이 가장 긴 게임을 열세 번째로 내려는 회사. 이름 옆에 "업데이트 12"가 붙는다.
+  const longest = [...PROJECT_ORDER].sort((a, b) => PROJECTS[b].title.length - PROJECTS[a].title.length)[0];
+  const cards = PROJECTS[longest].cards.length;
+  const state = createCompany('sprout', Date.now());
+  state.office = OFFICES.length - 1;
+  state.guide = GUIDE_STEPS.length;
+  state.released[longest] = 12;
+  state.releases = 12;
+  state.project = { id: longest, done: cards, total: cards, care: cards * RATING.full };
+  await seedCompany(page, state);
+  await page.reload();
+  await waitForScene(page, 'Hub');
+  await startScene(page, COMPANY_SCENE);
+
+  await expect.poll(() => textPoint(page, COMPANY_SCENE, '출시하기'), { ...WAIT, message: '다 만든 게임의 띠가 떠야 한다' }).not.toBeNull();
+  // 띠에 놓인 글자만 본다. 회사 화면의 다른 글자들은 글 상자가 옆의 칸과 한두 픽셀씩 맞닿아 있어서 여기서 가리지 않는다.
+  const strip = [PROJECTS[longest].title, '업데이트 12', '출시하기'];
+  for (const label of strip) expect(await textPoint(page, COMPANY_SCENE, label), label).not.toBeNull();
+  const hidden = await hiddenTexts(page, COMPANY_SCENE);
+  expect(hidden.filter((line) => strip.some((label) => line.startsWith(`${label}:`))), '다 만든 게임의 띠').toEqual([]);
 });
 
 it('결과 카드: 기록 일곱 줄과 랭킹 줄에 무기 여섯의 피해 줄까지 가려지지 않고 들어간다', async ({ page }) => {

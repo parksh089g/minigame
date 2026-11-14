@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { FONT_SIZE, GAME_WIDTH, THEME, THEME_CSS } from '../config';
+import { floatCenter } from '../core/float';
 import { addText } from '../core/ui';
 
 /** 미니게임 화면 위쪽에 놓이는 HUD의 높이. 이 아래부터 게임 영역이다. */
@@ -124,13 +125,14 @@ export function floatText(
   bounds: Phaser.Geom.Rectangle,
   depth: number,
 ): void {
-  const clampedX = Phaser.Math.Clamp(x, bounds.left + 20, bounds.right - 20);
-  const text = addText(scene, clampedX, Math.max(y, bounds.top + 8), label, {
+  const text = addText(scene, x, Math.max(y, bounds.top + 8), label, {
     color,
     originX: 0.5,
     originY: 1,
     stroke: THEME_CSS.white,
   }).setDepth(depth);
+  // 가장자리에서 띄운 긴 글도 양 끝이 밖으로 나가지 않게, 만든 글의 너비를 보고 가운데를 안쪽으로 당긴다.
+  text.setX(Math.round(floatCenter(x, text.width, bounds.left, bounds.right)));
   scene.tweens.add({
     targets: text,
     y: text.y - 14,
