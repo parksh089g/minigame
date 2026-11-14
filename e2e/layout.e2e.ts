@@ -22,6 +22,13 @@ import { hiddenTexts, it, openApp, startScene, tapText, textPoint, textsOutsideC
 const TICKET_TITLE = '무기 강화권';
 const LEVEL_UP_TITLE = '레벨 업!';
 
+/**
+ * 창이 뜨거나 판이 이어지기를 기다리는 시간. 창은 게임 시간으로 잠깐 뒤에 뜨고(강화권은 0.55초) 처음 뜰 때는 글자와
+ * 아이콘을 새로 그려서, 느린 기계에서는 기본 5초를 넘긴다. 여기서 CPU를 20배 느리게 하면 첫 강화권 창이 뜨는 데 4.5초,
+ * 30배면 판이 시작되는 데에도 5초 넘게 걸렸고, GitHub의 기계에서도 첫 강화권 창을 5초 안에 못 본 적이 있다.
+ */
+const WAIT = { timeout: 20_000 } as const;
+
 /** 등불지기 장면에서 이 점검이 들여다보는 것 */
 interface LanternView {
   phase: string;
@@ -88,14 +95,16 @@ it('등불지기 잔치의 밤: 고르는 창, 강화권 카드 넷~여섯 장(�
 
   // 준비 화면의 잔치의 밤 단추를 눌러 고르는 창을 띄우고, 쉬움을 고른다.
   await tapText(page, LANTERN_SCENE, '잔치의 밤');
-  await expect.poll(() => textPoint(page, LANTERN_SCENE, '쉬움'), { message: '고르는 창이 떠야 한다' }).not.toBeNull();
+  await expect.poll(() => textPoint(page, LANTERN_SCENE, '쉬움'), { ...WAIT, message: '고르는 창이 떠야 한다' }).not.toBeNull();
   expect(await hiddenTexts(page, LANTERN_SCENE, { from: '쉬움' }), '고르는 창').toEqual([]);
   expect(await textsOutsideCards(page, LANTERN_SCENE, '쉬움'), '고르는 창의 카드').toEqual([]);
   await tapText(page, LANTERN_SCENE, '쉬움');
-  await expect.poll(() => textPoint(page, LANTERN_SCENE, '잔치의 밤 · 쉬움'), { message: '단추에 고른 난이도가 적혀야 한다' }).not.toBeNull();
+  await expect
+    .poll(() => textPoint(page, LANTERN_SCENE, '잔치의 밤 · 쉬움'), { ...WAIT, message: '단추에 고른 난이도가 적혀야 한다' })
+    .not.toBeNull();
 
   await tapText(page, LANTERN_SCENE, '출발!');
-  await expect.poll(() => phaseOf(page), { message: '판이 시작되어야 한다' }).toBe('run');
+  await expect.poll(() => phaseOf(page), { ...WAIT, message: '판이 시작되어야 한다' }).toBe('run');
 
   // 강화권은 가진 무기 가운데 더 올릴 수 있는 것을 모두 카드로 보여 준다. 잔치의 밤에서는 여섯 장까지 된다.
   // 진화 카드는 설명이 길어 두 줄이 되므로, 설명이 가장 긴 무기들로 카드가 가장 높아야 하는 때도 본다.
@@ -118,7 +127,9 @@ it('등불지기 잔치의 밤: 고르는 창, 강화권 카드 넷~여섯 장(�
       },
       [LANTERN_SCENE, ticket.weapons, ticket.level] as const,
     );
-    await expect.poll(() => textPoint(page, LANTERN_SCENE, TICKET_TITLE), { message: '강화권 창이 떠야 한다' }).not.toBeNull();
+    await expect
+      .poll(() => textPoint(page, LANTERN_SCENE, TICKET_TITLE), { ...WAIT, message: `${ticket.name}: 강화권 창이 떠야 한다` })
+      .not.toBeNull();
     const hidden = await hiddenTexts(page, LANTERN_SCENE, { from: TICKET_TITLE, clearTop: await hudHeight(page) });
     expect(hidden, ticket.name).toEqual([]);
     expect(await textsOutsideCards(page, LANTERN_SCENE, TICKET_TITLE), ticket.name).toEqual([]);
@@ -128,23 +139,23 @@ it('등불지기 잔치의 밤: 고르는 창, 강화권 카드 넷~여섯 장(�
     await expect(async () => {
       await tapText(page, LANTERN_SCENE, firstTitle);
       expect(await textPoint(page, LANTERN_SCENE, TICKET_TITLE)).toBeNull();
-    }).toPass({ timeout: 10_000 });
-    await expect.poll(() => phaseOf(page)).toBe('run');
+    }).toPass(WAIT);
+    await expect.poll(() => phaseOf(page), { ...WAIT, message: `${ticket.name}: 판이 이어져야 한다` }).toBe('run');
   }
 
   // 무기 여섯을 든 빌드를 일시정지 화면에서 본다.
   await page.evaluate((key) => (window.__pocketArcade?.scene.getScene(key) as unknown as LanternView).pauseGame(), LANTERN_SCENE);
   await waitForScene(page, SCENE.pause);
-  await expect.poll(() => textPoint(page, SCENE.pause, '계속하기')).not.toBeNull();
+  await expect.poll(() => textPoint(page, SCENE.pause, '계속하기'), WAIT).not.toBeNull();
   expect(await hiddenTexts(page, SCENE.pause), '일시정지 빌드').toEqual([]);
   await tapText(page, SCENE.pause, '계속하기');
-  await expect.poll(() => phaseOf(page)).toBe('run');
+  await expect.poll(() => phaseOf(page), WAIT).toBe('run');
 
   // 레벨업 창: 카드 셋과 다시 뽑기
   await page.evaluate((key) => {
     (window.__pocketArcade?.scene.getScene(key) as unknown as LanternView).sim!.state.pendingLevelUps = 1;
   }, LANTERN_SCENE);
-  await expect.poll(() => textPoint(page, LANTERN_SCENE, LEVEL_UP_TITLE), { message: '레벨업 창이 떠야 한다' }).not.toBeNull();
+  await expect.poll(() => textPoint(page, LANTERN_SCENE, LEVEL_UP_TITLE), { ...WAIT, message: '레벨업 창이 떠야 한다' }).not.toBeNull();
   const hidden = await hiddenTexts(page, LANTERN_SCENE, { from: LEVEL_UP_TITLE, clearTop: await hudHeight(page) });
   expect(hidden, '레벨업 창').toEqual([]);
   expect(await textsOutsideCards(page, LANTERN_SCENE, LEVEL_UP_TITLE), '레벨업 창의 카드').toEqual([]);
@@ -192,6 +203,6 @@ it('결과 카드: 기록 일곱 줄과 랭킹 줄에 무기 여섯의 피해 �
     [LANTERN_SCENE, LANTERN_GAME_ID, WEAPON_ORDER.slice(0, 6).map((id) => iconKey(id))] as const,
   );
   await waitForScene(page, SCENE.result);
-  await expect.poll(() => textPoint(page, SCENE.result, '무기별 피해 (%)'), { message: '피해 줄이 빠지지 않아야 한다' }).not.toBeNull();
+  await expect.poll(() => textPoint(page, SCENE.result, '무기별 피해 (%)'), { ...WAIT, message: '피해 줄이 빠지지 않아야 한다' }).not.toBeNull();
   expect(await hiddenTexts(page, SCENE.result), '결과 카드').toEqual([]);
 });
