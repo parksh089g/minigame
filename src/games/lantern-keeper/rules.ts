@@ -851,7 +851,25 @@ export function upgradeTitle(upgrade: Upgrade): string {
   }
 }
 
-export function upgradeDescription(upgrade: Upgrade): string {
+/**
+ * 손거울 카드에 적는 글: 덤의 힘이 이만큼일 때 무기마다 몇 개가 더 나가고, 덜 여문 하나는 얼마나 아픈지.
+ * volley와 같은 셈이다. 힘이 1을 넘지 않으면 하나가 더 나가고, 넘으면 넘는 만큼이 또 하나가 된다
+ * (손거울을 다 올리고 영구 강화 곁불까지 들고 온 판).
+ */
+export function echoText(echo: number): string {
+  const extras = volley(0, echo);
+  if (extras.length === 0) return PASSIVES.mirror.perLevel;
+  const percent = Math.round(extras[extras.length - 1] * 100);
+  if (extras.length === 1) return `무기마다 하나 더, 그 하나의 피해 ${percent}%`;
+  const count = extras.length === 2 ? '둘' : `${extras.length}개`;
+  return percent < 100 ? `무기마다 ${count} 더, 그중 하나의 피해 ${percent}%` : `무기마다 ${count} 더`;
+}
+
+/**
+ * 선택 카드에 적는 설명. meta는 이 판에 들고 온 영구 강화의 단계다.
+ * 손거울처럼 영구 강화가 더해지는 것은 그것까지 더한 값을 적는다. 주지 않으면 영구 강화가 없는 판으로 본다.
+ */
+export function upgradeDescription(upgrade: Upgrade, meta: Levels<MetaId> = {}): string {
   switch (upgrade.type) {
     case 'weapon':
       return isEvolved(upgrade.level)
@@ -865,9 +883,8 @@ export function upgradeDescription(upgrade: Upgrade): string {
         return `쓰러진 그림자가 ${Math.round(sparkChance(upgrade.level) * 100)}% 확률로 터진다`;
       }
       // 손거울은 덤으로 나가는 하나가 이 레벨에서 얼마나 아픈지를 적는다. "+20%"라고만 적으면 더 센 하나로 읽힌다.
-      if (upgrade.id === 'mirror') {
-        return `무기마다 하나 더, 그 하나의 피해 ${Math.round(echoPower(upgrade.level) * 100)}%`;
-      }
+      // 곁불을 들고 온 판에서는 그만큼이 더해져서 나가므로(modifiers와 같은 셈), 카드에도 더한 값을 적는다.
+      if (upgrade.id === 'mirror') return echoText(echoPower(upgrade.level, meta.echo ?? 0));
       return PASSIVES[upgrade.id].perLevel;
     case 'boon':
       return BOONS[upgrade.id].description;

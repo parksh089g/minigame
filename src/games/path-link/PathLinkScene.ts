@@ -39,13 +39,14 @@ import {
   isLinked,
   isOver,
   isSolved,
-  levelRun,
+  levelPuzzle,
   levelStage,
   linkedCount,
   newRun,
   nextStage,
   openCells,
   pendingPoints,
+  puzzleRun,
   START_SECONDS,
   startStroke,
   stickyCellAt,
@@ -54,6 +55,7 @@ import {
   type BoardLayout,
   type ClearReward,
   type Path,
+  type Puzzle,
   type RunState,
 } from './rules';
 
@@ -141,6 +143,13 @@ interface Stroke {
    */
   pending: Board | null;
 }
+
+/**
+ * 단계 모드에서 가장 최근에 만든 문제. 단계 모드의 문제는 단계 번호로 정해져서 다시 만들어도 똑같은 문제가 나오는데,
+ * 만드는 데 시간이 걸린다(판 여럿을 만들어 그 가운데 하나를 고르느라, 느린 기기에서는 반 초쯤 화면이 멈춘다).
+ * 그래서 같은 단계를 다시 할 때는 만들어 둔 것을 그대로 쓴다. 문제는 바뀌지 않는 값이라(길을 그릴 때마다 새 판을 만든다) 다시 써도 된다.
+ */
+let lastLevelPuzzle: { level: number; puzzle: Puzzle } | null = null;
 
 /**
  * 길 잇기: 같은 모양의 점 두 개를 선으로 잇는다. 선끼리 겹칠 수 없고, 모든 쌍을 이으면서
@@ -270,9 +279,14 @@ export class PathLinkScene extends MiniGameScene {
     }
   }
 
+  /** 단계 모드의 그 단계의 문제. 방금 한 단계를 다시 하는 것이면 만들어 둔 문제를 그대로 준다. */
+  private levelPuzzle(level: number): Puzzle {
+    if (lastLevelPuzzle?.level !== level) lastLevelPuzzle = { level, puzzle: levelPuzzle(level, this.levelRandom()) };
+    return lastLevelPuzzle.puzzle;
+  }
+
   private resetState(): void {
-    this.run =
-      this.stageLevel === null ? newRun(Math.random) : levelRun(this.stageLevel, this.levelRandom());
+    this.run = this.stageLevel === null ? newRun(Math.random) : puzzleRun(this.levelPuzzle(this.stageLevel));
     this.layout = { cell: 0, left: 0, top: 0 };
     this.stroke = null;
     this.started = false;

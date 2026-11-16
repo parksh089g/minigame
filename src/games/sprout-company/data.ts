@@ -228,7 +228,10 @@ export interface LeadLevel {
   delay: number;
   /** true면 특기에 맞는 카드를 골라서 맡긴다. 아니면 맨 앞의 카드를 준다. */
   match: boolean;
-  /** 이 단계가 되면 달라지는 것. 직원 창에 보인다. */
+  /**
+   * 이 단계가 되면 달라지는 것. 직원 창의 팀장 줄에 값 버튼과 나란히 적히므로 짧게 적는다
+   * (작은 글씨로 108px, 한글 열두 자쯤을 넘으면 그 줄만 글씨가 줄어든다).
+   */
   description: string;
 }
 
@@ -239,9 +242,9 @@ export interface LeadLevel {
 export const LEAD: { unlockOffice: number; levels: readonly LeadLevel[] } = {
   unlockOffice: 1,
   levels: [
-    { cost: 800, delay: 3, match: false, description: '쉬는 친구에게 카드를 알아서 맡겨요' },
+    { cost: 800, delay: 3, match: false, description: '카드를 알아서 맡겨 줘요' },
     { cost: 6000, delay: 1.5, match: false, description: '카드를 두 배 빨리 맡겨요' },
-    { cost: 40000, delay: 0.5, match: true, description: '특기에 맞는 카드를 바로 맡겨요' },
+    { cost: 40000, delay: 0.5, match: true, description: '특기에 맞춰 바로 맡겨요' },
   ],
 };
 

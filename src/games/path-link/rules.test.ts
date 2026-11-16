@@ -22,6 +22,8 @@ import {
   isOver,
   isSolved,
   LATE_SECONDS_STEP,
+  levelPuzzle,
+  levelRun,
   linkedCount,
   MAX_CELL,
   MAX_GENERATE_ATTEMPTS,
@@ -39,6 +41,7 @@ import {
   pairRange,
   pendingPoints,
   puzzleFrom,
+  puzzleRun,
   SIZE_PLANS,
   stageSize,
   START_SECONDS,
@@ -944,5 +947,43 @@ describe('판의 차례와 시간, 점수', () => {
     const whole = { ...run, board: solved(run.board.puzzle) };
     expect(pendingPoints(whole)).toBe(0);
     expect(finalScore(claimClear(whole).run)).toBe(55 + clearPoints(1));
+  });
+});
+
+describe('단계 모드의 문제와 판', () => {
+  it('단계의 판은 그 단계의 문제로 연 판과 같다', () => {
+    for (const level of [1, 37, 100]) {
+      const puzzle = levelPuzzle(level, seeded(level));
+      expect(levelPuzzle(level, seeded(level))).toEqual(puzzle);
+      expect(levelRun(level, seeded(level))).toEqual(puzzleRun(puzzle));
+      expect(puzzleRun(puzzle).board.puzzle).toBe(puzzle);
+    }
+    expect(levelPuzzle(1, seeded(1)).dots).not.toEqual(levelPuzzle(100, seeded(100)).dots);
+  });
+
+  it('같은 문제로 판을 다시 열면 빈 판에서 시작하고, 앞의 판에 그린 길이 문제에도 새 판에도 남지 않는다', () => {
+    // 같은 단계를 다시 할 때는 문제를 다시 만들지 않고 만들어 둔 것으로 새 판을 연다.
+    const puzzle = levelPuzzle(50, seeded(50));
+    const before = JSON.stringify(puzzle);
+    const first = puzzleRun(puzzle);
+    expect(first).toMatchObject({ stage: 1, timeLeft: START_SECONDS, score: 0, boardsCleared: 0, pairsLinked: 0 });
+    expect(coveredCount(first.board)).toBe(0);
+
+    // 앞의 판에서 길을 하나 그려 보고, 끝까지 풀어서 깨 본다.
+    const half = { ...first, board: drawn(first.board, puzzle.solution[0]) };
+    expect(coveredCount(half.board)).toBe(puzzle.solution[0].length);
+    const cleared = claimClear({ ...first, board: solved(puzzle) });
+    expect(cleared.reward).not.toBeNull();
+    expect(cleared.run.boardsCleared).toBe(1);
+
+    const again = puzzleRun(puzzle);
+    expect(again).toEqual(first);
+    expect(again.board).not.toBe(first.board);
+    expect(again.board.puzzle).toBe(puzzle);
+    expect(coveredCount(again.board)).toBe(0);
+    expect(coveredCount(first.board)).toBe(0);
+    expect(JSON.stringify(puzzle)).toBe(before);
+    // 다시 연 판도 저장된 풀이대로 풀린다.
+    expect(isSolved(solved(again.board.puzzle))).toBe(true);
   });
 });
