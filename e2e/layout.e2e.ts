@@ -18,6 +18,7 @@ import {
   WEAPONS,
   type WeaponId,
 } from '../src/games/lantern-keeper/data';
+import { GARDEN_SCENE, UPGRADE_ORDER, UPGRADES } from '../src/games/garden-guard/data';
 import { iconKey } from '../src/games/lantern-keeper/icons';
 import { NEWS_GAP, newsLine, normalizeMeta, unknownNews } from '../src/games/lantern-keeper/meta';
 import { echoText, upgradeDescription, upgradeTitle, type Upgrade } from '../src/games/lantern-keeper/rules';
@@ -1092,4 +1093,116 @@ it('색깔 물 나누기와 길 잇기의 단계 도전: 하던 단계를 다시
     expect(back.dealt, `${game.name}: 돌아온 ${top}단계의 판`).toEqual(made(top));
     expect(back.untouched, `${game.name}: 돌아온 판의 처음 모습`).toBe(true);
   }
+});
+
+/** 텃밭 지키기 장면에서 이 점검이 들여다보는 것 */
+interface GardenView {
+  run: { fence: number; day: number; phase: string } | null;
+}
+
+/** 텃밭 지키기의 판 밖 진행을 앱이 읽기 전에 넣어 둔다. 저장하는 곳과 이름은 garden-guard/store.ts와 같다. */
+async function seedGardenMeta(page: Page, meta: object): Promise<void> {
+  await page.evaluate(
+    (value) =>
+      new Promise<void>((resolve, reject) => {
+        const open = indexedDB.open('pocket-arcade-garden');
+        open.onupgradeneeded = () => open.result.createObjectStore('kv');
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const tx = open.result.transaction('kv', 'readwrite');
+          tx.objectStore('kv').put(value, 'meta');
+          tx.oncomplete = () => {
+            open.result.close();
+            resolve();
+          };
+          tx.onerror = () => reject(tx.error);
+        };
+      }),
+    meta,
+  );
+}
+
+/** 텃밭 지키기 장면에 보이는 글자들 */
+const gardenTexts = (page: Page): Promise<string[]> =>
+  page.evaluate((key) => {
+    const scene = window.__pocketArcade?.scene.getScene(key);
+    if (!scene) return [];
+    return scene.children.list.flatMap((item) => {
+      const text = item as Phaser.GameObjects.Text;
+      return item.type === 'Text' && text.visible && text.alpha > 0 ? [text.text] : [];
+    });
+  }, GARDEN_SCENE);
+
+/** 강화 목록 아래의 "다음 쪽" 버튼 자리. 시작하는 날을 고르는 버튼도 같은 그림을 쓰므로 가장 위의 것을 고른다. */
+const gardenNextPage = (page: Page): Promise<{ x: number; y: number } | null> =>
+  page.evaluate((key) => {
+    const scene = window.__pocketArcade?.scene.getScene(key);
+    if (!scene) return null;
+    const arrows = scene.children.list.filter((item): item is Phaser.GameObjects.Image => {
+      const image = item as Phaser.GameObjects.Image;
+      return item.type === 'Image' && image.texture.key === 'icon-play' && image.visible && image.alpha === 1;
+    });
+    arrows.sort((a, b) => a.y - b.y);
+    return arrows.length > 0 ? { x: arrows[0].x, y: arrows[0].y } : null;
+  }, GARDEN_SCENE);
+
+it('텃밭 지키기: 준비 화면의 강화 줄(모든 쪽)과 판 화면이 가려지지 않고, 판이 끝나면 씨앗과 기록이 남은 준비 화면으로 돌아온다', async ({ page }) => {
+  await openApp(page);
+  // 대장을 둘 넘겨서 시작하는 날을 고를 수 있고, 강화의 값과 효과가 길게 적히는 저장.
+  const levels = Object.fromEntries(UPGRADE_ORDER.map((id) => [id, Math.min(UPGRADES[id].maxLevel - 1, 9)]));
+  await seedGardenMeta(page, {
+    version: 1,
+    seeds: 98765,
+    levels,
+    best: 13,
+    runs: 21,
+    kills: 2890,
+    startDay: 6,
+    savedAt: Date.now() + 60_000,
+  });
+  await page.reload();
+  await waitForScene(page, 'Hub');
+  await startScene(page, GARDEN_SCENE);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, '출발!'), { ...WAIT, message: '준비 화면이 떠야 한다' }).not.toBeNull();
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, '최고 13일째'), { ...WAIT, message: '넣어 둔 저장을 읽어야 한다' }).not.toBeNull();
+  expect(await textPoint(page, GARDEN_SCENE, '6일째'), '시작하는 날을 고르는 칸').not.toBeNull();
+
+  // 강화 목록을 끝 쪽까지 넘겨 가며 본다. 강화마다 이름이 한 번씩은 보여야 한다.
+  const seen = new Set<string>();
+  for (let turn = 0; turn < UPGRADE_ORDER.length; turn += 1) {
+    expect(await hiddenTexts(page, GARDEN_SCENE), `준비 화면 ${turn + 1}쪽`).toEqual([]);
+    const texts = await gardenTexts(page);
+    const before = seen.size;
+    for (const id of UPGRADE_ORDER) if (texts.includes(UPGRADES[id].name)) seen.add(id);
+    if (seen.size === UPGRADE_ORDER.length || seen.size === before) break;
+    const next = await gardenNextPage(page);
+    if (!next) break;
+    await tapAt(page, next.x, next.y);
+    await page.waitForTimeout(200);
+  }
+  expect([...seen].sort(), '모든 강화가 목록에 나와야 한다').toEqual([...UPGRADE_ORDER].sort());
+
+  // 판을 시작한다. 고른 날(6일째)에서 시작하고, 위쪽 띠와 울타리의 글자가 가려지지 않는다.
+  await tapText(page, GARDEN_SCENE, '출발!');
+  const runOf = (): Promise<GardenView['run']> =>
+    page.evaluate((key) => {
+      const run = (window.__pocketArcade?.scene.getScene(key) as unknown as GardenView | null)?.run;
+      return run ? { fence: run.fence, day: run.day, phase: run.phase } : null;
+    }, GARDEN_SCENE);
+  await expect.poll(async () => (await runOf())?.day, { ...WAIT, message: '판이 시작되어야 한다' }).toBe(6);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, '6일째'), WAIT).not.toBeNull();
+  expect(await hiddenTexts(page, GARDEN_SCENE), '판 화면').toEqual([]);
+
+  // 울타리를 무너뜨려 판을 끝내고, 결과 화면에서 다시 하기를 누르면 준비 화면이다.
+  await page.evaluate((key) => {
+    const run = (window.__pocketArcade?.scene.getScene(key) as unknown as GardenView).run;
+    if (run) run.fence = 0;
+  }, GARDEN_SCENE);
+  await waitForScene(page, SCENE.result);
+  await tapText(page, SCENE.result, '다시 하기');
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, '출발!'), { ...WAIT, message: '준비 화면으로 돌아와야 한다' }).not.toBeNull();
+  const after = await gardenTexts(page);
+  expect(after.some((text) => text.startsWith('22판')), `판 수가 하나 늘어야 한다: ${after.join(' / ')}`).toBe(true);
+  expect(after, '고른 시작 날이 그대로 남아야 한다').toContain('6일째');
+  expect(await hiddenTexts(page, GARDEN_SCENE), '돌아온 준비 화면').toEqual([]);
 });
