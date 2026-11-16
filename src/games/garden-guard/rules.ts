@@ -4,6 +4,7 @@
  */
 import {
   BOSS_EVERY,
+  BOSS_ROTATION,
   COMMON_KINDS,
   DAY,
   ENEMIES,
@@ -11,6 +12,7 @@ import {
   FIELD,
   GUN,
   STEP,
+  SWARM,
   UPGRADE_ORDER,
   UPGRADES,
   type EnemyKind,
@@ -67,6 +69,12 @@ export function isBossDay(day: number): boolean {
   return day > 0 && day % BOSS_EVERY === 0;
 }
 
+/** 그날 나오는 대장. 대장의 날마다 BOSS_ROTATION을 차례로 돈다(5일째 두더지, 10일째 장수풍뎅이, ...). 대장의 날이 아니면 null */
+export function bossKind(day: number): EnemyKind | null {
+  if (!isBossDay(day)) return null;
+  return BOSS_ROTATION[(day / BOSS_EVERY - 1) % BOSS_ROTATION.length];
+}
+
 /**
  * 그날 나오는 대장의 수. 대장의 날마다 하나다.
  * 대장을 둘, 셋으로 늘리면 그날만 갑자기 두 배가 되어서 그 앞에서 오래 막혔다. 세지는 것은 체력의 배율에 맡긴다.
@@ -105,7 +113,8 @@ export interface Spawn {
 /**
  * 그날 나올 벌레를 나오는 차례대로 정한다. random은 0 이상 1 미만의 수를 돌려주는 함수다.
  * 나오는 때는 시간을 고르게 나눈 칸 안에서 흔들어서, 몰려 나오기도 하지만 한꺼번에 다 나오지는 않는다.
- * 대장은 날이 시작되고 곧 가운데에서 나온다.
+ * 떼로 오는 벌레(모기)는 한 번 뽑히면 그 수만큼의 칸을 쓰고, 한자리에 붙어서 거의 한꺼번에 나온다.
+ * 그래서 그날 나오는 벌레의 수는 떼가 섞여도 dayCount와 같다. 대장은 날이 시작되고 곧 가운데에서 나온다.
  */
 export function planDay(day: number, random: () => number): Spawn[] {
   const count = dayCount(day);
@@ -113,7 +122,8 @@ export function planDay(day: number, random: () => number): Spawn[] {
   const weights = COMMON_KINDS.map((kind) => kindWeight(kind, day));
   const total = weights.reduce((sum, weight) => sum + weight, 0);
   const spawns: Spawn[] = [];
-  for (let index = 0; index < count; index += 1) {
+  let index = 0;
+  while (index < count) {
     let roll = random() * total;
     let kind: EnemyKind = COMMON_KINDS[0];
     for (let pick = 0; pick < COMMON_KINDS.length; pick += 1) {
@@ -123,15 +133,24 @@ export function planDay(day: number, random: () => number): Spawn[] {
         break;
       }
     }
-    spawns.push({
-      at: ((index + random()) / count) * window,
-      kind,
-      x: FIELD.margin + random() * (FIELD.width - FIELD.margin * 2),
-    });
+    const at = ((index + random()) / count) * window;
+    const x = FIELD.margin + random() * (FIELD.width - FIELD.margin * 2);
+    const group = Math.min(ENEMIES[kind].swarm ?? 1, count - index);
+    for (let member = 0; member < group; member += 1) {
+      // 가운데에서 좌우로 번갈아 벌어지게 놓되, 판 안쪽을 벗어나지 않게 한다.
+      const offset = Math.ceil(member / 2) * (member % 2 === 0 ? 1 : -1) * SWARM.spread;
+      spawns.push({
+        at: Math.min(window, at + member * SWARM.stagger),
+        kind,
+        x: Math.min(FIELD.width - FIELD.margin, Math.max(FIELD.margin, x + offset)),
+      });
+    }
+    index += group;
   }
+  const boss = bossKind(day);
   const bosses = bossCount(day);
-  for (let index = 0; index < bosses; index += 1) {
-    spawns.push({ at: 1.5 + index * 6, kind: 'mole', x: (FIELD.width * (index + 1)) / (bosses + 1) });
+  for (let index = 0; boss && index < bosses; index += 1) {
+    spawns.push({ at: 1.5 + index * 6, kind: boss, x: (FIELD.width * (index + 1)) / (bosses + 1) });
   }
   return spawns.sort((a, b) => a.at - b.at);
 }

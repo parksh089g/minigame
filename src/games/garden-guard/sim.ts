@@ -4,6 +4,8 @@
  * 자동 플레이(bot.ts)와 테스트도 같은 step을 돌려서, 화면에서 하는 판과 숫자가 같다.
  */
 import {
+  CHARGE,
+  DIG,
   ENEMIES,
   FIELD,
   DAY,
@@ -53,7 +55,7 @@ export interface Enemy {
   /** 찬물에 젖어 느려진 정도(0~1)와 남은 시간(초) */
   slow: number;
   slowLeft: number;
-  /** 대장이 다음에 부하를 부를 때까지 남은 시간(초) */
+  /** 대장이 다음에 솜씨를 부릴 때까지 남은 시간(초): 두더지는 부하를 부르고, 장수풍뎅이는 돌진을 마친다. */
   summonIn: number;
   /** 방금 맞아서 번쩍이는 남은 시간(초). 화면이 읽는다. */
   flash: number;
@@ -225,17 +227,39 @@ function spawnEnemy(state: RunState, kind: EnemyKind, x: number, y: number, even
     clock: roll(state) * (def.gait === 'weave' ? WEAVE.period : HOP.rest),
     slow: 0,
     slowLeft: 0,
-    summonIn: SUMMON.every,
+    summonIn: def.skill === 'charge' ? CHARGE.every : SUMMON.every,
     flash: 0,
   });
   events.push({ type: 'spawn', kind, x: homeX });
+}
+
+/** 땅강아지가 땅속에 숨어 있는지. 숨은 동안에는 물방울도 물벼락도 닿지 않고, 아무도 겨누지 않는다. */
+export function isBuried(enemy: Enemy): boolean {
+  return ENEMIES[enemy.kind].gait === 'dig' && enemy.y > DIG.from && enemy.y < DIG.to;
+}
+
+/**
+ * 장수풍뎅이가 돌진의 어느 때에 있는지. summonIn이 거꾸로 세는 박자에서 끝의 rush초는 내달리고,
+ * 그 앞의 windup초는 멈춰서 웅크린다. 돌진하지 않는 벌레와 울타리를 갉고 있는 벌레는 늘 walk다.
+ */
+export function chargePhase(enemy: Enemy): 'walk' | 'windup' | 'rush' {
+  if (ENEMIES[enemy.kind].skill !== 'charge' || enemy.biting) return 'walk';
+  if (enemy.summonIn <= CHARGE.rush) return 'rush';
+  if (enemy.summonIn <= CHARGE.rush + CHARGE.windup) return 'windup';
+  return 'walk';
+}
+
+/** 걸음새가 바꾸는 빠르기의 배율(돌진하면 빨라지고 웅크리면 멈춘다) */
+function gaitPace(enemy: Enemy): number {
+  const phase = chargePhase(enemy);
+  return phase === 'rush' ? CHARGE.speed : phase === 'windup' ? 0 : 1;
 }
 
 /** 벌레가 지금 한 초에 내려오는 거리(느려진 것까지 셈해서). 뛰는 벌레는 평균으로 친다. */
 function paceOf(enemy: Enemy): number {
   if (enemy.biting) return 0;
   const slow = enemy.slowLeft > 0 ? 1 - enemy.slow : 1;
-  return ENEMIES[enemy.kind].speed * slow;
+  return ENEMIES[enemy.kind].speed * slow * gaitPace(enemy);
 }
 
 function moveEnemy(state: RunState, enemy: Enemy, dt: number, events: SimEvent[]): void {
@@ -247,7 +271,7 @@ function moveEnemy(state: RunState, enemy: Enemy, dt: number, events: SimEvent[]
 
   if (!enemy.biting) {
     enemy.clock += dt * slow;
-    let step = def.speed * slow * dt;
+    let step = def.speed * slow * gaitPace(enemy) * dt;
     if (def.gait === 'hop') {
       // 쉬는 동안에는 서 있다가, 뛰는 짧은 동안에 한 박자의 거리를 한꺼번에 간다.
       const beat = HOP.rest + HOP.leap;
@@ -273,7 +297,11 @@ function moveEnemy(state: RunState, enemy: Enemy, dt: number, events: SimEvent[]
     }
   }
 
-  if (def.boss) {
+  if (def.skill === 'charge') {
+    // 젖어서 느려지면 웅크리고 내달리는 박자도 같이 느려진다.
+    enemy.summonIn -= dt * slow;
+    if (enemy.summonIn <= 0) enemy.summonIn += CHARGE.every;
+  } else if (def.skill === 'summon') {
     enemy.summonIn -= dt;
     if (enemy.summonIn <= 0) {
       enemy.summonIn += SUMMON.every;
@@ -310,7 +338,7 @@ export function autoAim(state: RunState, from: { x: number; y: number }, nearest
   let target: Enemy | null = null;
   let best = Infinity;
   for (const enemy of state.enemies) {
-    if (enemy.y < 0 || enemy.hp <= 0) continue;
+    if (enemy.y < 0 || enemy.hp <= 0 || isBuried(enemy)) continue;
     // 물총은 울타리에 가까운 것부터, 해바라기는 제게 가까운 것부터 쏜다.
     const value = nearest ? Math.hypot(enemy.x - from.x, enemy.y - from.y) : -enemy.y;
     if (value < best) {
@@ -391,7 +419,7 @@ function fireHelpers(state: RunState, dt: number, events: SimEvent[]): void {
 function castStorm(state: RunState, events: SimEvent[]): void {
   state.stormIn = state.stats.stormCooldown;
   for (const enemy of state.enemies) {
-    if (enemy.y < -ENEMIES[enemy.kind].radius) continue;
+    if (enemy.y < -ENEMIES[enemy.kind].radius || isBuried(enemy)) continue;
     hurt(enemy, state.stats.stormDamage, true);
     // 대장은 덩치가 커서 반만 느려진다.
     const slow = ENEMIES[enemy.kind].boss ? STORM.slow / 2 : STORM.slow;
@@ -409,7 +437,7 @@ function moveShots(state: RunState, dt: number, events: SimEvent[]): void {
     shot.y += shot.vy * dt;
     let spent = false;
     for (const enemy of state.enemies) {
-      if (enemy.hp <= 0 || shot.hit.includes(enemy.id)) continue;
+      if (enemy.hp <= 0 || shot.hit.includes(enemy.id) || isBuried(enemy)) continue;
       const reach = ENEMIES[enemy.kind].radius + GUN.shotRadius;
       if (Math.hypot(enemy.x - shot.x, enemy.y - shot.y) > reach) continue;
       const shell = hurt(enemy, shot.damage, shot.crit);
@@ -422,7 +450,7 @@ function moveShots(state: RunState, dt: number, events: SimEvent[]): void {
         }
         if (stats.splashRadius > 0) {
           for (const other of state.enemies) {
-            if (other === enemy || other.hp <= 0) continue;
+            if (other === enemy || other.hp <= 0 || isBuried(other)) continue;
             const span = stats.splashRadius + ENEMIES[other.kind].radius;
             if (Math.hypot(other.x - shot.x, other.y - shot.y) <= span) hurt(other, shot.damage * stats.splashRatio, false);
           }
