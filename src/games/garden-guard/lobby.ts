@@ -13,10 +13,14 @@ import { TEX, upgradeTexture } from './art';
 import { UPGRADE_ORDER, UPGRADES, type UpgradeId } from './data';
 import {
   buyUpgrade,
+  canBuy,
   canPlow,
+  costLabel,
   effectLine,
   FIELD_BONUS,
   levelOf,
+  needLine,
+  neededFor,
   plowField,
   PLOW_FROM,
   startDays,
@@ -31,6 +35,11 @@ export interface LobbyHooks {
   saved: { day: number } | null;
   getMeta: () => GardenMeta;
   setMeta: (meta: GardenMeta) => void;
+  /**
+   * 다른 곳(설치한 앱과 브라우저 탭)이 그사이 저장한 것이 있는지 저장을 다시 읽는다.
+   * 이 준비 화면을 연 뒤로 더 새것을 읽어 왔으면 true를 돌려주고, 그때는 준비 화면이 새 값으로 다시 열린다.
+   */
+  refresh: () => Promise<boolean>;
   onStart: () => void;
   /** 두고 간 판을 이어 한다. */
   onResume: () => void;
@@ -46,7 +55,7 @@ const ROW = { height: 36, gap: 4 } as const;
 const BUY = { width: 60, height: 26 } as const;
 /** 목록의 위쪽 끝 */
 const LIST_TOP = 76;
-/** 목록 아래의 설명 칸 */
+/** 목록 아래의 설명 칸. 글씨 10의 두 줄(높이 27)이 위아래로 조금 남게 들어간다. */
 const INFO_HEIGHT = 30;
 /** 맨 아래의 시작 줄: 시작하는 날을 고르는 칸과 출발 버튼 */
 const FOOT = { height: 36, bottom: 8 } as const;
@@ -56,6 +65,8 @@ const STEPPER_WIDTH = 116;
 export const INTRO_LINES = '벌레 떼가 울타리를 넘지 못하게 물총으로 지켜요.\n판이 끝나도 씨앗과 강화는 그대로 남아요.';
 /** 아직 아무 강화도 고르지 않았을 때 설명 칸에 적는 말 */
 export const INFO_HINT = '강화를 누르면 설명이 보여요';
+/** 값 버튼에 줄여 적은 값("1065만")의 강화를 골랐을 때, 설명 아래에 온전한 값을 적는다. */
+export const exactCost = (cost: number): string => `값은 씨앗 ${cost.toLocaleString('en-US')}개예요`;
 export const START_LABEL = '출발!';
 /** 시작하는 날을 바꿨을 때 설명 칸에 적는 말 */
 export const START_DAY_INFO = '고른 날부터 시작해요.\n대장을 물리치면 그다음 날이 열려요.';
@@ -145,6 +156,27 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
   /** "새 판"을 한 번 눌러서, 한 번 더 누르면 멈춘 판을 마치는 때인지 */
   let abandonArmed = false;
 
+  /** 이 준비 화면이 닫혔는지(판을 시작했거나, 나갔거나, 다시 열렸다) */
+  let closed = false;
+  scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+    closed = true;
+  });
+  let waiting: Promise<void> = Promise.resolve();
+  /**
+   * 씨앗과 강화, 기록을 바꾸는 일은 저장을 다시 읽고 나서 한다. 준비 화면을 띄워 둔 사이에 다른 곳이 저장한 것이 있으면
+   * 그 일은 하지 않는다: 읽어 둔 옛 값에서 셈해 통째로 쓰면 그사이의 씨앗과 강화, 최고 기록을 덮어쓰기 때문이다.
+   * 그때는 준비 화면이 새 값으로 다시 열리므로, 보고 다시 누르면 된다. 연달아 누른 것은 누른 차례대로 한다.
+   */
+  const withFresh = (action: () => void): void => {
+    waiting = waiting.then(async () => {
+      if (closed) return;
+      const changed = await hooks.refresh().catch(() => false);
+      if (changed || closed) return;
+      meta = hooks.getMeta();
+      action();
+    });
+  };
+
   addBackdrop(scene);
   new PixelButton(scene, {
     x: 8,
@@ -208,12 +240,12 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
   });
 
   const infoPanel = scene.add.graphics();
-  drawPanel(infoPanel, MARGIN, infoTop, WIDTH, INFO_HEIGHT - 3, { fill: THEME.butterSoft, shadow: null, radius: 9 });
+  drawPanel(infoPanel, MARGIN, infoTop, WIDTH, INFO_HEIGHT, { fill: THEME.butterSoft, shadow: null, radius: 9 });
   // 아무 강화도 고르지 않았을 때 설명 칸에 적는 말
   const idle = hooks.saved ? resumeInfo(hooks.saved.day) : INFO_HINT;
   const plowed = plowedFields !== null ? plowedNotice(plowedFields) : null;
   plowedFields = null;
-  const info = addText(scene, GAME_WIDTH / 2, infoTop + (INFO_HEIGHT - 3) / 2, plowed ?? hooks.notice ?? idle, {
+  const info = addText(scene, GAME_WIDTH / 2, infoTop + (INFO_HEIGHT) / 2, plowed ?? hooks.notice ?? idle, {
     size: 10,
     color: THEME_CSS.ink,
     originX: 0.5,
@@ -222,11 +254,17 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
     wrapWidth: WIDTH - 16,
     lineSpacing: 1,
   });
+  /** 고른 강화의 설명. 값을 줄여 적은 강화는 온전한 값을 한 줄 더 적는다. */
+  const infoFor = (id: UpgradeId): string => {
+    const cost = upgradeCost(id, levelOf(meta.levels, id));
+    const short = cost !== null && costLabel(cost) !== String(cost);
+    return short ? `${UPGRADES[id].blurb}\n${exactCost(cost)}` : UPGRADES[id].blurb;
+  };
   const showInfo = (id: UpgradeId | null): void => {
     // 다른 것을 눌렀으면 "새 판"은 처음부터 다시 묻는다.
     abandonArmed = false;
     picked = id;
-    info.setText(id ? UPGRADES[id].blurb : idle);
+    info.setText(id ? infoFor(id) : idle);
     for (const row of rows) drawRow(row);
   };
 
@@ -234,7 +272,9 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
     const level = levelOf(meta.levels, row.id);
     const def = UPGRADES[row.id];
     const cost = upgradeCost(row.id, level);
-    const affordable = cost !== null && meta.seeds >= cost;
+    const affordable = canBuy(meta, row.id);
+    // 먼저 있어야 하는 강화가 없으면(해바라기 없는 거름) 효과 대신 그것을 적고 팔지 않는다.
+    const needs = neededFor(meta.levels, row.id);
     row.panel.clear();
     drawPanel(row.panel, MARGIN, row.top, WIDTH, ROW.height, {
       depth: 2,
@@ -242,7 +282,7 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
       border: picked === row.id ? THEME.pinkDeep : undefined,
     });
     row.level.setText(level >= def.maxLevel ? '끝' : `${level}단계`).setX(row.nameRight + 5);
-    row.effect.setText(effectLine(row.id, level, meta.fields));
+    row.effect.setText(needs ? needLine(needs) : effectLine(row.id, level, meta.fields));
 
     const x = MARGIN + WIDTH - BUY.width - 6;
     const y = row.top + (ROW.height - BUY.height) / 2;
@@ -260,7 +300,7 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
     row.button.fillRoundedRect(x, y + offset, BUY.width, BUY.height - 3, 10);
     const middle = y + offset + (BUY.height - 3) / 2;
     row.cost
-      .setText(String(cost))
+      .setText(costLabel(cost))
       .setColor(affordable ? THEME_CSS.inkDeep : THEME_CSS.faint)
       .setOrigin(0, 0.5);
     // 씨앗 그림과 값을 한 덩어리로 가운데에 놓는다.
@@ -270,19 +310,22 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
     row.cost.setPosition(Math.round(left + 16), Math.round(middle));
   };
 
-  const buy = (id: UpgradeId): void => {
-    const next = buyUpgrade(meta, id);
-    showInfo(id);
-    if (next === meta) {
-      sfx.deny();
-      return;
-    }
-    meta = next;
-    hooks.setMeta(next);
-    sfx.coin();
-    seeds.set(meta.seeds);
-    for (const row of rows) drawRow(row);
-  };
+  const buy = (id: UpgradeId): void =>
+    withFresh(() => {
+      const next = buyUpgrade(meta, id);
+      showInfo(id);
+      if (next === meta) {
+        sfx.deny();
+        return;
+      }
+      meta = next;
+      hooks.setMeta(next);
+      sfx.coin();
+      seeds.set(meta.seeds);
+      // 다음 단계의 값으로 바뀐 설명을 다시 적는다.
+      info.setText(infoFor(id));
+      for (const row of rows) drawRow(row);
+    });
 
   /**
    * 새 밭 쪽: 준비 화면을 감추고, 두고 가는 것과 얻는 것과 남는 것을 적은 뒤 두 번 물어서 일군다.
@@ -296,14 +339,15 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
     }
     buildPlowPage(scene, meta, {
       onCancel: () => scene.scene.restart({}),
-      onPlow: () => {
-        const next = plowField(meta);
-        if (next === meta) return;
-        hooks.setMeta(next);
-        plowedFields = next.fields;
-        sfx.fanfare();
-        scene.scene.restart({});
-      },
+      onPlow: () =>
+        withFresh(() => {
+          const next = plowField(meta);
+          if (next === meta) return;
+          hooks.setMeta(next);
+          plowedFields = next.fields;
+          sfx.fanfare();
+          scene.scene.restart({});
+        }),
     });
   }
 
@@ -378,7 +422,7 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
       onTap: () => {
         // 멈춘 판은 되돌릴 수 없으니 한 번 더 묻는다.
         if (abandonArmed) {
-          hooks.onAbandon();
+          withFresh(hooks.onAbandon);
           return;
         }
         showInfo(null);
@@ -421,16 +465,17 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
   });
   const arrow = { width: 26, height: 24 } as const;
   const arrowY = footTop + (FOOT.height - 3 - arrow.height) / 2;
-  const step = (by: number): void => {
-    const at = days.indexOf(meta.startDay);
-    const next = days[Math.min(days.length - 1, Math.max(0, at + by))];
-    if (next === meta.startDay) return;
-    meta = { ...meta, startDay: next };
-    hooks.setMeta(meta);
-    drawStepper();
-    showInfo(null);
-    info.setText(START_DAY_INFO);
-  };
+  const step = (by: number): void =>
+    withFresh(() => {
+      const at = days.indexOf(meta.startDay);
+      const next = days[Math.min(days.length - 1, Math.max(0, at + by))];
+      if (next === meta.startDay) return;
+      meta = { ...meta, startDay: next };
+      hooks.setMeta(meta);
+      drawStepper();
+      showInfo(null);
+      info.setText(START_DAY_INFO);
+    });
   const prev = new PixelButton(scene, {
     x: MARGIN + 4,
     y: arrowY,
@@ -538,8 +583,8 @@ function buildPlowPage(scene: Phaser.Scene, meta: GardenMeta, actions: { onCance
   // 맨 아래: 설명 칸과, 그만두기·일구기 버튼. 일구기는 한 번 더 눌러야 일군다.
   const footTop = height - FOOT.bottom - FOOT.height;
   const infoTop = footTop - INFO_HEIGHT - 4;
-  drawPanel(scene.add.graphics(), MARGIN, infoTop, WIDTH, INFO_HEIGHT - 3, { fill: THEME.butterSoft, shadow: null, radius: 9 });
-  const info = addText(scene, GAME_WIDTH / 2, infoTop + (INFO_HEIGHT - 3) / 2, PLOW_INFO, {
+  drawPanel(scene.add.graphics(), MARGIN, infoTop, WIDTH, INFO_HEIGHT, { fill: THEME.butterSoft, shadow: null, radius: 9 });
+  const info = addText(scene, GAME_WIDTH / 2, infoTop + (INFO_HEIGHT) / 2, PLOW_INFO, {
     size: 10,
     color: THEME_CSS.ink,
     originX: 0.5,

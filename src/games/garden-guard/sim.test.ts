@@ -509,6 +509,21 @@ describe('하루', () => {
     state.dayKilled = 2;
     expect(runScore(state)).toBe(725);
   });
+
+  it('날을 지키고 쉬는 동안의 점수는 다음 날이 시작된 뒤와 같다', () => {
+    const state = start({ power: 30, rapid: 8 }, 3, 0, 5);
+    run(state, 120, { aim: null, storm: false });
+    // 날을 지켜서 강화를 고르기를 기다린다. 그날 쫓아낸 비율은 100%로 남아 있다.
+    expect(state.phase).toBe('rest');
+    expect(state.lastCleared).toBe(3);
+    expect(state.dayKilled).toBe(state.dayTotal);
+    expect(runScore(state)).toBe(300);
+    step(state, DT, { aim: null, storm: false, pick: 0 });
+    while (state.phase === 'rest') step(state, DT);
+    expect(state.day).toBe(4);
+    expect(state.dayKilled).toBe(0);
+    expect(runScore(state)).toBe(300);
+  });
 });
 
 describe('밸런스', () => {

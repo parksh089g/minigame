@@ -14,7 +14,7 @@ import { applyRun, bankSeeds, bossKind, clampStartDay, isBossDay, openedStart, r
 import { settleSavedRun } from './saved-run';
 import { createRun, runScore, step, stormReady, type Input, type RunState, type SimEvent } from './sim';
 import { gardenStore } from './store';
-import { FieldView, layoutField, toSim, type FieldLayout } from './view';
+import { aimDots, FieldView, layoutField, toSim, type FieldLayout } from './view';
 
 /**
  * 이 판에서 새로 열린 출발점(물리친 대장의 다음 날). 다음에 준비 화면을 열 때 한 번 알려 주고 지운다.
@@ -35,6 +35,8 @@ const STEP = 1 / 60;
 const MAX_FRAME = 0.1;
 /** 위쪽 HUD의 높이. 이 아래부터 판이다. */
 const HUD_HEIGHT = 46;
+/** 직접 겨눌 때의 점선: 물총에서 화면으로 잰 길이 from부터 to까지 gap마다 점을 찍는다. */
+const AIM_DOTS = { from: 26, to: 150, gap: 12 } as const;
 /**
  * 버튼(일시정지, 물벼락)은 층을 따로 정할 수 없어서 0층에 놓인다. 판은 그보다 아래에, HUD의 글자와 알림은 위에 둔다.
  * hudBack은 HUD 뒤를 덮는 바탕으로, 판보다는 위이고 버튼보다는 아래다.
@@ -188,11 +190,20 @@ export class GardenGuardScene extends MiniGameScene {
     // 이어 할 판이 있으면 시작하는 날을 고르지 않으므로, 새 출발점의 알림은 그 판을 마친 뒤로 미룬다.
     const opened = saved ? null : freshStart;
     if (!saved) freshStart = null;
+    // 준비 화면을 띄워 둔 사이에 다른 곳이 저장한 것을 읽어 왔으면(화면이 다시 보일 때, 사고팔기 직전에) 새 값으로 다시 연다.
+    // 나가는 중(입력이 꺼져 있다)에는 그대로 나간다. 다시 열리기 전까지 이 준비 화면에서는 더 사고팔지 않는다.
+    let stale = false;
+    const unwatch = gardenStore.watch(() => {
+      stale = true;
+      if (this.phase === 'lobby' && this.input.enabled) this.scene.restart({} satisfies StartData);
+    });
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, unwatch);
     buildLobby(this, {
       notice: opened !== null ? lobbyNotice(opened) : null,
       saved: saved ? { day: saved.state.day } : null,
       getMeta: () => gardenStore.data,
       setMeta: (meta) => gardenStore.set(meta),
+      refresh: async () => (await gardenStore.refresh()) || stale,
       onStart: () => this.scene.restart({ mode: 'run' } satisfies StartData),
       onResume: () => this.scene.restart({ mode: 'resume' } satisfies StartData),
       onAbandon: () => {
@@ -455,18 +466,15 @@ export class GardenGuardScene extends MiniGameScene {
     else if (state.t - this.savedT >= SAVE_EVERY) this.saveRun();
   }
 
-  /** 직접 겨누는 동안, 물총에서 누른 자리 쪽으로 옅은 점선을 그어 어디를 쏘는지 보여 준다. */
+  /** 직접 겨누는 동안, 물방울이 날아갈 길에 옅은 점선을 찍어 어디를 쏘는지 보여 준다. */
   private drawAim(state: RunState): void {
     const g = this.aimLine;
     g.clear();
     if (!state.manual) return;
-    const from = this.view.muzzle;
-    const angle = Math.atan2(Math.sin(state.aim) * this.layout.scaleY, Math.cos(state.aim));
     g.fillStyle(LOOK.drop, 0.45);
-    for (let distance = 26; distance < 150; distance += 12) {
-      const y = from.y + Math.sin(angle) * distance;
-      if (y < HUD_HEIGHT + 4) break;
-      g.fillCircle(from.x + Math.cos(angle) * distance, y, 1.6);
+    for (const dot of aimDots(this.layout, state.aim, AIM_DOTS.from, AIM_DOTS.to, AIM_DOTS.gap)) {
+      if (dot.y < HUD_HEIGHT + 4) break;
+      g.fillCircle(dot.x, dot.y, 1.6);
     }
   }
 

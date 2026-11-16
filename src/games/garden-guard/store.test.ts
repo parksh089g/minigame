@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { exportBundle, resetParts } from '../../core/bundle';
-import { GARDEN_GAME_ID } from './data';
-import { buyUpgrade, createMeta } from './rules';
+import { GARDEN_GAME_ID, UPGRADES } from './data';
+import { buyUpgrade, createMeta, MAX_DAY } from './rules';
 import type { SavedRun } from './saved-run';
 import { createRun } from './sim';
 import { GardenStore, gardenStore } from './store';
@@ -76,6 +76,56 @@ describe('텃밭의 저장', () => {
     expect(stale.seeds).toBe(5);
   });
 
+  it('다른 곳의 더 새 저장을 읽어 오면 알리고, 읽어 올 것이 없으면 알리지 않는다', async () => {
+    const a = await opened();
+    const b = await opened();
+    let told = 0;
+    const stop = b.watch(() => {
+      told += 1;
+    });
+    expect(await b.refresh()).toBe(false);
+    a.set({ ...a.data, seeds: 30 }, T);
+    await a.flush();
+    expect(await b.refresh()).toBe(true);
+    expect(told).toBe(1);
+    expect(b.data.seeds).toBe(30);
+    // 하던 판만 바뀌어도 알린다.
+    a.setRun(freshRun(6), T + 5);
+    await a.flush();
+    expect(await b.refresh()).toBe(true);
+    expect(told).toBe(2);
+    // 이 곳이 저장한 것과, 이미 읽어 온 것은 알리지 않는다.
+    b.set({ ...b.data, seeds: 1 }, T + 10);
+    expect(await b.refresh()).toBe(false);
+    expect(told).toBe(2);
+    // 그만 듣기로 하면 알리지 않는다.
+    stop();
+    a.set({ ...a.data, seeds: 99 }, T + 20);
+    await a.flush();
+    expect(await b.refresh()).toBe(true);
+    expect(told).toBe(2);
+  });
+
+  it('띄워 둔 사이에 다른 곳이 저장했으면, 다시 읽고 나서 사야 그것을 덮어쓰지 않는다', async () => {
+    const here = await opened();
+    here.set({ ...createMeta(), seeds: 100 }, T);
+    await here.flush();
+    const there = await opened();
+    there.set({ ...createMeta(), seeds: 5000, best: 12, bestEver: 12, runs: 9, startDay: 11, levels: { rapid: 4 } }, T + 50);
+    await there.flush();
+    // 읽어 둔 옛 값에서 셈하면 씨앗 88개와 센 물줄기 1단계만 남는다. 다시 읽은 값에서 셈한다.
+    expect(here.data.seeds).toBe(100);
+    expect(await here.refresh()).toBe(true);
+    here.set(buyUpgrade(here.data, 'power'), T + 60);
+    await here.flush();
+    expect((await opened()).data).toMatchObject({
+      seeds: 5000 - UPGRADES.power.cost,
+      best: 12,
+      runs: 9,
+      levels: { rapid: 4, power: 1 },
+    });
+  });
+
   it('읽어 온 것보다 늘 뒤에 저장한 것이 된다', async () => {
     const store = await opened();
     store.set({ ...store.data, seeds: 1 }, T);
@@ -127,6 +177,9 @@ describe('텃밭의 저장', () => {
     expect((await opened()).data).toEqual(createMeta());
     localStorage.setItem('pocket-arcade:garden-meta', JSON.stringify({ seeds: 12, levels: { power: 2, nope: 4 } }));
     expect((await opened()).data).toMatchObject({ seeds: 12, levels: { power: 2 } });
+    // 최고 기록이 터무니없이 커도 열리고, 그 기록은 잘라서 읽는다.
+    localStorage.setItem('pocket-arcade:garden-meta', JSON.stringify({ version: 3, seeds: 7, best: 1e12, startDay: 1e12 }));
+    expect((await opened()).data).toMatchObject({ seeds: 7, best: MAX_DAY });
   });
 });
 

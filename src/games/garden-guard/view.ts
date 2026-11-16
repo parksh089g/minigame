@@ -7,41 +7,11 @@ import { mascotTexture } from '../../art/cosmetics';
 import { GAME_WIDTH } from '../../config';
 import { store } from '../../core/store';
 import { ENEMY_TINT, enemyTexture, LOOK, TEX } from './art';
-import { ENEMIES, FIELD, HELPER_SPOTS, HOP, SHOOTER, type EnemyKind } from './data';
+import { ENEMIES, HELPER_SPOTS, HOP, SHOOTER, type EnemyKind } from './data';
+import { toScreenY, type FieldLayout } from './layout';
 import { chargePhase, isBuried, type Enemy, type RunState, type SimEvent } from './sim';
 
-export interface FieldLayout {
-  /** 벌레가 나타나는 줄(시뮬레이션의 y = 0)의 화면 y */
-  top: number;
-  /** 울타리(시뮬레이션의 y = FIELD.depth)의 화면 y */
-  fenceY: number;
-  /** 시뮬레이션의 세로 1이 화면에서 차지하는 길이 */
-  scaleY: number;
-  /** 화면의 세로 길이 */
-  height: number;
-}
-
-/** 울타리 아래에 텃밭과 물총이 놓이는 높이 */
-export const GARDEN_HEIGHT = 84;
-
-/** 화면 길이에 맞춰 판이 놓일 자리를 정한다. hudHeight 아래부터 판이다. */
-export function layoutField(height: number, hudHeight: number): FieldLayout {
-  const fenceY = height - GARDEN_HEIGHT;
-  return { top: hudHeight, fenceY, scaleY: (fenceY - hudHeight) / FIELD.depth, height };
-}
-
-/**
- * 시뮬레이션의 y를 화면의 y로 바꾼다. 울타리 위의 판만 화면 길이에 맞춰 늘이거나 줄이고,
- * 울타리 아래(물총과 해바라기가 선 텃밭)는 늘 같은 크기로 둔다.
- */
-export function toScreenY(layout: FieldLayout, y: number): number {
-  return layout.fenceY + (y - FIELD.depth) * (y > FIELD.depth ? 1 : layout.scaleY);
-}
-
-/** 화면의 한 점을 시뮬레이션 좌표로 바꾼다. */
-export function toSim(layout: FieldLayout, x: number, y: number): { x: number; y: number } {
-  return { x, y: FIELD.depth + (y - layout.fenceY) / (y > layout.fenceY ? 1 : layout.scaleY) };
-}
+export { aimDots, GARDEN_HEIGHT, layoutField, toScreenY, toSim, type FieldLayout } from './layout';
 
 interface Particle {
   x: number;
@@ -118,11 +88,6 @@ export class FieldView {
       .setOrigin(0.15, 0.5)
       .setDepth(depth + 4.5);
     this.drawFence(0);
-  }
-
-  /** 물총의 물방울이 나오는 자리(화면 좌표) */
-  get muzzle(): { x: number; y: number } {
-    return { x: this.gun.x, y: this.gun.y };
   }
 
   private drawGround(): void {
@@ -389,8 +354,8 @@ export class FieldView {
 
   private syncGun(state: RunState, dt: number): void {
     const { layout } = this;
-    // 화면이 세로로 늘거나 줄어도 물방울이 날아가는 쪽과 물총이 가리키는 쪽이 같게 한다.
-    const angle = Math.atan2(Math.sin(state.aim) * layout.scaleY, Math.cos(state.aim));
+    // 물총은 울타리 아래(화면이 늘이지 않는 곳)에 있어서, 물방울이 나가는 쪽이 시뮬레이션에서 겨눈 쪽 그대로다.
+    const angle = state.aim;
     if (this.recoil > 0) this.recoil = Math.max(0, this.recoil - dt);
     const kick = (this.recoil / 0.08) * 2.5;
     const baseY = toScreenY(layout, SHOOTER.y) - 6;

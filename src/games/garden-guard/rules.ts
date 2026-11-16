@@ -274,6 +274,35 @@ export function upgradeCost(id: UpgradeId, level: number): number | null {
   return Math.round(def.cost * def.growth ** level);
 }
 
+/**
+ * 값 버튼에 적는 씨앗의 수. 여섯 자리까지는 그대로 적고, 그보다 크면 버튼에 들어가게 만과 억으로 줄인다.
+ * 줄일 때는 올려서 적는다: 적힌 만큼 모으면 반드시 살 수 있다.
+ */
+export function costLabel(cost: number): string {
+  if (cost < 1_000_000) return String(cost);
+  const man = Math.ceil(cost / 10_000);
+  if (man < 10_000) return `${man}만`;
+  const tenths = Math.ceil(cost / 10_000_000);
+  return tenths < 1_000 ? `${tenths / 10}억` : `${Math.ceil(tenths / 10)}억`;
+}
+
+/**
+ * 이 강화를 사려면 먼저 있어야 하는데 아직 없는 강화. 없으면(살 수 있으면) null.
+ * 해바라기가 없으면 거름은 아무 일도 하지 않으므로 팔지 않는다.
+ */
+export function neededFor(levels: Levels, id: UpgradeId): UpgradeId | null {
+  const needs = UPGRADES[id].needs;
+  return needs !== undefined && levelOf(levels, needs) === 0 ? needs : null;
+}
+
+/** 먼저 있어야 하는 강화가 없을 때 준비 화면에서 효과 대신 적는 말("해바라기가 있어야 해요") */
+export function needLine(needs: UpgradeId): string {
+  const name = UPGRADES[needs].name;
+  // 받침이 없는 글자로 끝나면 "가", 있으면 "이"
+  const open = (name.charCodeAt(name.length - 1) - 0xac00) % 28 === 0;
+  return `${name}${open ? '가' : '이'} 있어야 해요`;
+}
+
 // ------------------------------------------------------------ 점수
 
 /**
@@ -314,6 +343,11 @@ export function recordBonus(day: number): number {
  * 3: 새 밭 일구기(fields, bestEver)가 생겼다. 2까지의 저장은 아직 새 밭을 일구지 않은 처음 밭이다.
  */
 export const META_VERSION = 3;
+/**
+ * 저장에서 읽는 "가장 멀리 지킨 날"의 위쪽 한도. 실제 판에서는 닿지 않는 날이다(강화를 다 올려도 70일째 근처에서 막힌다).
+ * 시작할 수 있는 날을 이 날까지 세어 올라가므로, 터무니없이 큰 값이 적힌 망가진 저장이 준비 화면을 멈추지 않게 자른다.
+ */
+export const MAX_DAY = 9_999;
 
 export interface GardenMeta {
   version: number;
@@ -378,13 +412,13 @@ export function normalizeMeta(raw: unknown): GardenMeta {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return meta;
   const data = raw as Record<string, unknown>;
   meta.seeds = count(data.seeds);
-  meta.best = count(data.best);
+  meta.best = Math.min(count(data.best), MAX_DAY);
   meta.runs = count(data.runs);
   meta.kills = count(data.kills);
   meta.savedAt = count(data.savedAt);
   meta.fields = count(data.fields);
   // 버전 2까지는 밭이 하나뿐이어서 지금 밭의 기록이 곧 모든 밭의 기록이다.
-  meta.bestEver = Math.max(count(data.bestEver), meta.best);
+  meta.bestEver = Math.max(Math.min(count(data.bestEver), MAX_DAY), meta.best);
   const levels = typeof data.levels === 'object' && data.levels !== null ? (data.levels as Record<string, unknown>) : {};
   for (const id of UPGRADE_ORDER) {
     const level = Math.min(count(levels[id]), UPGRADES[id].maxLevel);
@@ -424,20 +458,23 @@ export function openedStart(before: GardenMeta, after: GardenMeta): number | nul
   return day > latestStart(before.best) ? day : null;
 }
 
-/** 강화를 한 단계 산다. 씨앗이 모자라거나 다 올렸으면 그대로 돌려준다. */
+/** 지금 이 강화를 한 단계 살 수 있는지: 다 올리지 않았고, 씨앗이 넉넉하고, 먼저 있어야 하는 강화가 있다. */
+export function canBuy(meta: GardenMeta, id: UpgradeId): boolean {
+  const cost = upgradeCost(id, levelOf(meta.levels, id));
+  return cost !== null && meta.seeds >= cost && neededFor(meta.levels, id) === null;
+}
+
+/** 강화를 한 단계 산다. 살 수 없으면(씨앗이 모자라거나, 다 올렸거나, 먼저 있어야 하는 강화가 없으면) 그대로 돌려준다. */
 export function buyUpgrade(meta: GardenMeta, id: UpgradeId): GardenMeta {
+  if (!canBuy(meta, id)) return meta;
   const level = levelOf(meta.levels, id);
-  const cost = upgradeCost(id, level);
-  if (cost === null || meta.seeds < cost) return meta;
+  const cost = upgradeCost(id, level) ?? 0;
   return { ...meta, seeds: meta.seeds - cost, levels: { ...meta.levels, [id]: level + 1 } };
 }
 
 /** 지금 살 수 있는 강화가 하나라도 있는지 */
 export function canBuyAny(meta: GardenMeta): boolean {
-  return UPGRADE_ORDER.some((id) => {
-    const cost = upgradeCost(id, levelOf(meta.levels, id));
-    return cost !== null && meta.seeds >= cost;
-  });
+  return UPGRADE_ORDER.some((id) => canBuy(meta, id));
 }
 
 /** 판에서 번 씨앗을 넣는다. 판이 끝나기 전에도(날을 넘길 때마다) 넣어 둘 수 있다. */
