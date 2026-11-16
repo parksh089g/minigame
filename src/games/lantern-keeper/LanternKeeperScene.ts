@@ -566,7 +566,7 @@ export class LanternKeeperScene extends MiniGameScene {
           board.play('strike', now);
           break;
         case 'bolt':
-          this.view.bolt(event.points, event.evolved);
+          this.view.bolt(event.points, event.evolved, event.power);
           // 번개가 닿은 자리마다 불티가 튄다.
           for (let i = 2; i < event.points.length; i += 2) {
             this.view.burst(sim, event.points[i], event.points[i + 1], 2);
@@ -574,7 +574,7 @@ export class LanternKeeperScene extends MiniGameScene {
           board.play('bolt', now);
           break;
         case 'swing':
-          this.view.swing(event.angle, event.arc, event.reach, event.count, event.evolved);
+          this.view.swing(event.angle, event.arc, event.reach, event.count, event.evolved, event.faint);
           board.play('swing', now);
           break;
         case 'lamp':

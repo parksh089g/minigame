@@ -44,8 +44,14 @@ import {
 import {
   beamStats,
   bellStats,
+  boltStats,
   depthRules,
+  echoPower,
+  emberStats,
+  fireflyStats,
   lampStats,
+  oilStats,
+  starStats,
   torchStats,
   embersFor,
   endlessBossKind,
@@ -84,7 +90,7 @@ import {
   type RunState,
   type SimEvent,
 } from './sim';
-import { dailyPlan } from './daily';
+import { dailyPlan, MIRROR_DAILY_FROM } from './daily';
 import {
   GUST,
   gustAt,
@@ -651,6 +657,404 @@ describe('무기', () => {
     const looks = sim.state.shots.map((shot) => shot.look);
     expect(looks.filter((look) => look === 'emberEvo')).toHaveLength(4);
     expect(looks.filter((look) => look === 'lanceEvo')).toHaveLength(3);
+  });
+});
+
+describe('손거울과 곁불: 무기마다 덤으로 붙는 한 개', () => {
+  const base = modifiers({}, {});
+  /** 제자리에 묶어 둔 돌그림자 */
+  const pinned = (x: number, y: number, hp = 5000): Enemy => ({ ...enemy('brute', x, y, hp), slow: 1e9, slowTo: 0.0001 });
+  /** 손거울을 level만큼 들고 weapons만 든 조용한 판 */
+  const mirrorSim = (
+    level: number,
+    weapons: RunState['weapons'],
+    extra: Partial<Parameters<typeof createRun>[0]> = {},
+  ): Sim => {
+    const sim = quietSim(1, extra);
+    if (level > 0) sim.applyUpgrade({ type: 'passive', id: 'mirror', level });
+    sim.state.weapons = weapons;
+    sim.state.player.hp = 1e9;
+    return sim;
+  };
+
+  it('불씨탄이 한 발 더 나가고, 그 한 발은 손거울의 레벨만큼만 아프다', () => {
+    const fire = (level: number): Sim['state']['shots'] => {
+      const sim = mirrorSim(level, { ember: 1 });
+      sim.state.cd.ember = 0;
+      sim.state.enemies.push(pinned(60, 0));
+      sim.step(STEP, 0, 0);
+      return sim.state.shots;
+    };
+    const damage = emberStats(1, base).damage;
+    const turn = (shot: { vx: number; vy: number }): number => Math.atan2(shot.vy, shot.vx);
+    // 손거울이 없으면 예전 그대로 한 발이고, 약한 덤이라는 표시도 없다.
+    const plain = fire(0);
+    expect(plain).toHaveLength(1);
+    expect('power' in plain[0]).toBe(false);
+    // 3레벨: 겨눈 쪽으로 온전한 한 발이 그대로 나가고, 그 옆으로 0.6배짜리 한 발이 붙는다.
+    const [straight, extra, ...rest] = fire(3);
+    expect(rest).toEqual([]);
+    expect(turn(straight)).toBeCloseTo(0, 6);
+    expect(straight.damage).toBe(damage);
+    expect('power' in straight).toBe(false);
+    expect(turn(extra)).toBeCloseTo(0.22, 6);
+    expect(extra.damage).toBeCloseTo(damage * 0.6, 6);
+    expect(extra.power).toBe(0.6);
+    // 5레벨: 덤이 온전한 한 발이 되어, 두 발이 겨눈 쪽을 가운데에 두고 나란히 나간다.
+    const both = fire(MAX_LEVEL);
+    expect(both.map((shot) => shot.damage)).toEqual([damage, damage]);
+    expect(both.some((shot) => 'power' in shot)).toBe(false);
+    expect(turn(both[0])).toBeCloseTo(-0.11, 6);
+    expect(turn(both[1])).toBeCloseTo(0.11, 6);
+  });
+
+  it('약한 불씨탄은 맞은 그림자를 그만큼만 다치게 한다', () => {
+    const sim = mirrorSim(3, { ember: 1 });
+    sim.state.cd.ember = 0;
+    // 겨눈 쪽의 그림자(더 가깝다)와, 덤이 날아가는 쪽(0.22라디안 옆)으로 조금 더 먼 그림자
+    const aimed = pinned(100, 0);
+    const aside = pinned(120 * Math.cos(0.22), 120 * Math.sin(0.22));
+    sim.state.enemies.push(aimed, aside);
+    sim.step(STEP, 0, 0);
+    // 한 번 쏜 것만 본다.
+    sim.state.weapons = {};
+    advance(sim, 1);
+    const damage = emberStats(1, base).damage;
+    expect(5000 - aimed.hp).toBe(damage);
+    expect(5000 - aside.hp).toBeCloseTo(damage * 0.6, 6);
+    expect(sim.state.dealt?.ember).toBeCloseTo(damage * 1.6, 6);
+  });
+
+  it('별똥과 빛화살, 초승달, 풍등도 하나씩 더 나간다', () => {
+    const sim = mirrorSim(2, { star: 1, lance: 1, moon: 1, lamp: 1 });
+    Object.assign(sim.state.cd, { star: 0, lance: 0, moon: 0, lamp: 0 });
+    sim.state.enemies.push(pinned(60, 0), pinned(-60, 40));
+    sim.step(STEP, 0, 0);
+    const s = sim.state;
+    expect(s.strikes.map((strike) => strike.power)).toEqual([undefined, 0.4]);
+    expect(s.strikes[1].damage).toBeCloseTo(starStats(1, base).damage * 0.4, 6);
+    // 덤으로 떨어지는 별도 앞의 별보다 조금 늦게 떨어진다.
+    expect(s.strikes[1].delay).toBeGreaterThan(s.strikes[0].delay);
+    expect(s.shots.map((shot) => [shot.look, shot.power])).toEqual([
+      ['lance', undefined],
+      ['lance', 0.4],
+    ]);
+    expect(s.moons.map((moon) => moon.power)).toEqual([undefined, 0.4]);
+    expect(s.moons[1].damage).toBeCloseTo(moonStats(1, base).damage * 0.4, 6);
+    expect(s.lamps.map((lamp) => lamp.power)).toEqual([undefined, 0.4]);
+    expect(s.lamps[1].damage).toBeCloseTo(lampStats(1, base).damage * 0.4, 6);
+    // 덤으로 뜬 풍등은 다른 무리로 간다.
+    expect([s.lamps[0].tx, s.lamps[1].tx].map(Math.round).sort((a, b) => a - b)).toEqual([-60, 60]);
+  });
+
+  it('약한 반딧불은 온전한 반딧불과 따로 세어서, 서로 때릴 차례를 빼앗지 않는다', () => {
+    const sim = mirrorSim(2, { firefly: 1 });
+    const stats = fireflyStats(1, base);
+    // 반딧불이 하나면 덤은 그 맞은편에서 돈다.
+    const front = pinned(stats.orbit, 0);
+    const back = pinned(-stats.orbit, 0);
+    sim.state.enemies.push(front, back);
+    sim.step(STEP, 0, 0);
+    expect(5000 - front.hp).toBe(stats.damage);
+    expect(5000 - back.hp).toBeCloseTo(stats.damage * 0.4, 6);
+    expect(front.fireflyCd).toBe(stats.rehit);
+    expect(front.fireflyEchoCd ?? 0).toBe(0);
+    expect(back.fireflyEchoCd).toBe(stats.rehit);
+    expect(back.fireflyCd).toBe(0);
+    // 약한 반딧불에게 막 맞은 그림자도 온전한 반딧불에게는 바로 맞는다. 약한 것에게 또 맞지는 않는다.
+    back.x = stats.orbit;
+    sim.step(STEP, 0, 0);
+    expect(5000 - back.hp).toBeCloseTo(stats.damage * 1.4, 6);
+    expect(5000 - front.hp).toBe(stats.damage);
+    expect(sim.state.dealt?.firefly).toBeCloseTo(stats.damage * 2.4, 6);
+    // 따로 세는 시간도 흘러서, 다 지나면 약한 반딧불에게 다시 맞는다.
+    back.x = -stats.orbit;
+    sim.state.weapons = {};
+    advance(sim, stats.rehit + 0.1);
+    expect(back.fireflyEchoCd).toBeLessThanOrEqual(0);
+  });
+
+  it('약한 등대빛 줄기는 온전한 줄기들의 한가운데를 돌고, 따로 센다', () => {
+    const spin = (level: number): { front: Enemy; back: Enemy } => {
+      const sim = mirrorSim(level, { beam: 1 });
+      // 첫 걸음에 줄기가 지나가는 자리(오른쪽)와, 그 맞은편
+      const front = pinned(40 * Math.cos(0.02), 40 * Math.sin(0.02));
+      const back = pinned(-40 * Math.cos(0.02), -40 * Math.sin(0.02));
+      sim.state.enemies.push(front, back);
+      sim.step(STEP, 0, 0);
+      return { front, back };
+    };
+    const damage = beamStats(1, base).damage;
+    const plain = spin(0);
+    expect(5000 - plain.front.hp).toBe(damage);
+    expect(plain.back.hp).toBe(5000);
+    const echoed = spin(2);
+    expect(5000 - echoed.front.hp).toBe(damage);
+    expect(5000 - echoed.back.hp).toBeCloseTo(damage * 0.4, 6);
+    expect(echoed.back.beamEchoCd).toBe(BEAM_REHIT);
+    expect(echoed.back.beamCd ?? 0).toBe(0);
+    expect(echoed.front.beamEchoCd ?? 0).toBe(0);
+    // 덤이 온전해지면 줄기 둘이 마주 보고 돈다.
+    const full = spin(MAX_LEVEL);
+    expect(5000 - full.back.hp).toBe(damage);
+    expect(full.back.beamCd).toBe(BEAM_REHIT);
+  });
+
+  it('번갯불은 한 줄기가 더 치고, 그 줄기는 앞의 줄기가 치지 않은 그림자로 간다', () => {
+    const sim = mirrorSim(3, { bolt: 1 });
+    sim.state.cd.bolt = 0;
+    const right = [pinned(50, 0), pinned(80, 0), pinned(110, 0)];
+    const left = [pinned(-60, 0), pinned(-90, 0)];
+    sim.state.enemies.push(...right, ...left);
+    sim.step(STEP, 0, 0);
+    const damage = boltStats(1, base).damage;
+    for (const foe of right) expect(5000 - foe.hp).toBe(damage);
+    for (const foe of left) expect(5000 - foe.hp).toBeCloseTo(damage * 0.6, 6);
+    // 묶어 둔 그림자도 아주 조금은 움직이므로 자리는 반올림해서 본다.
+    const bolts = sim.events.flatMap((event) =>
+      event.type === 'bolt' ? [{ ...event, points: event.points.map(Math.round) }] : [],
+    );
+    expect(bolts).toEqual([
+      { type: 'bolt', points: [0, 0, 50, 0, 80, 0, 110, 0], evolved: false },
+      { type: 'bolt', points: [0, 0, -60, 0, -90, 0], evolved: false, power: 0.6 },
+    ]);
+  });
+
+  it('종소리는 한 번 더 울리고, 그 소리는 약한 만큼 덜 아프고 덜 밀어낸다', () => {
+    const sim = mirrorSim(2, { bell: 1 });
+    sim.state.cd.bell = 0;
+    const near = enemy('brute', 30, 0, 500);
+    sim.state.enemies.push(near);
+    sim.step(STEP, 0, 0);
+    const stats = bellStats(1, base);
+    expect(sim.state.waves).toHaveLength(2);
+    const [ring, extra] = sim.state.waves;
+    expect('power' in ring).toBe(false);
+    expect(extra.power).toBe(0.4);
+    expect(extra.damage).toBeCloseTo(stats.damage * 0.4, 6);
+    expect(extra.push).toBeCloseTo(stats.push * 0.4, 6);
+    expect(extra.delay).toBeGreaterThan(ring.delay);
+    // 종은 한 번 친 것이라 소리도 한 번만 난다.
+    expect(sim.events.filter((event) => event.type === 'bell')).toHaveLength(1);
+    advance(sim, 1.2);
+    expect(500 - near.hp).toBeCloseTo(stats.damage * 1.4, 6);
+    expect(sim.state.waves).toHaveLength(0);
+  });
+
+  it('횃불은 한쪽을 더 베고, 그쪽은 약한 만큼만 벤다', () => {
+    const swing = (mirror: number, torch: number): { sim: Sim; front: Enemy; behind: Enemy; up: Enemy; down: Enemy } => {
+      const sim = mirrorSim(mirror, { torch });
+      sim.state.cd.torch = 0;
+      // 겨눌 그림자(오른쪽)를 맨 앞에 두고, 맞은편과 양옆에 하나씩 둔다.
+      const [front, behind, up, down] = [pinned(20, 0), pinned(-25, 0), pinned(0, 25), pinned(0, -25)];
+      sim.state.enemies.push(front, behind, up, down);
+      sim.step(STEP, 0, 0);
+      return { sim, front, behind, up, down };
+    };
+    const hurt = (foe: Enemy): number => 5000 - foe.hp;
+    // 1레벨 횃불(한쪽)에 손거울 3레벨: 맞은편을 0.6배로 벤다.
+    const one = swing(3, 1);
+    const damage = torchStats(1, base).damage;
+    expect(hurt(one.front)).toBe(damage);
+    expect(hurt(one.behind)).toBeCloseTo(damage * 0.6, 6);
+    expect([hurt(one.up), hurt(one.down)]).toEqual([0, 0]);
+    expect(one.sim.events).toContainEqual(expect.objectContaining({ type: 'swing', angle: 0, count: 2, faint: 0.6 }));
+    // 손거울이 5레벨이면 맞은편도 온전히 벤다.
+    const whole = swing(MAX_LEVEL, 1);
+    expect(hurt(whole.behind)).toBe(damage);
+    const event = whole.sim.events.find((e) => e.type === 'swing');
+    expect(event).toMatchObject({ count: 2 });
+    expect(event && 'faint' in event).toBe(false);
+    // 4레벨 횃불(앞뒤 양쪽)에 손거울 3레벨: 덤은 옆의 한쪽으로 간다.
+    const two = swing(3, 4);
+    const strong = torchStats(4, base).damage;
+    expect([hurt(two.front), hurt(two.behind)]).toEqual([strong, strong]);
+    expect(hurt(two.up)).toBeCloseTo(strong * 0.6, 6);
+    expect(hurt(two.down)).toBe(0);
+    expect(two.sim.events).toContainEqual(expect.objectContaining({ type: 'swing', count: 3, faint: 0.6 }));
+  });
+
+  it('횃불에 겹쳐 선 그림자는 덤까지 다 맞고, 봉화의 약한 쪽은 그만큼 덜 밀쳐 낸다', () => {
+    const close = mirrorSim(3, { torch: 1 });
+    close.state.cd.torch = 0;
+    const hug = pinned(3, 0);
+    close.state.enemies.push(hug);
+    close.step(STEP, 0, 0);
+    expect(5000 - hug.hp).toBeCloseTo(torchStats(1, base).damage * 1.6, 6);
+
+    const sim = mirrorSim(2, { torch: EVOLVE_LEVEL });
+    sim.state.cd.torch = 0;
+    const stats = torchStats(EVOLVE_LEVEL, base);
+    // 봉화는 앞뒤를 넓게 벤다. 그 사이로 빠지는 옆쪽 멀리에 하나를 둔다.
+    const front = pinned(20, 0);
+    const up = pinned(0, 54);
+    sim.state.enemies.push(front, up);
+    sim.step(STEP, 0, 0);
+    expect(5000 - up.hp).toBeCloseTo(stats.damage * 0.4, 6);
+    expect(front.kx).toBeCloseTo(stats.push, 6);
+    expect(up.ky).toBeCloseTo(stats.push * 0.4, 6);
+  });
+
+  it('등잔 기름은 가까운 그림자 쪽으로 불길을 하나 더 남기고, 둘레에 그림자가 없으면 남기지 않는다', () => {
+    const stats = oilStats(1, base);
+    const sim = mirrorSim(3, { oil: 1 });
+    sim.state.cd.oil = 0;
+    sim.state.enemies.push(pinned(0, 60));
+    sim.step(STEP, 0, 0);
+    expect(sim.state.fires).toHaveLength(2);
+    const [here, there] = sim.state.fires;
+    expect([here.x, here.y]).toEqual([0, 0]);
+    expect('power' in here).toBe(false);
+    expect(there.x).toBeCloseTo(0, 6);
+    expect(there.y).toBeCloseTo(stats.radius * 1.5, 6);
+    expect(there.power).toBe(0.6);
+    expect(there.damage).toBeCloseTo(stats.damage * 0.6, 6);
+    // 제자리에 서 있어도 겹쳐 쌓이지 않는다.
+    advance(sim, stats.cooldown * 2 + 0.2);
+    expect(sim.state.fires).toHaveLength(2);
+
+    const alone = mirrorSim(3, { oil: 1 });
+    alone.state.cd.oil = 0;
+    alone.state.enemies.push(pinned(0, 200));
+    alone.step(STEP, 0, 0);
+    expect(alone.state.fires).toHaveLength(1);
+  });
+
+  it('덤이 하나를 넘으면 불길은 맞은편에도 남고, 이미 더 센 불길이 있는 자리는 그대로 둔다', () => {
+    const stats = oilStats(1, base);
+    const sim = mirrorSim(MAX_LEVEL, { oil: 1 }, { meta: { echo: META.echo.maxLevel } });
+    // 온전한 한 개를 넘고 남은 조각(백분율)
+    const rest = Math.round(echoPower(MAX_LEVEL, META.echo.maxLevel) * 100) - 100;
+    expect(rest).toBeGreaterThan(0);
+    expect(rest).toBeLessThan(100);
+    sim.state.cd.oil = 0;
+    sim.state.enemies.push(pinned(60, 0));
+    sim.step(STEP, 0, 0);
+    const step = stats.radius * 1.5;
+    const percent = (power: number | undefined): number => Math.round((power ?? 1) * 100);
+    expect(sim.state.fires.map((fire) => [Math.round(fire.x), Math.round(fire.y), percent(fire.power)])).toEqual([
+      [0, 0, 100],
+      [step, 0, 100],
+      [-step, 0, rest],
+    ]);
+    expect('power' in sim.state.fires[1]).toBe(false);
+
+    // 덤이 놓일 자리에 온전한 불길이 타고 있으면, 약한 덤이 그것을 덮어쓰지 않는다.
+    const kept = mirrorSim(3, { oil: 1 });
+    kept.state.cd.oil = 0;
+    kept.state.enemies.push(pinned(60, 0));
+    kept.state.fires.push({ x: step, y: 0, radius: stats.radius, life: 1, tick: 0, every: stats.tick, damage: stats.damage, slow: 1, evolved: false });
+    kept.step(STEP, 0, 0);
+    expect(kept.state.fires).toHaveLength(2);
+    expect(kept.state.fires[0]).toMatchObject({ x: step, damage: stats.damage });
+    expect(kept.state.fires[0].life).toBeLessThan(1);
+    expect('power' in kept.state.fires[0]).toBe(false);
+  });
+
+  it('약한 덤은 덜 아픈 만큼 덜 늦춘다 (진화한 등잔 기름의 불길과 진화한 종소리)', () => {
+    const oil = oilStats(EVOLVE_LEVEL, base);
+    expect(oil.slow).toBeLessThan(1);
+    const spill = (mirror: number): Sim => {
+      const sim = mirrorSim(mirror, { oil: EVOLVE_LEVEL });
+      sim.state.cd.oil = 0;
+      sim.state.enemies.push(pinned(0, 60));
+      sim.step(STEP, 0, 0);
+      return sim;
+    };
+    // 손거울 2레벨(덤의 힘 0.4): 덤으로 남긴 불길은 온전한 불길이 늦추는 몫의 0.4만큼만 늦춘다.
+    const [here, there] = spill(2).state.fires;
+    expect(here.slow).toBe(oil.slow);
+    expect(there.slow).toBeCloseTo(1 - (1 - oil.slow) * 0.4, 6);
+    // 온전한 덤은 온전한 불길과 똑같이 늦춘다.
+    expect(spill(MAX_LEVEL).state.fires.map((fire) => fire.slow)).toEqual([oil.slow, oil.slow]);
+
+    const bell = bellStats(EVOLVE_LEVEL, base);
+    expect(bell.slow).toBeLessThan(1);
+    const sim = mirrorSim(2, { bell: EVOLVE_LEVEL });
+    sim.state.cd.bell = 0;
+    sim.state.enemies.push(pinned(40, 0));
+    sim.step(STEP, 0, 0);
+    const slows = sim.state.waves.map((wave) => wave.slow);
+    expect(slows).toHaveLength(bell.rings + 1);
+    expect(slows.slice(0, bell.rings)).toEqual(new Array(bell.rings).fill(bell.slow));
+    expect(slows[bell.rings]).toBeCloseTo(1 - (1 - bell.slow) * 0.4, 6);
+  });
+
+  it('등불 고리에는 덤이 붙지 않는다', () => {
+    const burn = (level: number): number => {
+      const sim = mirrorSim(level, { aura: 1 });
+      const foe = pinned(20, 0);
+      sim.state.enemies.push(foe);
+      advance(sim, 2);
+      return 5000 - foe.hp;
+    };
+    expect(burn(0)).toBeGreaterThan(0);
+    expect(burn(MAX_LEVEL)).toBe(burn(0));
+  });
+
+  it('영구 강화 곁불은 판을 시작할 때부터 덤을 얹고, 손거울과 더해진다', () => {
+    expect(quietSim().mods.echo).toBe(0);
+    const sim = mirrorSim(0, { ember: 1 }, { meta: { echo: 2 } });
+    expect(sim.mods.echo).toBe(echoPower(0, 2));
+    sim.state.cd.ember = 0;
+    sim.state.enemies.push(pinned(60, 0));
+    sim.step(STEP, 0, 0);
+    expect(sim.state.shots.map((shot) => shot.power)).toEqual([undefined, echoPower(0, 2)]);
+    sim.applyUpgrade({ type: 'passive', id: 'mirror', level: 2 });
+    expect(sim.mods.echo).toBe(echoPower(2, 2));
+  });
+
+  it('유리 렌즈와 큼직한 불씨는 불씨탄과 반딧불의 몸집을 키운다', () => {
+    const grown = (extra: Partial<Parameters<typeof createRun>[0]>, lens: number): { radius: number; hit: boolean; area: number } => {
+      const sim = quietSim(1, extra);
+      if (lens > 0) sim.applyUpgrade({ type: 'passive', id: 'lens', level: lens });
+      sim.state.weapons = { ember: 1, firefly: 1 };
+      sim.state.player.hp = 1e9;
+      sim.state.cd.ember = 0;
+      const stats = fireflyStats(1, sim.mods);
+      // 반딧불이 도는 길의 바깥: 예전 몸집(4)으로는 닿지 않고, 렌즈를 다 올린 몸집(6)으로만 닿는 자리
+      const foe = pinned(stats.orbit + ENEMIES.brute.radius + 5, 0);
+      sim.state.enemies.push(foe);
+      sim.step(STEP, 0, 0);
+      return { radius: sim.state.shots[0].radius, hit: foe.hp < 5000, area: sim.mods.area };
+    };
+    expect(grown({}, 0)).toEqual({ radius: 3, hit: false, area: 1 });
+    const lens = grown({}, MAX_LEVEL);
+    expect(lens.area).toBeCloseTo(1.5, 6);
+    expect(lens.radius).toBeCloseTo(4.5, 6);
+    expect(lens.hit).toBe(true);
+    // 영구 강화 큼직한 불씨는 공격 범위는 그대로 두고 몸집만 키운다.
+    const big = grown({ meta: { hefty: META.hefty.maxLevel } }, 0);
+    expect(big.area).toBe(1);
+    expect(big.radius).toBeCloseTo(3 * (1 + META_STEP.hefty * META.hefty.maxLevel), 6);
+    // 손거울이 들어오기 전의 오늘의 판에서는 예전 몸집 그대로다. 그 뒤의 판부터 커진다.
+    const before = grown({ daily: MIRROR_DAILY_FROM - 1 }, MAX_LEVEL);
+    expect(before).toEqual({ radius: 3, hit: false, area: lens.area });
+    expect(grown({ daily: MIRROR_DAILY_FROM }, MAX_LEVEL)).toEqual(lens);
+  });
+
+  it('손거울은 정해 둔 날의 오늘의 판부터 레벨업 선택지에 나온다', () => {
+    const offered = (daily: number | undefined): boolean => {
+      const sim = quietSim(7, daily === undefined ? {} : { daily });
+      for (let i = 0; i < 300; i += 1) {
+        delete sim.state.offer;
+        if (sim.options().some((option) => option.type === 'passive' && option.id === 'mirror')) return true;
+      }
+      return false;
+    };
+    expect(createRun({ ...config, daily: MIRROR_DAILY_FROM - 1 }).banned).toEqual(['mirror']);
+    expect(createRun({ ...config, daily: MIRROR_DAILY_FROM }).banned).toEqual([]);
+    expect(createRun(config).banned).toEqual([]);
+    expect(offered(MIRROR_DAILY_FROM - 1)).toBe(false);
+    expect(offered(MIRROR_DAILY_FROM)).toBe(true);
+    expect(offered(undefined)).toBe(true);
+    // 손거울이 들어오기 전에 하다가 저장한 그날의 판도 손거울 없이 이어 간다. 골라낸 것은 그대로 남는다.
+    const saved = JSON.parse(JSON.stringify(createRun({ ...config, daily: MIRROR_DAILY_FROM - 1 }))) as RunState;
+    saved.banned = ['wick'];
+    expect(newSim(1, saved).state.banned).toEqual(['wick', 'mirror']);
+    // 보통 판과 그 뒤의 오늘의 판은 건드리지 않는다.
+    const later = JSON.parse(JSON.stringify(createRun({ ...config, daily: MIRROR_DAILY_FROM }))) as RunState;
+    expect(newSim(1, later).state.banned).toEqual([]);
   });
 });
 

@@ -22,6 +22,7 @@ import {
   MAX_DEPTH,
   META,
   META_ORDER,
+  PASSIVES,
   STAGE_ORDER,
   STAGES,
   WEAPON_ORDER,
@@ -29,6 +30,7 @@ import {
   type FeastId,
   type HeroId,
   type MetaId,
+  type PassiveId,
   type StageId,
   type WeaponId,
 } from './data';
@@ -87,8 +89,10 @@ export interface LanternMeta {
   feast: FeastId | null;
 }
 
-/** 지금 있는 캐릭터와 무기와 스테이지와 영구 강화 모두. 처음 하는 사람은 이것을 다 아는 것으로 친다(모두 처음 보므로 따로 알리지 않는다). */
-const ALL_KNOWN: readonly string[] = [...HERO_ORDER, ...WEAPON_ORDER, ...STAGE_ORDER, ...META_ORDER];
+/** 패시브를 도감에 놓이는 차례대로 */
+const PASSIVE_ORDER = Object.keys(PASSIVES) as PassiveId[];
+/** 지금 있는 캐릭터와 무기와 스테이지와 영구 강화와 패시브 모두. 처음 하는 사람은 이것을 다 아는 것으로 친다(모두 처음 보므로 따로 알리지 않는다). */
+const ALL_KNOWN: readonly string[] = [...HERO_ORDER, ...WEAPON_ORDER, ...STAGE_ORDER, ...META_ORDER, ...PASSIVE_ORDER];
 /**
  * 들어온 줄 아는 것(known)이 적혀 있지 않은 예전 저장이 알던 것: 다섯 번째 캐릭터 달잡이와 열 번째 무기 등대빛이
  * 들어오기 전의 캐릭터 넷과 무기 아홉. 그 뒤로 들어온 것은 known에 없으면 알린다.
@@ -120,6 +124,12 @@ const OLD_UPGRADES: readonly MetaId[] = [
   'headstart',
 ];
 
+/**
+ * 패시브도 알리게 되기 전(열 번째 패시브 손거울이 들어오기 전)의 저장이 알던 패시브 아홉.
+ * 적어 둔 known에 패시브가 하나도 없으면 이 아홉을 아는 것으로 친다. 그래야 손거울만 한 번 알린다.
+ */
+const OLD_PASSIVES: readonly PassiveId[] = ['wick', 'hourglass', 'boots', 'magnet', 'coat', 'lens', 'hood', 'herb', 'flint'];
+
 export function createDefaultMeta(): LanternMeta {
   return {
     version: META_VERSION,
@@ -148,6 +158,7 @@ export function createDefaultMeta(): LanternMeta {
 const isHero = (value: unknown): value is HeroId => typeof value === 'string' && value in HEROES;
 const isStage = (value: unknown): value is StageId => typeof value === 'string' && value in STAGES;
 const isUpgrade = (value: unknown): value is MetaId => typeof value === 'string' && value in META;
+const isPassive = (value: unknown): value is PassiveId => typeof value === 'string' && value in PASSIVES;
 
 const count = (value: unknown): number =>
   typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
@@ -192,10 +203,12 @@ export function normalizeMeta(raw: unknown): LanternMeta {
   // 들어온 줄 아는 것이 적혀 있지 않으면, 처음 하는 사람은 지금 것을 모두 아는 것으로 치고
   // 그 전부터 하던 사람은 달잡이와 등대빛이 들어오기 전의 것만 아는 것으로 친다. 그래야 두 가지를 한 번 알린다.
   // 스테이지가 하나도 적혀 있지 않으면 빛버섯 숲이 들어오기 전의 넷을, 영구 강화가 하나도 적혀 있지 않으면
-  // 새벽을 맞아야 열리는 다섯 가지가 들어오기 전의 열한 가지를 아는 것으로 친다.
+  // 새벽을 맞아야 열리는 다섯 가지가 들어오기 전의 열한 가지를, 패시브가 하나도 적혀 있지 않으면
+  // 손거울이 들어오기 전의 아홉을 아는 것으로 친다.
   const saved: unknown[] = Array.isArray(data.known) ? data.known : meta.runs > 0 ? [...OLD_KNOWN] : [...ALL_KNOWN];
   const staged = saved.some(isStage) ? saved : [...saved, ...OLD_STAGES];
-  const known = staged.some(isUpgrade) ? staged : [...staged, ...OLD_UPGRADES];
+  const upgraded = staged.some(isUpgrade) ? staged : [...staged, ...OLD_UPGRADES];
+  const known = upgraded.some(isPassive) ? upgraded : [...upgraded, ...OLD_PASSIVES];
   meta.known = ALL_KNOWN.filter((id) => known.includes(id));
   const fresh = Array.isArray(data.fresh) ? data.fresh : [];
   meta.fresh = HERO_ORDER.filter((id) => fresh.includes(id));
@@ -304,10 +317,11 @@ export function readEntries(meta: LanternMeta, ids: readonly string[]): LanternM
   return unread.length === meta.unread.length ? meta : { ...meta, unread };
 }
 
-/** 업데이트로 새로 들어왔는데 아직 알리지 않은 캐릭터와 무기와 스테이지와 영구 강화 */
+/** 업데이트로 새로 들어왔는데 아직 알리지 않은 캐릭터와 무기와 패시브와 스테이지와 영구 강화 */
 export interface News {
   heroes: HeroId[];
   weapons: WeaponId[];
+  passives: PassiveId[];
   stages: StageId[];
   upgrades: MetaId[];
 }
@@ -316,22 +330,28 @@ export function unknownNews(meta: LanternMeta): News {
   return {
     heroes: HERO_ORDER.filter((id) => !meta.known.includes(id)),
     weapons: WEAPON_ORDER.filter((id) => !meta.known.includes(id)),
+    passives: PASSIVE_ORDER.filter((id) => !meta.known.includes(id)),
     stages: STAGE_ORDER.filter((id) => !meta.known.includes(id)),
     upgrades: META_ORDER.filter((id) => !meta.known.includes(id)),
   };
 }
 
 export const hasNews = (news: News): boolean =>
-  news.heroes.length > 0 || news.weapons.length > 0 || news.stages.length > 0 || news.upgrades.length > 0;
+  news.heroes.length > 0 ||
+  news.weapons.length > 0 ||
+  news.passives.length > 0 ||
+  news.stages.length > 0 ||
+  news.upgrades.length > 0;
 
 /**
- * 새로 들어온 것을 알리는 한 줄. 예: "새 캐릭터 달잡이 · 새 무기 등대빛 · 새 스테이지 빛버섯 숲 · 새 영구 강화 5가지".
+ * 새로 들어온 것을 알리는 한 줄. 예: "새 캐릭터 달잡이 · 새 무기 등대빛 · 새 패시브 손거울 · 새 스테이지 빛버섯 숲 · 새 영구 강화 5가지".
  * 영구 강화는 여럿이 한꺼번에 들어오면 이름을 늘어놓지 않고 몇 가지인지만 적는다(준비 화면의 한 줄에 다 들어가지 않는다).
  */
 export function newsLine(news: News): string {
   const parts: string[] = [];
   if (news.heroes.length > 0) parts.push(`새 캐릭터 ${news.heroes.map((id) => HEROES[id].name).join(', ')}`);
   if (news.weapons.length > 0) parts.push(`새 무기 ${news.weapons.map((id) => WEAPONS[id].name).join(', ')}`);
+  if (news.passives.length > 0) parts.push(`새 패시브 ${news.passives.map((id) => PASSIVES[id].name).join(', ')}`);
   if (news.stages.length > 0) parts.push(`새 스테이지 ${news.stages.map((id) => STAGES[id].name).join(', ')}`);
   if (news.upgrades.length === 1) parts.push(`새 영구 강화 ${META[news.upgrades[0]].name}`);
   else if (news.upgrades.length > 1) parts.push(`새 영구 강화 ${news.upgrades.length}가지`);
@@ -340,18 +360,18 @@ export function newsLine(news: News): string {
 
 /**
  * 새로 들어온 것을 알렸다고 적는다. 새 캐릭터는 눌러 볼 때까지 카드에 "새"가 붙고(fresh),
- * 새 무기는 도감에서 새로 열린 항목처럼 들여다볼 때까지 점이 붙는다(unread). 스테이지와 영구 강화는 한 줄로만 알린다.
+ * 새 무기와 새 패시브는 도감에서 새로 열린 항목처럼 들여다볼 때까지 점이 붙는다(unread). 스테이지와 영구 강화는 한 줄로만 알린다.
  * 알릴 것이 없으면 그대로 돌려준다.
  */
 export function announceNews(meta: LanternMeta): LanternMeta {
   const news = unknownNews(meta);
   if (!hasNews(news)) return meta;
-  const weapons: readonly string[] = news.weapons;
+  const shown: readonly string[] = [...news.weapons, ...news.passives];
   return {
     ...meta,
     known: [...ALL_KNOWN],
     fresh: HERO_ORDER.filter((id) => meta.fresh.includes(id) || news.heroes.includes(id)),
-    unread: CODEX_IDS.filter((id) => meta.unread.includes(id) || weapons.includes(id)),
+    unread: CODEX_IDS.filter((id) => meta.unread.includes(id) || shown.includes(id)),
   };
 }
 

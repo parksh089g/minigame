@@ -15,6 +15,7 @@ import {
   friendVerdict,
   BEARER_DAILY_FROM,
   GROVE_DAILY_FROM,
+  MIRROR_DAILY_FROM,
   MOONER_DAILY_FROM,
   normalizeDaily,
   normalizeFriend,
@@ -127,6 +128,13 @@ describe('오늘의 판: 조건', () => {
     const after = Array.from({ length: BEARER_DAILY_FROM - MOONER_DAILY_FROM }, (_, i) => dailyPlan(MOONER_DAILY_FROM + i));
     for (const plan of after) expect(plan.hero).toBe(HERO_ORDER[plan.day % 5]);
     expect(after.some((plan) => plan.hero === 'mooner')).toBe(true);
+  });
+
+  it('손거울이 나오기 시작하는 날은 그날의 캐릭터와 스테이지를 바꾸지 않는다', () => {
+    // 2026년 11월 17일(한국 시각)이 그날이다. 그 전의 판에서 손거울을 빼는 것은 sim.ts가 한다.
+    expect(dayLabel(MIRROR_DAILY_FROM)).toBe('11월 17일');
+    expect(MIRROR_DAILY_FROM).toBe(TUNDRA_DAILY_FROM + 1);
+    expect(dailyPlan(MIRROR_DAILY_FROM)).toMatchObject({ hero: HERO_ORDER[MIRROR_DAILY_FROM % 4], stage: 'tundra' });
   });
 
   it('엉뚱한 날짜가 와도 조건은 나온다', () => {
