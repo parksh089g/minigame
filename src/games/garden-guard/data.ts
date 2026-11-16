@@ -190,7 +190,7 @@ export const ENEMIES: Readonly<Record<EnemyKind, EnemyDef>> = {
   },
   rhino: {
     name: '대장 장수풍뎅이',
-    hp: 760,
+    hp: 840,
     speed: 5.5,
     bite: 24,
     biteEvery: 1.6,
