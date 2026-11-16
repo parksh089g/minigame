@@ -33,7 +33,6 @@ import { levelPuzzle, levelShowsHints, levelShowsMonsterNote } from './levels';
 import {
   generatePuzzle,
   MAX_SHAFTS,
-  MAX_STACK,
   pinsOf,
   pull,
   puzzleSeconds,
@@ -78,6 +77,8 @@ interface PitProp {
 interface Layout {
   rock: Phaser.Geom.Rectangle;
   chamberHeight: number;
+  /** 방을 놓는 줄의 수 */
+  floors: number;
   /** 윗줄 방의 천장 높이 */
   top: number;
   pit: Phaser.Geom.Rectangle;
@@ -91,6 +92,8 @@ const ROCK_MARGIN = 6;
 const HEADER_HEIGHT = 62;
 /** 알림 한 줄이 동굴 꼭대기에서 떠 있는 높이. 도움말 두 줄은 그 위에 한 줄을 더 얹는다. */
 const NOTE_RISE = 30;
+/** 도움말 두 줄 사이의 간격 */
+const HINT_LINE = 16;
 /** 바위 가장자리에서 동굴까지의 두께 */
 const WALL = 5;
 /** 구덩이 아래에 남겨 두는 바위의 두께 */
@@ -111,6 +114,11 @@ const PIN_TUCK = 3;
 const CHAMBER_HEIGHT = { short: 50, tall: 62 } as const;
 /** 구덩이는 방보다 이만큼 높다 */
 const PIT_EXTRA = 18;
+/**
+ * 방을 놓는 줄의 가장 적은 수. 한두 층짜리 판은 언제나 두 줄 자리에 놓고,
+ * 3층으로 쌓인 통로가 있는 판만 한 줄을 더 쓴다. 가장 짧은 화면에도 세 줄이 들어간다.
+ */
+const MIN_FLOORS = 2;
 /** 용사와 괴물을 그림보다 이만큼 키워서 놓는다 */
 const FIGURE_SCALE = 1.2;
 /** 물 위에 뜬 보물이 물에 잠기는 깊이 */
@@ -154,7 +162,12 @@ const SETBACK_NOTES: Record<Setback, string> = {
 
 const DEPTH = { rock: 1, board: 5, effect: 20, hud: 30, banner: 40 } as const;
 
-function layoutFor(height: number): Layout {
+/** 그 판을 놓는 데 쓰는 줄의 수: 가장 높이 쌓인 통로의 층수 */
+function floorsOf(puzzle: Puzzle): number {
+  return Math.max(MIN_FLOORS, ...puzzle.shafts.map((chambers) => chambers.length));
+}
+
+function layoutFor(height: number, floors: number): Layout {
   const rockTop = HUD_HEIGHT + 4;
   const rock = new Phaser.Geom.Rectangle(
     ROCK_MARGIN,
@@ -171,7 +184,7 @@ function layoutFor(height: number): Layout {
     CHAMBER_HEIGHT.short + (CHAMBER_HEIGHT.tall - CHAMBER_HEIGHT.short) * stretch,
   );
   const pitHeight = chamberHeight + PIT_EXTRA;
-  const rows = MAX_STACK * (chamberHeight + PIN_THICKNESS);
+  const rows = floors * (chamberHeight + PIN_THICKNESS);
 
   // 방과 구덩이는 도움말 아래에 남은 자리의 한가운데에 놓는다.
   const areaTop = rock.top + HEADER_HEIGHT;
@@ -182,7 +195,7 @@ function layoutFor(height: number): Layout {
   const pitLeft = roomLeft + ROOM.width + DOOR_WALL;
   const pit = new Phaser.Geom.Rectangle(pitLeft, top + rows, rock.right - WALL - pitLeft, pitHeight);
   const room = new Phaser.Geom.Rectangle(roomLeft, pit.bottom - ROOM.height, ROOM.width, ROOM.height);
-  return { rock, chamberHeight, top, pit, room };
+  return { rock, chamberHeight, floors, top, pit, room };
 }
 
 /** 방에 든 것이 바닥에서부터 쌓인 높이. 위에서 떨어진 것이 그 위에 내려앉는다. */
@@ -254,7 +267,8 @@ export class PinPullScene extends MiniGameScene {
     this.beginMiniGame();
     this.resetState();
 
-    this.layout = layoutFor(this.scale.height);
+    // 바위와 목숨은 판의 층수와 상관없는 자리에 있다. 동굴의 자리는 판을 낼 때 그 판에 맞춰 다시 잡는다.
+    this.layout = layoutFor(this.scale.height, MIN_FLOORS);
     const { rock } = this.layout;
 
     addBackdrop(this);
@@ -363,10 +377,10 @@ export class PinPullScene extends MiniGameScene {
     return this.layout.pit.left + LANDING + inset + index * SHAFT_PITCH;
   }
 
-  /** 그 방의 바닥(받치는 핀의 윗면) 높이. 방이 하나뿐인 통로는 아랫줄에 놓인다. */
+  /** 그 방의 바닥(받치는 핀의 윗면) 높이. 덜 쌓인 통로는 아랫줄부터 채워서, 맨 아래 방이 모두 구덩이 바로 위에 놓인다. */
   private floorY(shaft: number, level: number): number {
-    const { top, chamberHeight } = this.layout;
-    const row = MAX_STACK - (this.puzzle?.shafts[shaft].length ?? MAX_STACK) + level;
+    const { top, chamberHeight, floors } = this.layout;
+    const row = floors - (this.puzzle?.shafts[shaft].length ?? floors) + level;
     return top + row * (chamberHeight + PIN_THICKNESS) + chamberHeight;
   }
 
@@ -424,15 +438,19 @@ export class PinPullScene extends MiniGameScene {
 
   // ───────── 도움말 ─────────
 
+  /** 알림 한 줄이 놓이는 높이. 도움말 두 줄은 이 줄과 바로 윗줄에 놓인다. */
+  private get noteY(): number {
+    return this.layout.top - NOTE_RISE;
+  }
+
   private showHints(): void {
-    const top = this.layout.top - NOTE_RISE - 16;
     this.hints = [
-      addText(this, GAME_WIDTH / 2, top, '핀을 눌러서 뽑아요', {
+      addText(this, GAME_WIDTH / 2, this.noteY - HINT_LINE, '핀을 눌러서 뽑아요', {
         color: LOOK.text.hint,
         originX: 0.5,
         stroke: LOOK.text.outline,
       }),
-      addText(this, GAME_WIDTH / 2, top + 16, '용암은 물로 식히고 보물을 받아요', {
+      addText(this, GAME_WIDTH / 2, this.noteY, '용암은 물로 식히고 보물을 받아요', {
         color: LOOK.text.hintSub,
         originX: 0.5,
         stroke: LOOK.text.outline,
@@ -463,7 +481,7 @@ export class PinPullScene extends MiniGameScene {
       this.tweens.killTweensOf(this.note);
       this.note.destroy();
     }
-    const note = addText(this, GAME_WIDTH / 2, this.layout.top - NOTE_RISE, label, {
+    const note = addText(this, GAME_WIDTH / 2, this.noteY, label, {
       color,
       originX: 0.5,
       stroke: LOOK.text.outline,
@@ -504,6 +522,7 @@ export class PinPullScene extends MiniGameScene {
     this.grace = 0;
     this.props = [];
 
+    this.fitLayout(puzzle);
     this.buildBoard(puzzle);
     if (level === null) {
       this.hud.setSide(`${this.stage}단계`, this.stage !== this.shownStage);
@@ -526,6 +545,18 @@ export class PinPullScene extends MiniGameScene {
         if (this.phase === 'dealing') this.phase = 'idle';
       },
     });
+  }
+
+  /**
+   * 판의 층수에 맞춰 동굴의 자리를 다시 잡는다. 3층으로 쌓인 통로가 있는 판은 방을 한 줄 더 놓아야 해서,
+   * 동굴이 위아래로 그만큼 넓어진다. 떠 있던 도움말과 알림도 새 동굴 꼭대기에 맞춰 옮긴다.
+   */
+  private fitLayout(puzzle: Puzzle): void {
+    const floors = floorsOf(puzzle);
+    if (floors === this.layout.floors) return;
+    this.layout = layoutFor(this.scale.height, floors);
+    this.hints.forEach((line, index) => line.setY(this.noteY - HINT_LINE * (this.hints.length - 1 - index)));
+    this.note?.setY(this.noteY);
   }
 
   private buildBoard(puzzle: Puzzle): void {

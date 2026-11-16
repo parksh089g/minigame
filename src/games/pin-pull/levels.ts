@@ -1,15 +1,15 @@
 /**
  * 핀 뽑기의 단계 모드에 나오는 판 100개.
- * 핀이 여덟 개까지인 판을 모두 풀어 보고(뽑는 순서를 빠짐없이 따진다), 통로의 순서만 다른 판은 하나로 쳐서
- * 서로 다른 판만 골랐다. 그 자리에서 만들지 않고 적어 두는 까닭은, 핀이 여덟 개인 판은 풀어 보는 데
- * 시간이 걸려서 휴대폰에서 단계를 열 때마다 할 일이 못 되기 때문이다.
+ * 핀이 아홉 개까지인 판을 모두 풀어 보고(뽑는 순서를 빠짐없이 따진다), 통로의 순서만 다른 판은 하나로 쳐서
+ * 서로 다른 판만 골랐다. 그 자리에서 만들지 않고 적어 두는 까닭은, 고르려면 판을 수천 개 풀어 봐야 해서
+ * 휴대폰에서 단계를 열 때마다 할 일이 못 되기 때문이다.
  * 표는 levels.test.ts의 pickLevels()가 만든다. 고르는 기준을 바꾸면 그 테스트가 새 표를 알려 준다.
  */
 import { STAGE_LEVELS } from '../../core/stages';
 import { MAX_SHAFTS, MAX_STACK, type Item, type Puzzle } from './rules';
 
 /** 단계 모드에서 핀의 최대 수(문 핀 포함). 점수 도전(MAX_PINS)보다 큰 판까지 나온다. */
-export const LEVEL_MAX_PINS = 8;
+export const LEVEL_MAX_PINS = 9;
 
 const ITEM_OF: Readonly<Record<string, Item>> = { t: 'treasure', l: 'lava', w: 'water' };
 const LETTER_OF: Readonly<Record<Item, string>> = { treasure: 't', lava: 'l', water: 'w' };
@@ -49,28 +49,32 @@ export function puzzleKind(puzzle: Puzzle): string {
   return puzzle.monster ? `${body}!` : body;
 }
 
-/** 단계 순서대로 적은 판. 핀이 적은 판부터 나오고, 핀 수가 같으면 아무렇게나 뽑아 이기기 쉬운 판이 먼저다. */
+/**
+ * 단계 순서대로 적은 판. 꼭 뽑아야 하는 핀의 수가 뒤로 갈수록 늘어난다: 처음 8단계는 두세 번, 50단계까지는 네 번,
+ * 51단계부터는 3층으로 쌓인 통로가 나와서 다섯 번에서 여덟 번이다. 뽑는 수가 같은 판끼리는 아무렇게나 뽑아도
+ * 이기기 쉬운 판이 먼저다.
+ */
 export const LEVEL_CODES: readonly string[] = [
   // 1~10단계
-  't/l', 'll/t', 'l/l/t', 'lt/l', 'tl/w', 'tw/l!', 'l/t/w!', 'l/wt!', 'wl/t!', 'w/tl!',
+  't/l', 'll/t', 'w/t/l/l', 't/l/wl', 'l/l/t', 'lt/l', 'l/l/t/l', 'tw/l/l', 'tl/w', 'tw/l!',
   // 11~20단계
-  'w/t/l/l', 'll/tw', 'wl/lt', 'l/t/ll', 'ww/tl', 'lt/l/l', 'wt/w/l!', 'l/w/w/t!', 'w/w/tl!', 'tl/ww!',
+  'w/l/tw!', 'wt/w/w/l!', 'wt/w/l!', 'w/wt/wl!', 'wl/wt!', 'l/ww/l/t!', 'l/w/l/wt!', 'wl/w/w/t!', 'wl/w/t!', 'w/tl/w/w!',
   // 21~30단계
-  'tl/lw', 'l/wt/l!', 'lt/l/w!', 't/wl/l!', 'll/wt!', 'tl/lw!', 'l/w/w/lt', 't/wl/ll', 'lt/w/ll', 'tl/w/lw',
+  'lw/wt/l!', 'lw/wl/t!', 'l/t/w!', 'l/t/ww!', 'l/tl/w/w!', 'l/wt!', 'wl/t!', 'w/tl!', 'tl/ww!', 'w/wl/tl!',
   // 31~40단계
-  'l/wl/t/l', 'll/lt/l', 'ww/tl/l', 'tw/l/lw!', 'l/l/lt/l', 'w/wt/wl!', 'wl/wl/t!', 'ww/t/wl!', 'wl/l/wt!', 'w/lw/tl!',
+  'ww/t/ll!', 'tl/w/l', 'tl/ll/w', 'tw/l/l/l!', 'l/l/t/w!', 'tw/ll!', 'lt/wl/w!', 'll/wt/l!', 'tl/l/w/l', 'lt/l/w!',
   // 41~50단계
-  'w/wl/tl!', 'tl/ll/w', 'w/l/lt/w!', 'lt/l/ww!', 'l/wt/l/l!', 't/l/l/lw!', 'lw/lt/l!', 't/lw/ll!', 'lt/ww/wl', 'lw/l/wt/l',
+  't/wl/l!', 'll/w/t!', 'wl/ll/t!', 'll/wt!', 'tl/lw!', 'l/lt/l/w!', 'wl/l/t/l!', 'lw/lt/l!', 'l/lw/tl!', 't/lw/ll!',
   // 51~60단계
-  'll/ww/lt', 'lt/wl/l/w', 'wl/t/wl/l', 'lt/l/w/ll', 'l/lw/l/lt', 'll/ll/t/l', 'l/lw/tw/w!', 'tw/ll/w/w!', 'tw/wl/w/w!', 'tl/w/w/ll',
+  'tww/l/l!', 'wll/tww!', 'l/w/tww!', 'l/tww/ww!', 'tww/wl!', 'tww/wwl!', 'll/w/tww!', 'tww/l/lw!', 'tww/ll!', 'w/w/l/tww!',
   // 61~70단계
-  'wt/w/ll/w!', 'w/tl/lw/l', 'lw/l/t/ww!', 'l/w/ll/tw!', 'lw/l/wt/l!', 'wl/wt/ll!', 'w/ww/l/lt!', 'll/l/tw/l!', 'w/wl/l/lt!', 'll/tl/w/l',
+  'w/tww/wl!', 'l/tww/l/l!', 'll/l/tww!', 'lll/tww!', 'tll/w/w/w', 'tll/wlw/w', 'wwl/tl/wl', 'l/tlw/w/w!', 'tll/ww/ww!', 'tlw/w/lwl!',
   // 71~80단계
-  'w/wl/tl/l!', 'l/l/lw/tl', 'wl/lt/ll!', 'lw/ll/lt!', 't/wl/wl/wl', 'wl/t/lw/ll', 'lw/w/ll/lt', 'tl/lw/lw/w', 'll/l/ww/lt', 'wl/l/ll/tw',
+  'tll/w/w/w!', 'ww/tll/llw', 'tl/wwl/wl!', 'www/tll!', 'wl/w/tll/w!', 'llw/w/wt!', 'llw/w/wwt!', 'tlw/llw/wl!', 'tll/l/ww', 'lwt/w/llw!',
   // 81~90단계
-  'lw/ww/tl/l', 'l/lw/wl/tw!', 'wl/l/ww/wt!', 'w/tw/ll/wl!', 'lt/ll/l/ll', 'tl/ww/ww/l!', 'wl/wt/w/ww!', 'wl/ww/lw/t!', 'l/wt/wl/wl!', 'tl/lw/lw/w!',
+  'tl/l/wwl', 'ww/wl/l/tll', 't/lw/llw/w!', 'l/tlw/lw!', 'w/tlw/ll!', 'w/lll/tlw!', 'wl/tlw/lll!', 'llw/ltw!', 'w/lw/tll!', 'tll/lw/lw',
   // 91~100단계
-  'lw/t/ww/ll!', 'l/wl/ll/tw!', 'lt/wl/l/ww!', 't/ll/ww/ll!', 'w/ll/lt/ww!', 'll/ww/l/tl!', 'lw/l/tl/lw!', 'l/lw/tl/ll', 'll/ll/lt/w!', 'l/tl/ll/lw!',
+  'wwl/l/ltl', 'll/ltl/wwl', 'lw/t/llw!', 'lwl/l/tlw!', 'llw/lw/lt!', 'l/lw/tll/lw!', 'lw/llw/tww!', 'ww/tlw/llw!', 'lw/tll/wwl', 'lw/tlw/llw!',
 ];
 
 /** 단계 모드의 level(1부터)번째 단계의 판 */
@@ -86,11 +90,11 @@ export function pinCount(puzzle: Puzzle): number {
   return puzzle.shafts.reduce((sum, shaft) => sum + shaft.length, 0) + 1;
 }
 
-/** 처음의 도움말을 보여 주는 단계: 핀이 가장 적은 판들 */
-export const HINT_MAX_PINS = 4;
+/** 처음의 도움말을 보여 주는 단계의 수: 두세 번만 뽑으면 끝나는, 뽑는 법을 익히는 단계들 */
+export const HINT_LEVELS = 8;
 
 export function levelShowsHints(level: number): boolean {
-  return pinCount(levelPuzzle(level)) <= HINT_MAX_PINS;
+  return level <= HINT_LEVELS;
 }
 
 /** 괴물을 물리치는 법을 알려 주는 단계의 수: 괴물이 나오는 처음 몇 단계 */
