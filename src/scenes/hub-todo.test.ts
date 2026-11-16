@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { createWeekly, type WeekContext, type WeeklyMission, type WeeklyState } from '../core/weekly';
+import { UPGRADES } from '../games/garden-guard/data';
+import { createMeta } from '../games/garden-guard/rules';
 import { LANTERN_GAME_ID } from '../games/lantern-keeper/data';
 import { AWAY, COMPANY_GAME_ID } from '../games/sprout-company/data';
 import { createGoals } from '../games/sprout-company/goals';
 import { createCompany } from '../games/sprout-company/rules';
-import { companyTodo, lanternTodo, weeklyTodo } from './hub-todo';
+import { companyTodo, gardenTodo, lanternTodo, weeklyTodo } from './hub-todo';
 
 describe('등불지기의 오늘 할 일', () => {
   it('멈춰 둔 판이 있으면 지난 시간과 함께 이어 하라고 한다', () => {
@@ -65,6 +67,25 @@ describe('새싹 컴퍼니의 오늘 할 일', () => {
     expect(companyTodo(state, NOW, TODAY)?.text).toBe(`목표 ${count}/${count}`);
     goals.claimed = goals.list.map(() => true);
     expect(companyTodo(state, NOW, TODAY)).toBeNull();
+  });
+});
+
+describe('텃밭 지키기의 오늘 할 일', () => {
+  it('해 본 사람이 가진 씨앗으로 살 수 있는 강화가 있으면 알린다', () => {
+    const played = { ...createMeta(), runs: 3 };
+    expect(gardenTodo({ ...played, seeds: UPGRADES.fence.cost })).toEqual({ text: '강화 가능' });
+    expect(gardenTodo({ ...played, seeds: UPGRADES.fence.cost - 1 })).toBeNull();
+  });
+
+  it('아직 해 보지 않았으면 씨앗이 있어도 "새 게임"을 둔다', () => {
+    expect(gardenTodo({ ...createMeta(), seeds: 500 })).toBeNull();
+  });
+
+  it('두고 간 판이 있으면 강화보다 먼저 그 판의 날과 함께 이어 하라고 한다', () => {
+    const rich = { ...createMeta(), runs: 3, seeds: 5000 };
+    expect(gardenTodo(rich, { day: 17 })).toEqual({ text: '이어하기 17일째' });
+    expect(gardenTodo(createMeta(), { day: 1 })).toEqual({ text: '이어하기 1일째' });
+    expect(gardenTodo(rich, null)).toEqual({ text: '강화 가능' });
   });
 });
 

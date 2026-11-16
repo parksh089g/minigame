@@ -440,6 +440,29 @@ describe('밸런스', () => {
     for (const played of career.runs) expect(played.seeds).toBeGreaterThanOrEqual(10);
   });
 
+  it('서른 판을 하는 동안 같은 날에서 오래 막히지 않는다', () => {
+    // 강화 값은 단계마다 곱으로 오르는데 한 판에 버는 씨앗은 날 수만큼만 늘어서, 뒤로 가면 벽이 생기기 쉽다.
+    // 예전 곡선에서는 40일째 근처에서 같은 판을 30번쯤 되풀이해야 넘었다.
+    for (const seed of [3, 5]) {
+      const career = playCareer(createMeta(), 30, 'active', seed);
+      let best = 0;
+      let stuck = 0;
+      let longest = 0;
+      for (const played of career.runs) {
+        if (played.cleared > best) {
+          best = played.cleared;
+          stuck = 0;
+        } else {
+          stuck += 1;
+          longest = Math.max(longest, stuck);
+        }
+      }
+      expect(best, `seed ${seed}`).toBeGreaterThanOrEqual(40);
+      expect(longest, `seed ${seed}: ${career.runs.map((played) => played.cleared).join(',')}`).toBeLessThanOrEqual(8);
+    }
+    // 판 예순 개를 끝까지 돌리므로 여느 테스트보다 오래 걸린다.
+  }, 60_000);
+
   it('손으로 겨누는 쪽이 지켜보기만 하는 쪽보다 못하지 않다', () => {
     const levels: Levels = { power: 6, rapid: 3, fence: 5, crit: 2, splash: 1 };
     let idle = 0;

@@ -231,7 +231,7 @@ export interface UpgradeDef {
 }
 
 export const UPGRADES: Readonly<Record<UpgradeId, UpgradeDef>> = {
-  power: { name: '센 물줄기', blurb: '물방울 하나의 피해가 커져요', maxLevel: 99, cost: 12, growth: 1.175 },
+  power: { name: '센 물줄기', blurb: '물방울 하나의 피해가 커져요', maxLevel: 99, cost: 12, growth: 1.15 },
   rapid: { name: '빠른 손', blurb: '물방울을 더 빨리 쏴요', maxLevel: 12, cost: 20, growth: 1.6 },
   fence: { name: '튼튼한 울타리', blurb: '울타리가 더 오래 버텨요', maxLevel: 60, cost: 10, growth: 1.2 },
   mend: { name: '울타리 손보기', blurb: '날이 바뀔 때 울타리를 더 많이 고쳐요', maxLevel: 8, cost: 20, growth: 1.7 },

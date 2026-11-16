@@ -92,7 +92,7 @@ let lastPage = 0;
 /** 별을 누른 뒤 카드를 다시 늘어놓기까지의 틈(ms). 별이 바뀐 것을 먼저 보여 주고 나서 자리를 옮긴다. */
 const STAR_SETTLE_MS = 160;
 
-/** 두 큰 게임의 할 일(hub-todo.ts)을 셈하는 데 쓰는 허브 세이브의 것 */
+/** 큰 게임의 할 일(hub-todo.ts)을 셈하는 데 쓰는 허브 세이브의 것 */
 const RECORDS: HubRecords = {
   playedBefore: (id) => getRecord(store.data, id).plays > 0,
   weekly: () => store.data.weekly,
@@ -139,7 +139,7 @@ export class HubScene extends Phaser.Scene {
   private slideFrom = 0;
   /** 지금 쪽에 놓인 카드의 아랫줄과, 할 일이 없을 때 그 자리에 쓰는 기록 줄. 할 일을 새로 읽으면 바꾼다. */
   private readonly cardLines = new Map<string, { label: Phaser.GameObjects.Text; record: CardLine }>();
-  /** 두 큰 게임의 할 일. 카드를 누르면 그 일이 있는 곳을 바로 연다. */
+  /** 큰 게임의 할 일. 카드를 누르면 그 일이 있는 곳을 바로 연다. */
   private todos: Todos = {};
   /** 할 일을 마지막으로 셈한 때(씬의 시각, ms) */
   private todosAt = 0;
@@ -158,7 +158,7 @@ export class HubScene extends Phaser.Scene {
 
     this.addHeader();
     this.shownDate = dateKeyOf(new Date());
-    // 두 큰 게임의 저장을 이미 읽었으면 그것으로 바로 셈해서, 카드를 그릴 때부터 맞는 할 일이 보이게 한다.
+    // 큰 게임의 저장을 이미 읽었으면 그것으로 바로 셈해서, 카드를 그릴 때부터 맞는 할 일이 보이게 한다.
     // 기록 초기화나 가져오기로 저장이 바뀌었어도 이 곳의 저장소는 이미 바뀐 것을 들고 있다.
     this.todos = todosNow(RECORDS);
     this.todosAt = 0;
@@ -168,7 +168,7 @@ export class HubScene extends Phaser.Scene {
     this.addFooter(height);
 
     const unsubscribe = onOfflineStatus((status) => this.showOfflineStatus(status));
-    // 같은 기기의 다른 곳(설치한 앱이나 다른 탭)에서 두 큰 게임을 하면 할 일을 바로 고친다.
+    // 같은 기기의 다른 곳(설치한 앱이나 다른 탭)에서 등불지기나 새싹 컴퍼니를 하면 할 일을 바로 고친다.
     const unwatch = watchTodos(() => this.paintTodos(todosNow(RECORDS)));
     // 뒤에 있다가 다시 보이면 두 게임의 저장을 다시 읽는다. 그사이 다른 곳에서 한 것도 따라간다.
     const onVisible = (): void => {
@@ -503,7 +503,10 @@ export class HubScene extends Phaser.Scene {
         : cleared > 0
           ? { text: `깬 단계 ${cleared}`, color: THEME_CSS.accent }
           : record.plays > 0
-            ? { text: `${game.ongoing ? '평판' : '최고'} ${record.best}`, color: THEME_CSS.accent }
+            ? {
+                text: game.recordLabel?.(record.best) ?? `${game.ongoing ? '평판' : '최고'} ${record.best}`,
+                color: THEME_CSS.accent,
+              }
             : { text: '새 게임', color: THEME_CSS.faint };
       const label = addText(this, center, TILE.recordY, line.text, {
         size: FONT_SIZE.small,
@@ -588,7 +591,7 @@ export class HubScene extends Phaser.Scene {
   }
 
   /**
-   * 카드의 아랫줄을 쓴다. 오늘 할 일이 있으면(두 큰 게임) 기록 대신 그것을 초록 글씨로 쓰고, 없으면 기록 줄을 쓴다.
+   * 카드의 아랫줄을 쓴다. 오늘 할 일이 있으면(큰 게임) 기록 대신 그것을 초록 글씨로 쓰고, 없으면 기록 줄을 쓴다.
    * 긴 글도 카드 안에 들어가도록 줄인다.
    */
   private paintLine(label: Phaser.GameObjects.Text, todo: Todo | undefined, record: CardLine): void {
@@ -597,7 +600,7 @@ export class HubScene extends Phaser.Scene {
     label.setScale(Math.min(1, (TILE_WIDTH - 4) / label.width));
   }
 
-  /** 두 큰 게임의 저장을 기기에서 다시 읽어서 할 일을 새로 고친다. 읽는 사이에 허브를 떠났으면 아무것도 하지 않는다. */
+  /** 큰 게임의 저장을 기기에서 다시 읽어서 할 일을 새로 고친다. 읽는 사이에 허브를 떠났으면 아무것도 하지 않는다. */
   private refreshTodos(): void {
     void loadTodos(RECORDS)
       .then((todos) => {
