@@ -1400,3 +1400,76 @@ it('텃밭 지키기: 하던 판을 두고 나가거나 앱이 꺼져도 준비 
   expect(texts.some((text) => text.startsWith('6판')), `판 수가 하나 늘어야 한다: ${texts.join(' / ')}`).toBe(true);
   expect(texts).not.toContain('이어하기 · 1일째');
 });
+
+it('텃밭 지키기: 50일째를 지키면 새 밭을 일굴 수 있고, 잃는 것과 얻는 것을 보여 준 뒤 두 번 눌러야 일군다', async ({ page }) => {
+  // 준비 화면의 글(garden-guard/lobby.ts). lobby.ts는 Phaser를 불러서 여기서 가져올 수 없다.
+  const PLOW_LABEL = '새 밭 일구기';
+  const PLOW_GO = '일구기';
+  const PLOW_SURE = '정말 일구기';
+  const PLOW_CONFIRM = '되돌릴 수 없어요.\n한 번 더 누르면 새 밭으로 가요.';
+  await openApp(page);
+  const levels = Object.fromEntries(UPGRADE_ORDER.map((id) => [id, Math.min(UPGRADES[id].maxLevel, 8)]));
+  await seedGardenMeta(page, {
+    version: 2,
+    seeds: 98765,
+    levels,
+    best: 63,
+    runs: 88,
+    kills: 123456,
+    startDay: 61,
+    savedAt: Date.now() + 60_000,
+  });
+  await page.reload();
+  await waitForScene(page, 'Hub');
+  await startScene(page, GARDEN_SCENE);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, PLOW_LABEL), { ...WAIT, message: '새 밭 일구기 버튼' }).not.toBeNull();
+  expect(await hiddenTexts(page, GARDEN_SCENE), '새 밭 버튼이 있는 준비 화면').toEqual([]);
+
+  // 버튼을 누르면 준비 화면 대신 두고 가는 것, 얻는 것, 남는 것이 보인다.
+  await tapText(page, GARDEN_SCENE, PLOW_LABEL);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, '두고 가는 것'), { ...WAIT, message: '새 밭 쪽' }).not.toBeNull();
+  const texts = await gardenTexts(page);
+  for (const line of ['· 씨앗 98765개', '· 강화 14가지 (모두 0단계로)', '· 최고 63일째와 열린 출발점', '· 물총 피해 +0% → +30%', '· 받는 씨앗 +0% → +30%']) {
+    expect(texts, line).toContain(line);
+  }
+  expect(texts, '준비 화면의 출발 버튼은 감춘다').not.toContain('출발!');
+  expect(await hiddenTexts(page, GARDEN_SCENE), '새 밭 쪽').toEqual([]);
+
+  // 한 번 누르면 되묻기만 하고, 그만두면 그대로인 준비 화면으로 돌아간다.
+  await tapText(page, GARDEN_SCENE, PLOW_GO);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, PLOW_CONFIRM), { ...WAIT, message: '한 번 더 묻는다' }).not.toBeNull();
+  expect(await textPoint(page, GARDEN_SCENE, PLOW_SURE)).not.toBeNull();
+  expect(await hiddenTexts(page, GARDEN_SCENE), '되묻는 새 밭 쪽').toEqual([]);
+  await tapText(page, GARDEN_SCENE, '그만두기');
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, '최고 63일째'), { ...WAIT, message: '그만두면 그대로' }).not.toBeNull();
+  expect(await textPoint(page, GARDEN_SCENE, '61일째'), '고른 시작 날도 그대로').not.toBeNull();
+
+  // 두 번 누르면 일군다: 1일째부터, 씨앗 0, 강화 0단계, "2번째 밭"이 보이고 효과 줄에 늘어난 피해가 들어간다.
+  await tapText(page, GARDEN_SCENE, PLOW_LABEL);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, PLOW_GO), WAIT).not.toBeNull();
+  await tapText(page, GARDEN_SCENE, PLOW_GO);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, PLOW_SURE), WAIT).not.toBeNull();
+  await tapText(page, GARDEN_SCENE, PLOW_SURE);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, '출발!'), { ...WAIT, message: '새 밭의 준비 화면' }).not.toBeNull();
+  const after = await gardenTexts(page);
+  expect(after).toContain('2번째 밭을 일궜어요!\n물총 피해와 씨앗이 +30%예요.');
+  expect(after).toContain('2번째 밭 · 88판');
+  expect(after).toContain('아직 하루도 못 지켰어요');
+  expect(after, '시작하는 날을 고르는 칸이 없어진다').not.toContain('61일째');
+  expect(after, '새 밭 버튼은 다시 50일째를 지켜야 생긴다').not.toContain(PLOW_LABEL);
+  expect(after.filter((text) => text === '0단계').length, '강화가 0단계로 돌아간다').toBeGreaterThan(0);
+  expect(await hiddenTexts(page, GARDEN_SCENE), '새 밭의 준비 화면').toEqual([]);
+  const stored = await page.evaluate(
+    () =>
+      new Promise<{ seeds: number; fields: number; best: number; bestEver: number }>((resolve, reject) => {
+        const open = indexedDB.open('pocket-arcade-garden');
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const request = open.result.transaction('kv').objectStore('kv').get('meta');
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        };
+      }),
+  );
+  expect(stored).toMatchObject({ seeds: 0, fields: 1, best: 0, bestEver: 63 });
+});

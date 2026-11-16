@@ -263,6 +263,7 @@ export class GardenGuardScene extends MiniGameScene {
         startDay: clampStartDay(meta.startDay, meta.best),
         levels: meta.levels,
         bestBefore: meta.best,
+        fields: meta.fields,
       }));
     }
     this.run = state;

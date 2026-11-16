@@ -110,7 +110,7 @@ export function playCareer(
     const wanted = Math.max(1, next.best - back);
     const start = clampStartDay(Math.max(...startDays(next.best).filter((day) => day <= wanted)), next.best);
     const state = playRun(
-      { seed: seed * 1000 + run, startDay: start, levels: next.levels, bestBefore: next.best },
+      { seed: seed * 1000 + run, startDay: start, levels: next.levels, bestBefore: next.best, fields: next.fields },
       style,
       3600,
       picks,

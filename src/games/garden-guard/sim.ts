@@ -129,6 +129,8 @@ export interface RunConfig {
   startDay: number;
   levels: Levels;
   bestBefore: number;
+  /** 일군 새 밭의 수(rules.ts의 GardenMeta.fields). 물총 피해와 받는 씨앗을 늘린다. 없으면 0 */
+  fields?: number;
 }
 
 export interface Input {
@@ -175,7 +177,7 @@ function beginDay(state: RunState, day: number, events: SimEvent[]): void {
 }
 
 export function createRun(config: RunConfig): { state: RunState; events: SimEvent[] } {
-  const stats = statsFor(config.levels);
+  const stats = statsFor(config.levels, config.fields ?? 0);
   const state: RunState = {
     rng: config.seed | 0,
     startDay: config.startDay,
