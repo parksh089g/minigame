@@ -195,4 +195,5 @@ export const SCENE = {
   matchThree: 'MatchThree',
   boxPush: 'BoxPush',
   brickBreak: 'BrickBreak',
+  candySlot: 'CandySlot',
 } as const;

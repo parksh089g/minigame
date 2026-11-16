@@ -365,6 +365,26 @@ export const SPRITES = {
     '................',
   ],
 
+  // 사탕 슬롯: 별 셋이 나란히 뜬 기계와 오른쪽의 손잡이
+  'icon-slot': [
+    '................',
+    '.............2..',
+    '.aaaaaaaaaaa.2..',
+    '.aaaaaaaaaaa.d..',
+    '.acccccccccca.d.',
+    '.ac4cc4cc4cca.d.',
+    '.a444444444ca.d.',
+    '.ac4cc4cc4ccadd.',
+    '.acccccccccca...',
+    '.aaaaaaaaaaa....',
+    '.aaa99999aaa....',
+    '.aaaaaaaaaaa....',
+    '.aaaaaaaaaaa....',
+    '..9.......9.....',
+    '................',
+    '................',
+  ],
+
   // 초성 퀴즈: 글자 조각에 적힌 초성 ㅊ과 ㅅ
   'icon-chosung': [
     '................',

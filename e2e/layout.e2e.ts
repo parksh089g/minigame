@@ -16,6 +16,7 @@ import {
   WEAPONS,
   type WeaponId,
 } from '../src/games/lantern-keeper/data';
+import { CHARMS, REROLL_COST, SLOTS, type RunState } from '../src/games/candy-slot/rules';
 import { iconKey } from '../src/games/lantern-keeper/icons';
 import { NEWS_GAP, newsLine, normalizeMeta, unknownNews } from '../src/games/lantern-keeper/meta';
 import { upgradeTitle, type Upgrade } from '../src/games/lantern-keeper/rules';
@@ -623,4 +624,56 @@ it('핀 뽑기 점수 도전: 3층 방이 나오는 단계에서 동굴과 도�
   expect((await pinPullBoard(page)).score - board.score, '시간을 그대로 남기고 깬 판의 점수').toBe(
     winPoints(stage, puzzleSeconds(stage)),
   );
+});
+
+/** 사탕 슬롯 장면에서 이 점검이 들여다보는 것 */
+interface CandySlotView {
+  run: RunState;
+  busy: boolean;
+  layout: { slotSize: number; slots: Array<{ x: number; y: number }> };
+  openShop(): void;
+}
+
+it('사탕 슬롯: 가게의 부적 세 줄과 붙인 부적의 설명, 상금이 가장 큰 확률 줄이 가려지지 않는다', async ({ page }) => {
+  await openApp(page);
+  await startScene(page, SCENE.candySlot);
+  expect(await hiddenTexts(page, SCENE.candySlot), '시작 화면').toEqual([]);
+
+  // 설명이 가장 긴 부적 세 장을 가게에 올리고, 상금의 자릿수가 가장 많아지는 부적들을 붙여 둔다.
+  const longest = [...CHARMS].sort((a, b) => b.description.length - a.description.length).slice(0, 3);
+  const widest = CHARMS.filter((charm) => charm.effect.value !== undefined && !longest.includes(charm)).slice(-(SLOTS - 1));
+  await page.evaluate(
+    ([key, offers, charms, rerollCost]) => {
+      const scene = window.__pocketArcade?.scene.getScene(key) as unknown as CandySlotView;
+      scene.run = { ...scene.run, phase: 'shop', spinsLeft: 0, candy: 999, charms, shop: { offers, rerollCost } };
+      scene.openShop();
+    },
+    [SCENE.candySlot, longest.map((charm) => charm.id), widest.map((charm) => charm.id), REROLL_COST] as const,
+  );
+  await expect.poll(() => textPoint(page, SCENE.candySlot, '부적 가게'), WAIT).not.toBeNull();
+  expect(await hiddenTexts(page, SCENE.candySlot, { from: '부적 가게' }), '가게').toEqual([]);
+
+  // 한 장을 사면 그 줄은 팔린 자리가 되고, 다섯 자리가 다 찬다.
+  await tapText(page, SCENE.candySlot, longest[0].name);
+  const run = (): Promise<RunState> =>
+    page.evaluate((key) => (window.__pocketArcade?.scene.getScene(key) as unknown as CandySlotView).run, SCENE.candySlot);
+  await expect.poll(async () => (await run()).charms.length, { message: '산 부적이 붙어야 한다' }).toBe(SLOTS);
+  expect(await hiddenTexts(page, SCENE.candySlot), '부적을 붙인 뒤의 가게와 확률 줄').toEqual([]);
+
+  // 붙인 부적을 누르면 설명과 떼는 버튼이 뜨고, 떼면 자리가 빈다.
+  const slot = await page.evaluate((key) => {
+    const { layout } = window.__pocketArcade?.scene.getScene(key) as unknown as CandySlotView;
+    const last = layout.slots[layout.slots.length - 1];
+    return { x: last.x + layout.slotSize / 2, y: last.y + layout.slotSize / 2 };
+  }, SCENE.candySlot);
+  await tapAt(page, slot.x, slot.y);
+  await expect.poll(() => textPoint(page, SCENE.candySlot, '떼기'), WAIT).not.toBeNull();
+  expect(await hiddenTexts(page, SCENE.candySlot, { from: '떼기' }), '붙인 부적의 설명').toEqual([]);
+  await tapText(page, SCENE.candySlot, '떼기');
+  await expect.poll(async () => (await run()).charms.length, { message: '뗀 자리가 비어야 한다' }).toBe(SLOTS - 1);
+
+  // 가게를 닫으면 다음 라운드가 시작된다.
+  await tapText(page, SCENE.candySlot, '다음 라운드');
+  await expect.poll(async () => (await run()).phase, { message: '다음 라운드가 시작되어야 한다' }).toBe('spin');
+  expect((await run()).round).toBe(2);
 });
