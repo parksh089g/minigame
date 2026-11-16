@@ -4,7 +4,7 @@ import { FONT_SIZE, GAME_WIDTH, SCENE, THEME } from '../../config';
 import { vibrate } from '../../core/haptics';
 import { reducedMotion } from '../../core/motion-guard';
 import { sfx, tone } from '../../core/sfx';
-import { addBackdrop, addTapZone, addText, drawPanel } from '../../core/ui';
+import { addTapZone, addText, drawPanel } from '../../core/ui';
 import { floatText, GameHud, HUD_HEIGHT, showBanner } from '../../scenes/GameHud';
 import { MiniGameScene, type ResultStrip } from '../../scenes/MiniGameScene';
 import {
@@ -13,6 +13,8 @@ import {
   CHARM_BOX,
   charmChipTexture,
   charmTexture,
+  drawBulbs,
+  drawFelt,
   drawMachine,
   emptySlotTexture,
   LOOK,
@@ -64,6 +66,8 @@ const FLICK_CALM_MS = 180;
 /** 첫 열이 멈출 때까지의 시간과, 그 뒤로 열마다 늦게 멈추는 시간(ms) */
 const STOP_FIRST_MS = 360;
 const STOP_STEP_MS = 190;
+/** 몸통의 전구가 켜진 것과 꺼진 것을 바꾸는 간격 */
+const BULB_MS = 480;
 /** 맞은 줄을 하나씩 보여 주는 간격(ms). 줄이 많으면 다 보여 주는 데 LINES_MAX_MS를 넘지 않게 좁힌다. */
 const LINE_STEP_MS = 280;
 const LINES_MAX_MS = 960;
@@ -111,7 +115,8 @@ type Graphics = Phaser.GameObjects.Graphics;
 // ───────── 버튼 ─────────
 
 const BUTTON_TONES = {
-  pink: { face: THEME.pink, lip: THEME.pinkDeep },
+  /** 돌리기와 다음 라운드: 카지노의 금빛 버튼 */
+  gold: { face: 0xffcf4a, lip: 0xc98f1a },
   mint: { face: THEME.mint, lip: THEME.mintDeep },
   coral: { face: THEME.coral, lip: THEME.coralDeep },
   plain: { face: THEME.card, lip: THEME.shadow },
@@ -313,7 +318,7 @@ export class CandySlotScene extends MiniGameScene {
     this.layout = layoutFor({ x: 0, y: HUD_HEIGHT, width: GAME_WIDTH, height: height - HUD_HEIGHT });
     this.run = newRun();
 
-    addBackdrop(this);
+    this.addTable();
     this.addMachine();
     this.addGoal();
     this.addSlots();
@@ -330,7 +335,7 @@ export class CandySlotScene extends MiniGameScene {
 
     this.addPauseButton();
     this.hud = new GameHud(this, DEPTH.hud);
-    this.spinButton = new SoftButton(this, this.layout.button, 'pink', DEPTH.panel, '돌리기', () => this.trySpin());
+    this.spinButton = new SoftButton(this, this.layout.button, 'gold', DEPTH.panel, '돌리기', () => this.trySpin());
 
     this.refreshNumbers();
     this.refreshSlots();
@@ -400,10 +405,28 @@ export class CandySlotScene extends MiniGameScene {
     return this.layout.machine.y + this.layout.machine.height / 2;
   }
 
+  /** 화면을 덮는 초록 천. 이 게임은 꾸미기 상점의 배경 대신 카지노 테이블 위에서 한다. */
+  private addTable(): void {
+    const { width, height } = this.scale;
+    const { machine } = this.layout;
+    const focus = { x: machine.x + machine.width / 2, y: machine.y + machine.height / 2 };
+    drawFelt(this.add.graphics(), width, height, focus, machine.width * 0.78);
+  }
+
   private addMachine(): void {
     const { machine, cell } = this.layout;
     const body = this.add.graphics().setDepth(DEPTH.machine);
     drawMachine(body, machine.x, machine.y, cell, MACHINE_FRAME);
+    // 몸통의 전구는 하나 걸러 하나씩 번갈아 깜빡인다. 움직임을 줄인 기기에서는 깜빡이지 않는다.
+    const bulbs = this.add.graphics().setDepth(DEPTH.machine);
+    let phase = 0;
+    const blink = (): void => {
+      bulbs.clear();
+      drawBulbs(bulbs, machine.x, machine.y, cell, MACHINE_FRAME, phase);
+      phase = 1 - phase;
+    };
+    blink();
+    if (!reducedMotion()) this.time.addEvent({ delay: BULB_MS, loop: true, callback: blink });
     this.glow = this.add.graphics().setDepth(DEPTH.glow);
     this.lineFx = this.add.graphics().setDepth(DEPTH.line);
     for (let index = 0; index < CELLS; index += 1) {
@@ -909,7 +932,7 @@ export class CandySlotScene extends MiniGameScene {
     const next = new SoftButton(
       this,
       { ...button, x: button.x + half + gap, width: half },
-      'pink',
+      'gold',
       DEPTH.panel,
       '다음 라운드',
       () => this.closeShop(),
@@ -1076,10 +1099,10 @@ export class CandySlotScene extends MiniGameScene {
     const depth = DEPTH.bubble;
 
     const back = this.add.graphics().setDepth(depth);
-    drawPanel(back, box.x, box.y, box.width, box.height, { radius: 10, border: THEME.lilac });
+    drawPanel(back, box.x, box.y, box.width, box.height, { radius: 10, border: LOOK.machine.trim });
     // 어느 부적의 설명인지 가리키는 꼬리
     const tipX = slots[slot].x + slotSize / 2;
-    back.fillStyle(THEME.lilac, 1);
+    back.fillStyle(LOOK.machine.trim, 1);
     back.fillTriangle(tipX - 6, box.y + box.height - 1, tipX + 6, box.y + box.height - 1, tipX, box.y + box.height + 6);
     const title = addText(this, box.x + 10, box.y + 6, name, { color: LOOK.text.ink }).setDepth(depth);
     const body = addText(this, box.x + 10, box.y + 24, description, {

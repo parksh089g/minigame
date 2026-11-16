@@ -36,8 +36,20 @@ interface Tone {
 }
 
 export const LOOK = {
-  /** 기계: 몸통과 그 아래 두께, 그림이 놓이는 칸의 바닥 */
-  machine: { body: THEME.lilac, lip: THEME.lilacDeep, shine: THEME.lilacSoft, slot: THEME.white, slotAlt: THEME.bg },
+  /** 기계: 빨간 몸통과 그 아래 두께, 그림이 놓이는 칸의 바닥, 칸을 두르는 금테, 몸통을 따라 박힌 전구 */
+  machine: {
+    body: 0xc92a3c,
+    lip: 0x7f1424,
+    shine: 0xf0707c,
+    slot: THEME.white,
+    slotAlt: 0xfff1d6,
+    trim: 0xffd24a,
+    trimLip: 0xb5810f,
+    bulbOn: 0xfff6c2,
+    bulbOff: 0xe39a1c,
+  },
+  /** 기계가 놓인 카지노 테이블의 초록 천: 바탕, 기계 둘레의 밝은 자리, 천의 무늬 */
+  felt: { base: 0x1b7350, glow: 0x239066, mark: 0x176646 },
   /** 그림마다의 색. 카지노 슬롯의 그림답게 짙고 또렷한 색을 쓴다. */
   symbols: {
     cherry: { face: 0xdc2f45, lip: 0x8f1830 },
@@ -68,7 +80,7 @@ export const LOOK = {
     trick: { edge: THEME.butterDeep, face: THEME.butterSoft },
   } satisfies Record<CharmKind, { edge: number; face: number }>,
   /** 부적이 붙지 않은 빈자리 */
-  emptySlot: { edge: THEME.shadow, face: THEME.dim },
+  emptySlot: { edge: 0x12573b, face: 0x186848 },
   /** 부적 그림 위의 표시: 더하기, 빼기 */
   plus: THEME.good,
   minus: THEME.bad,
@@ -77,7 +89,7 @@ export const LOOK = {
   dot: THEME.white,
   dotOn: THEME.accent,
   candy: { face: THEME.pink, lip: THEME.pinkDeep, wrap: THEME.pinkSoft, swirl: THEME.white },
-  goalBar: { back: THEME.dim, fill: THEME.pink, full: THEME.mintDeep },
+  goalBar: { back: THEME.dim, fill: THEME.gold, full: THEME.mintDeep },
   sparks: [THEME.gold, THEME.pink, THEME.mintDeep, THEME.skyDeep, THEME.white],
   text: {
     ink: THEME_CSS.ink,
@@ -614,22 +626,85 @@ export function emptySlotTexture(scene: Phaser.Scene): string {
  */
 export function drawMachine(g: Graphics, x: number, y: number, cell: number, frame: number): void {
   const size = cell * SIZE + frame * 2;
-  g.fillStyle(LOOK.machine.lip, 1);
+  const look = LOOK.machine;
+  g.fillStyle(look.lip, 1);
   g.fillRoundedRect(x, y + 4, size, size, 14);
-  g.fillStyle(LOOK.machine.body, 1);
+  g.fillStyle(look.body, 1);
   g.fillRoundedRect(x, y, size, size, 14);
-  g.fillStyle(LOOK.machine.shine, 1);
-  g.fillRoundedRect(x + 12, y + 2, size * 0.3, 2.4, 1.2);
+  // 칸들을 두르는 금테
+  const trim = 2;
+  g.fillStyle(look.trimLip, 1);
+  g.fillRoundedRect(x + frame - trim, y + frame - trim + 1, size - (frame - trim) * 2, size - (frame - trim) * 2, 11);
+  g.fillStyle(look.trim, 1);
+  g.fillRoundedRect(x + frame - trim, y + frame - trim, size - (frame - trim) * 2, size - (frame - trim) * 2 - 1, 11);
   for (let index = 0; index < SIZE * SIZE; index += 1) {
     const col = index % SIZE;
     const row = Math.floor(index / SIZE);
-    g.fillStyle(index % 2 === 0 ? LOOK.machine.slot : LOOK.machine.slotAlt, 1);
+    g.fillStyle(index % 2 === 0 ? look.slot : look.slotAlt, 1);
     g.fillRoundedRect(x + frame + col * cell + 1, y + frame + row * cell + 1, cell - 2, cell - 2, 9);
   }
   // 가운데 칸은 네 줄이 지나는 자리라서 작은 점으로 표시해 둔다.
   const center = { col: CENTER % SIZE, row: Math.floor(CENTER / SIZE) };
-  g.fillStyle(LOOK.machine.body, 0.5);
+  g.fillStyle(look.trimLip, 0.5);
   g.fillCircle(x + frame + (center.col + 0.5) * cell, y + frame + (center.row + 1) * cell - 5, 1.6);
+}
+
+/** 몸통의 한 변에 박는 전구의 수 */
+const BULBS_PER_SIDE = 9;
+
+/**
+ * 몸통의 테두리를 따라 박힌 전구를 그린다. 하나 걸러 하나씩 켜지고, phase가 바뀌면 켜진 것과 꺼진 것이 바뀐다.
+ * 자리는 drawMachine과 같이 준다.
+ */
+export function drawBulbs(g: Graphics, x: number, y: number, cell: number, frame: number, phase: number): void {
+  const size = cell * SIZE + frame * 2;
+  const look = LOOK.machine;
+  const inset = (frame - 2) / 2;
+  const radius = Math.min(1.7, inset - 0.6);
+  // 둥근 모서리를 비켜서 네 변에 고르게 놓는다.
+  const from = 15;
+  const step = (size - from * 2) / (BULBS_PER_SIDE - 1);
+  let count = 0;
+  const bulb = (bx: number, by: number): void => {
+    const lit = (count + phase) % 2 === 0;
+    count += 1;
+    g.fillStyle(lit ? look.bulbOn : look.bulbOff, 1);
+    g.fillCircle(bx, by, lit ? radius : radius - 0.3);
+  };
+  for (let index = 0; index < BULBS_PER_SIDE; index += 1) bulb(x + from + step * index, y + inset);
+  for (let index = 0; index < BULBS_PER_SIDE; index += 1) bulb(x + size - inset, y + from + step * index);
+  for (let index = BULBS_PER_SIDE - 1; index >= 0; index -= 1) bulb(x + from + step * index, y + size - inset);
+  for (let index = BULBS_PER_SIDE - 1; index >= 0; index -= 1) bulb(x + inset, y + from + step * index);
+}
+
+// ───────── 테이블 ─────────
+
+/** 천의 무늬가 놓이는 간격 */
+const FELT_STEP = 20;
+
+/**
+ * 화면을 덮는 카지노 테이블의 초록 천을 그린다. 기계가 놓인 자리(focus)는 조명을 받은 듯 조금 밝고,
+ * 천에는 작은 마름모 무늬가 엇갈려 깔린다.
+ */
+export function drawFelt(g: Graphics, width: number, height: number, focus: Point, reach: number): void {
+  const look = LOOK.felt;
+  g.fillStyle(look.base, 1);
+  g.fillRect(0, 0, width, height);
+  for (const scale of [1, 0.8, 0.6]) {
+    g.fillStyle(look.glow, 0.3);
+    g.fillEllipse(focus.x, focus.y, reach * 2 * scale, reach * 2.2 * scale);
+  }
+  const half = 2.2;
+  g.fillStyle(look.mark, 0.8);
+  for (let row = 0; row * FELT_STEP < height + FELT_STEP; row += 1) {
+    const shift = row % 2 === 0 ? 0 : FELT_STEP / 2;
+    for (let col = 0; col * FELT_STEP < width + FELT_STEP; col += 1) {
+      const cx = col * FELT_STEP + shift;
+      const cy = row * FELT_STEP + 4;
+      g.fillTriangle(cx - half, cy, cx, cy - half * 1.4, cx + half, cy);
+      g.fillTriangle(cx - half, cy, cx, cy + half * 1.4, cx + half, cy);
+    }
+  }
 }
 
 /** 그림의 색. 맞은 줄에서 튀는 알갱이에 쓴다. 7은 테두리의 금빛으로 튄다. */
