@@ -116,6 +116,8 @@ const TABS_TOP = DAILY_TOP + DAILY_HEIGHT + 8;
 const TAB_WIDTH = (CARD_WIDTH - HUB_TABS.gap * (HUB_GROUPS.length - 1)) / HUB_GROUPS.length;
 /** 맨 아래 버전과 오프라인 표시가 차지하는 높이 */
 const FOOTER_HEIGHT = 26;
+/** 목록과 그 아래의 도움말 사이에 비워 두는 틈 */
+const TIP_GAP = 6;
 
 /**
  * 마지막으로 보던 갈래와, 갈래마다 보던 쪽. 설정이나 꾸미기에 다녀와도 같은 자리가 보인다.
@@ -161,6 +163,14 @@ interface TabView {
   pressed: boolean;
 }
 
+/** 목록 아래에 두는 도움말의 글과, 그것을 담는 칸의 높이 */
+interface TipDraft {
+  text: Phaser.GameObjects.Text;
+  height: number;
+  /** 홈 화면에 추가하라는 도움말인지. 그러면 누를 수 있다. */
+  toInstall: boolean;
+}
+
 /** 카드에서 기록이나 오늘 할 일을 적는 자리 */
 interface LineView {
   label: Phaser.GameObjects.Text;
@@ -187,6 +197,13 @@ export class HubScene extends Phaser.Scene {
   /** 쪽이 여럿인 갈래의 쪽 넘김 줄. 고른 갈래의 것만 보인다. */
   private pagers: Partial<Record<HubGroup, Pager>> = {};
   private tabs!: Record<HubGroup, TabView>;
+  /** 목록 아래의 도움말. fits는 그 갈래의 목록과 겹치지 않는지다. 어느 갈래에서도 자리가 없으면 null이다. */
+  private tip: {
+    panel: Phaser.GameObjects.Graphics;
+    text: Phaser.GameObjects.Text;
+    zone: Phaser.GameObjects.Zone | null;
+    fits: (group: HubGroup) => boolean;
+  } | null = null;
   /** 가려져 있는 갈래에 할 일이 있다고 알리는 탭 모서리의 점 */
   private tabDot!: Phaser.GameObjects.Graphics;
   /** 지금 쪽의 카드를 이루는 것들. 쪽이나 갈래를 넘기면 지우고 다시 만든다. */
@@ -220,8 +237,11 @@ export class HubScene extends Phaser.Scene {
     this.todos = todosNow(RECORDS);
     this.todosAt = 0;
     this.addDaily();
-    this.addGames(height);
-    this.addTip(height);
+    // 도움말의 높이를 먼저 재서, 꾸준히 하는 게임의 목록이 그 자리를 비워 둘 수 있게 한다.
+    this.tip = null;
+    const tip = this.writeTip();
+    this.addGames(height, tip.height + TIP_GAP);
+    this.addTip(tip, height);
     this.addFooter(height);
 
     const unsubscribe = onOfflineStatus((status) => this.showOfflineStatus(status));
@@ -432,7 +452,7 @@ export class HubScene extends Phaser.Scene {
    * 게임 목록. 위에는 두 갈래(꾸준히 하는 게임, 짧게 즐기는 게임)를 고르는 탭이 있고, 그 아래에 고른 갈래의 카드가 놓인다.
    * 화면에 다 들어가면 그대로 늘어놓고, 넘치면 쪽으로 나눠서 아래의 버튼이나 옆으로 밀기로 넘겨 본다.
    */
-  private addGames(height: number): void {
+  private addGames(height: number, tipHeight: number): void {
     this.cardObjects = [];
     this.cardsDirty = false;
     this.slideFrom = 0;
@@ -440,7 +460,7 @@ export class HubScene extends Phaser.Scene {
 
     const room = height - FOOTER_HEIGHT - TABS_TOP;
     this.lists = {
-      steady: steadyList(this.cards('steady').length, room, PAGER_HEIGHT),
+      steady: steadyList(this.cards('steady').length, room, PAGER_HEIGHT, tipHeight),
       quick: quickList(this.cards('quick').length, room, PAGER_HEIGHT),
     };
     const save = store.data;
@@ -557,6 +577,7 @@ export class HubScene extends Phaser.Scene {
     lastPages[group] = this.page;
     this.showPagers();
     this.paintTabs();
+    this.showTip();
     this.cardsDirty = true;
     return true;
   }
@@ -978,8 +999,8 @@ export class HubScene extends Phaser.Scene {
     this.cardObjects.push(zone);
   }
 
-  /** 목록 아래 빈자리에 짧은 도움말을 둔다. 화면이 짧아 어느 갈래의 목록과든 겹치면 생략한다. */
-  private addTip(height: number): void {
+  /** 목록 아래에 두는 짧은 도움말의 글을 쓰고, 그것을 담는 칸의 높이를 잰다. 자리는 addTip이 잡는다. */
+  private writeTip(): TipDraft {
     const plays = Object.values(store.data.games).reduce((sum, record) => sum + record.plays, 0);
     // 아직 홈 화면에 추가하지 않았으면 그것부터 권한다. 방법은 기기마다 달라서, 누르면 그 기기에 맞는 순서가 나온다.
     const toInstall = !isStandalone();
@@ -996,11 +1017,18 @@ export class HubScene extends Phaser.Scene {
       color: THEME_CSS.sub,
       wrapWidth: CARD_WIDTH - 20,
     });
-    const panelHeight = Math.ceil(text.height) + 14;
-    const top = height - 26 - panelHeight;
-    // 탭을 바꿔도 도움말은 그대로 있으므로, 두 갈래 가운데 더 길게 내려오는 목록을 피한다.
-    const cardsBottom = TABS_TOP + Math.max(...HUB_GROUPS.map((group) => listBottom(this.lists[group], PAGER_HEIGHT)));
-    if (top < cardsBottom) {
+    return { text: text.setVisible(false), height: Math.ceil(text.height) + 14, toInstall };
+  }
+
+  /**
+   * 목록 아래 빈자리에 도움말을 둔다. 갈래마다 목록의 길이가 달라서, 지금 보는 갈래의 목록과 겹치지 않을 때만 보인다(showTip).
+   * 어느 갈래에서도 자리가 없으면 만들지 않는다.
+   */
+  private addTip(draft: TipDraft, height: number): void {
+    const { text, height: panelHeight, toInstall } = draft;
+    const top = height - FOOTER_HEIGHT - panelHeight;
+    const fits = (group: HubGroup): boolean => top >= TABS_TOP + listBottom(this.lists[group], PAGER_HEIGHT);
+    if (!HUB_GROUPS.some(fits)) {
       text.destroy();
       return;
     }
@@ -1014,12 +1042,25 @@ export class HubScene extends Phaser.Scene {
     };
     drawTip(false);
     text.setY(top + 7).setDepth(1);
-    if (toInstall) {
-      addTapZone(this, MARGIN, top, CARD_WIDTH, panelHeight, drawTip, () => {
-        sfx.click();
-        void whileBlocked(this, showInstallGuide);
-      });
-    }
+    const zone = toInstall
+      ? addTapZone(this, MARGIN, top, CARD_WIDTH, panelHeight, drawTip, () => {
+          sfx.click();
+          void whileBlocked(this, showInstallGuide);
+        })
+      : null;
+    this.tip = { panel, text, zone, fits };
+    this.showTip();
+  }
+
+  /** 도움말은 지금 보는 갈래의 목록과 겹치지 않을 때만 보인다. */
+  private showTip(): void {
+    if (!this.tip) return;
+    const { panel, text, zone, fits } = this.tip;
+    const shown = fits(this.group);
+    panel.setVisible(shown);
+    text.setVisible(shown);
+    if (shown) zone?.setInteractive({ useHandCursor: true });
+    else zone?.disableInteractive();
   }
 
   private addFooter(height: number): void {

@@ -44,6 +44,19 @@ describe('허브의 목록 놓기', () => {
     expect(steadyList(1, 2000, PAGER)).toMatchObject({ rows: 1, pages: 1 });
   });
 
+  it('도움말을 둘 자리는 카드가 넉넉한 높이를 지킬 때만 비워 둔다', () => {
+    const tip = 47;
+    // 390×844: 비워 두어도 카드가 넉넉하다.
+    const spared = steadyList(4, roomAt(519), PAGER, tip);
+    expect(spared.card.height).toBeGreaterThanOrEqual(STEADY_CARD.roomy);
+    expect(listBottom(spared, PAGER)).toBeLessThanOrEqual(roomAt(519) - tip);
+    // 320×568: 비워 두면 카드가 너무 낮아지므로 자리를 다 쓴다.
+    expect(steadyList(4, roomAt(426), PAGER, tip)).toEqual(steadyList(4, roomAt(426), PAGER));
+    // 쪽을 나눠야 하는 화면에서도 비워 두지 않는다.
+    expect(steadyList(9, roomAt(519), PAGER, tip)).toEqual(steadyList(9, roomAt(519), PAGER));
+    expect(steadyList(4, roomAt(519), PAGER, 0)).toEqual(steadyList(4, roomAt(519), PAGER));
+  });
+
   it('꾸준히 하는 게임이 가장 낮은 카드로도 다 들어가지 않으면 쪽으로 나눈다', () => {
     const list = steadyList(9, roomAt(MIN_GAME_HEIGHT), PAGER);
     expect(list.card.height).toBe(STEADY_CARD.least);

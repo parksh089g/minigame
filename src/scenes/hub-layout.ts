@@ -39,8 +39,11 @@ export const QUICK_CARD = {
   compact: { height: 57, gap: 6 },
 } as const satisfies Record<string, CardSize>;
 
-/** 꾸준히 하는 게임의 카드: 자리가 넉넉하면 tall까지 키우고, 모자라도 least 밑으로는 낮추지 않는다. */
-export const STEADY_CARD = { tall: 72, least: 48, gap: 6 } as const;
+/**
+ * 꾸준히 하는 게임의 카드: 자리가 넉넉하면 tall까지 키우고, 모자라도 least 밑으로는 낮추지 않는다.
+ * 목록 아래에 도움말을 둘 자리는 카드가 roomy보다 낮아지지 않을 때만 비워 둔다.
+ */
+export const STEADY_CARD = { tall: 72, roomy: 60, least: 48, gap: 6 } as const;
 
 const listTop = (compact: boolean): number =>
   HUB_TABS.height + HUB_TABS.depth + (compact ? BELOW_TABS.compact : BELOW_TABS.roomy);
@@ -68,8 +71,17 @@ export function quickList(count: number, room: number, pager: number): HubList {
 /**
  * 꾸준히 하는 게임 count개를 room 높이 안에 한 줄에 하나씩 놓는다. 다 들어가면 자리가 남는 만큼 카드를 키우고(tall까지),
  * 가장 낮은 카드로도 다 들어가지 않으면 쪽으로 나눈다.
+ * reserve는 목록 아래에 두는 도움말의 높이다. 그만큼 비워 두어도 카드가 넉넉하면(roomy 이상) 비워 두고,
+ * 아니면 도움말을 포기하고 자리를 다 쓴다.
  */
-export function steadyList(count: number, room: number, pager: number): HubList {
+export function steadyList(count: number, room: number, pager: number, reserve = 0): HubList {
+  const full = steadyFill(count, room, pager);
+  if (!(reserve > 0)) return full;
+  const spared = steadyFill(count, room - reserve, pager);
+  return spared.pages === 1 && spared.card.height >= STEADY_CARD.roomy ? spared : full;
+}
+
+function steadyFill(count: number, room: number, pager: number): HubList {
   const n = Math.max(1, Math.floor(count));
   const gap = STEADY_CARD.gap;
   const fits = (compact: boolean): number => Math.floor((room - listTop(compact)) / n) - gap;
