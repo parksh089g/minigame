@@ -254,6 +254,16 @@ export const GAMES: readonly MiniGameInfo[] = [
     genre: 'action',
   },
   {
+    id: 'candy-slot',
+    title: '행운 슬롯',
+    icon: 'icon-slot',
+    sceneKey: SCENE.candySlot,
+    // 점수는 한 판에 받은 금화의 수다. 부적이 잘 맞으면 수천까지 가서, 다른 게임보다 크게 나눈다.
+    coinsFor: (score) => Math.floor(score / 50),
+    dailyTargets: [100, 300, 700],
+    genre: 'puzzle',
+  },
+  {
     id: 'duel',
     title: '둘이서 대결',
     icon: 'icon-duel',

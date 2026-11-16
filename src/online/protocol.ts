@@ -31,6 +31,7 @@ export const RANKED_GAMES = [
   'match-three',
   'box-push',
   'brick-break',
+  'candy-slot',
   'garden-guard',
 ] as const;
 

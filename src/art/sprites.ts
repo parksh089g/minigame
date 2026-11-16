@@ -385,6 +385,26 @@ export const SPRITES = {
     '................',
   ],
 
+  // 행운 슬롯: 7 셋이 나란히 뜬 기계와 오른쪽의 손잡이
+  'icon-slot': [
+    '................',
+    '.............2..',
+    '.aaaaaaaaaaa.2..',
+    '.aaaaaaaaaaa.d..',
+    '.acccccccccca.d.',
+    '.a22c22c22cca.d.',
+    '.ac2cc2cc2cca.d.',
+    '.ac2cc2cc2ccadd.',
+    '.acccccccccca...',
+    '.aaaaaaaaaaa....',
+    '.aaa99999aaa....',
+    '.aaaaaaaaaaa....',
+    '.aaaaaaaaaaa....',
+    '..9.......9.....',
+    '................',
+    '................',
+  ],
+
   // 텃밭 지키기: 울타리 너머의 새싹과 물방울
   'icon-garden': [
     '................',
