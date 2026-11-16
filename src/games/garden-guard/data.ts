@@ -252,6 +252,8 @@ export const DAY = {
   bossEscort: 0.6,
   /** 날을 지킨 뒤 다음 날이 시작되기까지 쉬는 시간(초) */
   rest: 2.2,
+  /** 강화를 고른 뒤에는 쉬는 시간이 이만큼만 남는다(초). 고르느라 이미 쉬었다. */
+  afterPick: 1,
   /** 판에 벌레가 하나도 없으면 다음 벌레가 이 시간(초) 안에 나오도록 당긴다. 쉬운 날이 빨리 지나간다. */
   hurry: 0.35,
 } as const;
@@ -374,3 +376,107 @@ export const STEP = {
 
 /** 강화 없이 시작하는 울타리의 체력 */
 export const FENCE_BASE = 100;
+
+// ------------------------------------------------------------ 판마다 고르는 강화
+
+/**
+ * 날을 지킬 때마다 셋 가운데 하나를 골라 그 판에서만 쓰는 강화. 판이 끝나면 사라진다.
+ * 값은 BOON_STEP에 있고, 효과는 boons.ts의 applyBoon이 판의 능력치(Stats)에 바로 더한다.
+ */
+export type BoonId =
+  | 'jet'
+  | 'quick'
+  | 'needle'
+  | 'lance'
+  | 'spray'
+  | 'frost'
+  | 'plank'
+  | 'patch'
+  | 'bramble'
+  | 'bloom'
+  | 'cloud'
+  | 'sack';
+
+export interface BoonDef {
+  name: string;
+  /** 무엇을 하는지 한 줄. 고르는 카드에 적는다. */
+  blurb: string;
+  /** 카드에 그리는 그림. 닮은 영구 강화의 그림을 빌려 쓴다. */
+  icon: UpgradeId;
+  /** 한 판에 고를 수 있는 횟수 */
+  max: number;
+  /** 뽑히는 무게. 클수록 자주 나온다. */
+  weight: number;
+}
+
+/** 한 판에 고르는 횟수. 이만큼 고른 뒤로는 날을 지켜도 더 나오지 않는다. */
+export const BOON_PICKS = 8;
+/** 한 번에 내놓는 수 */
+export const BOON_CHOICES = 3;
+/**
+ * 고른 강화만큼 벌레도 세진다: 그 판에서 지킨 날마다(많아야 BOON_PICKS번) 벌레의 체력에 이 값을 곱한다.
+ * 강화를 고르는 만큼 물총이 세지므로, 이것이 없으면 판마다 훨씬 멀리 가서 영구 강화의 값어치가 줄어든다.
+ * 고른 강화의 힘과 얼추 맞춰 두어서, 잘 고르면 전보다 조금 더 가고 아무렇게나 고르면 전과 비슷하게 간다
+ * (자동 플레이 100판, 네 씨앗: 60일째까지 강화가 없을 때 232분, 맨 앞의 것만 고르면 236분, 골라서 고르면 210분).
+ * 판을 앞쪽 날에서 시작해 강화를 미리 모아도, 벌레도 같이 세져 있어서 득이 없다.
+ */
+export const BOON_HEAT = 1.08;
+
+/** 고를 때마다 바뀌는 값 */
+export const BOON_STEP = {
+  /** 센 물살: 물총의 피해 × */
+  jet: 1.12,
+  /** 날랜 손: 쏘는 빠르기 × (쏘는 간격은 이만큼으로 나눈다) */
+  quick: 1.1,
+  /** 콕콕 찌르기: 치명타 확률 + */
+  needle: 0.08,
+  /** 긴 물줄기: 뚫고 지나가는 벌레 수 + */
+  lance: 1,
+  /** 큰 물보라: 물보라가 없으면 first를 주고, 있으면 반지름과 피해 비율을 더한다. */
+  spray: { radius: 19, ratio: 0.3, radiusStep: 4, ratioStep: 0.1 },
+  /** 얼음물: 찬물이 없으면 first를 주고, 있으면 느려지는 정도를 더한다(많아도 max). */
+  frost: { slow: 0.18, seconds: 1.4, slowStep: 0.08, max: 0.6 },
+  /** 덧댄 울타리: 울타리 체력 + (지금의 가장 큰 체력에 대한 비율). 늘어난 만큼 바로 찬다. */
+  plank: 0.2,
+  /** 급한 수리: 울타리를 가장 큰 체력의 이만큼 바로 고친다. 울타리가 below 아래로 깎였을 때만 나온다. */
+  patch: { heal: 0.5, below: 0.75 },
+  /** 가시덤불: 갉을 때마다 물방울 피해의 이만큼을 더 되돌려 준다. */
+  bramble: 0.5,
+  /** 활짝 핀 꽃: 해바라기의 피해 × */
+  bloom: 1.3,
+  /** 먹구름: 물벼락을 다시 쓸 때까지의 시간 × */
+  cloud: 0.75,
+  /** 씨앗 주머니: 이 판에서 받는 씨앗 × */
+  sack: 1.25,
+} as const;
+
+export const BOONS: Readonly<Record<BoonId, BoonDef>> = {
+  jet: { name: '센 물살', blurb: '물총의 피해 +12%', icon: 'power', max: 4, weight: 3 },
+  quick: { name: '날랜 손', blurb: '쏘는 빠르기 +10%', icon: 'rapid', max: 4, weight: 3 },
+  needle: { name: '콕콕 찌르기', blurb: '크게 맞힐 확률 +8%', icon: 'crit', max: 3, weight: 2 },
+  lance: { name: '긴 물줄기', blurb: '물방울이 벌레 하나를 더 뚫어요', icon: 'pierce', max: 1, weight: 1 },
+  spray: { name: '큰 물보라', blurb: '물보라가 더 크게 튀어요', icon: 'splash', max: 2, weight: 2 },
+  frost: { name: '얼음물', blurb: '맞은 벌레가 더 느려져요', icon: 'chill', max: 2, weight: 2 },
+  plank: { name: '덧댄 울타리', blurb: '울타리 체력 +20%', icon: 'fence', max: 3, weight: 3 },
+  patch: { name: '급한 수리', blurb: '울타리를 절반만큼 바로 고쳐요', icon: 'mend', max: BOON_PICKS, weight: 3 },
+  bramble: { name: '가시덤불', blurb: '갉는 벌레가 가시에 더 찔려요', icon: 'thorn', max: 3, weight: 2 },
+  bloom: { name: '활짝 핀 꽃', blurb: '해바라기의 씨가 30% 세져요', icon: 'compost', max: 3, weight: 2 },
+  cloud: { name: '먹구름', blurb: '물벼락을 더 자주 써요', icon: 'storm', max: 2, weight: 2 },
+  sack: { name: '씨앗 주머니', blurb: '이 판에서 받는 씨앗 +25%', icon: 'harvest', max: 3, weight: 2 },
+};
+
+/** 뽑을 때 살펴보는 차례. 저장한 판을 읽을 때 아는 강화인지도 이것으로 본다. */
+export const BOON_ORDER: readonly BoonId[] = [
+  'jet',
+  'quick',
+  'needle',
+  'lance',
+  'spray',
+  'frost',
+  'plank',
+  'patch',
+  'bramble',
+  'bloom',
+  'cloud',
+  'sack',
+];

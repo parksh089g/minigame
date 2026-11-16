@@ -6,10 +6,17 @@ import { createRun, step, type RunState } from './sim';
 const STEP = 1 / 60;
 const T = 1_700_000_000_000;
 
-/** 벌레와 물방울이 판에 있는 한창인 판 */
+/** 벌레와 물방울이 판에 있는 한창인 판. 날을 지키면 내놓는 강화는 맨 앞의 것을 고른다. */
 function busyRun(seconds = 25): RunState {
   const { state } = createRun({ seed: 42, startDay: 4, levels: { power: 6, rapid: 3, helper: 1, splash: 1 }, bestBefore: 3 });
-  for (let t = 0; t < seconds; t += STEP) step(state, STEP);
+  for (let t = 0; t < seconds; t += STEP) step(state, STEP, { aim: null, storm: false, pick: 0 });
+  return state;
+}
+
+/** 날을 막 지켜서 강화 셋을 내놓고 고르기를 기다리는 판 */
+function waitingRun(): RunState {
+  const { state } = createRun({ seed: 42, startDay: 4, levels: { power: 6, rapid: 3, helper: 1, splash: 1 }, bestBefore: 3 });
+  for (let t = 0; t < 120 && state.offer.length === 0; t += STEP) step(state, STEP);
   return state;
 }
 
@@ -29,11 +36,22 @@ describe('하던 판의 저장', () => {
     const original = busyRun();
     const restored = readRunRecord(throughDisk(runRecord({ state: original, banked: 0 }, T))).run!.state;
     for (let t = 0; t < 30; t += STEP) {
-      step(original, STEP, { aim: { x: 40, y: 60 }, storm: true });
-      step(restored, STEP, { aim: { x: 40, y: 60 }, storm: true });
+      step(original, STEP, { aim: { x: 40, y: 60 }, storm: true, pick: 1 });
+      step(restored, STEP, { aim: { x: 40, y: 60 }, storm: true, pick: 1 });
     }
     expect(restored).toEqual(original);
-    expect(original.t).toBeGreaterThan(50);
+    expect(original.t).toBeGreaterThan(40);
+    expect(original.boons.length).toBeGreaterThan(0);
+  });
+
+  it('강화를 고르기를 기다리던 판은 읽어도 같은 셋을 내놓고, 고른 강화도 그대로다', () => {
+    const state = waitingRun();
+    expect(state.offer).toHaveLength(3);
+    const restored = readRunRecord(throughDisk(runRecord({ state, banked: 0 }, T))).run!.state;
+    expect(restored.offer).toEqual(state.offer);
+    step(restored, STEP, { aim: null, storm: false, pick: 2 });
+    expect(restored.boons).toEqual([state.offer[2]]);
+    expect(readRunRecord(throughDisk(runRecord({ state: restored, banked: 0 }, T))).run!.state.boons).toEqual(restored.boons);
   });
 
   it('이어 할 판이 없다고 적은 것은 없는 것으로 읽는다', () => {
@@ -59,6 +77,9 @@ describe('하던 판의 저장', () => {
       broken((record) => ((record.run.state.stats as Record<string, unknown>).damage = null)),
       broken((record) => ((record.run.state.queue as { kind: string }[])[0].kind = 'dragon')),
       broken((record) => (record.run.state.helperIn = ['soon'])),
+      broken((record) => (record.run.state.boons = ['jet', 'wings'])),
+      broken((record) => (record.run.state.offer = [3])),
+      broken((record) => delete record.run.state.offer),
       broken((record) => (record.run.state = [] as unknown as Record<string, unknown>)),
     ];
     for (const raw of cases) expect(readRunRecord(raw)).toEqual({ savedAt: T, run: null });
