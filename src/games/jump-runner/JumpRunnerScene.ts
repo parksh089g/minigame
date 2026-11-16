@@ -18,12 +18,14 @@ import {
   RUNNER_BOX,
   runSpeed,
   scoreFor,
+  SECOND_ACT_SECONDS,
   STAR_BOX,
   STAR_HEIGHT,
   STAR_POINTS,
   STAR_SIZE,
   stepRunner,
   touches,
+  VIEW_AHEAD,
   type ObstacleKind,
   type RunnerState,
 } from './rules';
@@ -44,7 +46,7 @@ interface Star {
 }
 
 /** 캐릭터가 서 있는 가로 위치. 화면 왼쪽에 두어 앞을 넓게 본다. */
-const RUNNER_X = 52;
+const RUNNER_X = GAME_WIDTH - VIEW_AHEAD;
 /** 땅의 높이. 화면 세로 길이에 대한 비율. */
 const GROUND_RATIO = 0.72;
 /** 한 번에 움직이는 가장 긴 시간(초). 프레임이 느려도 장애물을 건너뛰지 않게 잘게 나눈다. */
@@ -100,6 +102,8 @@ export class JumpRunnerScene extends MiniGameScene {
   private cleared = 0;
   private shownScore = -1;
   private nextMilestone = MILESTONE_METERS;
+  /** 2막(더 빨라지고 장애물이 붙어 나오는 구간)에 들어섰다고 알렸는지 */
+  private secondAct = false;
   /** 0보다 크면 잠깐 멈춰 있는 중 */
   private grace = 0;
   /** 처음 화면을 누르거나 잠깐 기다릴 때까지 달리지 않는다. 처음 하는 사람이 설명을 읽을 틈이다. */
@@ -233,6 +237,7 @@ export class JumpRunnerScene extends MiniGameScene {
     this.cleared = 0;
     this.shownScore = -1;
     this.nextMilestone = MILESTONE_METERS;
+    this.secondAct = false;
     this.grace = 0;
     this.gate.reset();
     this.pressed = false;
@@ -323,6 +328,7 @@ export class JumpRunnerScene extends MiniGameScene {
     this.elapsed += dt;
     const dx = runSpeed(this.elapsed) * dt;
     this.distance += dx;
+    if (!this.secondAct && this.elapsed >= SECOND_ACT_SECONDS) this.enterSecondAct();
 
     const step = stepRunner(this.body, { pressed: this.pressed, held: this.held }, dt);
     this.pressed = false;
@@ -379,15 +385,18 @@ export class JumpRunnerScene extends MiniGameScene {
       const isFirst = this.spawnCount === 0;
       // 첫 장애물은 조작을 읽을 시간을 두고 나온다.
       const gap = isFirst ? Math.round(runSpeed(0) * FIRST_GAP_SECONDS) : spawn.gap;
-      const box = OBSTACLE_BOX[spawn.kind];
-      const art = OBSTACLE_ART[spawn.kind];
       const x = Math.max(this.frontier + gap, GAME_WIDTH + 16);
 
-      const sprite = this.add
-        .image(0, this.groundY - box.bottom - art.lift, art.frames[0])
-        .setOrigin(0.5, 1)
-        .setDepth(DEPTH.obstacle);
-      this.obstacles.push({ kind: spawn.kind, x, sprite, passed: false });
+      // 2막에서는 둘이 붙어 나오기도 한다. 그때도 간격은 묶음의 앞끝과 뒤끝에서 잰다.
+      for (const part of spawn.obstacles) {
+        const box = OBSTACLE_BOX[part.kind];
+        const art = OBSTACLE_ART[part.kind];
+        const sprite = this.add
+          .image(0, this.groundY - box.bottom - art.lift, art.frames[0])
+          .setOrigin(0.5, 1)
+          .setDepth(DEPTH.obstacle);
+        this.obstacles.push({ kind: part.kind, x: x + part.offset, sprite, passed: false });
+      }
 
       // 빈 곳의 별은 앞 장애물과의 사이에 놓이므로, 앞 장애물이 없는 첫 번째에는 두지 않는다.
       if (spawn.star && (spawn.star.along >= 0 || !isFirst)) {
@@ -398,7 +407,7 @@ export class JumpRunnerScene extends MiniGameScene {
         this.stars.push({ x: starX, sprite: starSprite });
       }
 
-      this.frontier = x + box.width;
+      this.frontier = x + spawn.width;
       this.spawnCount += 1;
     }
   }
@@ -408,6 +417,13 @@ export class JumpRunnerScene extends MiniGameScene {
   }
 
   // ───────── 사건 ─────────
+
+  /** 2막에 들어섰다고 한 번 알린다. 여기서부터 속도가 더 오르고 장애물이 둘씩 붙어 나온다. */
+  private enterSecondAct(): void {
+    this.secondAct = true;
+    showBanner(this, this.playArea.centerY, '더 빠르게!', THEME_CSS.accent, 900, DEPTH.banner);
+    sfx.go();
+  }
 
   private onJump(): void {
     sfx.jump();

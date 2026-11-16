@@ -6,13 +6,27 @@
 // ───────── 속도 ─────────
 
 export const START_SPEED = 130;
-export const MAX_SPEED = 230;
-/** 1초마다 빨라지는 정도(px/s) */
+/** 1막이 끝날 때의 속도. 여기까지는 빠르게 오른다. */
+export const CRUISE_SPEED = 230;
+/**
+ * 가장 빠른 속도. 화면이 좁아서(너비 240) 이보다 빠르면 장애물이 나타나서 뛰어야 할 때까지
+ * 0.4초가 안 되어, 보고 누르는 게임이 아니게 된다.
+ */
+export const MAX_SPEED = 280;
+/** 1초마다 빨라지는 정도(px/s): 1막과 2막 */
 const SPEED_GAIN = 2.5;
+const LATE_SPEED_GAIN = 1;
+/**
+ * 2막이 시작되는 때(초). 1막에서 올릴 것(속도, 간격, 장애물 종류)이 모두 끝까지 오른 때다.
+ * 2막에서는 속도가 천천히 더 오르고 장애물이 둘씩 붙어 나와서, 오래 달릴수록 계속 어려워진다.
+ */
+export const SECOND_ACT_SECONDS = (CRUISE_SPEED - START_SPEED) / SPEED_GAIN;
 
-/** 달리는 속도(px/s). t는 달리기 시작한 뒤 지난 시간. 40초쯤에 가장 빨라진다. */
+/** 달리는 속도(px/s). t는 달리기 시작한 뒤 지난 시간. 40초까지 빠르게, 그 뒤로 90초까지 천천히 오른다. */
 export function runSpeed(t: number): number {
-  return Math.min(MAX_SPEED, START_SPEED + SPEED_GAIN * Math.max(0, t));
+  const time = Math.max(0, t);
+  if (time <= SECOND_ACT_SECONDS) return START_SPEED + SPEED_GAIN * time;
+  return Math.min(MAX_SPEED, CRUISE_SPEED + LATE_SPEED_GAIN * (time - SECOND_ACT_SECONDS));
 }
 
 // ───────── 점프 ─────────
@@ -113,6 +127,12 @@ export const OBSTACLE_BOX: Readonly<Record<ObstacleKind, Box>> = {
 export const RUNNER_BOX = { width: 14, height: 22 } as const;
 
 /**
+ * 달리는 캐릭터의 가운데에서 화면 오른쪽 끝까지의 거리(px). 장애물을 미리 볼 수 있는 거리라서,
+ * 속도와 함께 "보고 누를 시간"을 정한다.
+ */
+export const VIEW_AHEAD = 188;
+
+/**
  * 별이 떠 있는 높이(중심)와 크기. 끝까지 눌러 뛴 점프의 꼭대기에 닿는 높이라서
  * 높이 뛰면 반드시 지나가고, 살짝 뛰면 꼭대기에서만 겨우 닿는다.
  */
@@ -174,8 +194,71 @@ export interface StarSpot {
   along: number;
 }
 
-export interface Spawn {
+// ───────── 묶음(2막) ─────────
+
+/** 둘이 붙어 나오는 장애물. 끝까지 누른 점프 한 번으로 넘지만, 뛸 수 있는 순간이 하나일 때의 절반쯤이다. */
+export type GroupKind = 'twin-spikes' | 'spike-pillar' | 'bat-spike' | 'twin-pillars';
+
+/** 이 시간이 지나야 나오는 묶음. 뛸 수 있는 순간이 넉넉한 것부터 차례로 열린다. */
+export const GROUP_UNLOCK_SECONDS: Readonly<Record<GroupKind, number>> = {
+  'twin-spikes': 40,
+  'spike-pillar': 55,
+  'bat-spike': 70,
+  'twin-pillars': 85,
+};
+
+/**
+ * 묶음의 모양: 앞뒤로 놓이는 두 장애물과 그 사이의 틈(초).
+ * 틈을 거리가 아니라 시간으로 정해서, 속도가 올라 한 번에 넘는 거리가 늘어도 묶음이 쉬워지지 않는다.
+ * 틈이 null이면 뒤의 것이 앞의 것 바로 위에 뜬다(가시 위의 박쥐: 높이 뛰어야만 넘는다).
+ */
+const GROUP_SHAPE: Readonly<
+  Record<GroupKind, { parts: readonly [ObstacleKind, ObstacleKind]; innerSeconds: number | null }>
+> = {
+  'twin-spikes': { parts: ['spike', 'spike'], innerSeconds: 0.07 },
+  'spike-pillar': { parts: ['spike', 'pillar'], innerSeconds: 0.06 },
+  'bat-spike': { parts: ['spike', 'bat'], innerSeconds: null },
+  'twin-pillars': { parts: ['pillar', 'pillar'], innerSeconds: 0.085 },
+};
+
+/** 묶음으로 나올 확률이 가장 높을 때의 값과, 거기에 이르는 때(초). 2막이 시작될 때는 0이다. */
+export const GROUP_MAX_CHANCE = 0.5;
+export const GROUP_FULL_SECONDS = 110;
+
+/** 다음 장애물이 묶음으로 나올 확률(0~GROUP_MAX_CHANCE). 1막에서는 0이다. */
+export function groupChance(t: number): number {
+  const progress = (t - SECOND_ACT_SECONDS) / (GROUP_FULL_SECONDS - SECOND_ACT_SECONDS);
+  return GROUP_MAX_CHANCE * Math.min(1, Math.max(0, progress));
+}
+
+/** 한꺼번에 놓이는 장애물 하나 */
+export interface Placed {
   kind: ObstacleKind;
+  /** 맨 앞 장애물의 앞끝에서 이 장애물의 앞끝까지의 거리(px) */
+  offset: number;
+}
+
+/** 그 속도로 달릴 때 묶음을 이루는 장애물들. 앞에 놓이는 것부터다. */
+export function groupParts(group: GroupKind, speed: number): Placed[] {
+  const { parts, innerSeconds } = GROUP_SHAPE[group];
+  const [first, second] = parts;
+  const offset = innerSeconds === null ? 0 : OBSTACLE_BOX[first].width + Math.round(innerSeconds * speed);
+  return [
+    { kind: first, offset: 0 },
+    { kind: second, offset },
+  ];
+}
+
+/** 놓인 장애물들의 맨 앞끝에서 맨 뒤끝까지(px) */
+export function spanWidth(parts: readonly Placed[]): number {
+  return Math.max(0, ...parts.map((part) => part.offset + OBSTACLE_BOX[part.kind].width));
+}
+
+export interface Spawn {
+  /** 함께 놓이는 장애물. 1막에서는 언제나 하나이고, 2막에서는 둘이 붙어 나오기도 한다. */
+  obstacles: readonly Placed[];
+  /** 맨 앞 장애물의 앞끝에서 맨 뒤 장애물의 뒤끝까지(px) */
+  width: number;
   /** 앞 장애물의 뒤끝에서 이 장애물의 앞끝까지의 거리(px) */
   gap: number;
   star: StarSpot | null;
@@ -188,20 +271,35 @@ export interface Spawn {
 export function nextSpawn(t: number, random: () => number): Spawn {
   const kind = pickKind(t, random());
   const seconds = minGapSeconds(t) + random() * GAP_SPREAD_SECONDS;
-  const gap = Math.round(runSpeed(t) * seconds);
-  const box = OBSTACLE_BOX[kind];
-
+  const speed = runSpeed(t);
+  const gap = Math.round(speed * seconds);
   const roll = random();
+
+  const group = pickGroup(t, random);
+  const obstacles: Placed[] = group ? groupParts(group, speed) : [{ kind, offset: 0 }];
+  const width = spanWidth(obstacles);
+
   let star: StarSpot | null = null;
   if (roll < 0.35) {
-    // 장애물 바로 위. 높이 뛰어넘으면 따라온다. 박쥐 위의 별은 박쥐를 넘어야 닿는다.
-    star = { along: box.width / 2 };
+    // 장애물(묶음이면 그 한가운데) 바로 위. 높이 뛰어넘으면 따라온다. 박쥐 위의 별은 박쥐를 넘어야 닿는다.
+    star = { along: width / 2 };
   } else if (roll < 0.55 && seconds >= GAP_STAR_MIN_SECONDS) {
     // 장애물 앞의 빈 곳. 한 번 더 뛰어야 닿는다.
     star = { along: -Math.round(gap / 2) };
   }
-  return { kind, gap, star };
+  return { obstacles, width, gap, star };
 }
+
+/** 이번 장애물을 묶음으로 낼지, 낸다면 어느 묶음인지. 1막에서는 난수를 쓰지 않고 null을 돌려준다. */
+function pickGroup(t: number, random: () => number): GroupKind | null {
+  const chance = groupChance(t);
+  if (chance <= 0 || random() >= chance) return null;
+  const open = GROUP_KINDS.filter((group) => t >= GROUP_UNLOCK_SECONDS[group]);
+  if (open.length === 0) return null;
+  return open[Math.min(open.length - 1, Math.floor(random() * open.length))];
+}
+
+const GROUP_KINDS = Object.keys(GROUP_UNLOCK_SECONDS) as GroupKind[];
 
 function pickKind(t: number, roll: number): ObstacleKind {
   const open = KIND_WEIGHT.filter(([kind]) => t >= UNLOCK_SECONDS[kind]);

@@ -29,6 +29,7 @@ export const HOW_TO: Readonly<Record<string, readonly string[]>> = {
     '화면을 누르면 뛰어요',
     '길게 누르면 더 높이 뛰어요',
     '높이 뛰어 별을 먹으면 10점이에요',
+    '갈수록 빨라지고 장애물이 둘씩 나와요',
     '장애물에 부딪히면 끝나요',
   ],
   'stack-tower': [
