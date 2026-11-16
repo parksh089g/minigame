@@ -4,7 +4,7 @@
  * 게임 목록은 허브와 같은 registry에서 읽으므로, 게임을 새로 넣으면 따로 할 일 없이 이 점검에 들어온다.
  */
 import './app-globals';
-import { expect } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 import { GAME_WIDTH, SCENE } from '../src/config';
 import { GAMES } from '../src/games/registry';
 import {
@@ -18,7 +18,20 @@ import {
 } from '../src/games/jump-runner/rules';
 import { dayIndexOf } from '../src/games/lantern-keeper/daily';
 import { LANTERN_GAME_ID, LANTERN_SCENE } from '../src/games/lantern-keeper/data';
-import { areAdjacent, CELLS, COLS, isValidSwap, type Piece } from '../src/games/match-three/rules';
+import {
+  ARCADE_KINDS,
+  areAdjacent,
+  cellOf,
+  CELLS,
+  COLS,
+  isValidSwap,
+  playSwap,
+  ROWS,
+  secondsBack,
+  swapped,
+  type Piece,
+  type Turn,
+} from '../src/games/match-three/rules';
 import {
   activeScenes,
   expectRendering,
@@ -114,9 +127,18 @@ it('등불지기: 출발해서 움직이고, 멈췄다가 이어 할 수 있다'
 /** 세 개 맞추기 장면에서 이 점검이 들여다보는 것 */
 interface MatchThreeView {
   board: Piece[];
+  /** 칸마다 놓인 조각 그림 */
+  views: Array<{ texture: { key: string } } | null>;
   phase: string;
   timeLeft: number;
+  score: number;
+  rainbows: number;
+  /** 새로 들어오는 조각을 뽑는 난수 */
+  random: () => number;
+  syncViews(): void;
   trySwap(a: number, b: number): void;
+  /** 장면에 놓인 것들. 터지는 모습(빛줄기와 띠)은 Graphics로 그렸다가 지운다. */
+  children: { list: Array<{ type: string }> };
   events: {
     on(event: 'update', listener: (time: number, delta: number) => void): void;
     off(event: 'update', listener: (time: number, delta: number) => void): void;
@@ -176,6 +198,152 @@ it('세 개 맞추기: 맞지 않는 자리를 이어서 바꿔도 점수 도전
   // 되돌아오는 동안 시계가 서면, 그동안 지나간 프레임만큼 준 시간이 센 시간보다 모자란다.
   expect(measured.spent, '시계는 게임이 센 시간만큼 줄어야 한다').toBeGreaterThan(measured.played - 0.05);
   expect(measured.spent).toBeLessThan(measured.played + 0.05);
+});
+
+/**
+ * 글자로 그린 세 개 맞추기 판. 줄마다 COLS글자이고 숫자는 조각의 갈래, 소문자 a~f는 그 갈래(0~5)의 무지개다.
+ * 적지 않은 윗줄과 '?'는 서로 맞지 않는 무늬(갈래 3, 4, 5)로 채운다.
+ */
+function matchThreeBoard(rows: readonly string[]): Piece[] {
+  const board: Piece[] = [];
+  const offset = ROWS - rows.length;
+  for (let row = 0; row < ROWS; row += 1) {
+    for (let col = 0; col < COLS; col += 1) {
+      const letter = row < offset ? '?' : rows[row - offset][col];
+      if (letter === '?') board.push({ kind: 3 + ((col + row * 2) % 3), power: null });
+      else if (letter >= 'a' && letter <= 'f') board.push({ kind: letter.charCodeAt(0) - 97, power: 'rainbow' });
+      else board.push({ kind: Number(letter), power: null });
+    }
+  }
+  return board;
+}
+
+/** 점검이 장면에 끼워 넣는 난수: 부를 때마다 갈래가 0, 5, 4, 3, 2, 1 차례로 나온다. 페이지 안에서도 같은 식을 쓴다. */
+function steadyRandom(): () => number {
+  let index = 0;
+  return () => (((index++ * 5) % ARCADE_KINDS) + 0.5) / ARCADE_KINDS;
+}
+
+/** 장면의 판을 board로 바꿔 놓고 a와 b를 맞바꾼 뒤, 그 차례가 다 끝났을 때의 장면을 돌려준다. */
+async function playMatchThree(
+  page: Page,
+  board: Piece[],
+  a: number,
+  b: number,
+  timeLeft: number,
+): Promise<{
+  board: Piece[];
+  textures: Array<string | null>;
+  /** 옮겨 간 칸(b)에 그 차례 동안 놓였던 그림들. 처음 나온 차례대로다. */
+  shown: string[];
+  score: number;
+  rainbows: number;
+  /** 그 차례 동안 시계가 는 만큼(초). 손을 기다리는 동안 흐른 시간만큼 모자란다. */
+  gained: number;
+  /** 장면에 놓인 Graphics의 수: 바꾸기 전, 차례 도중 가장 많았을 때 */
+  drawn: { before: number; peak: number };
+}> {
+  return page.evaluate(
+    ([key, next, from, to, seconds, kinds]) =>
+      new Promise((resolve, reject) => {
+        const scene = window.__pocketArcade?.scene.getScene(key) as unknown as MatchThreeView;
+        const graphics = (): number => scene.children.list.filter((child) => child.type === 'Graphics').length;
+        scene.board = next;
+        scene.syncViews();
+        let index = 0;
+        scene.random = () => (((index++ * 5) % kinds) + 0.5) / kinds;
+        scene.timeLeft = seconds;
+        const before = graphics();
+        let peak = before;
+        const shown: string[] = [];
+        const giveUp = setTimeout(() => {
+          scene.events.off('update', onUpdate);
+          reject(new Error(`차례가 끝나지 않았다(phase ${scene.phase})`));
+        }, 30_000);
+        function onUpdate(): void {
+          peak = Math.max(peak, graphics());
+          const texture = scene.views[to]?.texture.key;
+          if (texture && !shown.includes(texture)) shown.push(texture);
+          if (scene.phase !== 'idle') return;
+          clearTimeout(giveUp);
+          scene.events.off('update', onUpdate);
+          resolve({
+            board: scene.board,
+            textures: scene.views.map((view) => view?.texture.key ?? null),
+            shown,
+            score: scene.score,
+            rainbows: scene.rainbows,
+            gained: scene.timeLeft - seconds,
+            drawn: { before, peak },
+          });
+        }
+        scene.trySwap(from, to);
+        if (scene.phase === 'idle') {
+          clearTimeout(giveUp);
+          reject(new Error('바꿀 수 없는 자리다'));
+          return;
+        }
+        scene.events.on('update', onUpdate);
+      }),
+    [SCENE.matchThree, board, a, b, timeLeft, ARCADE_KINDS] as const,
+  );
+}
+
+it('세 개 맞추기: 다섯을 맞추면 무지개 조각이 생기고, 무지개를 맞추면 같은 조각이 모두 함께 사라진다', async ({ page }) => {
+  await openApp(page);
+  await startScene(page, SCENE.matchThree);
+  const textureOf = (piece: Piece): string => `match-three:${piece.power ?? 'piece'}:${piece.kind}`;
+  const graphicsNow = (): Promise<number> =>
+    page.evaluate(
+      (key) =>
+        (window.__pocketArcade?.scene.getScene(key) as unknown as MatchThreeView).children.list.filter(
+          (child) => child.type === 'Graphics',
+        ).length,
+      SCENE.matchThree,
+    );
+
+  // 가운데 칸의 0을 아래로 내리면 맨 아래 줄에 0이 다섯 나란해진다.
+  const fiveBoard = matchThreeBoard(['??0????', '00?00??']);
+  const made = playSwap(fiveBoard, cellOf(2, 6), cellOf(2, 7), ARCADE_KINDS, steadyRandom()) as Turn;
+  expect(made.steps[0].made, '다섯이 맞으면 옮긴 칸에 무지개가 생겨야 한다').toEqual([
+    { cell: cellOf(2, 7), kind: 0, power: 'rainbow' },
+  ]);
+  expect(made.board[cellOf(2, 7)], '이 점검의 판에서는 무지개가 차례가 끝날 때까지 남아야 한다').toEqual({
+    kind: 0,
+    power: 'rainbow',
+  });
+  expect(secondsBack(made), '이 점검의 판에서는 첫 차례에 터지는 것이 없어야 한다').toBe(0);
+  const afterFive = await playMatchThree(page, fiveBoard, cellOf(2, 6), cellOf(2, 7), 30);
+  expect(afterFive.board, '장면의 판이 규칙이 낸 판과 같아야 한다').toEqual(made.board);
+  expect(afterFive.textures, '칸마다 그 조각의 그림이 놓여야 한다').toEqual(made.board.map(textureOf));
+  // 옮겨 온 여느 조각이 그 자리에서 곧바로 무지개로 바뀐다. 잠깐이라도 폭죽으로 보이면 안 된다.
+  expect(afterFive.shown, '옮긴 칸의 조각이 무지개로 바뀌어야 한다').toEqual(['match-three:piece:0', 'match-three:rainbow:0']);
+  expect(afterFive.score).toBe(made.points);
+  expect(afterFive.rainbows, '만들기만 해서는 터뜨린 것으로 세지 않는다').toBe(0);
+  expect(afterFive.gained, '무지개를 만들기만 해서는 시간을 돌려받지 않는다').toBeLessThanOrEqual(0);
+
+  // 왼쪽 아래의 무지개(갈래 0) 옆으로 0을 내려서 셋을 맞춘다. 판 곳곳에 0이 다섯, 다른 조각(1)이 넷 흩어져 있다.
+  const sweepBoard = matchThreeBoard(['0?1??01', '???0?1?', '?0????0', 'a?0?0?1']);
+  const zeros = swapped(sweepBoard, cellOf(1, 6), cellOf(1, 7)).flatMap((piece, cell) => (piece.kind === 0 ? [cell] : []));
+  const swept = playSwap(sweepBoard, cellOf(1, 6), cellOf(1, 7), ARCADE_KINDS, steadyRandom()) as Turn;
+  expect(swept.steps[0].swept).toEqual([{ cell: cellOf(0, 7), kind: 0 }]);
+  const gone = [...swept.steps[0].matched, ...swept.steps[0].blasted].sort((x, y) => x - y);
+  expect(zeros).toHaveLength(8);
+  expect(gone, '판의 0이 모두 사라지고 다른 조각은 남아야 한다').toEqual(zeros);
+  const back = secondsBack(swept);
+  expect(back).toBeGreaterThan(0);
+
+  const afterSweep = await playMatchThree(page, sweepBoard, cellOf(1, 6), cellOf(1, 7), 30);
+  expect(afterSweep.board, '장면의 판이 규칙이 낸 판과 같아야 한다').toEqual(swept.board);
+  expect(afterSweep.textures, '칸마다 그 조각의 그림이 놓여야 한다').toEqual(swept.board.map(textureOf));
+  expect(afterSweep.score).toBe(made.points + swept.points);
+  expect(afterSweep.rainbows, '터뜨린 무지개를 세어야 한다').toBe(swept.rainbows);
+  // 시계는 조각이 사라지고 떨어지는 동안 서 있으므로, 돌려받은 시간에서 차례가 끝난 뒤의 한두 프레임만큼만 모자란다.
+  expect(afterSweep.gained, '무지개를 터뜨리면 시간을 돌려받아야 한다').toBeGreaterThan(back - 0.35);
+  expect(afterSweep.gained).toBeLessThanOrEqual(back);
+  // 무지개가 같은 조각마다 잇는 빛줄기를 그렸다가, 다 사라지면 남기지 않고 지운다.
+  expect(afterSweep.drawn.peak, '무지개가 터지는 모습을 그려야 한다').toBeGreaterThan(afterSweep.drawn.before);
+  await expect.poll(graphicsNow, { message: '터지는 모습을 그린 것이 남아 있으면 안 된다' }).toBe(afterSweep.drawn.before);
 });
 
 /** 점프 러너 장면에서 이 점검이 들여다보는 것 */

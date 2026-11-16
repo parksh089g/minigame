@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { FONT_SIZE, GAME_WIDTH, SCENE, THEME } from '../../config';
 import { TEXTURE } from '../../art/sprites';
 import { vibrate } from '../../core/haptics';
-import { sfx } from '../../core/sfx';
+import { sfx, tone } from '../../core/sfx';
 import { StartGate } from '../../core/start-gate';
 import { addBackdrop, addText, drawPanel } from '../../core/ui';
 import { floatText, GameHud, HUD_HEIGHT, showBanner } from '../../scenes/GameHud';
@@ -44,6 +44,7 @@ import {
   START_SECONDS,
   startLevel,
   type BoardPhase,
+  type Clearing,
   type Direction,
   type LevelRun,
   type Move,
@@ -90,6 +91,14 @@ const HINT_NUDGE = 4;
 const TICK_FROM_SECONDS = 5;
 
 const DEPTH = { board: 1, piece: 5, select: 6, effect: 20, hud: 30, hint: 32, banner: 40 } as const;
+
+/** 무지개가 터지는 소리: 폭죽의 쉭 소리 위로 높은 음 셋이 차례로 반짝인다. */
+function sweepSound(): void {
+  sfx.whoosh();
+  [1319, 1760, 2349].forEach((note, index) => {
+    tone(note, 0.1, { type: 'triangle', volume: 0.22, delay: 0.03 + index * 0.05 });
+  });
+}
 
 /** 손가락 하나가 누른 조각. 한 번 누른 동안에는 한 번만 바꾼다. */
 interface Touch {
@@ -146,6 +155,7 @@ export class MatchThreeScene extends MiniGameScene {
   private popped = 0;
   private longest = 0;
   private bursts = 0;
+  private rainbows = 0;
   private timeLeft = START_SECONDS;
   private readonly gate = new StartGate();
   private lastTick = 0;
@@ -192,7 +202,7 @@ export class MatchThreeScene extends MiniGameScene {
       this.board = newBoard(this.kinds, Math.random);
       this.hud.setTime(this.timeLeft, START_SECONDS);
       this.showHints();
-      this.addNote('넷 이상 맞추면 폭죽이 생겨요');
+      this.addNote('넷을 맞추면 폭죽, 다섯이면 무지개가 생겨요');
     } else {
       // 같은 단계는 언제나 같은 판이고, 새로 들어오는 조각도 같은 차례로 나온다.
       const plan = levelPlan(this.stageLevel);
@@ -221,7 +231,7 @@ export class MatchThreeScene extends MiniGameScene {
     // 탭이 가려졌다 돌아와도 시간이 한꺼번에 흐르지 않게 한 프레임의 길이를 제한한다.
     const dt = Math.min(deltaMs, 100) / 1000;
     if (this.phase === 'idle') {
-      this.pulseBursts(time);
+      this.pulseSpecials(time);
       this.idle += dt;
       if (this.idle >= HINT_SECONDS) this.showMoveHint();
     }
@@ -256,6 +266,7 @@ export class MatchThreeScene extends MiniGameScene {
     this.popped = 0;
     this.longest = 0;
     this.bursts = 0;
+    this.rainbows = 0;
     this.timeLeft = START_SECONDS;
     this.gate.reset();
     this.lastTick = 0;
@@ -286,7 +297,7 @@ export class MatchThreeScene extends MiniGameScene {
 
   /** 조각 그림 하나를 꺼내 그 조각의 모습으로 맞춘다. 사라진 조각의 그림을 다시 쓴다. */
   private takeView(piece: Piece): Phaser.GameObjects.Image {
-    const texture = pieceTexture(this, piece.kind, piece.burst);
+    const texture = pieceTexture(this, piece.kind, piece.power);
     const view = this.pool.pop();
     if (view) return view.setTexture(texture).setVisible(true).setAlpha(1).setScale(1);
     const created = this.add.image(0, 0, texture);
@@ -311,7 +322,7 @@ export class MatchThreeScene extends MiniGameScene {
       this.tweens.killTweensOf(view);
       const { x, y } = this.centerOf(cell);
       view
-        .setTexture(pieceTexture(this, piece.kind, piece.burst))
+        .setTexture(pieceTexture(this, piece.kind, piece.power))
         .setPosition(x, y)
         .setScale(1)
         .setAlpha(1)
@@ -333,11 +344,11 @@ export class MatchThreeScene extends MiniGameScene {
     });
   }
 
-  /** 폭죽 조각은 가만히 있는 동안 살짝 커졌다 작아져서 눈에 띈다. */
-  private pulseBursts(time: number): void {
+  /** 특수 조각(폭죽과 무지개)은 가만히 있는 동안 살짝 커졌다 작아져서 눈에 띈다. */
+  private pulseSpecials(time: number): void {
     const scale = 1 + 0.05 * Math.sin(time / 180);
     this.board.forEach((piece, cell) => {
-      if (!piece.burst) return;
+      if (!piece.power) return;
       const view = this.views[cell];
       if (view && !this.tweens.isTweening(view)) view.setScale(scale);
     });
@@ -392,7 +403,7 @@ export class MatchThreeScene extends MiniGameScene {
       const x = left + 6 + index * GOAL_WIDTH;
       const y = top + GOAL_HEIGHT / 2;
       const icon = this.add
-        .image(x + 14, y, pieceTexture(this, goal.kind, false))
+        .image(x + 14, y, pieceTexture(this, goal.kind))
         .setScale(GOAL_SCALE)
         .setDepth(DEPTH.board + 1);
       const label = addText(this, x + 27, y, String(goal.count), {
@@ -623,19 +634,20 @@ export class MatchThreeScene extends MiniGameScene {
     });
   }
 
-  /** 사라지는 조각을 터뜨린다. 폭죽이 생기는 칸의 조각은 사라지는 대신 폭죽으로 바뀐다. */
+  /** 사라지는 조각을 터뜨린다. 특수 조각이 생기는 칸의 조각은 사라지는 대신 그 특수 조각으로 바뀐다. */
   private popCells(step: Step, gone: readonly number[]): void {
-    const made = new Map(step.made.map((burst) => [burst.cell, burst.kind]));
+    const made = new Map(step.made.map((special) => [special.cell, special]));
     for (const cell of step.detonated) this.flashLines(cell);
+    for (const rainbow of step.swept) this.flashSweep(rainbow, gone);
     for (const cell of gone) {
       const view = this.views[cell];
       const { x, y } = this.centerOf(cell);
       this.sparks.explode(2, x, y);
       if (!view) continue;
       this.tweens.killTweensOf(view);
-      const kind = made.get(cell);
-      if (kind !== undefined) {
-        view.setTexture(pieceTexture(this, kind, true)).setPosition(x, y);
+      const special = made.get(cell);
+      if (special) {
+        view.setTexture(pieceTexture(this, special.kind, special.power)).setPosition(x, y);
         this.tweens.add({ targets: view, scale: { from: 1.45, to: 1 }, duration: POP_MS + 60, ease: 'Back.Out' });
         continue;
       }
@@ -669,13 +681,47 @@ export class MatchThreeScene extends MiniGameScene {
     });
   }
 
+  /**
+   * 무지개가 터진 칸에서 함께 사라지는 같은 갈래의 조각마다 빛줄기를 잠깐 잇는다.
+   * 멀리 있는 조각이 왜 사라지는지가 보인다. 빛줄기의 겉은 그 조각의 색이다.
+   */
+  private flashSweep(rainbow: Clearing['swept'][number], gone: readonly number[]): void {
+    const from = this.centerOf(rainbow.cell);
+    const look = LOOK.pieces[rainbow.kind % LOOK.pieces.length];
+    const targets = gone
+      .filter((cell) => cell !== rainbow.cell && this.board[cell]?.kind === rainbow.kind)
+      .map((cell) => this.centerOf(cell));
+    const rays = this.add.graphics().setDepth(DEPTH.effect);
+    for (const [width, colour] of [
+      [5, look.face],
+      [2, LOOK.sweep],
+    ] as const) {
+      rays.lineStyle(width, colour, 0.9);
+      for (const to of targets) rays.lineBetween(from.x, from.y, to.x, to.y);
+    }
+    rays.lineStyle(3, look.face, 0.9);
+    for (const to of targets) rays.strokeCircle(to.x, to.y, CELL / 2 - 3);
+    rays.strokeCircle(from.x, from.y, CELL / 2 + 1);
+    this.tweens.add({
+      targets: rays,
+      alpha: 0,
+      duration: POP_MS + 160,
+      ease: 'Quad.In',
+      onComplete: () => rays.destroy(),
+    });
+  }
+
   /** 걸음 하나의 점수와 모은 조각을 반영하고, 소리와 글자로 알려 준다. */
   private reward(step: Step, gone: readonly number[]): void {
     this.popped += gone.length;
     this.bursts += step.detonated.length;
+    this.rainbows += step.swept.length;
     this.longest = Math.max(this.longest, step.chain);
 
-    if (step.detonated.length > 0) {
+    if (step.swept.length > 0) {
+      sweepSound();
+      vibrate(30);
+    } else if (step.detonated.length > 0) {
       sfx.whoosh();
       vibrate(25);
     } else if (step.made.length > 0) {
@@ -873,6 +919,7 @@ export class MatchThreeScene extends MiniGameScene {
       ['맞춘 조각', `${this.popped}개`],
       ['가장 긴 연쇄', `${this.longest}연쇄`],
       ['터뜨린 폭죽', `${this.bursts}개`],
+      ['터뜨린 무지개', `${this.rainbows}개`],
     ]);
   }
 

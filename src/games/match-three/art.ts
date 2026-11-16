@@ -6,7 +6,7 @@
 import type Phaser from 'phaser';
 import { THEME, THEME_CSS } from '../../config';
 import { bakeShape } from '../../core/bake';
-import { COLS, MAX_KINDS, ROWS } from './rules';
+import { COLS, MAX_KINDS, ROWS, type Power } from './rules';
 
 type Graphics = Phaser.GameObjects.Graphics;
 
@@ -61,10 +61,20 @@ export const LOOK = {
   shine: THEME.white,
   /** 폭죽 조각의 뒤에 깔리는 빛: 흰 동그라미에 금색 테, 네 쪽으로 뻗는 금색 살 */
   burst: { glow: THEME.white, ring: THEME.gold, ray: THEME.gold },
+  /**
+   * 무지개 조각의 뒤에 깔리는 빛: 흰 동그라미에 여섯 색으로 나뉜 두꺼운 테. 살이 없고 테가 토막 나 있어서,
+   * 색을 가려 보기 어려워도 폭죽과 모양으로 갈린다. 색은 조각의 여섯 색을 무지개 차례로 놓았다.
+   */
+  rainbow: {
+    glow: THEME.white,
+    ring: [THEME.coralDeep, THEME.gold, THEME.mintDeep, THEME.skyDeep, THEME.lilacDeep, THEME.pink],
+  },
   /** 고른 조각에 두르는 테 */
   select: THEME.inkDeep,
   /** 폭죽이 쓸고 지나가는 줄 */
   beam: THEME.gold,
+  /** 무지개가 같은 조각마다 잇는 빛줄기의 속. 겉은 그 조각의 색이다. */
+  sweep: THEME.white,
   sparks: [THEME.gold, THEME.pink, THEME.mintDeep, THEME.skyDeep, THEME.white],
   /** 목표를 다 모았다는 표시 */
   done: THEME.mintDeep,
@@ -94,7 +104,7 @@ export const RIM_LIP = 4;
 export const BOARD_WIDTH = COLS * CELL + RIM * 2;
 export const BOARD_HEIGHT = ROWS * CELL + RIM * 2;
 
-/** 조각 그림의 크기. 폭죽의 살이 칸 끝까지 뻗으므로 칸과 같은 크기로 굽는다. */
+/** 조각 그림의 크기. 폭죽의 살이 칸 끝까지 뻗으므로 칸과 같은 크기로 굽는다. 무지개의 테도 이 안에 든다. */
 const PIECE_BOX = CELL + 2;
 /** 조각의 반쯤 되는 크기 */
 const HALF = 11;
@@ -260,17 +270,48 @@ function drawGlow(g: Graphics): void {
   g.fillCircle(0, 0, reach - 5);
 }
 
-/** 그 갈래의 조각 텍스처. burst면 폭죽 조각이다. 처음 부를 때 굽는다. */
-export function pieceTexture(scene: Phaser.Scene, kind: number, burst: boolean): string {
+/** 한가운데에서 퍼지는 부채꼴 하나를 채운다. 각은 라디안이고 from에서 to로 돈다. */
+function fillWedge(g: Graphics, radius: number, from: number, to: number, steps = 8): void {
+  g.beginPath();
+  g.moveTo(0, 0);
+  for (let step = 0; step <= steps; step += 1) {
+    const angle = from + ((to - from) * step) / steps;
+    g.lineTo(radius * Math.cos(angle), radius * Math.sin(angle));
+  }
+  g.closePath();
+  g.fillPath();
+}
+
+/** 무지개 조각의 뒤에 깔리는 빛. 같은 조각을 모두 지운다는 뜻으로 조각의 여섯 색을 테에 둘렀다. */
+function drawRainbow(g: Graphics): void {
+  const radius = CELL / 2 - 1;
+  const colours = LOOK.rainbow.ring;
+  const slice = (Math.PI * 2) / colours.length;
+  // 토막 사이로 흰 바탕이 비쳐서 테가 여섯으로 나뉘어 보인다.
+  const gap = 0.09;
+  g.fillStyle(LOOK.rainbow.glow, 1);
+  g.fillCircle(0, 0, radius);
+  colours.forEach((colour, index) => {
+    const from = -Math.PI / 2 + index * slice;
+    g.fillStyle(colour, 1);
+    fillWedge(g, radius, from + gap, from + slice - gap);
+  });
+  g.fillStyle(LOOK.rainbow.glow, 1);
+  g.fillCircle(0, 0, radius - 4.5);
+}
+
+/** 그 갈래의 조각 텍스처. power를 주면 그 갈래의 특수 조각(폭죽이나 무지개)이다. 처음 부를 때 굽는다. */
+export function pieceTexture(scene: Phaser.Scene, kind: number, power: Power | null = null): string {
   const index = ((Math.floor(kind) % MAX_KINDS) + MAX_KINDS) % MAX_KINDS;
   const look = LOOK.pieces[index];
   return bakeShape(
     scene,
-    `match-three:${burst ? 'burst' : 'piece'}:${index}`,
+    `match-three:${power ?? 'piece'}:${index}`,
     { width: PIECE_BOX, height: PIECE_BOX, zoom: 1.4 },
     (g) => {
-      if (burst) drawGlow(g);
-      drawPiece(g, look, burst ? HALF * 0.78 : HALF);
+      if (power === 'burst') drawGlow(g);
+      if (power === 'rainbow') drawRainbow(g);
+      drawPiece(g, look, power ? HALF * 0.78 : HALF);
     },
   );
 }
