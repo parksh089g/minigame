@@ -196,5 +196,6 @@ export const SCENE = {
   matchThree: 'MatchThree',
   boxPush: 'BoxPush',
   brickBreak: 'BrickBreak',
+  candySlot: 'CandySlot',
   gardenGuard: 'GardenGuard',
 } as const;

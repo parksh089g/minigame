@@ -12,6 +12,7 @@ import { store } from './core/store';
 import { BlockFillScene } from './games/block-fill/BlockFillScene';
 import { BoxPushScene } from './games/box-push/BoxPushScene';
 import { BrickBreakScene } from './games/brick-break/BrickBreakScene';
+import { CandySlotScene } from './games/candy-slot/CandySlotScene';
 import { ChosungQuizScene } from './games/chosung-quiz/ChosungQuizScene';
 import { ColorSortScene } from './games/color-sort/ColorSortScene';
 import { DuelScene } from './games/duel/DuelScene';
@@ -123,6 +124,7 @@ async function boot(): Promise<void> {
       BlockFillScene,
       ChosungQuizScene,
       BrickBreakScene,
+      CandySlotScene,
       DuelScene,
       LanternKeeperScene,
       GardenGuardScene,
