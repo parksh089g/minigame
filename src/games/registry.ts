@@ -231,6 +231,15 @@ export const GAMES: readonly MiniGameInfo[] = [
     genre: 'puzzle',
   },
   {
+    id: 'brick-break',
+    title: '벽돌 깨기',
+    icon: 'icon-brick',
+    sceneKey: SCENE.brickBreak,
+    coinsFor: (score) => Math.floor(score / 15),
+    dailyTargets: [80, 170, 280],
+    genre: 'action',
+  },
+  {
     id: 'duel',
     title: '둘이서 대결',
     icon: 'icon-duel',

@@ -159,6 +159,8 @@ export const ACHIEVEMENTS: readonly Achievement[] = [
   { id: 'box-350', group: 'score', title: '상자의 달인', description: '상자 밀기 350점 이상', goal: 350, reward: 50, measure: bestOf('box-push') },
   { id: 'chosung-500', group: 'score', title: '낱말 박사', description: '초성 퀴즈 500점 이상', goal: 500, reward: 20, measure: bestOf('chosung-quiz') },
   { id: 'chosung-1000', group: 'score', title: '초성의 달인', description: '초성 퀴즈 1000점 이상', goal: 1000, reward: 50, measure: bestOf('chosung-quiz') },
+  { id: 'brick-300', group: 'score', title: '와르르 벽돌', description: '벽돌 깨기 300점 이상', goal: 300, reward: 20, measure: bestOf('brick-break') },
+  { id: 'brick-450', group: 'score', title: '벽돌의 달인', description: '벽돌 깨기 450점 이상', goal: 450, reward: 50, measure: bestOf('brick-break') },
   { id: 'lantern-3000', group: 'score', title: '꺼지지 않는 불', description: '등불지기 3000점 이상', goal: 3000, reward: 20, measure: bestOf('lantern-keeper') },
   { id: 'lantern-8000', group: 'score', title: '새벽을 본 등불', description: '등불지기 8000점 이상', goal: 8000, reward: 50, measure: bestOf('lantern-keeper') },
   { id: 'company-200', group: 'score', title: '소문난 회사', description: '새싹 컴퍼니 평판 200', goal: 200, reward: 20, measure: bestOf('sprout-company') },
