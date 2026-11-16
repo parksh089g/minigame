@@ -5,20 +5,23 @@
  */
 import './app-globals';
 import { expect, test, type Page } from '@playwright/test';
-import { SCENE } from '../src/config';
-import { STAGE_LEVELS } from '../src/core/stages';
+import { FONT_SIZE, GAME_WIDTH, SCENE, THEME_CSS } from '../src/config';
+import { STAGE_LEVELS, stageRandom } from '../src/core/stages';
+import { dealLevel as colorSortLevel } from '../src/games/color-sort/rules';
 import {
   EVOLVE_LEVEL,
   LANTERN_GAME_ID,
   LANTERN_SCENE,
   MAX_LEVEL,
+  META,
   WEAPON_ORDER,
   WEAPONS,
   type WeaponId,
 } from '../src/games/lantern-keeper/data';
 import { iconKey } from '../src/games/lantern-keeper/icons';
 import { NEWS_GAP, newsLine, normalizeMeta, unknownNews } from '../src/games/lantern-keeper/meta';
-import { upgradeTitle, type Upgrade } from '../src/games/lantern-keeper/rules';
+import { echoText, upgradeDescription, upgradeTitle, type Upgrade } from '../src/games/lantern-keeper/rules';
+import { levelPuzzle as pathLinkPuzzle } from '../src/games/path-link/rules';
 import { levelPuzzle } from '../src/games/pin-pull/levels';
 import {
   MAX_STACK,
@@ -29,8 +32,23 @@ import {
   type Pin,
   type Puzzle,
 } from '../src/games/pin-pull/rules';
-import { COMPANY_SCENE, GUIDE_STEPS, OFFICES, PROJECT_ORDER, PROJECTS, RATING } from '../src/games/sprout-company/data';
-import { createCompany, type CompanyState } from '../src/games/sprout-company/rules';
+import {
+  COMPANY_SCENE,
+  GUIDE_STEPS,
+  LEAD,
+  OFFICES,
+  PROJECT_ORDER,
+  PROJECTS,
+  RATING,
+  SKILL_LEVEL,
+  SKILLS,
+  STAFF,
+  STAFF_ORDER,
+  TIPS,
+  TRAINING,
+  type StaffId,
+} from '../src/games/sprout-company/data';
+import { buddyOf, createCompany, hasBuddy, type CompanyState } from '../src/games/sprout-company/rules';
 import { hiddenTexts, it, openApp, startScene, tapAt, tapText, textPoint, textsOutsideCards, waitForScene } from './app';
 
 /** 강화권 창, 레벨업 창, 골라내기 화면의 머리글(levelup.ts) */
@@ -51,9 +69,16 @@ interface LanternView {
   sim?: {
     state: {
       weapons: Record<string, number>;
+      passives: Record<string, number>;
+      /** 이 판에 들고 온 영구 강화 */
+      meta: Record<string, number>;
+      /** 뽑아 둔 레벨업 선택지. 가진 것과 맞으면 레벨업 창에 그대로 나온다. */
+      offer?: Upgrade[];
       pendingTickets: number;
       pendingLevelUps: number;
     };
+    /** 지금 무기에 얹히는 배율. echo는 무기마다 덤으로 나가는 것의 힘이다. */
+    mods: { echo: number };
     /** 남은 다시 뽑기와 골라내기 */
     rerolls: number;
     banishes: number;
@@ -217,6 +242,75 @@ it('등불지기 잔치의 밤: 고르는 창, 강화권 카드 넷~여섯 장(�
   expect(after.options.slice(1), '나머지 카드는 그대로다').toEqual(before.options.slice(1));
   expect(await textPoint(page, LANTERN_SCENE, `골라내기 ${after.banishes}`), '남은 골라내기').not.toBeNull();
   await expectClear(LEVEL_UP_TITLE, '골라낸 뒤의 레벨업 창');
+});
+
+it('등불지기 레벨업 카드: 손거울은 들고 온 곁불까지 더한 값을 적고, 고르면 적힌 그대로 덤이 나간다', async ({ page }) => {
+  await openApp(page);
+  // 새벽을 한 번 맞아 영구 강화 곁불을 다 올려 두고, 골라내기도 한 번 사 둔 저장.
+  const echo = META.echo.maxLevel;
+  await seedLanternMeta(page, { clears: 1, runs: 1, bestSeconds: 600, upgrades: { echo, sift: 1 } });
+  await page.reload();
+  await waitForScene(page, 'Hub');
+  await startScene(page, LANTERN_SCENE);
+  await tapText(page, LANTERN_SCENE, '출발!');
+  await expect.poll(() => phaseOf(page), { ...WAIT, message: '판이 시작되어야 한다' }).toBe('run');
+  const carried = await page.evaluate(
+    (key) => (window.__pocketArcade?.scene.getScene(key) as unknown as LanternView).sim!.state.meta.echo,
+    LANTERN_SCENE,
+  );
+  expect(carried, '이 판에 들고 온 곁불').toBe(echo);
+
+  // 손거울을 처음 드는 카드와 다 올리는 카드. 다 올리면 온전한 하나가 되고, 곁불만큼이 약한 하나로 더 붙는다.
+  // 전에는 카드가 손거울만의 값(20%, 100%)을 적어서, 곁불을 산 사람에게는 실제보다 적게 적혔다.
+  const wrong = [1, MAX_LEVEL].map((level) => upgradeDescription({ type: 'passive', id: 'mirror', level }));
+  for (const level of [1, MAX_LEVEL]) {
+    const card: Upgrade = { type: 'passive', id: 'mirror', level };
+    const text = upgradeDescription(card, { echo });
+    expect(wrong, `손거울 ${level}레벨: 곁불이 더해진 글`).not.toContain(text);
+    await page.evaluate(
+      ([key, offer, owned]) => {
+        const state = (window.__pocketArcade?.scene.getScene(key) as unknown as LanternView).sim!.state;
+        state.passives = owned > 0 ? { mirror: owned } : {};
+        state.offer = offer;
+        state.pendingLevelUps = 1;
+      },
+      [LANTERN_SCENE, [card, { type: 'heal' }, { type: 'embers' }] satisfies Upgrade[], level - 1] as const,
+    );
+    await expect
+      .poll(() => textPoint(page, LANTERN_SCENE, LEVEL_UP_TITLE), { ...WAIT, message: `손거울 ${level}레벨: 레벨업 창이 떠야 한다` })
+      .not.toBeNull();
+    expect(await textPoint(page, LANTERN_SCENE, text), `레벨업 창의 카드: ${text}`).not.toBeNull();
+    // 글이 달라져도 카드 안에 가려지지 않고 들어가야 한다.
+    const hidden = await hiddenTexts(page, LANTERN_SCENE, { from: LEVEL_UP_TITLE, clearTop: await hudHeight(page) });
+    expect(hidden, `손거울 ${level}레벨의 레벨업 창`).toEqual([]);
+    expect(await textsOutsideCards(page, LANTERN_SCENE, LEVEL_UP_TITLE), `손거울 ${level}레벨 카드`).toEqual([]);
+
+    if (level === 1) {
+      // 골라내기 화면은 같은 카드를 다시 그린다. 거기서도 같은 글이어야 한다.
+      await expect(async () => {
+        await tapText(page, LANTERN_SCENE, '골라내기 (1번 남음)');
+        expect(await textPoint(page, LANTERN_SCENE, BANISH_TITLE)).not.toBeNull();
+      }).toPass(WAIT);
+      expect(await textPoint(page, LANTERN_SCENE, text), `골라내기 화면의 카드: ${text}`).not.toBeNull();
+      await expect(async () => {
+        await tapText(page, LANTERN_SCENE, '그만두기');
+        expect(await textPoint(page, LANTERN_SCENE, LEVEL_UP_TITLE)).not.toBeNull();
+      }).toPass(WAIT);
+      expect(await textPoint(page, LANTERN_SCENE, text), `돌아온 레벨업 창의 카드: ${text}`).not.toBeNull();
+    }
+
+    // 카드를 고르면 무기에 얹히는 덤이 카드에 적힌 것과 같다.
+    await expect(async () => {
+      await tapText(page, LANTERN_SCENE, upgradeTitle(card));
+      expect(await textPoint(page, LANTERN_SCENE, LEVEL_UP_TITLE)).toBeNull();
+    }).toPass(WAIT);
+    await expect.poll(() => phaseOf(page), { ...WAIT, message: `손거울 ${level}레벨: 판이 이어져야 한다` }).toBe('run');
+    const power = await page.evaluate(
+      (key) => (window.__pocketArcade?.scene.getScene(key) as unknown as LanternView).sim!.mods.echo,
+      LANTERN_SCENE,
+    );
+    expect(echoText(power), `손거울 ${level}레벨을 고른 뒤의 덤`).toBe(text);
+  }
 });
 
 /** 등불지기 준비 화면에 잠깐 뜨는 알림 */
@@ -389,6 +483,251 @@ it('새싹 컴퍼니: 만드는 게임의 띠에 끝낸 카드 수가 가려지�
   await expect.poll(() => textPoint(page, COMPANY_SCENE, count(done + 1)), { ...WAIT, message: '카드를 끝내면 수가 올라야 한다' }).not.toBeNull();
   expect(await textPoint(page, COMPANY_SCENE, count(done)), '지난 수는 지워져야 한다').toBeNull();
   await expectStripClear('한 장을 더 끝낸 띠');
+});
+
+/** 새싹 컴퍼니 장면의 글자 하나: 줄여 적은 배율, 글씨 크기, 색, 화면에서의 상자 */
+interface CompanyText {
+  text: string;
+  scale: number;
+  fontPx: number;
+  color: string;
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
+/** 새싹 컴퍼니의 겹쳐 뜬 창에 놓인 글자와 하트 그림. 창이 없으면 장면에 바로 놓인 글자(알림 같은 것)를 모은다. */
+interface CompanyShown {
+  texts: CompanyText[];
+  /** 하트 그림(sc-heart)의 가운데 */
+  hearts: Array<{ x: number; y: number }>;
+}
+
+const companyShown = (page: Page): Promise<CompanyShown> =>
+  page.evaluate((key) => {
+    const scene = window.__pocketArcade?.scene.getScene(key) as unknown as
+      | (Phaser.Scene & { panel: Phaser.GameObjects.Container | null })
+      | undefined;
+    const shown: CompanyShown = { texts: [], hearts: [] };
+    if (!scene) return shown;
+    const walk = (list: Phaser.GameObjects.GameObject[], scale: number): void => {
+      for (const item of list) {
+        const seen = item as unknown as { visible: boolean; alpha: number; scaleX: number };
+        if (!seen.visible || seen.alpha <= 0.05) continue;
+        if (item.type === 'Container') {
+          walk((item as Phaser.GameObjects.Container).list, scale * seen.scaleX);
+        } else if (item.type === 'Image') {
+          const image = item as Phaser.GameObjects.Image;
+          if (image.texture.key === 'sc-heart') shown.hearts.push({ x: image.x, y: image.y });
+        } else if (item.type === 'Text') {
+          const text = item as Phaser.GameObjects.Text;
+          if (text.text.trim() === '') continue;
+          const box = text.getBounds();
+          shown.texts.push({
+            text: text.text,
+            scale: Math.round(text.scaleX * scale * 1000) / 1000,
+            fontPx: parseFloat(String(text.style.fontSize)),
+            color: String(text.style.color),
+            left: box.left,
+            right: box.right,
+            top: box.top,
+            bottom: box.bottom,
+          });
+        }
+      }
+    };
+    walk(scene.panel ? scene.panel.list : scene.children.list.filter((item) => item.type !== 'Container'), 1);
+    return shown;
+  }, COMPANY_SCENE);
+
+/** 직원 창의 줄 높이의 반(SproutCompanyScene의 buildStaffPanel: 한 줄 38). 이름은 줄의 가운데에서 15 위에 적힌다. */
+const STAFF_ROW_HALF = 19;
+const staffRowMiddle = (name: CompanyText): number => name.top + 15;
+
+/** 직원 창에서 그 친구의 이름이 적힌 글자. 줄의 다른 글자는 모두 더 작은 글씨다. */
+const staffRowName = (shown: CompanyShown, id: StaffId): CompanyText | undefined =>
+  shown.texts.find((text) => text.text === STAFF[id].name && text.fontPx === FONT_SIZE.normal);
+
+/** 새싹 컴퍼니를 이 회사로 열고 직원 창을 띄운다. */
+async function openStaffPanel(page: Page, state: CompanyState): Promise<void> {
+  await seedCompany(page, state);
+  await page.reload();
+  await waitForScene(page, 'Hub');
+  await startScene(page, COMPANY_SCENE);
+  await expect.poll(() => textPoint(page, COMPANY_SCENE, '직원'), { ...WAIT, message: '회사 화면이 떠야 한다' }).not.toBeNull();
+  await tapText(page, COMPANY_SCENE, '직원');
+  await expect.poll(() => textPoint(page, COMPANY_SCENE, '닫기'), { ...WAIT, message: '직원 창이 떠야 한다' }).not.toBeNull();
+}
+
+it('새싹 컴퍼니 직원 창: 기술을 적는 아랫줄은 뽑을 친구든 우리 친구든 줄여 적지 않고, 레벨과 하트는 얼굴 그림에 단다', async ({ page }) => {
+  await openApp(page);
+  // 가장 큰 사무실에 아홉이 앉아 있고 세 자리가 비어서, 남은 셋이 뽑을 친구로 나오는 회사.
+  // 열두 친구의 기술이 모두 창에 적히고, 뽑을 셋은 모두 단짝이 회사에 있다(전에는 그 이름을 같은 줄에 적느라 글씨가 가장 작아졌다).
+  const members: StaffId[] = ['sprout', 'drop', 'duck', 'dog', 'ghost', 'cat', 'rabbit', 'frog', 'penguin'];
+  const levels = [0, 1, SKILL_LEVEL - 1, SKILL_LEVEL, 5, TRAINING.maxLevel, 0, SKILL_LEVEL - 1, SKILL_LEVEL];
+  const hopefuls: StaffId[] = ['chick', 'bear', 'fox'];
+  expect([...members, ...hopefuls].sort(), '열두 친구 모두').toEqual([...STAFF_ORDER].sort());
+  const state = createCompany('sprout', Date.now());
+  state.office = OFFICES.length - 1;
+  state.guide = GUIDE_STEPS.length;
+  state.tips = Object.keys(TIPS);
+  state.leaves = 1e12;
+  state.desks = Array.from({ length: OFFICES[state.office].desks }, (_, index) => ({
+    ...state.desks[0],
+    staff: members[index] ?? null,
+    level: levels[index] ?? 0,
+  }));
+  state.candidates = hopefuls;
+  for (const id of hopefuls) expect(members, `${STAFF[id].name}의 단짝은 회사에 있다`).toContain(buddyOf(id));
+  await openStaffPanel(page, state);
+
+  // 팀장 줄의 아랫줄은 다음 단계에서 달라지는 것을 값 버튼 옆에 적는다. 어느 단계의 글도 그 자리에 줄이지 않고 들어가야 한다.
+  for (const [lead, next] of LEAD.levels.entries()) {
+    await page.evaluate(
+      ([key, level]) => {
+        (window.__pocketArcade?.scene.getScene(key) as unknown as CompanyView).state.lead = level;
+      },
+      [COMPANY_SCENE, lead] as const,
+    );
+    const lineOf = async (): Promise<CompanyText | undefined> =>
+      (await companyShown(page)).texts.find((text) => text.text === next.description);
+    await expect.poll(lineOf, { ...WAIT, message: `팀장 ${lead}단계의 줄: ${next.description}` }).toBeDefined();
+    expect((await lineOf())?.scale, `${next.description}: 줄여 적은 배율`).toBe(1);
+  }
+
+  // 쪽을 넘겨 가며 본다. 줄이 열셋이라 두 화면 크기 모두에서 쪽이 나뉜다.
+  const found = new Set<StaffId>();
+  let pageCount = 1;
+  for (let turn = 1; turn <= pageCount; turn += 1) {
+    const shown = await companyShown(page);
+    // 버튼의 값은 잎 그림 자리만큼 띄어 적어서 글 상자가 그 그림과 겹치는데, 글자가 가리지는 않는다.
+    const hidden = (await hiddenTexts(page, COMPANY_SCENE, { from: '닫기' })).filter((line) => !line.includes('그림(sc-leaf)'));
+    expect(hidden, `직원 창 ${turn}쪽에서 가려진 글`).toEqual([]);
+    // 줄여 적는 글은 이름 옆의 덤 글뿐이어야 한다(이름이 세 글자인 친구의 "출시 보너스 +10%"가 0.8배쯤으로 줄어든다).
+    // 아랫줄과 레벨 표, 창 아래의 안내는 모두 제 크기다.
+    const shrunk = shown.texts.filter((text) => text.scale < 1);
+    expect(shrunk.filter((text) => !/ \+\d+%$/.test(text.text)).map((text) => `${text.text} ×${text.scale}`), `직원 창 ${turn}쪽에서 줄여 적은 글`).toEqual([]);
+    for (const note of shrunk) expect(note.scale, `${note.text}: 줄여 적은 배율`).toBeGreaterThanOrEqual(0.8);
+
+    for (const id of STAFF_ORDER) {
+      const name = staffRowName(shown, id);
+      if (!name) continue;
+      found.add(id);
+      const who = STAFF[id].name;
+      const middle = staffRowMiddle(name);
+      const row = shown.texts.filter((text) => Math.abs((text.top + text.bottom) / 2 - middle) < STAFF_ROW_HALF);
+      const desk = members.indexOf(id);
+      const level = desk < 0 ? null : levels[desk];
+      const open = level !== null && level >= SKILL_LEVEL;
+
+      // 아랫줄에는 기술이 하는 일 하나만 적는다. 레벨이나 단짝의 이름을 함께 적으면 그만큼 글씨가 줄어든다.
+      const description = SKILLS[STAFF[id].skill].description;
+      const lines = row.filter((text) => Math.abs(text.left - name.left) < 1 && text.top > name.bottom - 2);
+      expect(lines.map((text) => text.text), `${who}의 아랫줄`).toEqual([description]);
+      expect(lines[0].scale, `${who}의 아랫줄을 줄여 적은 배율`).toBe(1);
+      expect(lines[0].fontPx, `${who}의 아랫줄의 글씨 크기`).toBe(FONT_SIZE.small);
+      // 기술이 열린 친구의 줄은 눈에 띄는 색으로, 아직 열리지 않았거나 뽑기 전인 친구의 줄은 보통 색으로 적는다.
+      expect(lines[0].color, `${who}의 아랫줄의 색`).toBe(open ? THEME_CSS.good : THEME_CSS.sub);
+
+      // 레벨은 얼굴 그림(이름의 왼쪽)에 단다: 기술이 열리기 전에는 열리는 레벨까지 얼마나 왔는지를, 열린 뒤에는 레벨만.
+      const badges = row.filter((text) => text.right <= name.left);
+      expect(badges.map((text) => text.text), `${who}의 레벨 표`).toEqual(
+        level === null ? [] : [open ? `${level}` : `${level}/${SKILL_LEVEL}`],
+      );
+      for (const badge of badges) expect(badge.scale, `${who}의 레벨 표를 줄여 적은 배율`).toBe(1);
+
+      // 하트도 얼굴 그림에 단다: 뽑을 친구는 단짝이 회사에 있을 때, 우리 친구는 단짝과 나란히 앉았을 때.
+      const hearts = shown.hearts.filter((heart) => heart.x < name.left && Math.abs(heart.y - middle) < STAFF_ROW_HALF);
+      expect(hearts.length, `${who}의 얼굴에 붙은 하트`).toBe(desk < 0 || hasBuddy(state, desk) ? 1 : 0);
+    }
+
+    const pager = shown.texts.map((text) => /^(\d+) \/ (\d+)$/.exec(text.text)).find((match) => match !== null);
+    if (!pager) break;
+    expect(Number(pager[1]), '보고 있는 쪽').toBe(turn);
+    pageCount = Number(pager[2]);
+    if (turn === pageCount) break;
+    await tapText(page, COMPANY_SCENE, '다음');
+    await expect.poll(() => textPoint(page, COMPANY_SCENE, `${turn + 1} / ${pageCount}`), WAIT).not.toBeNull();
+  }
+  expect(pageCount, '직원 창의 쪽 수').toBeGreaterThan(1);
+  expect([...found].sort(), '창에서 본 친구').toEqual([...STAFF_ORDER].sort());
+});
+
+it('새싹 컴퍼니: 여덟 줄짜리 직원 창은 쪽을 나누지 않고, 기술이 열릴 때의 알림은 기술 이름과 설명이 서로 닿지 않으며 설명은 바탕 위에 제 크기로 적힌다', async ({
+  page,
+}) => {
+  await openApp(page);
+  // 여섯 자리 사무실에 넷이 앉아 있고, 한 번만 더 교육하면 사장의 기술이 열리는 회사.
+  // 직원 창에는 뽑을 친구 셋, 팀장, 직원 넷으로 여덟 줄이 놓인다.
+  const members: StaffId[] = ['sprout', 'chick', 'drop', 'duck'];
+  const state = createCompany('sprout', Date.now());
+  state.office = OFFICES.findIndex((office) => office.desks === 6);
+  expect(state.office, '여섯 자리 사무실').toBeGreaterThanOrEqual(TRAINING.unlockOffice);
+  state.guide = GUIDE_STEPS.length;
+  state.tips = Object.keys(TIPS);
+  state.leaves = 1e9;
+  state.desks = Array.from({ length: OFFICES[state.office].desks }, (_, index) => ({
+    ...state.desks[0],
+    staff: members[index] ?? null,
+    level: index === 0 ? SKILL_LEVEL - 1 : 0,
+  }));
+  await openStaffPanel(page, state);
+
+  // 여덟 줄은 가장 작은 화면(320×568)에도 한 쪽에 다 들어간다. 창 아래의 안내가 한 줄 늘어도 이것은 지켜야 한다.
+  const shown = await companyShown(page);
+  expect(shown.texts.filter((text) => text.fontPx === FONT_SIZE.normal && text.left === staffRowName(shown, 'sprout')?.left), '직원 창의 줄').toHaveLength(8);
+  expect(shown.texts.filter((text) => /^\d+ \/ \d+$/.test(text.text)).map((text) => text.text), '쪽 번호').toEqual([]);
+  expect((await hiddenTexts(page, COMPANY_SCENE, { from: '닫기' })).filter((hidden) => !hidden.includes('그림(sc-leaf)')), '여덟 줄짜리 직원 창에서 가려진 글').toEqual([]);
+
+  const boss = STAFF.sprout;
+  const skill = SKILLS[boss.skill];
+  const title = `${skill.name}!`;
+  const line = `${boss.name}: ${skill.description}`;
+  const name = staffRowName(shown, 'sprout');
+  if (!name) throw new Error('사장의 줄이 없다');
+  // 교육 버튼은 줄의 오른쪽 끝에 있다(창의 왼쪽 10 + 폭 220 - 66에서 폭 56). 알림은 곧 흐려지므로, 뜨면 그 움직임을 멈춰 둔다.
+  await tapAt(page, 192, staffRowMiddle(name));
+  await page.waitForFunction(
+    ([key, label]) => {
+      const scene = window.__pocketArcade?.scene.getScene(key);
+      const up = scene?.children.list.some((item) => item.type === 'Text' && (item as Phaser.GameObjects.Text).text === label) ?? false;
+      if (up) scene?.tweens.pauseAll();
+      return up;
+    },
+    [COMPANY_SCENE, line] as const,
+    { timeout: WAIT.timeout, polling: 'raf' },
+  );
+
+  // 창은 닫혔으므로 장면에 바로 놓인 글자를 본다.
+  const { texts } = await companyShown(page);
+  const big = texts.find((text) => text.text === title);
+  const small = texts.find((text) => text.text === line);
+  if (!big || !small) throw new Error(`알림의 두 줄이 보여야 한다: ${title} / ${line}`);
+  // 전에는 두 줄의 글 상자가 12만큼 겹쳐서 큰 글씨의 아래와 설명의 위가 닿았다.
+  expect(small.top, '설명은 기술 이름의 아래에 닿지 않게 놓인다').toBeGreaterThanOrEqual(big.bottom);
+  expect(small.scale, '설명을 줄여 적은 배율').toBe(1);
+  expect(small.fontPx, '설명의 글씨 크기').toBe(FONT_SIZE.normal);
+  expect(small.left, '설명의 왼쪽 끝').toBeGreaterThanOrEqual(0);
+  expect(small.right, '설명의 오른쪽 끝').toBeLessThanOrEqual(GAME_WIDTH);
+  // 설명은 책상과 이름표 위에 뜨므로, 바로 아래에 그 글을 다 덮는 바탕이 깔려 있어야 한다.
+  const plate = await page.evaluate(
+    ([key, label]) => {
+      const list = window.__pocketArcade?.scene.getScene(key)?.children.list ?? [];
+      const at = list.findIndex((item) => item.type === 'Text' && (item as Phaser.GameObjects.Text).text === label);
+      const below = list[at - 1] as Phaser.GameObjects.Image | undefined;
+      if (at < 1 || !below || below.type !== 'Image') return null;
+      const box = below.getBounds();
+      const text = (list[at] as Phaser.GameObjects.Text).getBounds();
+      return {
+        covers: box.left <= text.left && box.right >= text.right && box.top <= text.top + 1 && box.bottom >= text.bottom - 1,
+        alpha: below.alpha,
+      };
+    },
+    [COMPANY_SCENE, line] as const,
+  );
+  expect(plate?.covers, '설명 아래에 그 글을 덮는 바탕').toBe(true);
+  expect(plate?.alpha ?? 0, '바탕의 진하기').toBeGreaterThan(0.8);
 });
 
 it('결과 카드: 기록 일곱 줄과 랭킹 줄에 무기 여섯의 피해 줄까지 가려지지 않고 들어간다', async ({ page }) => {
@@ -623,4 +962,134 @@ it('핀 뽑기 점수 도전: 3층 방이 나오는 단계에서 동굴과 도�
   expect((await pinPullBoard(page)).score - board.score, '시간을 그대로 남기고 깬 판의 점수').toBe(
     winPoints(stage, puzzleSeconds(stage)),
   );
+});
+
+/**
+ * 단계 모드의 장면에서 아래의 점검이 들여다보는 것. 색깔 물 나누기는 깔아 둔 판(stageData)과 지금의 병들(tubes)을,
+ * 길 잇기는 판의 문제(run.board.puzzle)와 지금까지 그린 길(run.board.paths)을 든다.
+ */
+interface StageDealView {
+  stageLevel: number | null;
+  /** 위쪽 HUD. 장면을 열 때마다 새로 만든다. */
+  hud: object;
+  stageData?: { tubes: unknown; solution: Array<{ from: number; to: number }> } | null;
+  tubes?: unknown;
+  views?: Array<{ x: number; y: number }>;
+  run?: { board: { puzzle: { size: number; solution: number[][] }; paths: number[][] } };
+  layout?: { cell: number; left: number; top: number };
+}
+
+interface StageDeal {
+  level: number | null;
+  /** 장면이 든 판(색깔 물 나누기)이나 문제(길 잇기) */
+  dealt: unknown;
+  /** 그 판이나 문제에 매긴 번호. 값이 같아도 따로 만든 것이면 번호가 다르다. */
+  dealtId: number;
+  /** 장면을 연 번째에 매긴 번호. 장면을 다시 열면 달라진다. */
+  openId: number;
+  /** 아직 아무것도 하지 않은 처음 모습인지 */
+  untouched: boolean;
+}
+
+/** 단계 모드의 장면이 든 판을 읽는다. 같은 것을 다시 쓰는지 볼 수 있게, 본 것마다 페이지 안에서 번호를 매겨 둔다. */
+const stageDeal = (page: Page, key: string): Promise<StageDeal> =>
+  page.evaluate((sceneKey) => {
+    const scene = window.__pocketArcade?.scene.getScene(sceneKey) as unknown as StageDealView;
+    const seen = ((window as unknown as { __stageDealsSeen?: unknown[] }).__stageDealsSeen ??= []);
+    const idOf = (thing: unknown): number => {
+      const at = seen.indexOf(thing);
+      return at >= 0 ? at : seen.push(thing) - 1;
+    };
+    const dealt = scene.run ? scene.run.board.puzzle : (scene.stageData ?? null);
+    const untouched = scene.run
+      ? scene.run.board.paths.every((path) => path.length === 0)
+      : JSON.stringify(scene.tubes) === JSON.stringify(scene.stageData?.tubes);
+    return { level: scene.stageLevel, dealt, dealtId: idOf(dealt), openId: idOf(scene.hud), untouched };
+  }, key);
+
+it('색깔 물 나누기와 길 잇기의 단계 도전: 하던 단계를 다시 열면 만들어 둔 판을 다시 만들지 않고 처음 모습으로 쓰고, 다른 단계에는 그 단계의 판이 나온다', async ({
+  page,
+}) => {
+  // 단계 모드의 판은 단계 번호로 정해지는데 만드는 데 시간이 걸려서(느린 기기에서는 반 초쯤 화면이 멈춘다),
+  // 다시 하기를 누를 때마다 똑같은 판을 또 만들지 않고 만들어 둔 것을 쓴다.
+  // 마지막 단계까지 열린 저장을 앱이 읽기 전에 넣어 둔다(core/store.ts의 FALLBACK_KEY).
+  await page.addInitScript(
+    (cleared) =>
+      localStorage.setItem('pocket-arcade:save', JSON.stringify({ stages: { 'color-sort': cleared, 'path-link': cleared } })),
+    STAGE_LEVELS - 1,
+  );
+  await openApp(page);
+  const box = await page.locator('canvas').boundingBox();
+  if (!box) throw new Error('캔버스가 보이지 않는다');
+  const scale = box.width / GAME_WIDTH;
+
+  /** 색깔 물 나누기: 찾아 둔 풀이의 첫 붓기를 한다(부을 병을 누르고 받을 병을 누른다). 판이 깔리는 동안에는 눌리지 않는다. */
+  const pourOnce = async (): Promise<void> => {
+    await expect(async () => {
+      const spots = await page.evaluate((key) => {
+        const scene = window.__pocketArcade?.scene.getScene(key) as unknown as StageDealView;
+        const move = scene.stageData?.solution[0];
+        const views = scene.views ?? [];
+        return move && views[move.from] && views[move.to] ? [views[move.from], views[move.to]].map((view) => ({ x: view.x, y: view.y + 30 })) : [];
+      }, SCENE.colorSort);
+      for (const spot of spots) await tapAt(page, spot.x, spot.y);
+      await expect.poll(async () => (await stageDeal(page, SCENE.colorSort)).untouched, { timeout: 2_000 }).toBe(false);
+    }).toPass(WAIT);
+  };
+  /** 길 잇기: 저장된 풀이의 첫 길을 두 칸만 그린다(첫 점을 누른 채 옆 칸으로 끈다). 판이 뜨고 잠깐은 그려지지 않는다. */
+  const drawOnce = async (): Promise<void> => {
+    await expect(async () => {
+      const cells = await page.evaluate((key) => {
+        const scene = window.__pocketArcade?.scene.getScene(key) as unknown as StageDealView;
+        if (!scene.run || !scene.layout || scene.layout.cell <= 0) return [];
+        const { size, solution } = scene.run.board.puzzle;
+        const { cell, left, top } = scene.layout;
+        return solution[0].slice(0, 2).map((at) => ({ x: left + ((at % size) + 0.5) * cell, y: top + (Math.floor(at / size) + 0.5) * cell }));
+      }, SCENE.pathLink);
+      expect(cells, '판이 놓여야 한다').toHaveLength(2);
+      await page.mouse.move(box.x + cells[0].x * scale, box.y + cells[0].y * scale);
+      await page.mouse.down();
+      await page.mouse.move(box.x + cells[1].x * scale, box.y + cells[1].y * scale, { steps: 4 });
+      await page.mouse.up();
+      expect((await stageDeal(page, SCENE.pathLink)).untouched).toBe(false);
+    }).toPass(WAIT);
+  };
+
+  const games = [
+    { name: '색깔 물 나누기', key: SCENE.colorSort, play: pourOnce, made: (level: number): unknown => colorSortLevel(level, stageRandom('color-sort', level)) },
+    { name: '길 잇기', key: SCENE.pathLink, play: drawOnce, made: (level: number): unknown => pathLinkPuzzle(level, stageRandom('path-link', level)) },
+  ];
+  for (const game of games) {
+    const top = STAGE_LEVELS;
+    // 브라우저에서 읽어 온 판과 견주므로, 여기서 만든 판도 같은 꼴(JSON)로 바꿔 둔다.
+    const made = (level: number): unknown => JSON.parse(JSON.stringify(game.made(level)));
+
+    // 처음 열면 그 단계의 판을 만들어 깐다.
+    await startScene(page, game.key, { stageLevel: top });
+    const first = await stageDeal(page, game.key);
+    expect(first.level, `${game.name}: 단계 모드로 열려야 한다`).toBe(top);
+    expect(first.dealt, `${game.name}: ${top}단계의 판`).toEqual(made(top));
+    expect(first.untouched, `${game.name}: 처음 모습`).toBe(true);
+
+    // 한 수를 두고 나서 같은 단계를 다시 연다(결과 화면의 다시 하기와 같다). 만들어 둔 바로 그 판을 쓰되, 둔 수는 남지 않는다.
+    await game.play();
+    await startScene(page, game.key, { stageLevel: top });
+    const again = await stageDeal(page, game.key);
+    expect(again.openId, `${game.name}: 장면이 다시 열려야 한다`).not.toBe(first.openId);
+    expect(again.dealtId, `${game.name}: 같은 단계를 다시 열면 만들어 둔 판을 그대로 쓴다`).toBe(first.dealtId);
+    expect(again.dealt, `${game.name}: 다시 연 ${top}단계의 판`).toEqual(made(top));
+    expect(again.untouched, `${game.name}: 다시 열면 처음 모습에서 시작한다`).toBe(true);
+
+    // 다른 단계를 열면 만들어 둔 판이 아니라 그 단계의 판이 나오고, 돌아오면 다시 처음의 판이 나온다.
+    await startScene(page, game.key, { stageLevel: top - 1 });
+    const other = await stageDeal(page, game.key);
+    expect(other.level, `${game.name}: 앞 단계`).toBe(top - 1);
+    expect(other.dealtId, `${game.name}: 다른 단계에는 다른 판`).not.toBe(first.dealtId);
+    expect(other.dealt, `${game.name}: ${top - 1}단계의 판`).toEqual(made(top - 1));
+    expect(other.dealt, `${game.name}: 두 단계의 판은 서로 다르다`).not.toEqual(made(top));
+    await startScene(page, game.key, { stageLevel: top });
+    const back = await stageDeal(page, game.key);
+    expect(back.dealt, `${game.name}: 돌아온 ${top}단계의 판`).toEqual(made(top));
+    expect(back.untouched, `${game.name}: 돌아온 판의 처음 모습`).toBe(true);
+  }
 });

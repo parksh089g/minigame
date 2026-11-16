@@ -64,6 +64,7 @@ import {
   sameUpgrade,
   scoreFor,
   seededRandom,
+  upgradeDescription,
   upgradeTitle,
   type Upgrade,
 } from './rules';
@@ -820,6 +821,14 @@ export class LanternKeeperScene extends MiniGameScene {
 
   // ------------------------------------------------------------ 레벨업
 
+  /**
+   * 레벨업 카드에 적을 설명. 손거울의 덤은 이 판에 들고 온 영구 강화 곁불까지 더해져서 나가므로, 그 값으로 적는다.
+   * 영구 강화가 들지 않는 오늘의 판에서는 들고 온 것이 없어서 손거울만의 값이 적힌다.
+   */
+  private describeUpgrade(upgrade: Upgrade): string {
+    return upgradeDescription(upgrade, this.sim.state.meta);
+  }
+
   /** again은 다시 뽑아서 같은 레벨업 화면을 새로 여는 것. 레벨업 소리를 또 내지 않는다. */
   private openLevelUp(again = false): void {
     this.phase = 'choosing';
@@ -862,6 +871,8 @@ export class LanternKeeperScene extends MiniGameScene {
       },
       HUD_HEIGHT,
       extras,
+      undefined,
+      (upgrade) => this.describeUpgrade(upgrade),
     );
   }
 
@@ -882,6 +893,7 @@ export class LanternKeeperScene extends MiniGameScene {
       HUD_HEIGHT,
       [{ label: '그만두기', onTap: () => this.openLevelUp(true) }],
       canBanish,
+      (upgrade) => this.describeUpgrade(upgrade),
     );
   }
 

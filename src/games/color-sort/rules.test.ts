@@ -4,6 +4,7 @@ import {
   canPour,
   clearBonus,
   colorsFor,
+  dealLevel,
   dealStage,
   EMPTY_TUBES,
   fallbackTubes,
@@ -230,5 +231,27 @@ describe('단계 만들기', () => {
     const a = dealStage(4, seeded(99));
     const b = dealStage(4, seeded(99));
     expect(a).toEqual(b);
+  });
+
+  it('단계 모드의 판은 끝까지 풀어도, 풀다가 막혀도 깔아 둔 그대로다', () => {
+    // 같은 단계를 다시 할 때는 판을 다시 만들지 않고 만들어 둔 것을 그대로 쓴다. 그러려면 붓는 일이 그 판을 고치지 않아야 한다.
+    for (const level of [1, 50, 100]) {
+      const dealt = dealLevel(level, seeded(level));
+      expect(dealLevel(level, seeded(level))).toEqual(dealt);
+      const before = JSON.stringify(dealt);
+      expect(isSolved(replay(dealt.tubes, dealt.solution))).toBe(true);
+      // 부을 수 있는 대로 아무렇게나 부어 본다.
+      const random = seeded(level + 7);
+      let tubes = dealt.tubes;
+      for (let step = 0; step < 40 && !isStuck(tubes) && !isSolved(tubes); step += 1) {
+        const moves = legalMoves(tubes);
+        const move = moves[Math.floor(random() * moves.length)];
+        const poured = pour(tubes, move.from, move.to);
+        if (!poured) throw new Error('부을 수 있다고 한 곳에 붓지 못했다');
+        tubes = poured.tubes;
+      }
+      expect(tubes).not.toEqual(dealt.tubes);
+      expect(JSON.stringify(dealt)).toBe(before);
+    }
   });
 });
