@@ -17,6 +17,7 @@ import {
   type WeaponId,
 } from '../src/games/lantern-keeper/data';
 import { iconKey } from '../src/games/lantern-keeper/icons';
+import { NEWS_GAP, newsLine, normalizeMeta, unknownNews } from '../src/games/lantern-keeper/meta';
 import { upgradeTitle, type Upgrade } from '../src/games/lantern-keeper/rules';
 import { levelPuzzle } from '../src/games/pin-pull/levels';
 import {
@@ -216,6 +217,80 @@ it('등불지기 잔치의 밤: 고르는 창, 강화권 카드 넷~여섯 장(�
   expect(after.options.slice(1), '나머지 카드는 그대로다').toEqual(before.options.slice(1));
   expect(await textPoint(page, LANTERN_SCENE, `골라내기 ${after.banishes}`), '남은 골라내기').not.toBeNull();
   await expectClear(LEVEL_UP_TITLE, '골라낸 뒤의 레벨업 창');
+});
+
+/** 등불지기 준비 화면에 잠깐 뜨는 알림 */
+interface NoticeView {
+  /** 화면에 적힌 그대로의 글. 줄을 나눴으면 줄바꿈이 들어 있다. */
+  text: string;
+  lines: number;
+  /** 줄인 것까지 넣은, 화면에 그려진 글씨의 크기(px) */
+  fontPx: number;
+  /** 글의 상자와, 그 뒤에 깔린 어두운 띠의 상자. 띠를 찾지 못하면 null이다. */
+  box: { left: number; right: number; top: number; bottom: number };
+  band: { left: number; right: number; top: number; bottom: number } | null;
+}
+
+it('등불지기 준비 화면: 업데이트를 여러 번 건너뛴 저장에 알리는 새 소식을 줄을 나눠 적어서, 글씨가 작아지지 않는다', async ({ page }) => {
+  await openApp(page);
+  // 들어온 줄 아는 것이 적혀 있지 않은 가장 오래된 저장. 캐릭터, 무기, 패시브, 스테이지, 영구 강화가 모두 새 소식이라 알림이 가장 길다.
+  const save = { runs: 3, clears: 0, bestSeconds: 300 };
+  const news = newsLine(unknownNews(normalizeMeta(save)));
+  expect(news.split(NEWS_GAP), '새 소식의 갈래').toHaveLength(5);
+  await seedLanternMeta(page, save);
+  await page.reload();
+  await waitForScene(page, 'Hub');
+  await startScene(page, LANTERN_SCENE);
+
+  // 알림은 몇 초 뒤에 흐려지며 사라진다. 찾으면 그 움직임을 멈춰 두어서, 보는 동안 사라지지 않게 한다.
+  const noticeOf = (): Promise<NoticeView | null> =>
+    page.evaluate(
+      ([key, line, gap]) => {
+        const scene = window.__pocketArcade?.scene.getScene(key);
+        if (!scene) return null;
+        const label = scene.children.list.find(
+          (item): item is Phaser.GameObjects.Text =>
+            item.type === 'Text' && (item as Phaser.GameObjects.Text).text.split('\n').join(gap) === line,
+        );
+        if (!label) return null;
+        for (const tween of scene.tweens.getTweensOf(label)) tween.pause();
+        const box = label.getBounds();
+        // 글의 한가운데를 덮는 네모 가운데 가장 작은 것이 알림의 띠다.
+        const bands = scene.children.list
+          .filter((item): item is Phaser.GameObjects.Rectangle => item.type === 'Rectangle')
+          .map((item) => item.getBounds())
+          .filter((bounds) => bounds.contains(box.centerX, box.centerY))
+          .sort((a, b) => a.width * a.height - b.width * b.height);
+        const sides = (bounds: Phaser.Geom.Rectangle): NoticeView['box'] => ({
+          left: bounds.left,
+          right: bounds.right,
+          top: bounds.top,
+          bottom: bounds.bottom,
+        });
+        return {
+          text: label.text,
+          lines: label.text.split('\n').length,
+          fontPx: parseFloat(String(label.style.fontSize)) * label.scaleY,
+          box: sides(box),
+          band: bands.length > 0 ? sides(bands[0]) : null,
+        };
+      },
+      [LANTERN_SCENE, news, NEWS_GAP] as const,
+    );
+  await expect.poll(noticeOf, { ...WAIT, message: '새 소식 알림이 떠야 한다' }).not.toBeNull();
+  const notice = (await noticeOf())!;
+  // 한 줄에 줄여 적으면 0.39배(4.7px)가 된다. 줄을 나눠서, 앱에서 가장 작게 쓰는 글씨(10px)보다 작아지지 않아야 한다.
+  expect(notice.lines, notice.text).toBeGreaterThan(1);
+  expect(notice.fontPx, notice.text).toBeGreaterThanOrEqual(10);
+  // 글은 어두운 띠 안에 들고, 화면 밖으로 나가거나 다른 것에 가리지 않는다.
+  expect(notice.band, '알림의 띠').not.toBeNull();
+  const { box } = notice;
+  const band = notice.band!;
+  expect(box.left, '띠의 왼쪽').toBeGreaterThanOrEqual(band.left);
+  expect(box.right, '띠의 오른쪽').toBeLessThanOrEqual(band.right);
+  expect(box.top, '띠의 위쪽').toBeGreaterThanOrEqual(band.top);
+  expect(box.bottom, '띠의 아래쪽').toBeLessThanOrEqual(band.bottom);
+  expect(await hiddenTexts(page, LANTERN_SCENE, { from: notice.text.replace(/\s+/g, ' ') }), '새 소식 알림').toEqual([]);
 });
 
 /**

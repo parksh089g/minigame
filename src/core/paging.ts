@@ -67,6 +67,63 @@ export function balancedRows(count: number, perRow: number): number[] {
   return Array.from({ length: rows }, (_, index) => base + (index < extra ? 1 : 0));
 }
 
+/**
+ * 차례대로 놓인 조각 count개를 몇 줄에 나눠 적을지 정해서, 줄마다 담는 조각의 수를 돌려준다(모두 더하면 count).
+ * width(from, to)는 from번째부터 to번째 앞까지를 한 줄에 적었을 때의 너비이고, room은 한 줄에 쓸 수 있는 너비다.
+ * 줄 수를 하나씩 늘려 가며, 가장 긴 줄을 minScale배로 줄이면 room에 들어가는 첫 줄 수를 고른다.
+ * 줄 수가 같은 나눔 가운데서는 가장 긴 줄이 가장 짧은 것을, 그것도 같으면 앞줄에 적게 담은 것을 고른다.
+ * 조각마다 한 줄을 써도 넘치면 그렇게 나눈다(더 줄이는 일은 부르는 쪽이 한다).
+ * 예: 너비 80, 60, 70, 90인 조각을 사이에 10씩 두고 적으면 400 안에는 [4], 200 안에는 [2, 2], 100 안에는 [1, 1, 1, 1]
+ */
+export function packLines(
+  count: number,
+  width: (from: number, to: number) => number,
+  room: number,
+  minScale = 1,
+): number[] {
+  const n = Math.max(0, Math.floor(count));
+  if (n === 0) return [];
+  // 한 줄의 너비는 한 번씩만 잰다. 글자를 그려서 재는 쪽에서는 재는 일이 비싸다.
+  const measured = new Map<number, number>();
+  const lineWidth = (from: number, to: number): number => {
+    const key = from * (n + 1) + to;
+    let value = measured.get(key);
+    if (value === undefined) {
+      value = width(from, to);
+      measured.set(key, value);
+    }
+    return value;
+  };
+  interface Split {
+    widest: number;
+    sizes: number[];
+  }
+  // from번째부터 끝까지를 lines줄에 나누는 방법 가운데 가장 긴 줄이 가장 짧은 것. 같은 물음은 한 번만 푼다.
+  const solved = new Map<number, Split>();
+  const split = (from: number, lines: number): Split => {
+    if (lines === 1) return { widest: lineWidth(from, n), sizes: [n - from] };
+    const key = from * (n + 1) + lines;
+    const known = solved.get(key);
+    if (known) return known;
+    let best: Split | null = null;
+    // 첫 줄에 담는 수를 늘려 가며 본다. 남은 줄마다 조각이 하나는 있어야 한다.
+    for (let take = 1; take <= n - from - (lines - 1); take += 1) {
+      const rest = split(from + take, lines - 1);
+      const widest = Math.max(lineWidth(from, from + take), rest.widest);
+      if (best === null || widest < best.widest) best = { widest, sizes: [take, ...rest.sizes] };
+    }
+    const found = best as Split;
+    solved.set(key, found);
+    return found;
+  };
+  const scale = Math.min(1, Math.max(0, minScale));
+  for (let lines = 1; lines < n; lines += 1) {
+    const { widest, sizes } = split(0, lines);
+    if (widest * scale <= room) return sizes;
+  }
+  return Array.from({ length: n }, () => 1);
+}
+
 /** 세로로 늘어놓는 것 하나의 높이와 그 사이 간격 */
 export interface StackSize {
   height: number;
