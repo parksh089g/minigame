@@ -29,6 +29,7 @@ export const RANKED_GAMES = [
   'sprout-company',
   'match-three',
   'box-push',
+  'brick-break',
   'garden-guard',
 ] as const;
 
