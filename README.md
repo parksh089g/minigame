@@ -188,7 +188,7 @@ src/
     dialog.ts          글자를 입력받는 작은 창 (닉네임, 옮기기 코드). 캔버스 밖 DOM에 띄운다
     daily.ts           오늘의 도전: 날짜로 게임과 목표 정하기, 연속 달성 계산
     weekly.ts          주간 미션: 그 주의 미션 세 개 정하기, 한 주의 판 수와 코인 세기, 보상 받기
-    stages.ts          퍼즐 단계 모드: 단계 번호에서 늘 같은 판이 나오는 난수, 단계와 난이도, 깬 단계의 기록과 코인
+    stages.ts          퍼즐 단계 모드: 단계 번호에서 늘 같은 판이 나오는 난수, 단계와 난이도, 깬 단계의 기록과 코인, 칸 안에서의 자리와 판 고르기
     shop.ts            꾸미기 상점: 파는 것과 가격, 사기와 바꿔 끼우기
     achievements.ts    업적: 목록, 달성 조건, 보상 받기
     paging.ts          긴 목록을 쪽으로 나누는 계산 (허브, 업적 화면, 랭킹의 게임 고르기)
@@ -263,7 +263,7 @@ scripts/gen-icons.mjs  앱 아이콘을 코드로 생성
 6. 그 게임의 점수 업적을 두려면 `src/core/achievements.ts`에 한두 줄을 넣습니다.
 7. `src/online/protocol.ts`의 `RANKED_GAMES`에 게임 id를 넣으면 온라인 랭킹이 생깁니다. 빠뜨리면 테스트가 알려 줍니다.
 8. 둘이서 겨뤄 승패로 끝나는 게임은 `registry.ts`에 `versus: true`를 적고, 끝날 때 `finishMiniGame` 대신 `finishVersusMatch()`를 부릅니다. 이런 게임은 랭킹과 오늘의 도전에 넣지 않고, 누가 이겼는지는 그 게임의 화면에서 보여 줍니다(`games/duel/` 참고).
-9. 판을 풀이까지 함께 만드는 퍼즐 게임은 퍼즐 단계 모드에 넣을 수 있습니다. `registry.ts`에 `stageMode: true`를 적고, `rules.ts`에 단계 번호를 난이도로 바꾸는 `levelStage(level)`(`core/stages.ts`의 `difficultyOf`에 난이도의 수를 넘깁니다)를 둡니다. 씬에서는 `beginMiniGame()` 뒤에 `this.stageLevel`이 숫자이면 단계 모드이므로, 판을 `this.levelRandom()`으로 만들고, 시간을 흐르게 하지 않고, HUD는 `hud.showStage(단계)`로 바꾸고, 판 하나를 깨거나 기회를 다 쓰면 `finishMiniGame` 대신 `finishStage(깼는지, 통계)`를 부릅니다. 점수를 띄울 때 `this.floatPoints(...)`를 쓰면 단계 모드에서는 저절로 빠집니다. `how-to.ts`의 `STAGE_HOW_TO`에 단계 모드의 방법을 따로 적고, `games/stage-levels.test.ts`에 그 게임의 단계가 늘 같은 판이고 풀리는지 보는 테스트를 넣습니다(`games/number-puzzle/` 참고).
+9. 판을 풀이까지 함께 만드는 퍼즐 게임은 퍼즐 단계 모드에 넣을 수 있습니다. `registry.ts`에 `stageMode: true`를 적고, `rules.ts`에 단계 번호를 난이도로 바꾸는 `levelStage(level)`(`core/stages.ts`의 `difficultyOf`에 난이도의 수를 넘깁니다)를 둡니다. 씬에서는 `beginMiniGame()` 뒤에 `this.stageLevel`이 숫자이면 단계 모드이므로, 판을 `this.levelRandom()`으로 만들고, 시간을 흐르게 하지 않고, HUD는 `hud.showStage(단계)`로 바꾸고, 판 하나를 깨거나 기회를 다 쓰면 `finishMiniGame` 대신 `finishStage(깼는지, 통계)`를 부릅니다. 점수를 띄울 때 `this.floatPoints(...)`를 쓰면 단계 모드에서는 저절로 빠집니다. `how-to.ts`의 `STAGE_HOW_TO`에 단계 모드의 방법을 따로 적고, `games/stage-levels.test.ts`에 그 게임의 단계가 늘 같은 판이고 풀리는지 보는 테스트를 넣습니다(`games/number-puzzle/` 참고). 난이도 칸은 100단계를 몇 칸으로만 나누므로, 같은 칸의 단계들이 한 난이도로 이어지지 않게 칸 안에서도 뒤로 갈수록 어려워지게 합니다. `stepProgress`로 횟수나 함정 수를 조이거나(`games/match-three/`, `games/logic-tiles/`), `pickBest`로 판을 여러 개 만들어 그 단계가 노리는 어려움에 가장 가까운 것을 고릅니다(`games/parking-out/`, `games/color-sort/`, `games/path-link/`).
 
 규칙과 난이도는 `rules.ts`처럼 화면과 분리된 순수 함수로 두면 숫자만 바꿔 밸런스를 잡을 수 있고 테스트하기도 쉽습니다.
 

@@ -5,7 +5,7 @@
  * 길끼리 겹치지 않고 모든 칸이 길로 덮여야 판을 깬다.
  * 무작위가 필요한 곳은 random(0 이상 1 미만의 수를 돌려주는 함수)을 받아서 쓴다.
  */
-import { difficultyOf } from '../../core/stages';
+import { difficultyOf, levelProgress, pickBest } from '../../core/stages';
 
 // ───────── 칸 ─────────
 
@@ -778,14 +778,50 @@ export function levelPlan(level: number): LevelPlan {
 }
 
 /**
+ * 풀이의 길들이 얼마나 돌아가는지: 길마다 두 점 사이의 가장 짧은 거리보다 더 간 칸 수를 모두 더해 판의 칸 수로 나눈다.
+ * 0이면 모든 길이 곧장 가거나 한 번만 꺾이고, 클수록 길이 멀리 돌아가서 어디로 이어야 할지 알기 어렵다.
+ */
+export function detourShare(puzzle: Puzzle): number {
+  const { size } = puzzle;
+  let extra = 0;
+  for (const path of puzzle.solution) {
+    const from = path[0];
+    const to = path[path.length - 1];
+    const straight = Math.abs((from % size) - (to % size)) + Math.abs(Math.floor(from / size) - Math.floor(to / size));
+    extra += path.length - 1 - straight;
+  }
+  return extra / (size * size);
+}
+
+/** 단계 모드의 한 단계가 만들어 보는 판의 수. 이 가운데 그 단계에 맞는 것 하나를 쓴다. */
+export const LEVEL_PUZZLES = 4;
+/** 첫 단계와 마지막 단계가 노리는 detourShare */
+export const LEVEL_DETOUR = [0.05, 0.45] as const;
+
+/**
+ * 단계 모드의 level번째 단계가 노리는 detourShare. 첫 단계에서 마지막 단계까지 끊기지 않고 올라간다.
+ * 판 크기와 쌍의 수는 난이도 칸마다 한 번씩만 바뀌므로, 그 사이의 단계들은 이것으로 조금씩 어려워진다.
+ */
+export function levelDetour(level: number): number {
+  return LEVEL_DETOUR[0] + (LEVEL_DETOUR[1] - LEVEL_DETOUR[0]) * levelProgress(level);
+}
+
+/**
  * 단계 모드의 한 단계. 시간은 흐르지 않고(elapse를 부르지 않는다), 판 하나를 깨면 끝난다.
  * 같은 random이면 같은 판이 나온다.
+ * 그 칸의 판을 LEVEL_PUZZLES개 만들어서, 길이 돌아가는 정도가 그 단계가 노리는 값에 가장 가까운 판을 쓴다.
  */
 export function levelRun(level: number, random: () => number): RunState {
   const plan = levelPlan(level);
+  const target = levelDetour(level);
+  const puzzle = pickBest(
+    LEVEL_PUZZLES,
+    () => generatePuzzle(plan.size, random, plan.pairs),
+    (made) => -Math.abs(detourShare(made) - target),
+  );
   return {
     stage: 1,
-    board: newBoard(generatePuzzle(plan.size, random, plan.pairs)),
+    board: newBoard(puzzle),
     timeLeft: START_SECONDS,
     score: 0,
     boardsCleared: 0,

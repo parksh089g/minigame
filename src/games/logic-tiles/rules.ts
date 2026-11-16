@@ -5,7 +5,7 @@
  * 칸은 번호 하나로 적는다: row * cols + col, 왼쪽 위가 0번이다.
  * 무작위가 필요한 곳은 random(0 이상 1 미만의 수를 돌려주는 함수)을 받아서 쓴다.
  */
-import { difficultyOf } from '../../core/stages';
+import { difficultyOf, stepProgress } from '../../core/stages';
 
 export interface BoardSize {
   cols: number;
@@ -610,7 +610,10 @@ export function tapTile(
   const targets = chord ? chordTargets(run.board, index) : [index];
   if (targets.length === 0) return { run, outcome: { kind: 'none' } };
 
-  const placed = first ? withTraps(run.board, layTraps(stageSpec(run.stage), index, random)) : run.board;
+  // 함정 수는 판에 적힌 것을 따른다: 단계 모드에서는 같은 크기의 판이라도 단계마다 다르다.
+  const placed = first
+    ? withTraps(run.board, layTraps({ ...stageSpec(run.stage), traps: run.board.trapCount }, index, random))
+    : run.board;
   const { board, opened, tripped } = openTiles(placed, targets);
   const points = opened.length * TILE_POINTS;
   const next: RunState = {
@@ -678,11 +681,29 @@ export function levelStage(level: number): number {
 }
 
 /**
+ * 단계 모드의 마지막 단계에 숨기는 함정의 수. 가장 큰 판(8×10)의 25%다.
+ * 이보다 많으면 추론만으로 풀리는 배치가 MAX_ATTEMPTS번 안에 나오지 않는 일이 잦아진다.
+ */
+export const LAST_LEVEL_TRAPS = 20;
+
+/**
+ * 단계 모드의 level번째 단계에 숨기는 함정의 수. 판의 크기는 난이도 칸이 정하고,
+ * 같은 칸 안에서는 뒤로 갈수록 함정이 늘어난다: 다음 칸의 함정 수 바로 아래까지,
+ * 마지막 칸에서는 LAST_LEVEL_TRAPS까지 간다.
+ */
+export function levelTraps(level: number): number {
+  const stage = levelStage(level);
+  const { traps } = stageSpec(stage);
+  const most = stage < LEVEL_STEPS ? stageSpec(stage + 1).traps - 1 : LAST_LEVEL_TRAPS;
+  return traps + Math.round(stepProgress(level, LEVEL_STEPS) * Math.max(0, most - traps));
+}
+
+/**
  * 단계 모드의 한 단계. 시간은 흐르지 않고(elapse를 부르지 않는다), 판 하나를 깨면 끝난다.
  * 목숨은 단계마다 새로 받는다. 함정은 여느 때처럼 첫 칸을 누를 때 놓이므로,
  * 같은 단계라도 누른 첫 칸이 다르면 다른 판이 된다.
  */
 export function levelRun(level: number): RunState {
   const stage = levelStage(level);
-  return { ...newRun(), stage, board: freshBoard(stage) };
+  return { ...newRun(), stage, board: emptyBoard(stageSpec(stage), levelTraps(level)) };
 }

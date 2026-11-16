@@ -3,6 +3,9 @@ import {
   clearedOf,
   clearLevel,
   difficultyOf,
+  levelProgress,
+  pickBest,
+  stepProgress,
   isUnlocked,
   MILESTONE_COINS,
   nextLevel,
@@ -99,6 +102,57 @@ describe('toLevel, difficultyOf', () => {
     for (let step = 0; step < steps; step += 1) {
       expect(difficultyOf(stepStart(step, steps), steps, 0)).toBe(step);
     }
+  });
+});
+
+describe('stepProgress, levelProgress', () => {
+  it('난이도 칸의 첫 단계는 0, 마지막 단계는 1이고 그 사이에서는 늘기만 한다', () => {
+    for (const steps of [1, 7, 8, 10, 12, 18]) {
+      for (let step = 0; step < steps; step += 1) {
+        const from = stepStart(step, steps);
+        const to = step + 1 < steps ? stepStart(step + 1, steps) - 1 : STAGE_LEVELS;
+        expect(stepProgress(from, steps)).toBe(0);
+        if (to > from) expect(stepProgress(to, steps)).toBe(1);
+        for (let level = from + 1; level <= to; level += 1) {
+          expect(stepProgress(level, steps)).toBeGreaterThan(stepProgress(level - 1, steps));
+        }
+      }
+    }
+  });
+
+  it('범위를 벗어난 단계는 첫 단계나 마지막 단계로 본다', () => {
+    expect(stepProgress(0, 8)).toBe(0);
+    expect(stepProgress(999, 8)).toBe(1);
+    expect(stepProgress(Number.NaN, 8)).toBe(0);
+  });
+
+  it('100단계 전체에서의 자리는 첫 단계가 0, 마지막 단계가 1이다', () => {
+    expect(levelProgress(1)).toBe(0);
+    expect(levelProgress(STAGE_LEVELS)).toBe(1);
+    expect(levelProgress(51)).toBeCloseTo(50 / 99);
+    expect(levelProgress(-5)).toBe(0);
+    expect(levelProgress(1000)).toBe(1);
+  });
+});
+
+describe('pickBest', () => {
+  it('만들어 본 것 가운데 점수가 가장 높은 것을 고르고, 같으면 먼저 만든 것을 쓴다', () => {
+    const values = [3, 9, 4, 9, 1];
+    let made = 0;
+    const picked = pickBest(
+      values.length,
+      () => ({ index: made, value: values[made++] }),
+      (item) => item.value,
+    );
+    expect(picked).toEqual({ index: 1, value: 9 });
+    expect(made).toBe(values.length);
+  });
+
+  it('하나만 만들라고 하면 그것을 쓰고, 0이나 음수여도 하나는 만든다', () => {
+    let made = 0;
+    expect(pickBest(1, () => ++made, () => 0)).toBe(1);
+    expect(pickBest(0, () => ++made, () => 0)).toBe(2);
+    expect(pickBest(-3, () => ++made, () => 0)).toBe(3);
   });
 });
 

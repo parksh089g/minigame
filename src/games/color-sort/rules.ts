@@ -2,7 +2,7 @@
  * 색깔 물 나누기의 규칙: 병과 붓기, 다 나눴는지 판정, 단계 만들기.
  * 화면과 Phaser에 의존하지 않는 순수 함수들이다. 무작위가 필요한 곳은 random을 받아서 쓴다.
  */
-import { difficultyOf } from '../../core/stages';
+import { difficultyOf, levelProgress, pickBest } from '../../core/stages';
 
 /** 병 하나에 들어가는 칸 수 */
 export const TUBE_CAPACITY = 4;
@@ -116,13 +116,35 @@ export function levelStage(level: number): number {
   return difficultyOf(level, LEVEL_STEPS, 0);
 }
 
+/** 단계 모드의 첫 단계에서 더 부을 수 있는 여유: 찾아 둔 풀이의 이 비율만큼, 적어도 LEVEL_SLACK_FLOOR[0]번 */
+export const LEVEL_SLACK_SHARE = [0.5, 0.25] as const;
+/** 여유의 바닥. 첫 단계의 값에서 마지막 단계의 값으로 줄어든다. */
+export const LEVEL_SLACK_FLOOR = [6, 4] as const;
+
 /**
- * 단계 모드에서 한 단계에 부을 수 있는 횟수. 시간에 쫓기지 않는 모드라 점수 도전보다 넉넉하고,
- * 뒤로 가도 여유가 줄지 않는다: 찾아 둔 풀이의 절반만큼, 적어도 여섯 번은 더 부을 수 있다.
+ * 단계 모드에서 한 단계에 부을 수 있는 횟수. 시간에 쫓기지 않는 모드라 처음에는 점수 도전보다 넉넉하고
+ * (찾아 둔 풀이의 절반만큼, 적어도 여섯 번), 단계가 오를수록 여유가 줄어서
+ * 마지막 단계에서는 풀이의 4분의 1만큼, 적어도 네 번만 더 부을 수 있다.
  */
-export function levelPourBudget(par: number): number {
+export function levelPourBudget(par: number, level: number): number {
   const moves = Math.max(0, Math.floor(par));
-  return moves + Math.max(6, Math.ceil(moves / 2));
+  const at = levelProgress(level);
+  const share = LEVEL_SLACK_SHARE[0] + (LEVEL_SLACK_SHARE[1] - LEVEL_SLACK_SHARE[0]) * at;
+  const floor = Math.round(LEVEL_SLACK_FLOOR[0] + (LEVEL_SLACK_FLOOR[1] - LEVEL_SLACK_FLOOR[0]) * at);
+  return moves + Math.max(floor, Math.ceil(moves * share - 1e-9));
+}
+
+/** 단계 모드의 한 단계가 만들어 보는 판의 수. 이 가운데 그 단계에 맞는 것 하나를 쓴다(dealLevel). */
+export const LEVEL_DEALS = 5;
+/** 첫 단계와 마지막 단계가 노리는 carelessEase */
+export const LEVEL_EASE = [0.98, 0.1] as const;
+
+/**
+ * 단계 모드의 level번째 단계가 노리는 carelessEase. 첫 단계에서 마지막 단계까지 끊기지 않고 내려간다.
+ * 색 수는 난이도 칸마다 한 번씩만 늘어나므로, 그 사이의 단계들은 이것으로 조금씩 어려워진다.
+ */
+export function levelEase(level: number): number {
+  return LEVEL_EASE[0] + (LEVEL_EASE[1] - LEVEL_EASE[0]) * levelProgress(level);
 }
 
 /** 병 하나를 한 색으로 채울 때마다 받는 점수 */
@@ -283,4 +305,56 @@ export function dealStage(stage: number, random: () => number): Stage {
   const tubes = fallbackTubes(colors);
   const solution = bestSolution(tubes, random) ?? [];
   return { tubes, colors, par: solution.length, solution };
+}
+
+/** 대충 붓는 사람을 흉내 내어 한 판을 풀어 보는 횟수 */
+export const CARELESS_TRIES = 60;
+
+/**
+ * 앞을 내다보지 않고 붓는 사람이 budget번 안에 이 판을 푸는 비율(0~1). 낮을수록 막다른 길이 많은 판이다.
+ * 흉내는 이렇다: 이미 다 된 병은 건드리지 않고, 한 색뿐인 병을 빈 병에 옮기지 않고, 지나온 배치로 돌아가지 않으며,
+ * 대개는 같은 색 위에 붓고 가끔 빈 병을 쓴다. 물리지는 못한다.
+ */
+export function carelessEase(tubes: Tubes, budget: number, random: () => number, tries = CARELESS_TRIES): number {
+  const count = Math.max(1, Math.floor(tries));
+  let solved = 0;
+  for (let attempt = 0; attempt < count; attempt += 1) {
+    let state = tubes;
+    const seen = new Set<string>([keyOf(state)]);
+    for (let left = Math.floor(budget); left > 0 && !isSolved(state); left -= 1) {
+      const options: Tubes[] = [];
+      const onto: Tubes[] = [];
+      for (const move of legalMoves(state)) {
+        const source = state[move.from];
+        if (isComplete(source)) continue;
+        const empty = state[move.to].length === 0;
+        if (empty && singleColorTube(source)) continue;
+        const next = pour(state, move.from, move.to)!.tubes;
+        if (seen.has(keyOf(next))) continue;
+        options.push(next);
+        if (!empty) onto.push(next);
+      }
+      if (options.length === 0) break;
+      const pool = onto.length > 0 && random() < 0.8 ? onto : options;
+      state = pool[Math.min(pool.length - 1, Math.floor(random() * pool.length))];
+      seen.add(keyOf(state));
+    }
+    if (isSolved(state)) solved += 1;
+  }
+  return solved / count;
+}
+
+/**
+ * 단계 모드의 level(1부터)번째 단계. 같은 random이면 같은 판이 나온다.
+ * 색 수는 난이도 칸이 정한다. 그 색 수의 판을 LEVEL_DEALS개 만들어서,
+ * 대충 부어서 풀리는 정도가 그 단계가 노리는 값에 가장 가까운 판을 쓴다.
+ */
+export function dealLevel(level: number, random: () => number): Stage {
+  const stage = levelStage(level);
+  const target = levelEase(level);
+  return pickBest(
+    LEVEL_DEALS,
+    () => dealStage(stage, random),
+    (dealt) => -Math.abs(carelessEase(dealt.tubes, levelPourBudget(dealt.par, level), random) - target),
+  );
 }

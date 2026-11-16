@@ -9,6 +9,7 @@ import {
   GROW_WIDTH,
   JITTER_FROM_FLOOR,
   MAX_SPEED,
+  MAX_SPEED_FLOOR,
   MAX_STREAK_BONUS,
   moverLeft,
   moverRange,
@@ -18,6 +19,9 @@ import {
   PERFECT_TOLERANCE,
   pointsFor,
   SPEED_JITTER,
+  speedJitter,
+  TOP_JITTER,
+  TOP_SPEED,
   START_SPEED,
   START_WIDTH,
   type TowerState,
@@ -34,7 +38,15 @@ describe('속도', () => {
   it('처음 속도에서 시작해 층마다 빨라지고 상한에서 멈춘다', () => {
     expect(baseSpeed(0)).toBe(START_SPEED);
     expect(baseSpeed(10)).toBeGreaterThan(baseSpeed(9));
-    expect(baseSpeed(1000)).toBe(MAX_SPEED);
+    // MAX_SPEED에 닿은 뒤로도 TOP_SPEED까지 천천히 더 빨라진다.
+    expect(baseSpeed(MAX_SPEED_FLOOR)).toBe(MAX_SPEED);
+    expect(baseSpeed(MAX_SPEED_FLOOR - 1)).toBeLessThan(MAX_SPEED);
+    expect(baseSpeed(MAX_SPEED_FLOOR + 1)).toBeGreaterThan(MAX_SPEED);
+    expect(baseSpeed(MAX_SPEED_FLOOR + 1) - MAX_SPEED).toBeLessThan(MAX_SPEED - baseSpeed(MAX_SPEED_FLOOR - 1));
+    for (let floors = 1; floors < 200; floors += 1) {
+      expect(baseSpeed(floors)).toBeGreaterThanOrEqual(baseSpeed(floors - 1));
+    }
+    expect(baseSpeed(1000)).toBe(TOP_SPEED);
     expect(baseSpeed(-5)).toBe(START_SPEED);
   });
 
@@ -43,6 +55,18 @@ describe('속도', () => {
       expect(moverSpeed(floors, 0)).toBe(baseSpeed(floors));
       expect(moverSpeed(floors, 0.999)).toBe(baseSpeed(floors));
     }
+  });
+
+  it('흔들림은 처음 몇 층에는 없고, 가장 빨라진 뒤로는 조금씩 커지다가 멈춘다', () => {
+    expect(speedJitter(0)).toBe(0);
+    expect(speedJitter(JITTER_FROM_FLOOR - 1)).toBe(0);
+    expect(speedJitter(JITTER_FROM_FLOOR)).toBe(SPEED_JITTER);
+    expect(speedJitter(MAX_SPEED_FLOOR)).toBe(SPEED_JITTER);
+    expect(speedJitter(MAX_SPEED_FLOOR + 10)).toBeGreaterThan(SPEED_JITTER);
+    expect(speedJitter(1000)).toBe(TOP_JITTER);
+    const floors = MAX_SPEED_FLOOR + 400;
+    expect(moverSpeed(floors, 0)).toBeCloseTo(TOP_SPEED * (1 - TOP_JITTER));
+    expect(moverSpeed(floors, 0.5)).toBeCloseTo(TOP_SPEED);
   });
 
   it('그 뒤로는 정해진 폭 안에서만 흔들린다', () => {

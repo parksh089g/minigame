@@ -11,6 +11,7 @@ import {
   canPour,
   clearBonus,
   dealStage,
+  dealLevel,
   levelPourBudget,
   levelStage,
   isComplete,
@@ -365,13 +366,13 @@ export class ColorSortScene extends MiniGameScene {
 
   /** 지금 단계의 병을 새로 깔고, 다 나타나면 누를 수 있게 한다. */
   private dealNext(first: boolean): void {
-    // 단계 모드에서는 단계 번호로 정해진 판 하나만 나오고, 부을 수 있는 횟수가 더 넉넉하다.
+    // 단계 모드에서는 단계 번호로 정해진 판 하나만 나오고, 부을 수 있는 횟수는 단계가 오를수록 빠듯해진다.
     const level = this.stageLevel;
     const dealt =
-      level === null ? dealStage(this.stage, Math.random) : dealStage(levelStage(level), this.levelRandom());
+      level === null ? dealStage(this.stage, Math.random) : dealLevel(level, this.levelRandom());
     this.stageData = dealt;
     this.tubes = dealt.tubes;
-    this.budget = level === null ? pourBudget(dealt.par, this.stage) : levelPourBudget(dealt.par);
+    this.budget = level === null ? pourBudget(dealt.par, this.stage) : levelPourBudget(dealt.par, level);
     this.poursLeft = this.budget;
     this.selected = -1;
     this.busy = false;
