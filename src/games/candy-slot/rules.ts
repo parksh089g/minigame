@@ -134,41 +134,45 @@ const HORSESHOE = 3;
 const DIAMOND = 4;
 
 /** 저금통: 남은 금화 이만큼마다 한 개를 덤으로 받는다. */
-export const SAVINGS_PER = 5;
+export const SAVINGS_PER = 3;
 
 /**
  * 부적의 목록. 가게에는 이 가운데 아직 붙이지 않은 것 세 장이 고르게 뽑혀 나온다.
  * 한 줄을 더하면 가게에 나오고, 그림은 art.ts가 갈래와 효과를 보고 그린다(trick은 id마다 따로 그린다).
+ *
+ * 숫자는 열 잠그기를 쓰는 자동 플레이로 맞췄다. 값은 쓸모를 따른다:
+ * 혼자서는 힘이 없고 짝이 있어야 듣는 것(체리·클로버 듬뿍, 비싼 그림의 황금)과 초반에만 든든한 것(가로·세로 두 배,
+ * 덤 스핀, 저금통, 위로 금화)은 싸고, 끝까지 들고 가는 것(쌍둥이 줄, 7 듬뿍, 가운데 7, 막판 한 방, 오뚝이)은 비싸다.
  */
 export const CHARMS: readonly CharmInfo[] = [
   // 확률: 그림이 나올 확률을 바꾼다.
-  { id: 'more-cherry', name: '체리 듬뿍', description: '체리가 더 자주 나와요', kind: 'odds', price: 5, effect: { weight: [CHERRY, 36] } },
-  { id: 'more-clover', name: '클로버 듬뿍', description: '클로버가 더 자주 나와요', kind: 'odds', price: 5, effect: { weight: [CLOVER, 30] } },
-  { id: 'more-bell', name: '종 듬뿍', description: '종이 더 자주 나와요', kind: 'odds', price: 6, effect: { weight: [BELL, 26] } },
-  { id: 'more-horseshoe', name: '말굽 듬뿍', description: '말굽이 더 자주 나와요', kind: 'odds', price: 7, effect: { weight: [HORSESHOE, 22] } },
-  { id: 'more-diamond', name: '다이아 듬뿍', description: '다이아가 더 자주 나와요', kind: 'odds', price: 8, effect: { weight: [DIAMOND, 20] } },
-  { id: 'more-seven', name: '7 듬뿍', description: '7이 더 자주 나와요', kind: 'odds', price: 8, effect: { weight: [WILD, 4] } },
-  { id: 'less-cherry', name: '체리 덜기', description: '체리가 덜 나와요', kind: 'odds', price: 5, effect: { weight: [CHERRY, -18] } },
-  { id: 'less-clover', name: '클로버 덜기', description: '클로버가 덜 나와요', kind: 'odds', price: 5, effect: { weight: [CLOVER, -15] } },
+  { id: 'more-cherry', name: '체리 듬뿍', description: '체리가 더 자주 나와요', kind: 'odds', price: 3, effect: { weight: [CHERRY, 32] } },
+  { id: 'more-clover', name: '클로버 듬뿍', description: '클로버가 더 자주 나와요', kind: 'odds', price: 3, effect: { weight: [CLOVER, 27] } },
+  { id: 'more-bell', name: '종 듬뿍', description: '종이 더 자주 나와요', kind: 'odds', price: 5, effect: { weight: [BELL, 29] } },
+  { id: 'more-horseshoe', name: '말굽 듬뿍', description: '말굽이 더 자주 나와요', kind: 'odds', price: 5, effect: { weight: [HORSESHOE, 25] } },
+  { id: 'more-diamond', name: '다이아 듬뿍', description: '다이아가 더 자주 나와요', kind: 'odds', price: 6, effect: { weight: [DIAMOND, 23] } },
+  { id: 'more-seven', name: '7 듬뿍', description: '7이 더 자주 나와요', kind: 'odds', price: 11, effect: { weight: [WILD, 6] } },
+  { id: 'less-cherry', name: '체리 덜기', description: '체리가 덜 나와요', kind: 'odds', price: 7, effect: { weight: [CHERRY, -19] } },
+  { id: 'less-clover', name: '클로버 덜기', description: '클로버가 덜 나와요', kind: 'odds', price: 6, effect: { weight: [CLOVER, -17] } },
   // 상금: 그림의 상금을 올린다.
-  { id: 'gold-cherry', name: '황금 체리', description: '체리 줄의 상금 +3', kind: 'prize', price: 5, effect: { value: [CHERRY, 3] } },
-  { id: 'gold-clover', name: '황금 클로버', description: '클로버 줄의 상금 +4', kind: 'prize', price: 5, effect: { value: [CLOVER, 4] } },
-  { id: 'gold-bell', name: '황금 종', description: '종 줄의 상금 +6', kind: 'prize', price: 6, effect: { value: [BELL, 6] } },
-  { id: 'gold-horseshoe', name: '황금 말굽', description: '말굽 줄의 상금 +10', kind: 'prize', price: 7, effect: { value: [HORSESHOE, 10] } },
-  { id: 'gold-diamond', name: '황금 다이아', description: '다이아 줄의 상금 +16', kind: 'prize', price: 8, effect: { value: [DIAMOND, 16] } },
+  { id: 'gold-cherry', name: '황금 체리', description: '체리 줄의 상금 +4', kind: 'prize', price: 6, effect: { value: [CHERRY, 4] } },
+  { id: 'gold-clover', name: '황금 클로버', description: '클로버 줄의 상금 +5', kind: 'prize', price: 6, effect: { value: [CLOVER, 5] } },
+  { id: 'gold-bell', name: '황금 종', description: '종 줄의 상금 +6', kind: 'prize', price: 5, effect: { value: [BELL, 6] } },
+  { id: 'gold-horseshoe', name: '황금 말굽', description: '말굽 줄의 상금 +10', kind: 'prize', price: 4, effect: { value: [HORSESHOE, 10] } },
+  { id: 'gold-diamond', name: '황금 다이아', description: '다이아 줄의 상금 +16', kind: 'prize', price: 4, effect: { value: [DIAMOND, 16] } },
   // 줄: 줄의 갈래마다 상금을 곱한다.
-  { id: 'wide', name: '가로 두 배', description: '가로줄의 상금이 두 배', kind: 'line', price: 8, effect: { lineTimes: ['row', 2] } },
-  { id: 'tall', name: '세로 두 배', description: '세로줄의 상금이 두 배', kind: 'line', price: 8, effect: { lineTimes: ['col', 2] } },
-  { id: 'slant', name: '대각선 세 배', description: '대각선의 상금이 세 배', kind: 'line', price: 8, effect: { lineTimes: ['diag', 3] } },
+  { id: 'wide', name: '가로 두 배', description: '가로줄의 상금이 두 배', kind: 'line', price: 4, effect: { lineTimes: ['row', 2] } },
+  { id: 'tall', name: '세로 두 배', description: '세로줄의 상금이 두 배', kind: 'line', price: 5, effect: { lineTimes: ['col', 2] } },
+  { id: 'slant', name: '대각선 세 배', description: '대각선의 상금이 세 배', kind: 'line', price: 9, effect: { lineTimes: ['diag', 3] } },
   // 재주: 판의 흐름을 바꾼다.
-  { id: 'extra', name: '덤 스핀', description: '라운드마다 한 번 더 돌려요', kind: 'trick', price: 7, effect: { spins: 1 } },
-  { id: 'piggy', name: '저금통', description: '남긴 금화 5개마다 +1', kind: 'trick', price: 6, effect: { savingsCap: 8 } },
-  { id: 'comfort', name: '위로 금화', description: '꽝이면 금화를 2개 더 받아요', kind: 'trick', price: 5, effect: { consolation: 2 } },
-  { id: 'twins', name: '쌍둥이 줄', description: '두 줄 넘게 맞으면 두 배', kind: 'trick', price: 9, effect: { combo: [2, 2] } },
-  { id: 'crown', name: '왕관', description: '세 줄 넘게 맞으면 두 배', kind: 'trick', price: 6, effect: { combo: [3, 2] } },
-  { id: 'middle', name: '가운데 7', description: '가운데에 7이 자주 떠요', kind: 'trick', price: 9, effect: { centerWild: 0.25 } },
-  { id: 'finale', name: '막판 한 방', description: '마지막 스핀의 상금이 세 배', kind: 'trick', price: 6, effect: { lastTimes: 3 } },
-  { id: 'rebound', name: '오뚝이', description: '꽝 다음 스핀의 상금이 두 배', kind: 'trick', price: 6, effect: { reboundTimes: 2 } },
+  { id: 'extra', name: '덤 스핀', description: '라운드마다 세 번 더 돌려요', kind: 'trick', price: 6, effect: { spins: 3 } },
+  { id: 'piggy', name: '저금통', description: '남긴 금화 3개마다 +1', kind: 'trick', price: 4, effect: { savingsCap: 20 } },
+  { id: 'comfort', name: '위로 금화', description: '꽝이면 금화를 4개 더 받아요', kind: 'trick', price: 4, effect: { consolation: 4 } },
+  { id: 'twins', name: '쌍둥이 줄', description: '두 줄 이상 맞으면 두 배', kind: 'trick', price: 13, effect: { combo: [2, 2] } },
+  { id: 'crown', name: '왕관', description: '세 줄 이상 맞으면 두 배', kind: 'trick', price: 7, effect: { combo: [3, 2] } },
+  { id: 'middle', name: '가운데 7', description: '가운데에 7이 자주 떠요', kind: 'trick', price: 11, effect: { centerWild: 0.35 } },
+  { id: 'finale', name: '막판 한 방', description: '마지막 스핀의 상금이 네 배', kind: 'trick', price: 10, effect: { lastTimes: 4 } },
+  { id: 'rebound', name: '오뚝이', description: '꽝 다음 스핀의 상금이 세 배', kind: 'trick', price: 10, effect: { reboundTimes: 3 } },
 ];
 
 const CHARM_BY_ID: ReadonlyMap<string, CharmInfo> = new Map(CHARMS.map((charm) => [charm.id, charm]));
@@ -358,8 +362,9 @@ export const START_COIN = 3;
 /**
  * 라운드마다 내야 하는 금화. 적힌 것보다 뒤의 라운드는 앞 라운드의 한 배 반씩 오른다(정수로만 셈한다).
  * 부적 다섯 장으로 벌 수 있는 금화에는 끝이 있어서, 아무리 잘 골라도 판은 언젠가 끝난다.
+ * 열을 잠글 수 있게 되면서 벌이가 늘어서, 넷째 라운드부터는 앞 라운드의 한 배 반쯤으로 가파르게 오른다.
  */
-const TARGETS: readonly number[] = [5, 10, 16, 24, 34, 48, 66, 90, 122, 165, 222, 300];
+const TARGETS: readonly number[] = [5, 10, 16, 25, 38, 60, 92, 140, 210, 310, 450, 660];
 
 export function targetOf(round: number): number {
   const at = Math.max(1, Math.floor(round));
