@@ -6,7 +6,8 @@ import { reducedMotion } from '../../core/motion-guard';
 import { sfx, tone } from '../../core/sfx';
 import { addTapZone, addText, drawPanel } from '../../core/ui';
 import { floatText, GameHud, HUD_HEIGHT, showBanner } from '../../scenes/GameHud';
-import { MiniGameScene, type ResultStrip } from '../../scenes/MiniGameScene';
+import { MiniGameScene, type ResultStat, type ResultStrip } from '../../scenes/MiniGameScene';
+import type { SharedStart, ShareOverride } from '../../share/link';
 import {
   COIN_ICON,
   coinTexture,
@@ -24,6 +25,22 @@ import {
   symbolColor,
   symbolTexture,
 } from './art';
+import {
+  addDailyRun,
+  DAILY_LABEL,
+  dailyDayOf,
+  dailyInfo,
+  dailySeed,
+  dailyShare,
+  dailyToday,
+  dailyVerdict,
+  dayIndexOf,
+  friendNotice,
+  friendScoreOf,
+  friendVerdict,
+  SHARED_DAY_PASSED,
+} from './daily';
+import { slotDailyStore } from './daily-store';
 import {
   buy,
   buyBlock,
@@ -95,6 +112,21 @@ const START_GRID: readonly number[] = [0, 1, 2, 3, 4, 5, 1, 2, 0];
 /** 이 라운드까지는 돌리기 전에 상금을 따지는 여덟 줄을 흐리게 그어 보여 준다. */
 const GUIDE_ROUNDS = 1;
 const HINTS = ['돌리기를 눌러요', '같은 그림 셋이 한 줄이면 금화!'] as const;
+
+/**
+ * 씬을 열 때 넘겨받는 것. daily는 결과 화면의 "다시 하기"가 오늘의 판을 다시 열 때 넘긴다.
+ * 오늘의 판을 공유한 주소로 들어오면 그날(sharedDay)과 보낸 사람의 점수(sharedScore)가 온다.
+ */
+interface SlotStart extends SharedStart {
+  daily?: boolean;
+}
+
+/** 시작 화면에서 여느 판과 오늘의 판을 오가는 버튼. 도움말 카드에서 gap만큼 띄워 그 바로 위에 놓는다. */
+const DAILY_SWITCH = { width: 96, height: 24, gap: 6 } as const;
+/** 오늘의 판을 골랐을 때 버튼 위에 적는 한 줄(오늘의 기록)의 높이와, 버튼과의 틈 */
+const DAILY_INFO = { height: 16, gap: 4 } as const;
+/** 오늘의 판을 하는 동안 점수 아래에 띄워 두는 표시의 한가운데 높이와 그 높이 */
+const DAILY_BADGE = { y: 46, height: 14 } as const;
 
 const DEPTH = {
   machine: 1,
@@ -311,6 +343,18 @@ export class CandySlotScene extends MiniGameScene {
   private rerollButton: SoftButton | null = null;
   /** 붙인 부적을 눌렀을 때 뜨는 설명 */
   private bubble: { views: Disposable[]; zones: Phaser.GameObjects.GameObject[] } | null = null;
+  /** 씬을 열 때 넘겨받은 것. init이 적어 두고 setUpDaily가 쓴다. */
+  private dailyStart: SlotStart = {};
+  /** 시작 화면에서 여느 판과 오늘의 판을 오가는 버튼. 첫 스핀에 도움말과 함께 사라진다. */
+  private dailySwitch: SoftButton | null = null;
+  /** 오늘의 판을 골랐을 때 그 버튼 위에 적는 한 줄 */
+  private dailyNote: { back: Graphics; text: Text } | null = null;
+  /** 오늘의 판을 하는 동안 점수 아래에 떠 있는 표시 */
+  private dailyBadge: { back: Graphics; text: Text } | null = null;
+  /** 공유받은 주소로 들어왔는데 그날이 이미 지났으면 true. 시작 화면에 한 줄로 알린다. */
+  private sharedDayPassed = false;
+  /** 공유받은 주소에 실려 온 친구의 오늘 점수. 없으면 null */
+  private friendScore: number | null = null;
 
   constructor() {
     super(SCENE.candySlot);
@@ -349,6 +393,7 @@ export class CandySlotScene extends MiniGameScene {
     this.bindInput();
     this.showHints();
     this.showGuide();
+    this.setUpDaily();
     sfx.go();
     this.playing = true;
   }
@@ -535,6 +580,7 @@ export class CandySlotScene extends MiniGameScene {
       g.fillRoundedRect(bar.x, bar.y, Math.max(bar.height, bar.width * ratio), bar.height, bar.height / 2);
     }
     this.goalText.setText(`${coin} / ${target}`).setX(Math.round(bar.x + bar.width / 2));
+    this.refreshDailyBadge();
   }
 
   private refreshSlots(): void {
@@ -598,6 +644,7 @@ export class CandySlotScene extends MiniGameScene {
 
   /** 처음의 도움말을 치운다. now면 흐려지는 움직임 없이 바로 치운다(그 위에 다른 것이 덮일 때). */
   private hideHints(now = false): void {
+    this.hideDailySwitch();
     if (this.hints.length === 0) return;
     const hints = this.hints;
     this.hints = [];
@@ -892,14 +939,17 @@ export class CandySlotScene extends MiniGameScene {
       return texture ? [{ texture, label: '' }] : [];
     });
     const strip: ResultStrip | undefined = chips.length > 0 ? { caption: '붙인 부적', chips } : undefined;
+    const daily = this.recordDaily();
     this.finishMiniGame(
       scoreOf(run),
       [
+        ...(daily?.stats ?? []),
         ['넘긴 라운드', `${clearedRounds(run)}번`],
         ['가장 큰 한 방', `금화 ${run.bestSpin}개`],
       ],
       OVER_RESULT_MS,
       strip,
+      daily?.share,
     );
   }
 
@@ -1122,6 +1172,183 @@ export class CandySlotScene extends MiniGameScene {
     this.refreshNumbers();
     showBanner(this, this.machineMiddle, `라운드 ${this.run.round}`, LOOK.text.good, 700, DEPTH.banner, FONT_SIZE.large);
     sfx.go();
+  }
+
+  // ───────── 오늘의 판 ─────────
+
+  /** 씬을 열 때마다 create보다 먼저 불린다. 넘겨받은 것을 적어 두고, 지난번에 만들어 둔 것은 잊는다. */
+  init(data?: SlotStart): void {
+    this.dailyStart = data ?? {};
+    this.dailySwitch = null;
+    this.dailyNote = null;
+    this.dailyBadge = null;
+    this.sharedDayPassed = false;
+    this.friendScore = null;
+  }
+
+  /** 지금 판이 오늘의 판이면 그 날(daily.ts의 dayIndexOf). 여느 판이면 null. */
+  private get dailyDay(): number | null {
+    return dailyDayOf(this.run.seed);
+  }
+
+  /** 여느 판과 오늘의 판을 바꿀 수 있는지: 아직 한 번도 돌리지 않은 판에서만 바꾼다. */
+  private canSwitchMode(): boolean {
+    const { run } = this;
+    return !this.busy && run.phase === 'spin' && run.round === 1 && run.spinCount === 0;
+  }
+
+  /**
+   * 판을 열 때 한 번 부른다. 오늘의 판으로 열어 달라고 했으면("다시 하기"나 공유받은 주소) 오늘의 판으로 바꾸고,
+   * 시작 화면에 판을 바꾸는 버튼을 놓고, 기기에 저장해 둔 오늘의 기록을 읽어 온다.
+   */
+  private setUpDaily(): void {
+    const start = this.dailyStart;
+    const today = dayIndexOf(new Date());
+    const shared = start.sharedDay !== undefined;
+    if ((start.daily === true || shared) && this.dailyDay === null && this.canSwitchMode()) {
+      this.run = newRun(dailySeed(today));
+      this.refreshNumbers();
+    }
+    // 지난 날의 판은 다시 할 수 없어서 오늘의 판을 열고 그렇다고 알린다. 오늘의 것이면 친구의 점수를 넘어 볼 기록으로 보인다.
+    this.sharedDayPassed = shared && start.sharedDay !== today;
+    this.friendScore = friendScoreOf(start.sharedDay, start.sharedScore, today);
+    this.showDailySwitch();
+
+    let alive = true;
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      alive = false;
+    });
+    void slotDailyStore.refresh().then(() => {
+      if (alive) this.refreshDailyNote();
+    });
+  }
+
+  /**
+   * 시작 화면의 도움말 카드 바로 위에 판을 바꾸는 버튼을 놓는다. 여느 판에서는 오늘의 판으로,
+   * 오늘의 판에서는 여느 판으로 돌아가는 버튼이고, 오늘의 판이면 그 위에 오늘의 기록을 한 줄 적는다.
+   */
+  private showDailySwitch(): void {
+    this.hideDailySwitch();
+    if (this.hints.length === 0 || !this.canSwitchMode()) return;
+    const daily = this.dailyDay !== null;
+    const { width, height, gap } = DAILY_SWITCH;
+    // 도움말 카드의 위쪽 끝은 기계의 한가운데에서 23만큼 위다(showHints).
+    const box = {
+      x: Math.round(GAME_WIDTH / 2 - width / 2),
+      y: Math.round(this.machineMiddle - 23 - gap - height),
+      width,
+      height,
+    };
+    const label = daily ? DAILY_LABEL.back : DAILY_LABEL.name;
+    this.dailySwitch = new SoftButton(this, box, daily ? 'plain' : 'mint', DEPTH.hint, label, () => this.switchMode());
+    if (!daily) return;
+    const middle = box.y - DAILY_INFO.gap - DAILY_INFO.height / 2;
+    this.dailyNote = {
+      back: this.add.graphics().setDepth(DEPTH.hint),
+      text: addText(this, GAME_WIDTH / 2, middle, '', {
+        size: FONT_SIZE.small,
+        color: LOOK.text.ink,
+        originX: 0.5,
+        originY: 0.5,
+      }).setDepth(DEPTH.hint + 0.5),
+    };
+    this.refreshDailyNote();
+  }
+
+  /** 판을 바꾸는 버튼과 그 위의 한 줄을 치운다. 첫 스핀을 돌리면 도움말과 함께 사라진다. */
+  private hideDailySwitch(): void {
+    this.dailySwitch?.destroy();
+    this.dailySwitch = null;
+    this.dailyNote?.back.destroy();
+    this.dailyNote?.text.destroy();
+    this.dailyNote = null;
+  }
+
+  /** 버튼 위의 한 줄을 지금의 기록대로 적는다: 지난 날의 주소로 왔다는 것, 넘어 볼 친구 기록, 아니면 오늘의 최고 기록. */
+  private refreshDailyNote(): void {
+    const note = this.dailyNote;
+    if (!note) return;
+    const today = dayIndexOf(new Date());
+    const record = dailyToday(slotDailyStore.data, today);
+    const friend = this.friendScore;
+    const line = this.sharedDayPassed
+      ? SHARED_DAY_PASSED
+      : friend !== null && !(record.tries > 0 && record.best > friend)
+        ? friendNotice(friend)
+        : dailyInfo(record, today);
+    // 화면보다 넓은 줄은 그만큼 줄인다.
+    note.text.setScale(1).setText(line);
+    note.text.setScale(Math.min(1, (GAME_WIDTH - 40) / note.text.width));
+    const width = Math.ceil(note.text.displayWidth) + 16;
+    const { height } = DAILY_INFO;
+    const x = Math.round(GAME_WIDTH / 2 - width / 2);
+    const y = Math.round(note.text.y - height / 2);
+    note.back.clear();
+    note.back.fillStyle(LOOK.machine.trimLip, 1);
+    note.back.fillRoundedRect(x, y + 1, width, height, height / 2);
+    note.back.fillStyle(LOOK.machine.slotAlt, 1);
+    note.back.fillRoundedRect(x, y, width, height, height / 2);
+  }
+
+  /** 여느 판과 오늘의 판을 바꾼다. 아직 돌리지 않은 판이라 새 판으로 갈아 끼우기만 하면 된다. */
+  private switchMode(): void {
+    if (!this.playing || !this.canSwitchMode()) return;
+    this.run = newRun(this.dailyDay === null ? dailySeed(dayIndexOf(new Date())) : null);
+    this.refreshNumbers();
+    this.showDailySwitch();
+    // 오늘의 판으로 바꿨으면 점수 아래의 표시가 스르르 나타나 어디가 달라졌는지 알린다.
+    const badge = this.dailyBadge;
+    if (this.dailyDay === null || !badge) return;
+    this.tweens.killTweensOf([badge.back, badge.text]);
+    this.tweens.add({ targets: [badge.back, badge.text], alpha: { from: 0, to: 1 }, duration: 220 });
+  }
+
+  /** 오늘의 판을 하는 동안 점수 아래에 작은 표시를 띄워 둔다. 여느 판이면 감춘다. */
+  private refreshDailyBadge(): void {
+    const daily = this.dailyDay !== null;
+    if (!this.dailyBadge) {
+      if (!daily) return;
+      const { y, height } = DAILY_BADGE;
+      const text = addText(this, GAME_WIDTH / 2, y, DAILY_LABEL.name, {
+        size: FONT_SIZE.small,
+        color: LOOK.text.ink,
+        originX: 0.5,
+        originY: 0.5,
+      }).setDepth(DEPTH.hud);
+      const width = Math.ceil(text.width) + 14;
+      const left = Math.round(GAME_WIDTH / 2 - width / 2);
+      const back = this.add.graphics().setDepth(DEPTH.hud - 0.5);
+      back.fillStyle(LOOK.machine.trimLip, 1);
+      back.fillRoundedRect(left, y - height / 2 + 2, width, height, height / 2);
+      back.fillStyle(LOOK.machine.trim, 1);
+      back.fillRoundedRect(left, y - height / 2, width, height, height / 2);
+      this.dailyBadge = { back, text };
+    }
+    this.dailyBadge.back.setVisible(daily);
+    this.dailyBadge.text.setVisible(daily);
+  }
+
+  /**
+   * 끝난 판이 오늘의 판이면 그날의 기록에 보태고, 결과 화면에 적을 줄과 공유할 것을 돌려준다. 여느 판이면 null.
+   * 오늘 시작한 오늘의 판만 그날의 기록에 남는다. 날이 넘어간 뒤에 끝낸 판은 여느 판으로 친다.
+   */
+  private recordDaily(): { stats: ResultStat[]; share: ShareOverride } | null {
+    const today = dayIndexOf(new Date());
+    if (this.dailyDay !== today) return null;
+    const result = { score: scoreOf(this.run), rounds: clearedRounds(this.run) };
+    const outcome = addDailyRun(slotDailyStore.data, today, result);
+    slotDailyStore.set(outcome.record);
+    const stats: ResultStat[] = [[DAILY_LABEL.name, dailyVerdict(outcome)]];
+    if (this.friendScore !== null) stats.push([DAILY_LABEL.friend, friendVerdict(this.friendScore, result.score)]);
+    return { stats, share: dailyShare(today, result, outcome.record.streak) };
+  }
+
+  /** 오늘의 판을 마쳤으면 결과 화면의 "다시 하기"가 오늘의 판을 다시 연다. 넘어 볼 친구 기록도 이어서 넘긴다. */
+  protected override retryData(): SlotStart | undefined {
+    const day = this.dailyDay;
+    if (day === null) return undefined;
+    if (this.friendScore === null) return { daily: true };
+    return { daily: true, sharedDay: day, sharedScore: this.friendScore };
   }
 
   // ───────── 붙인 부적 ─────────
