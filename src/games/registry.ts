@@ -175,6 +175,16 @@ export const GAMES: readonly MiniGameInfo[] = [
     stageMode: true,
   },
   {
+    id: 'nemo-logic',
+    title: '네모 로직',
+    icon: 'icon-nemo',
+    sceneKey: SCENE.nemoLogic,
+    coinsFor: (score) => Math.floor(score / 15),
+    dailyTargets: [60, 150, 260],
+    genre: 'puzzle',
+    stageMode: true,
+  },
+  {
     id: 'number-puzzle',
     title: '숫자 퍼즐',
     icon: 'icon-number',

@@ -3,6 +3,8 @@ import { seededRandom, STAGE_HEARTS, STAGE_LEVELS, stageRandom } from '../core/s
 import * as colorSort from './color-sort/rules';
 import * as logicTiles from './logic-tiles/rules';
 import * as matchThree from './match-three/rules';
+import { PICTURES as NEMO_PICTURES } from './nemo-logic/pictures';
+import * as nemoLogic from './nemo-logic/rules';
 import * as numberPuzzle from './number-puzzle/rules';
 import * as parkingOut from './parking-out/rules';
 import * as pathLink from './path-link/rules';
@@ -26,13 +28,14 @@ const LAST_TEN = ALL_LEVELS.slice(-10);
 const average = (values: readonly number[]): number => values.reduce((sum, value) => sum + value, 0) / values.length;
 
 describe('단계 모드를 하는 게임', () => {
-  it('아홉 게임이고 모두 플레이할 수 있다', () => {
+  it('열 게임이고 모두 플레이할 수 있다', () => {
     expect(stageGames().map((game) => game.id)).toEqual([
       'color-sort',
       'pin-pull',
       'parking-out',
       'screw-sort',
       'logic-tiles',
+      'nemo-logic',
       'number-puzzle',
       'path-link',
       'match-three',
@@ -298,6 +301,49 @@ describe('논리 타일의 단계', () => {
       }
     }
   }, 60_000);
+});
+
+describe('네모 로직의 단계', () => {
+  it('단계마다 정해 둔 그림이 하나씩 있고, 가장 작은 판에서 시작해 가장 큰 판으로 끝난다', () => {
+    expect(NEMO_PICTURES).toHaveLength(STAGE_LEVELS);
+    expect(new Set(ALL_LEVELS.map((level) => nemoLogic.levelPicture(level))).size).toBe(STAGE_LEVELS);
+    const first = nemoLogic.levelRun(1).board;
+    const last = nemoLogic.levelRun(STAGE_LEVELS).board;
+    expect([first.cols, first.rows]).toEqual([5, 5]);
+    expect([last.cols, last.rows]).toEqual([nemoLogic.MAX_COLS, nemoLogic.MAX_ROWS]);
+  });
+
+  it('같은 단계는 언제나 같은 판이고, 목숨을 가득 안고 빈 판에서 시작한다', () => {
+    for (const level of ALL_LEVELS) {
+      const run = nemoLogic.levelRun(level);
+      expect(run).toEqual(nemoLogic.levelRun(level));
+      expect(run.hearts).toBe(STAGE_HEARTS);
+      expect(run.board.cells.every((cell) => cell === 'blank')).toBe(true);
+    }
+  });
+
+  it('판은 단계가 오를수록 작아지지 않고, 뒤쪽 단계가 앞쪽 단계보다 풀기 어렵다', () => {
+    const boards = ALL_LEVELS.map((level) => nemoLogic.levelRun(level).board);
+    for (let at = 1; at < boards.length; at += 1) {
+      expect(boards[at].cols * boards[at].rows).toBeGreaterThanOrEqual(boards[at - 1].cols * boards[at - 1].rows);
+    }
+    const difficulty = (levels: readonly number[]): number =>
+      average(levels.map((level) => nemoLogic.difficultyOf(nemoLogic.levelRun(level).board)));
+    expect(difficulty(LAST_TEN)).toBeGreaterThan(difficulty(FIRST_TEN));
+  });
+
+  it('어느 단계든 찍지 않고 한 줄씩 따져서 풀리고, 그대로 칠하면 틀리지 않고 깬다', () => {
+    for (const level of ALL_LEVELS) {
+      let run = nemoLogic.levelRun(level);
+      const { solved, known } = nemoLogic.solve(run.board);
+      expect(solved, `${level}단계`).toBe(true);
+      known.forEach((mark, cell) => {
+        if (mark === nemoLogic.FILLED) run = nemoLogic.paint(run, [cell], 'fill').run;
+      });
+      expect(nemoLogic.isCleared(run.board), `${level}단계`).toBe(true);
+      expect(run.hearts).toBe(STAGE_HEARTS);
+    }
+  });
 });
 
 describe('숫자 퍼즐의 단계', () => {
