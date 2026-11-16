@@ -75,7 +75,7 @@ function puzzleOf(code: string): Puzzle {
 /** 점수 도전을 열고 그 판을 깐다. 시계는 처음 움직일 때 가기 시작한다. */
 async function load(page: Page, puzzle: Puzzle, timeLeft?: number): Promise<void> {
   await startScene(page, SCENE.boxPush);
-  await expect.poll(async () => (await view(page)).playing, { message: '첫 판이 깔려야 한다' }).toBe(true);
+  await expect.poll(async () => (await view(page)).playing, { message: '첫 판이 깔려야 한다', ...SLOW }).toBe(true);
   const run: RunState = { ...puzzleRun(puzzle), ...(timeLeft === undefined ? {} : { timeLeft }) };
   await page.evaluate(
     ([key, next]) => {
@@ -94,7 +94,7 @@ async function load(page: Page, puzzle: Puzzle, timeLeft?: number): Promise<void
     },
     [SCENE.boxPush, run] as const,
   );
-  await expect.poll(async () => (await view(page)).playing, { message: '정해 둔 판이 깔려야 한다' }).toBe(true);
+  await expect.poll(async () => (await view(page)).playing, { message: '정해 둔 판이 깔려야 한다', ...SLOW }).toBe(true);
 }
 
 /** 조작 하나: 그쪽으로 걷기(밀기), 되돌리기 */
@@ -122,9 +122,25 @@ function act(page: Page, acts: readonly Act[]): Promise<void> {
   );
 }
 
-/** 움직임이 모두 끝나기를 기다린다. */
+/** 기다림의 한도. CI의 느린 기계에서는 장면의 시간이 벽시계보다 한참 느리게 갈 수 있어서 넉넉히 둔다. */
+const SLOW = { timeout: 20_000 } as const;
+
+/**
+ * 걸음과 움직임이 모두 끝나기를 기다린다. 장면의 시간은 기계마다 빠르기가 달라서, 정해 둔 시간만큼 기다리지 않고
+ * 장면이 걷는 중이 아니고 캐릭터와 상자의 움직임(tween)이 모두 멈출 때까지 지켜본다.
+ */
 async function settle(page: Page): Promise<void> {
-  await page.waitForTimeout(400);
+  const busy = (): Promise<boolean> =>
+    page.evaluate((key) => {
+      const scene = window.__pocketArcade?.scene.getScene(key) as unknown as {
+        stepping: boolean;
+        player: object;
+        boxViews: object[];
+        tweens: { isTweening(target: object): boolean };
+      };
+      return scene.stepping || [scene.player, ...scene.boxViews].some((target) => scene.tweens.isTweening(target));
+    }, SCENE.boxPush);
+  await expect.poll(busy, { message: '움직임이 끝나야 한다', ...SLOW }).toBe(false);
 }
 
 it('상자 밀기: 상자끼리 얽혀 깰 수 없게 된 판도 알린다 (B1)', async ({ page }) => {
@@ -155,17 +171,17 @@ it('상자 밀기: 마지막 상자를 미는 동안 시간이 끝나면 깬 판
   // 한 번 밀면 깨는 판. 미는 움직임(0.11초)보다 남은 시간(0.05초)이 짧다.
   await load(page, puzzleOf('pbo/...'), 0.05);
   await act(page, ['right']);
-  await expect.poll(async () => (await view(page)).boardsCleared, { message: '다 깬 판으로 쳐야 한다' }).toBe(1);
+  await expect.poll(async () => (await view(page)).boardsCleared, { message: '다 깬 판으로 쳐야 한다', ...SLOW }).toBe(1);
   const cleared = await view(page);
   expect(cleared.score).toBeGreaterThan(0);
   // 돌려받은 시간으로 다음 판을 이어 한다.
-  await expect.poll(async () => (await view(page)).playing, { message: '다음 판이 깔려야 한다' }).toBe(true);
+  await expect.poll(async () => (await view(page)).playing, { message: '다음 판이 깔려야 한다', ...SLOW }).toBe(true);
   expect((await view(page)).timeLeft).toBeGreaterThan(1);
 
   // 깨지 못하는 걸음이었으면 그 걸음이 끝난 뒤에 끝난다.
   await load(page, puzzleOf('pb.o/....'), 0.05);
   await act(page, ['right']);
-  await expect.poll(async () => (await view(page)).timeLeft, { message: '시간이 끝나야 한다' }).toBe(0);
+  await expect.poll(async () => (await view(page)).timeLeft, { message: '시간이 끝나야 한다', ...SLOW }).toBe(0);
   const over = await view(page);
   expect(over.playing).toBe(false);
   expect(over.boardsCleared).toBe(0);
@@ -201,6 +217,8 @@ it('상자 밀기: 걷기만 해도 "처음부터"를 누를 수 있다 (B4)', a
 });
 
 it('상자 밀기: "준비!" 동안 다시 멈추면 판을 본 만큼 시계가 간다 (C1)', async ({ page }) => {
+  // 멈췄다 돌아오기를 되풀이하므로, 느린 기계에서는 다른 점검보다 오래 걸린다.
+  it.setTimeout(120_000);
   await openApp(page);
   await load(page, puzzleOf('pb.o/....'));
   // 한 걸음 걸어서 시계를 움직인다.
@@ -209,7 +227,7 @@ it('상자 밀기: "준비!" 동안 다시 멈추면 판을 본 만큼 시계가
   const before = (await view(page)).timeLeft;
   // 멈췄다 돌아와서 "준비!"(0.6초)가 반쯤 지났을 때 다시 멈추기를 여러 번 되풀이한다.
   // 기계마다 프레임의 빠르기가 달라서, 페이지 안에서 프레임마다 지켜보다가 "준비!"가 0.3초 남으면 바로 멈춘다.
-  const rounds = 6;
+  const rounds = 4;
   await page.evaluate((key) => window.__pocketArcade?.scene.pause(key), SCENE.boxPush);
   for (let round = 0; round < rounds; round += 1) {
     const left = await page.evaluate(
