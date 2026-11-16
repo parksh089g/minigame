@@ -10,6 +10,8 @@
  * 여기서 말하는 금화는 이 게임 안에서만 쓰는 것이고, 앱의 코인과는 상관없다.
  */
 
+import { seededRandom } from '../../core/stages';
+
 // ───────── 그림 ─────────
 
 export const SIZE = 3;
@@ -429,9 +431,23 @@ export interface RunState {
   afterMiss: boolean;
   /** 한 번의 스핀으로 받은 가장 많은 금화 */
   bestSpin: number;
+  /** 이 라운드에서 바로 앞 스핀에 나온 판. 라운드의 첫 스핀을 돌리기 전에는 null이다. 열을 잠글 때 쓴다. */
+  lastGrid: number[] | null;
+  /** 이 라운드에 남은 잠그기 횟수 */
+  holdsLeft: number;
+  /** 정해진 운으로 하는 판(오늘의 판)의 씨앗. 여느 판은 null이고, 그때는 운을 밖에서 준 대로 쓴다. */
+  seed: string | null;
+  /** 이 판에서 지금까지 돌린 횟수. 정해진 운에서 몇 번째 스핀인지 세는 데 쓴다. */
+  spinCount: number;
+  /** 이 판에서 지금까지 가게의 부적을 뽑은 횟수(라운드를 넘길 때와 다시 뽑을 때). 정해진 운의 차례를 센다. */
+  drawCount: number;
 }
 
-export function newRun(): RunState {
+/** 라운드마다 열을 잠글 수 있는 횟수 */
+export const HOLDS_PER_ROUND = 1;
+
+/** 새 판. seed를 주면 정해진 운으로 하는 판이 된다(randomOf를 보라). */
+export function newRun(seed: string | null = null): RunState {
   return {
     phase: 'spin',
     round: 1,
@@ -442,7 +458,32 @@ export function newRun(): RunState {
     shop: null,
     afterMiss: false,
     bestSpin: 0,
+    lastGrid: null,
+    holdsLeft: HOLDS_PER_ROUND,
+    seed,
+    spinCount: 0,
+    drawCount: 0,
   };
+}
+
+/** 운을 쓰는 두 가지 일: 스핀과, 가게의 부적 뽑기 */
+export type LuckKind = 'spin' | 'shop';
+
+/**
+ * 이번에 쓸 운. 여느 판(seed가 null)은 fallback을 그대로 돌려준다.
+ * 정해진 운의 판은 씨앗과 차례(몇 번째 스핀인지, 몇 번째 뽑기인지)로 운을 만든다. 그래서 같은 씨앗이면
+ * 누구에게나 같은 차례에 같은 수들이 나오고, 판을 저장했다가 이어 해도 달라지지 않는다.
+ * 스핀과 가게는 차례를 따로 세어서, 가게에서 다시 뽑아도 스핀의 운은 그대로다.
+ */
+export function randomOf(run: RunState, kind: LuckKind, fallback: () => number): () => number {
+  if (run.seed === null) return fallback;
+  const count = kind === 'spin' ? run.spinCount : run.drawCount;
+  return seededRandom(`${run.seed}:${kind}:${count}`);
+}
+
+/** 지금 열을 잠글 수 있는지: 이 라운드에 한 번은 돌렸고, 스핀과 잠그기 횟수가 남아 있어야 한다. */
+export function canHold(run: RunState): boolean {
+  return run.phase === 'spin' && run.spinsLeft > 0 && run.holdsLeft > 0 && run.lastGrid !== null;
 }
 
 /** 넘긴 라운드의 수. 가게가 열려 있으면 지금 라운드까지 넘긴 것이다. */
@@ -453,10 +494,20 @@ export function clearedRounds(run: RunState): number {
 /**
  * 한 번 돌린다. 돌릴 수 없는 때(가게, 끝난 판, 스핀이 없을 때)에는 null을 돌려준다.
  * 마지막 스핀까지 돌려도 라운드는 저절로 넘어가지 않는다. 화면이 결과를 다 보여 준 뒤 settleRound를 부른다.
+ *
+ * hold에 열의 번호(0부터)를 주면 그 열의 세 칸은 바로 앞 스핀의 그림 그대로 두고 나머지만 새로 돌린다.
+ * 잠글 수 없는 때(canHold가 false)나 없는 열이면 잠그지 않고 그냥 돌린다.
  */
-export function spin(run: RunState, random: () => number): { run: RunState; outcome: SpinOutcome } | null {
+export function spin(
+  run: RunState,
+  random: () => number,
+  hold: number | null = null,
+): { run: RunState; outcome: SpinOutcome } | null {
   if (run.phase !== 'spin' || run.spinsLeft <= 0) return null;
-  const grid = rollGrid(run.charms, random);
+  const last = run.lastGrid;
+  const held = hold !== null && last !== null && canHold(run) && Number.isInteger(hold) && hold >= 0 && hold < SIZE;
+  const rolled = rollGrid(run.charms, random);
+  const grid = held && last ? rolled.map((symbol, cell) => (cell % SIZE === hold ? last[cell] : symbol)) : rolled;
   const outcome = scoreSpin(grid, run.charms, { last: run.spinsLeft === 1, afterMiss: run.afterMiss });
   return {
     outcome,
@@ -467,6 +518,9 @@ export function spin(run: RunState, random: () => number): { run: RunState; outc
       earned: run.earned + outcome.total,
       afterMiss: outcome.wins.length === 0,
       bestSpin: Math.max(run.bestSpin, outcome.total),
+      lastGrid: grid,
+      holdsLeft: held ? run.holdsLeft - 1 : run.holdsLeft,
+      spinCount: run.spinCount + 1,
     },
   };
 }
@@ -504,6 +558,7 @@ export function settleRound(run: RunState, random: () => number): Settlement | n
       earned: run.earned + savings,
       afterMiss: false,
       shop: { offers: drawOffers(run.charms, random), rerollCost: REROLL_COST },
+      drawCount: run.drawCount + 1,
     },
   };
 }
@@ -544,6 +599,7 @@ export function reroll(run: RunState, random: () => number): RunState {
     ...run,
     coin: run.coin - run.shop.rerollCost,
     shop: { offers: drawOffers(run.charms, random), rerollCost: run.shop.rerollCost + REROLL_STEP },
+    drawCount: run.drawCount + 1,
   };
 }
 
@@ -563,6 +619,8 @@ export function nextRound(run: RunState): RunState {
     spinsLeft: spinsOf(run.charms),
     shop: null,
     afterMiss: false,
+    lastGrid: null,
+    holdsLeft: HOLDS_PER_ROUND,
   };
 }
 

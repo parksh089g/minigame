@@ -37,6 +37,7 @@ import {
   newRun,
   nextRound,
   oddsOf,
+  randomOf,
   OFFERS,
   reroll,
   scoreOf,
@@ -641,7 +642,7 @@ export class CandySlotScene extends MiniGameScene {
 
   private trySpin(): void {
     if (!this.playing || this.busy || this.run.phase !== 'spin') return;
-    const result = spin(this.run, Math.random);
+    const result = spin(this.run, randomOf(this.run, 'spin', Math.random));
     if (!result) return;
     this.hideHints();
     this.hideGuide();
@@ -840,7 +841,7 @@ export class CandySlotScene extends MiniGameScene {
   private settle(): void {
     if (!this.playing) return;
     const short = targetOf(this.run.round) - this.run.coin;
-    const settlement = settleRound(this.run, Math.random);
+    const settlement = settleRound(this.run, randomOf(this.run, 'shop', Math.random));
     if (!settlement) return;
     this.run = settlement.run;
     if (!settlement.cleared) {
@@ -1094,7 +1095,7 @@ export class CandySlotScene extends MiniGameScene {
   private tryReroll(): void {
     if (!this.playing || this.busy || this.run.phase !== 'shop') return;
     this.hideBubble();
-    const next = reroll(this.run, Math.random);
+    const next = reroll(this.run, randomOf(this.run, 'shop', Math.random));
     if (next === this.run) {
       sfx.deny();
       return;

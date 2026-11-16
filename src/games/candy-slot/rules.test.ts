@@ -24,6 +24,9 @@ import {
   MACHINE_FRAME,
   MIN_WEIGHT,
   MISS_COIN,
+  HOLDS_PER_ROUND,
+  canHold,
+  randomOf,
   newRun,
   nextRound,
   oddsOf,
@@ -480,6 +483,121 @@ describe('한 판', () => {
     // 끝난 판은 더 돌리지도 맺지도 못한다.
     expect(spin(settled.run, Math.random)).toBeNull();
     expect(settleRound(settled.run, Math.random)).toBeNull();
+  });
+});
+
+describe('열 잠그기', () => {
+  it('라운드의 첫 스핀 전에는 잠글 수 없고, 한 번 돌리면 잠글 수 있다', () => {
+    const run = newRun();
+    expect(canHold(run)).toBe(false);
+    expect(run.holdsLeft).toBe(HOLDS_PER_ROUND);
+    const after = spin(run, seeded(3))!.run;
+    expect(after.lastGrid).toHaveLength(CELLS);
+    expect(canHold(after)).toBe(true);
+  });
+
+  it('잠근 열의 세 칸은 그대로 있고, 나머지는 잠그지 않았을 때와 똑같이 나온다', () => {
+    const first = spin(newRun(), seeded(3))!.run;
+    const last = first.lastGrid!;
+    for (let col = 0; col < SIZE; col += 1) {
+      const free = spin(first, seeded(9))!;
+      const held = spin(first, seeded(9), col)!;
+      held.outcome.grid.forEach((symbol, cell) => {
+        expect(symbol, `열 ${col}, 칸 ${cell}`).toBe(cell % SIZE === col ? last[cell] : free.outcome.grid[cell]);
+      });
+      expect(held.run.holdsLeft).toBe(HOLDS_PER_ROUND - 1);
+      expect(free.run.holdsLeft).toBe(HOLDS_PER_ROUND);
+    }
+  });
+
+  it('한 라운드에 정해진 횟수만 잠글 수 있고, 다 쓰면 잠그라고 해도 그냥 돌린다', () => {
+    let run = spin(newRun(), seeded(3))!.run;
+    for (let used = 0; used < HOLDS_PER_ROUND; used += 1) run = spin(run, seeded(4 + used), 0)!.run;
+    expect(run.holdsLeft).toBe(0);
+    expect(canHold(run)).toBe(false);
+    const free = spin(run, seeded(11))!;
+    const asked = spin(run, seeded(11), 1)!;
+    expect(asked.outcome.grid).toEqual(free.outcome.grid);
+  });
+
+  it('없는 열을 주면 잠그지 않는다', () => {
+    const run = spin(newRun(), seeded(3))!.run;
+    for (const col of [-1, SIZE, 0.5]) {
+      const result = spin(run, seeded(9), col)!;
+      expect(result.outcome.grid).toEqual(spin(run, seeded(9))!.outcome.grid);
+      expect(result.run.holdsLeft).toBe(HOLDS_PER_ROUND);
+    }
+  });
+
+  it('라운드가 바뀌면 잠그기 횟수가 돌아오고, 앞 라운드의 판은 잊는다', () => {
+    const used: RunState = { ...newRun(), phase: 'shop', spinsLeft: 0, holdsLeft: 0, lastGrid: Array(CELLS).fill(0), shop: { offers: [], rerollCost: REROLL_COST } };
+    const next = nextRound(used);
+    expect(next.holdsLeft).toBe(HOLDS_PER_ROUND);
+    expect(next.lastGrid).toBeNull();
+    expect(canHold(next)).toBe(false);
+  });
+});
+
+describe('정해진 운', () => {
+  it('여느 판은 받은 운을 그대로 쓴다', () => {
+    const fallback = (): number => 0.5;
+    expect(randomOf(newRun(), 'spin', fallback)).toBe(fallback);
+    expect(randomOf(newRun(), 'shop', fallback)).toBe(fallback);
+  });
+
+  /** 정해진 운으로 스핀만 count번 돌린 판들 */
+  const spun = (seed: string, count: number): number[][] => {
+    let run = newRun(seed);
+    const grids: number[][] = [];
+    for (let index = 0; index < count; index += 1) {
+      const result = spin(run, randomOf(run, 'spin', Math.random))!;
+      grids.push([...result.outcome.grid]);
+      run = result.run;
+    }
+    return grids;
+  };
+
+  it('같은 씨앗이면 같은 차례에 같은 판이 나오고, 씨앗이 다르면 달라진다', () => {
+    expect(spun('오늘', BASE_SPINS)).toEqual(spun('오늘', BASE_SPINS));
+    expect(spun('오늘', BASE_SPINS)).not.toEqual(spun('내일', BASE_SPINS));
+    // 스핀마다 운이 새로 정해져서, 같은 판만 되풀이되지 않는다.
+    const grids = spun('오늘', BASE_SPINS);
+    expect(new Set(grids.map((grid) => grid.join(''))).size).toBeGreaterThan(1);
+  });
+
+  it('가게에서 다시 뽑아도 다음 스핀의 운은 그대로다', () => {
+    const settled = (rerolls: number): RunState => {
+      let run: RunState = { ...newRun('오늘'), spinsLeft: 0, coin: 999 };
+      run = settleRound(run, randomOf(run, 'shop', Math.random))!.run;
+      for (let index = 0; index < rerolls; index += 1) run = reroll(run, randomOf(run, 'shop', Math.random));
+      return nextRound(run);
+    };
+    const plain = settled(0);
+    const rerolled = settled(3);
+    expect(rerolled.drawCount).toBe(plain.drawCount + 3);
+    const grid = (run: RunState): readonly number[] => spin(run, randomOf(run, 'spin', Math.random))!.outcome.grid;
+    expect(grid(rerolled)).toEqual(grid(plain));
+  });
+
+  it('가게에 나오는 부적도 씨앗과 뽑은 차례로 정해지고, 다시 뽑으면 다른 차례의 운을 쓴다', () => {
+    const open = (): RunState => {
+      const run: RunState = { ...newRun('오늘'), spinsLeft: 0, coin: 999 };
+      return settleRound(run, randomOf(run, 'shop', Math.random))!.run;
+    };
+    expect(open().shop?.offers).toEqual(open().shop?.offers);
+    const once = reroll(open(), randomOf(open(), 'shop', Math.random));
+    expect(once.shop?.offers).toEqual(reroll(open(), randomOf(open(), 'shop', Math.random)).shop?.offers);
+    expect(once.drawCount).toBe(2);
+  });
+
+  it('판의 상태만 있으면 이어서 같은 운이 나온다(저장했다가 이어 하는 판)', () => {
+    let run = newRun('오늘');
+    for (let index = 0; index < 3; index += 1) run = spin(run, randomOf(run, 'spin', Math.random))!.run;
+    const restored = JSON.parse(JSON.stringify(run)) as RunState;
+    expect(restored).toEqual(run);
+    expect(spin(restored, randomOf(restored, 'spin', Math.random))!.outcome.grid).toEqual(
+      spin(run, randomOf(run, 'spin', Math.random))!.outcome.grid,
+    );
   });
 });
 
