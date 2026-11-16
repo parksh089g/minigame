@@ -13,6 +13,7 @@ import {
   drawHearts,
   drawHero,
   drawHollows,
+  drawKey,
   drawLava,
   drawMonster,
   drawPin,
@@ -22,24 +23,33 @@ import {
   drawWater,
   FIGURE_HEIGHT,
   HANDLE_RADIUS,
+  KEY_HEIGHT,
   LIQUID_UNIT,
   LOOK,
   PIN_THICKNESS,
   STONE_HEIGHT,
   TREASURE_HEIGHT,
   type Hollow,
+  type PinLook,
 } from './art';
-import { levelPuzzle, levelShowsHints, levelShowsMonsterNote } from './levels';
+import { levelDeviceNote, levelPuzzle, levelShowsHints, levelShowsMonsterNote, type Device } from './levels';
 import {
+  canPull,
   generatePuzzle,
+  isPinned,
   MAX_SHAFTS,
   pinsOf,
   pull,
   puzzleSeconds,
+  samePin,
+  samePlace,
   START_HEARTS,
   startPuzzle,
   winPoints,
   type Contents,
+  type Fall,
+  type Item,
+  type Landing,
   type LossCause,
   type Pin,
   type PullResult,
@@ -59,6 +69,10 @@ type Setback = LossCause | 'timeout';
 interface PinView {
   pin: Pin;
   view: Phaser.GameObjects.Graphics;
+  /** 겉모습. 자물쇠가 풀리면 보통 핀으로 다시 그린다. */
+  look: PinLook;
+  /** 막대의 길이. 다시 그릴 때 쓴다. */
+  length: number;
   /** 손잡이의 가운데 */
   handle: { x: number; y: number };
   /** 누르면 이 핀이 뽑히는 영역: 손잡이와 막대, 그리고 그 핀이 받치는 방 */
@@ -153,14 +167,31 @@ const TICK_FROM_SECONDS = 3;
 /** 처음에 보여 주는 도움말이 사라지기 시작하는 때(ms) */
 const HINT_MS = 5500;
 
+/** 자물쇠가 잠긴 핀을 눌렀을 때 핀이 좌우로 떨리는 폭과 시간 */
+const RATTLE = { distance: 2, ms: 45, times: 2 } as const;
+
 const SETBACK_NOTES: Record<Setback, string> = {
   burnt: '보물이 타 버렸어요',
+  melted: '열쇠가 녹아 버렸어요',
   lava: '앗, 뜨거워요!',
   monster: '괴물에게 잡혔어요',
   timeout: '시간이 다 됐어요',
 };
 
+/** 새 장치가 처음 나오는 단계에서 알려 주는 쓰는 법 */
+const DEVICE_NOTES: Record<Device, string> = {
+  chain: '사슬로 묶인 핀은 함께 뽑혀요',
+  lock: '열쇠가 바닥에 닿으면 자물쇠가 풀려요',
+};
+
 const DEPTH = { rock: 1, board: 5, effect: 20, hud: 30, banner: 40 } as const;
+
+const EMPTY: Contents = { treasure: 0, lava: 0, water: 0, stone: 0, key: 0 };
+
+/** 방에 처음 든 것 하나 */
+function oneOf(item: Item): Contents {
+  return { ...EMPTY, [item]: 1 };
+}
 
 /** 그 판을 놓는 데 쓰는 줄의 수: 가장 높이 쌓인 통로의 층수 */
 function floorsOf(puzzle: Puzzle): number {
@@ -202,6 +233,7 @@ function layoutFor(height: number, floors: number): Layout {
 function restHeight(contents: Contents): number {
   const liquid = (contents.lava + contents.water) * LIQUID_UNIT;
   if (contents.treasure > 0) return Math.max(0, liquid - FLOAT_SINK) + TREASURE_HEIGHT;
+  if (contents.key > 0) return Math.max(0, liquid - FLOAT_SINK) + KEY_HEIGHT;
   return Math.max(liquid, contents.stone > 0 ? STONE_HEIGHT : 0);
 }
 
@@ -529,8 +561,11 @@ export class PinPullScene extends MiniGameScene {
       this.shownStage = this.stage;
     }
     this.hud.setTime(this.timeLeft, this.timeLimit);
-    // 단계 모드에서는 괴물이 나오는 처음 몇 단계에서만 알려 준다.
-    if (puzzle.monster && !this.monsterSeen && (level === null || levelShowsMonsterNote(level))) {
+    // 단계 모드에서는 새 장치나 괴물이 나오는 처음 몇 단계에서만 쓰는 법을 알려 준다. 장치가 먼저다.
+    const device = level === null ? null : levelDeviceNote(level);
+    if (device) {
+      this.showNote(DEVICE_NOTES[device], LOOK.text.hint, 4000);
+    } else if (puzzle.monster && !this.monsterSeen && (level === null || levelShowsMonsterNote(level))) {
       this.monsterSeen = true;
       this.showNote('괴물은 용암으로 물리쳐요', LOOK.text.hint, 4000);
     }
@@ -570,9 +605,7 @@ export class PinPullScene extends MiniGameScene {
     this.board.add([hollows, this.poolView, this.propsView]);
 
     this.cellViews = puzzle.shafts.map((chambers, shaft) =>
-      chambers.map((item, level) =>
-        this.addCell(shaft, level, { treasure: 0, lava: 0, water: 0, stone: 0, [item]: 1 }),
-      ),
+      chambers.map((item, level) => this.addCell(shaft, level, oneOf(item))),
     );
 
     this.monsterView = null;
@@ -587,7 +620,7 @@ export class PinPullScene extends MiniGameScene {
     drawHero(this.heroView, 'calm');
     this.board.add(this.heroView);
 
-    this.pinViews = pinsOf(puzzle).map((pin) => this.addPin(pin));
+    this.pinViews = pinsOf(puzzle).map((pin) => this.addPin(pin, this.lookOf(puzzle, pin)));
     // 첫 판에서는 손잡이가 누르는 곳이라는 것을 둥근 물결로 알려 준다.
     this.rings = [];
     if (this.pulls === 0) this.pulseHandles();
@@ -622,13 +655,23 @@ export class PinPullScene extends MiniGameScene {
     if (contents.lava > 0) drawLava(view, 0, 0, CHAMBER_WIDTH, liquid);
     else if (contents.water > 0) drawWater(view, 0, 0, CHAMBER_WIDTH, liquid);
     if (contents.stone > 0) drawStone(view, CHAMBER_WIDTH / 2, 0);
-    // 물과 함께 있는 보물은 물 위에 살짝 잠겨 떠 있어서 둘 다 보인다.
-    if (contents.treasure > 0) drawTreasure(view, CHAMBER_WIDTH / 2, -Math.max(0, liquid - FLOAT_SINK));
+    // 물과 함께 있는 보물과 열쇠는 물 위에 살짝 잠겨 떠 있어서 둘 다 보인다.
+    const afloat = -Math.max(0, liquid - FLOAT_SINK);
+    const both = contents.treasure > 0 && contents.key > 0;
+    if (contents.treasure > 0) drawTreasure(view, CHAMBER_WIDTH / 2 - (both ? 4 : 0), afloat);
+    if (contents.key > 0) drawKey(view, both ? CHAMBER_WIDTH - 5 : CHAMBER_WIDTH / 2, afloat);
     this.board.add(view);
     return view;
   }
 
-  private addPin(pin: Pin): PinView {
+  /** 그 핀의 겉모습: 자물쇠가 달렸는지, 사슬로 묶였는지 */
+  private lookOf(puzzle: Puzzle, pin: Pin): PinLook {
+    if ((puzzle.locks ?? []).some((locked) => samePin(locked, pin))) return 'locked';
+    if ((puzzle.links ?? []).some((pair) => pair.some((linked) => samePin(linked, pin)))) return 'chained';
+    return 'plain';
+  }
+
+  private addPin(pin: Pin, look: PinLook): PinView {
     const view = this.add.graphics();
     this.board.add(view);
 
@@ -636,11 +679,13 @@ export class PinPullScene extends MiniGameScene {
       const { room } = this.layout;
       const length = room.height + DOOR_RISE;
       view.setPosition(this.doorX, room.bottom - 1);
-      drawDoorPin(view, length);
+      drawDoorPin(view, length, look);
       const zoneTop = room.bottom - 1 - length - HANDLE_RADIUS - 8;
       return {
         pin,
         view,
+        look,
+        length,
         handle: { x: this.doorX, y: room.bottom - 1 - length },
         // 손잡이와 막대뿐 아니라 옆방의 용사를 눌러도 문이 열린다.
         zone: new Phaser.Geom.Rectangle(
@@ -660,11 +705,13 @@ export class PinPullScene extends MiniGameScene {
     const length = PIN_TUCK + CHAMBER_WIDTH + SHAFT_GAP / 2;
     const y = floor + PIN_THICKNESS / 2;
     view.setPosition(left - PIN_TUCK, y);
-    drawPin(view, length);
+    drawPin(view, length, look);
     const zoneTop = floor - this.layout.chamberHeight + 4;
     return {
       pin,
       view,
+      look,
+      length,
       handle: { x: left - PIN_TUCK + length, y },
       // 방의 왼쪽 벽에서 손잡이의 오른쪽 끝까지. 옆 통로의 영역과 맞닿되 겹치지 않는다.
       zone: new Phaser.Geom.Rectangle(left, zoneTop, SHAFT_PITCH, floor + PIN_THICKNESS + 8 - zoneTop),
@@ -706,28 +753,52 @@ export class PinPullScene extends MiniGameScene {
   private pullPin(target: PinView): void {
     const before = this.state;
     if (!before) return;
+    // 자물쇠가 잠긴 핀은 뽑히지 않는다. 기회를 잃지는 않고, 왜 안 뽑히는지만 알려 준다.
+    if (isPinned(before, target.pin) && !canPull(before, target.pin)) {
+      this.rattle(target);
+      return;
+    }
     const result = pull(before, target.pin);
     if (!result.pulled) return;
 
     this.gate.start();
     this.state = result.state;
+    // 사슬로 묶인 핀은 둘이 함께 뽑히지만, 누른 것은 한 번이다.
     this.pulls += 1;
     this.phase = 'busy';
-    this.pinViews = this.pinViews.filter((candidate) => candidate !== target);
+    const pulled = this.pinViews.filter((candidate) => result.pins.some((pin) => samePin(pin, candidate.pin)));
+    this.pinViews = this.pinViews.filter((candidate) => !pulled.includes(candidate));
     this.clearRings();
-    this.slideOut(target);
+    for (const each of pulled) this.slideOut(each);
     sfx.pull();
     vibrate(8);
 
     this.time.delayedCall(FALL_DELAY_MS, () => {
       if (target.pin.kind === 'door') this.walkIn();
-      else this.dropFrom(target.pin.shaft, target.pin.level, before, result);
+      else this.dropAll(before, result);
+    });
+  }
+
+  /** 자물쇠가 잠긴 핀을 눌렀을 때: 핀이 덜컥거리고, 열쇠가 있어야 한다고 알려 준다. */
+  private rattle({ view }: PinView): void {
+    sfx.deny();
+    vibrate(12);
+    this.showNote('열쇠가 먼저 바닥에 닿아야 해요', LOOK.text.hint, 2200);
+    if (this.tweens.isTweening(view)) return;
+    this.tweens.add({
+      targets: view,
+      x: view.x + RATTLE.distance,
+      duration: RATTLE.ms,
+      yoyo: true,
+      repeat: RATTLE.times,
+      ease: 'Sine.InOut',
     });
   }
 
   /** 핀이 손잡이 쪽으로 빠져나가며 사라진다. */
   private slideOut({ pin, view }: PinView): void {
     const door = pin.kind === 'door';
+    this.tweens.killTweensOf(view);
     this.tweens.add({
       targets: view,
       x: door ? view.x : view.x + PIN_SLIDE.distance,
@@ -739,65 +810,115 @@ export class PinPullScene extends MiniGameScene {
     });
   }
 
-  /** 방에 든 것이 아래 칸으로 떨어진다. 닿으면 그 칸을 새 상태대로 다시 그린다. */
-  private dropFrom(shaft: number, level: number, before: PuzzleState, result: PullResult): void {
-    const view = this.cellViews[shaft][level];
-    const fall = result.fall;
-    if (!view || !fall) {
+  /**
+   * 뽑힌 방에 든 것이 아래 칸으로 떨어진다. 사슬로 묶인 핀을 뽑았으면 두 방의 것이 한꺼번에 떨어진다.
+   * 같은 칸에 닿는 것은 함께 닿게 하고, 닿으면 그 칸을 새 상태대로 다시 그린다. 모두 닿은 뒤에 판의 결과를 따진다.
+   */
+  private dropAll(before: PuzzleState, result: PullResult): void {
+    let waiting = result.landings.length;
+    if (waiting === 0) {
       this.settle();
       return;
     }
-    this.cellViews[shaft][level] = null;
-
-    const { pit } = this.layout;
-    const landing =
-      fall.to.kind === 'pit'
-        ? pit.bottom - 1 - poolHeight(before.pit)
-        : this.floorY(shaft, fall.to.level) -
-          restHeight(before.shafts[shaft][fall.to.level].contents);
-    this.tweens.add({
-      targets: view,
-      y: landing,
-      duration: FALL_MS.base + FALL_MS.perPx * (landing - view.y),
-      ease: 'Quad.In',
-      onComplete: () => {
-        view.destroy();
-        this.land(shaft, before, result);
-      },
-    });
+    for (const landing of result.landings) {
+      // 한 통로에서 둘이 떨어지면 아래 것이 먼저 닿은 자리 위에 위 것이 얹힌다.
+      const falls = result.falls
+        .filter((fall) => samePlace(fall.to, landing.to))
+        .sort((a, b) => b.level - a.level);
+      const stacked = new Map<number, number>();
+      const drops = falls.map((fall) => {
+        const view = this.cellViews[fall.shaft][fall.level];
+        this.cellViews[fall.shaft][fall.level] = null;
+        const raised = stacked.get(fall.shaft) ?? 0;
+        stacked.set(fall.shaft, raised + restHeight(fall.contents));
+        return { view, y: this.restY(before, fall) - raised };
+      });
+      const duration = Math.max(
+        ...drops.map(({ view, y }) => FALL_MS.base + FALL_MS.perPx * Math.max(0, y - (view?.y ?? y))),
+      );
+      for (const { view, y } of drops) {
+        if (view) this.tweens.add({ targets: view, y, duration, ease: 'Quad.In' });
+      }
+      this.time.delayedCall(duration, () => {
+        for (const { view } of drops) {
+          if (!view) continue;
+          this.tweens.killTweensOf(view);
+          view.destroy();
+        }
+        this.land(landing, falls, before, result);
+        waiting -= 1;
+        if (waiting === 0) this.settle();
+      });
+    }
   }
 
-  /** 떨어진 것이 닿았을 때: 닿은 칸을 다시 그리고, 거기서 일어난 일을 보여 준다. */
-  private land(shaft: number, before: PuzzleState, result: PullResult): void {
-    const state = result.state;
-    const fall = result.fall;
-    if (!fall) return;
-    const x = this.shaftLeft(shaft) + CHAMBER_WIDTH / 2;
-    const burnt = state.lossCause === 'burnt';
-    let y: number;
-    let burnX = x;
+  /** 떨어진 것이 내려앉는 높이: 닿는 칸에 이미 든 것의 위 */
+  private restY(before: PuzzleState, fall: Fall): number {
+    if (fall.to.kind === 'pit') return this.layout.pit.bottom - 1 - poolHeight(before.pit);
+    const below = before.shafts[fall.to.shaft][fall.to.level].contents;
+    return this.floorY(fall.to.shaft, fall.to.level) - restHeight(below);
+  }
 
-    if (fall.to.kind === 'chamber') {
-      const { level } = fall.to;
+  /** 떨어진 것이 한 칸에 닿았을 때: 닿은 칸을 다시 그리고, 거기서 일어난 일을 보여 준다. */
+  private land(landing: Landing, falls: readonly Fall[], before: PuzzleState, result: PullResult): void {
+    const state = result.state;
+    const centerOf = (fall: Fall | undefined): number =>
+      this.shaftLeft((fall ?? falls[0]).shaft) + CHAMBER_WIDTH / 2;
+    const x = centerOf(falls[0]);
+    // 타거나 녹은 것이 있던 자리: 떨어지던 것이면 그 통로 아래, 구덩이에 놓여 있던 보물이면 그 자리
+    let ruinX = centerOf(falls.find(({ contents }) => contents.treasure + contents.key > 0));
+    let y: number;
+
+    if (landing.to.kind === 'chamber') {
+      const { shaft, level } = landing.to;
       this.cellViews[shaft][level]?.destroy();
       this.cellViews[shaft][level] = this.addCell(shaft, level, state.shafts[shaft][level].contents);
       y = this.floorY(shaft, level) - LIQUID_UNIT / 2;
     } else {
       const resting = this.props.find((prop) => prop.kind === 'treasure');
-      if (burnt && resting) burnX = resting.x;
-      if (burnt) this.props = this.props.filter((prop) => prop.kind !== 'treasure');
+      if (landing.burnt && resting) ruinX = resting.x;
+      if (landing.burnt) this.props = this.props.filter((prop) => prop.kind !== 'treasure');
       for (let i = before.pit.stone; i < state.pit.stone; i += 1) this.props.push({ kind: 'stone', x });
-      if (state.pit.treasure > before.pit.treasure) this.props.push({ kind: 'treasure', x });
+      if (state.pit.treasure > before.pit.treasure) {
+        this.props.push({ kind: 'treasure', x: centerOf(falls.find(({ contents }) => contents.treasure > 0)) });
+      }
       this.drawPit(state);
       y = this.layout.pit.bottom - 8;
     }
 
-    if (fall.contents.lava + fall.contents.water > 0) sfx.pour();
+    if (falls.some(({ contents }) => contents.lava + contents.water > 0)) sfx.pour();
     else sfx.land();
-    if (result.cooled > 0) this.steamAt(x, y);
-    if (result.slain) this.vanishMonster();
-    if (burnt) this.burnAt(burnX, y);
-    this.settle();
+    if (landing.cooled > 0) this.steamAt(x, y);
+    if (landing.to.kind === 'pit' && result.slain) this.vanishMonster();
+    if (landing.burnt || landing.melted) this.burnAt(ruinX, y);
+    if (landing.to.kind === 'pit' && result.unlocked) {
+      this.openLocks(centerOf(falls.find(({ contents }) => contents.key > 0)), y);
+    }
+  }
+
+  /** 열쇠가 구덩이에 닿았을 때: 열쇠가 반짝이며 사라지고, 자물쇠가 달렸던 핀이 모두 보통 핀으로 바뀐다. */
+  private openLocks(x: number, y: number): void {
+    sfx.coin();
+    this.sparks.win.explode(8, x, y - 4);
+    this.showNote('자물쇠가 풀렸어요', LOOK.text.good, 1800);
+    for (const pinView of this.pinViews) {
+      if (pinView.look !== 'locked') continue;
+      pinView.look = 'plain';
+      if (pinView.pin.kind === 'door') drawDoorPin(pinView.view, pinView.length, 'plain');
+      else drawPin(pinView.view, pinView.length, 'plain');
+      const ring = this.add
+        .circle(pinView.handle.x, pinView.handle.y, HANDLE_RADIUS + 1)
+        .setStrokeStyle(1.5, LOOK.unlock);
+      this.board.add(ring);
+      this.tweens.add({
+        targets: ring,
+        scale: 2.2,
+        alpha: { from: 1, to: 0 },
+        duration: 420,
+        ease: 'Quad.Out',
+        onComplete: () => ring.destroy(),
+      });
+    }
   }
 
   /** 문이 열리고 용사가 구덩이로 걸어 들어간다. */

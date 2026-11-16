@@ -5,8 +5,8 @@
 
 // ───────── 판의 모양 ─────────
 
-/** 방에 처음 들어 있는 것 */
-export type Item = 'treasure' | 'lava' | 'water';
+/** 방에 처음 들어 있는 것. 열쇠는 단계 모드의 뒤쪽 판에만 나온다. */
+export type Item = 'treasure' | 'lava' | 'water' | 'key';
 
 export const MIN_SHAFTS = 2;
 export const MAX_SHAFTS = 4;
@@ -20,10 +20,19 @@ export interface Puzzle {
   shafts: readonly (readonly Item[])[];
   /** 구덩이에 괴물이 있는지 */
   monster: boolean;
+  /**
+   * 자물쇠가 달린 핀. 열쇠가 구덩이에 닿아야 풀리고, 그 전에는 뽑히지 않는다.
+   * 자물쇠가 있는 판에는 열쇠가 꼭 하나 있다. 없는 판에서는 적지 않는다.
+   */
+  locks?: readonly Pin[];
+  /** 사슬로 묶인 핀의 짝. 하나를 뽑으면 다른 하나도 함께 뽑힌다. 없는 판에서는 적지 않는다. */
+  links?: readonly PinPair[];
 }
 
 /** 방을 받치는 핀(level은 위에서부터 0)이거나, 용사의 방을 막은 문 핀 */
 export type Pin = { kind: 'chamber'; shaft: number; level: number } | { kind: 'door' };
+/** 사슬로 묶인 두 핀 */
+export type PinPair = readonly [Pin, Pin];
 
 /** 떨어진 것이 닿는 곳 */
 export type Place = { kind: 'chamber'; shaft: number; level: number } | { kind: 'pit' };
@@ -35,6 +44,8 @@ export interface Contents {
   water: number;
   /** 용암과 물이 만나 굳은 돌. 아무 일도 일으키지 않는다. */
   stone: number;
+  /** 열쇠. 구덩이에 닿으면 자물쇠를 풀고 사라지므로, 구덩이에서는 언제나 0이다. */
+  key: number;
 }
 
 export interface Chamber {
@@ -44,8 +55,8 @@ export interface Chamber {
 }
 
 export type Status = 'playing' | 'won' | 'lost';
-/** 진 까닭: 보물이 탐, 용사가 용암에 닿음, 용사가 괴물을 만남 */
-export type LossCause = 'burnt' | 'lava' | 'monster';
+/** 진 까닭: 보물이 탐, 열쇠가 녹음, 용사가 용암에 닿음, 용사가 괴물을 만남 */
+export type LossCause = 'burnt' | 'melted' | 'lava' | 'monster';
 
 export interface PuzzleState {
   shafts: readonly (readonly Chamber[])[];
@@ -54,11 +65,15 @@ export interface PuzzleState {
   monster: boolean;
   /** 용사가 있는 곳. 문 핀을 뽑으면 구덩이로 간다. */
   hero: 'room' | 'pit';
+  /** 아직 자물쇠가 잠겨 있는 핀. 열쇠가 구덩이에 닿으면 한꺼번에 풀려서 비워진다. */
+  locks: readonly Pin[];
+  /** 사슬로 묶인 핀의 짝. 판이 끝날 때까지 바뀌지 않는다. */
+  links: readonly PinPair[];
   status: Status;
   lossCause: LossCause | null;
 }
 
-const NOTHING: Contents = { treasure: 0, lava: 0, water: 0, stone: 0 };
+const NOTHING: Contents = { treasure: 0, lava: 0, water: 0, stone: 0, key: 0 };
 
 /** 모든 핀. 통로 순서, 그 안에서는 위에서 아래 순서이고 문 핀이 맨 끝이다. */
 export function pinsOf(puzzle: Puzzle): Pin[] {
@@ -75,11 +90,26 @@ export function samePin(a: Pin, b: Pin): boolean {
   return a.shaft === b.shaft && a.level === b.level;
 }
 
+/** 핀을 수 하나로 적는다. 문 핀은 -1이다. 핀의 모임을 견줄 때 쓴다. */
+function pinNumber(pin: Pin): number {
+  return pin.kind === 'door' ? -1 : pin.shaft * MAX_STACK + pin.level;
+}
+
+/** 자물쇠와 사슬을 순서에 상관없이 견줄 수 있게 적는다. */
+function devicesKey(puzzle: Puzzle): string {
+  const locks = (puzzle.locks ?? []).map(pinNumber).sort((a, b) => a - b);
+  const links = (puzzle.links ?? [])
+    .map((pair) => pair.map(pinNumber).sort((a, b) => a - b).join('+'))
+    .sort();
+  return `${locks.join()}|${links.join()}`;
+}
+
 export function samePuzzle(a: Puzzle, b: Puzzle): boolean {
   return (
     a.monster === b.monster &&
     a.shafts.length === b.shafts.length &&
-    a.shafts.every((chambers, shaft) => chambers.join() === b.shafts[shaft].join())
+    a.shafts.every((chambers, shaft) => chambers.join() === b.shafts[shaft].join()) &&
+    devicesKey(a) === devicesKey(b)
   );
 }
 
@@ -92,6 +122,8 @@ export function startPuzzle(puzzle: Puzzle): PuzzleState {
     pit: NOTHING,
     monster: puzzle.monster,
     hero: 'room',
+    locks: puzzle.locks ?? [],
+    links: puzzle.links ?? [],
     status: 'playing',
     lossCause: null,
   };
@@ -115,18 +147,85 @@ export function remainingPins(state: PuzzleState): Pin[] {
   return pins;
 }
 
+/** 그 핀에 자물쇠가 아직 잠겨 있는지 */
+export function isLocked(state: PuzzleState, pin: Pin): boolean {
+  return state.locks.some((locked) => samePin(locked, pin));
+}
+
+/** 그 핀과 사슬로 묶인 핀. 묶인 핀이 아니면 null */
+export function partnerOf(links: readonly PinPair[], pin: Pin): Pin | null {
+  for (const [one, other] of links) {
+    if (samePin(one, pin)) return other;
+    if (samePin(other, pin)) return one;
+  }
+  return null;
+}
+
+/** 그 핀을 누르면 함께 뽑히는 핀: 그 핀과, 사슬로 묶인 짝이 있으면 그것까지 */
+export function pulledWith(state: PuzzleState, pin: Pin): Pin[] {
+  if (state.links.length === 0) return [pin];
+  const partner = partnerOf(state.links, pin);
+  return partner && isPinned(state, partner) ? [pin, partner] : [pin];
+}
+
+/** 그 핀을 지금 뽑을 수 있는지: 꽂혀 있고, 그 핀에도 사슬로 묶인 짝에도 자물쇠가 잠겨 있지 않다. */
+export function canPull(state: PuzzleState, pin: Pin): boolean {
+  if (!isPinned(state, pin)) return false;
+  return state.locks.length === 0 || pulledWith(state, pin).every((each) => !isLocked(state, each));
+}
+
+/**
+ * 지금 둘 수 있는 수: 눌러서 뽑을 수 있는 핀. 사슬로 묶인 핀은 둘 중 무엇을 눌러도 같으므로 앞선 것만 낸다.
+ * 자물쇠도 사슬도 없는 판에서는 remainingPins와 같다.
+ */
+export function movesOf(state: PuzzleState): Pin[] {
+  const pins = remainingPins(state);
+  // 판을 낼 때마다 수천 번 불리므로, 장치가 없는 판은 따질 것 없이 바로 돌려준다.
+  if (state.locks.length === 0 && state.links.length === 0) return pins;
+  return pins.filter((pin, index) => {
+    if (!canPull(state, pin)) return false;
+    const partner = partnerOf(state.links, pin);
+    return !partner || !pins.slice(0, index).some((earlier) => samePin(earlier, partner));
+  });
+}
+
 // ───────── 핀 뽑기 ─────────
+
+/** 방 하나에서 떨어진 것 */
+export interface Fall {
+  shaft: number;
+  level: number;
+  contents: Contents;
+  to: Place;
+}
+
+/** 떨어진 것이 닿은 칸에서 일어난 일. 사슬로 묶인 핀을 뽑으면 두 칸에 닿을 수 있다. */
+export interface Landing {
+  to: Place;
+  /** 이 칸에서 물과 만나 돌이 된 용암의 수 */
+  cooled: number;
+  /** 이 칸에서 보물이 탔는지 */
+  burnt: boolean;
+  /** 이 칸에서 열쇠가 녹았는지 */
+  melted: boolean;
+}
 
 export interface PullResult {
   state: PuzzleState;
-  /** 핀이 뽑혔는지. 이미 뽑힌 핀이거나 판이 끝난 뒤라면 false이고 상태는 그대로다. */
+  /** 핀이 뽑혔는지. 이미 뽑힌 핀, 자물쇠가 잠긴 핀이거나 판이 끝난 뒤라면 false이고 상태는 그대로다. */
   pulled: boolean;
-  /** 방에서 떨어진 것과 닿은 곳. 문 핀을 뽑았으면 null */
-  fall: { contents: Contents; to: Place } | null;
-  /** 닿은 칸에서 물과 만나 돌이 된 용암의 수 */
+  /** 함께 뽑힌 핀. 사슬로 묶인 핀이면 둘이다. */
+  pins: readonly Pin[];
+  /** 방에서 떨어진 것과 닿은 곳. 문 핀을 뽑았으면 비어 있다. */
+  falls: readonly Fall[];
+  /** 닿은 칸마다 일어난 일. 같은 칸에 둘이 떨어졌으면 한 번만 적는다. */
+  landings: readonly Landing[];
+  /** 닿은 칸들에서 물과 만나 돌이 된 용암의 수 */
   cooled: number;
   /** 구덩이의 괴물이 용암에 사라졌는지 */
   slain: boolean;
+  /** 열쇠가 구덩이에 닿아 자물쇠가 풀렸는지 */
+  unlocked: boolean;
 }
 
 function add(a: Contents, b: Contents): Contents {
@@ -135,132 +234,178 @@ function add(a: Contents, b: Contents): Contents {
     lava: a.lava + b.lava,
     water: a.water + b.water,
     stone: a.stone + b.stone,
+    key: a.key + b.key,
   };
 }
 
 /**
- * 한 칸에 모인 것을 섞는다. 용암과 물은 하나씩 짝지어 돌이 되고, 그러고도 용암이 남으면 보물이 탄다.
+ * 한 칸에 모인 것을 섞는다. 용암과 물은 하나씩 짝지어 돌이 되고, 그러고도 용암이 남으면 보물이 타고 열쇠가 녹는다.
  * 물이 먼저 용암을 식히므로, 물이 넉넉한 칸에서는 용암이 아무것도 해치지 못한다.
  */
-function mix(contents: Contents): { contents: Contents; cooled: number; burnt: boolean } {
+function mix(contents: Contents): { contents: Contents; cooled: number; burnt: boolean; melted: boolean } {
   const cooled = Math.min(contents.lava, contents.water);
   const lava = contents.lava - cooled;
   const burnt = lava > 0 && contents.treasure > 0;
+  const melted = lava > 0 && contents.key > 0;
   return {
     contents: {
       treasure: burnt ? 0 : contents.treasure,
       lava,
       water: contents.water - cooled,
       stone: contents.stone + cooled,
+      key: melted ? 0 : contents.key,
     },
     cooled,
     burnt,
+    melted,
   };
+}
+
+/** 보물이 탔거나 열쇠가 녹았으면 그 까닭. 둘 다면 보물이 탄 것으로 친다. */
+function ruinOf(mixed: { burnt: boolean; melted: boolean }): LossCause | null {
+  if (mixed.burnt) return 'burnt';
+  return mixed.melted ? 'melted' : null;
 }
 
 /**
  * 구덩이에 새로 무언가(떨어진 것이나 용사)가 들어온 뒤의 상태를 정한다.
- * 섞고 남은 용암은 괴물을 없애고 그대로 남는다. 용사는 용암이나 괴물과 함께 있으면 지고,
- * 위험한 것 없이 보물과 함께 있으면 이긴다. 그 밖에는 구덩이에서 기다린다.
+ * 섞고 남은 용암은 괴물을 없애고 그대로 남는다. 무사히 닿은 열쇠는 자물쇠를 모두 풀고 사라진다.
+ * 용사는 용암이나 괴물과 함께 있으면 지고, 위험한 것 없이 보물과 함께 있으면 이긴다. 그 밖에는 구덩이에서 기다린다.
  */
 function settlePit(
   state: PuzzleState,
   arrived: Contents,
   hero: 'room' | 'pit',
-): { state: PuzzleState; cooled: number; slain: boolean } {
+): { state: PuzzleState; landing: Landing; slain: boolean; unlocked: boolean } {
   const mixed = mix(add(state.pit, arrived));
-  const pit = mixed.contents;
+  const unlocked = mixed.contents.key > 0;
+  const pit = unlocked ? { ...mixed.contents, key: 0 } : mixed.contents;
   const slain = state.monster && pit.lava > 0;
   const monster = state.monster && !slain;
 
   let status: Status = 'playing';
-  let lossCause: LossCause | null = null;
-  if (mixed.burnt) [status, lossCause] = ['lost', 'burnt'];
+  let lossCause = ruinOf(mixed);
+  if (lossCause) status = 'lost';
   else if (hero === 'pit' && pit.lava > 0) [status, lossCause] = ['lost', 'lava'];
   else if (hero === 'pit' && monster) [status, lossCause] = ['lost', 'monster'];
   else if (hero === 'pit' && pit.treasure > 0) status = 'won';
 
   return {
-    state: { ...state, pit, monster, hero, status, lossCause },
-    cooled: mixed.cooled,
+    state: { ...state, pit, monster, hero, locks: unlocked ? [] : state.locks, status, lossCause },
+    landing: { to: { kind: 'pit' }, cooled: mixed.cooled, burnt: mixed.burnt, melted: mixed.melted },
     slain,
+    unlocked,
   };
 }
 
 /** 그 방에서 떨어진 것이 닿는 곳: 바로 아래에 핀이 꽂힌 방이 있으면 그 방, 없으면 구덩이 */
-function landingOf(state: PuzzleState, shaft: number, level: number): Place {
-  const chambers = state.shafts[shaft];
+function landingOf(shafts: PuzzleState['shafts'], shaft: number, level: number): Place {
+  const chambers = shafts[shaft];
   for (let below = level + 1; below < chambers.length; below += 1) {
     if (chambers[below].pinned) return { kind: 'chamber', shaft, level: below };
   }
   return { kind: 'pit' };
 }
 
+const NOT_PULLED = { pulled: false, pins: [], falls: [], landings: [], cooled: 0, slain: false, unlocked: false };
+
 /**
  * 핀 하나를 뽑는다. 받은 상태는 바꾸지 않고 새 상태를 돌려준다.
  * 방의 핀이면 든 것이 아래로 떨어져 닿은 칸에서 섞이고, 문 핀이면 용사가 구덩이로 들어간다.
+ * 사슬로 묶인 핀은 짝과 함께 뽑힌다: 두 방에 든 것이 한꺼번에 떨어지고, 같은 칸에 닿으면 함께 섞인다.
  */
 export function pull(state: PuzzleState, pin: Pin): PullResult {
-  if (state.status !== 'playing' || !isPinned(state, pin)) {
-    return { state, pulled: false, fall: null, cooled: 0, slain: false };
-  }
+  if (state.status !== 'playing' || !canPull(state, pin)) return { state, ...NOT_PULLED };
 
+  const pins = pulledWith(state, pin);
   if (pin.kind === 'door') {
-    return { ...settlePit(state, NOTHING, 'pit'), pulled: true, fall: null };
+    const settled = settlePit(state, NOTHING, 'pit');
+    return { ...NOT_PULLED, state: settled.state, pulled: true, pins };
   }
 
-  const falling = state.shafts[pin.shaft][pin.level].contents;
-  const to = landingOf(state, pin.shaft, pin.level);
-  const emptied = state.shafts.map((chambers, shaft) =>
-    shaft !== pin.shaft
-      ? chambers
-      : chambers.map((chamber, level) =>
-          level === pin.level ? { contents: NOTHING, pinned: false } : chamber,
-        ),
-  );
-  const fall = { contents: falling, to };
-
-  if (to.kind === 'pit') {
-    return { ...settlePit({ ...state, shafts: emptied }, falling, state.hero), pulled: true, fall };
+  // 함께 뽑히는 핀을 먼저 모두 빼고 나서 닿는 곳을 정한다: 위아래로 묶인 핀이면 둘 다 그 아래로 떨어진다.
+  let shafts = state.shafts;
+  for (const each of pins) {
+    if (each.kind === 'chamber') shafts = withChamber(shafts, each.shaft, each.level, OPENED);
+  }
+  const falls: Fall[] = [];
+  for (const each of pins) {
+    if (each.kind !== 'chamber') continue;
+    const { shaft, level } = each;
+    falls.push({ shaft, level, contents: state.shafts[shaft][level].contents, to: landingOf(shafts, shaft, level) });
   }
 
-  const mixed = mix(add(emptied[to.shaft][to.level].contents, falling));
-  const shafts = emptied.map((chambers, shaft) =>
-    shaft !== to.shaft
-      ? chambers
-      : chambers.map((chamber, level) =>
-          level === to.level ? { contents: mixed.contents, pinned: true } : chamber,
-        ),
+  // 방에 닿은 것부터 섞는다. 같은 칸에 닿은 것(위아래로 묶인 짝)은 한꺼번에 섞는다.
+  const landings: Landing[] = [];
+  let lossCause: LossCause | null = null;
+  let intoPit: Contents | null = null;
+  // 풀이가 수없이 부르는 곳이라, 하나만 떨어지는 흔한 경우에 헛일을 하지 않게 차례를 세어 가며 돈다.
+  for (let index = 0; index < falls.length; index += 1) {
+    const fall = falls[index];
+    const { to } = fall;
+    if (to.kind === 'pit') {
+      intoPit = intoPit ? add(intoPit, fall.contents) : fall.contents;
+      continue;
+    }
+    let counted = false;
+    for (let earlier = 0; earlier < index; earlier += 1) counted ||= samePlace(falls[earlier].to, to);
+    if (counted) continue;
+    let arrived = fall.contents;
+    for (let later = index + 1; later < falls.length; later += 1) {
+      if (samePlace(falls[later].to, to)) arrived = add(arrived, falls[later].contents);
+    }
+    const mixed = mix(add(shafts[to.shaft][to.level].contents, arrived));
+    shafts = withChamber(shafts, to.shaft, to.level, { contents: mixed.contents, pinned: true });
+    landings.push({ to, cooled: mixed.cooled, burnt: mixed.burnt, melted: mixed.melted });
+    lossCause ??= ruinOf(mixed);
+  }
+
+  let next: PuzzleState = { ...state, shafts };
+  let slain = false;
+  let unlocked = false;
+  if (intoPit) {
+    const settled = settlePit(next, intoPit, state.hero);
+    next = settled.state;
+    landings.push(settled.landing);
+    ({ slain, unlocked } = settled);
+  }
+  // 방에서 보물이 탔거나 열쇠가 녹았으면, 구덩이에서 무슨 일이 있었든 진 판이다.
+  if (lossCause) next = { ...next, status: 'lost', lossCause };
+
+  let cooled = 0;
+  for (const landing of landings) cooled += landing.cooled;
+  return { state: next, pulled: true, pins, falls, landings, cooled, slain, unlocked };
+}
+
+const OPENED: Chamber = { contents: NOTHING, pinned: false };
+
+/** 방 하나만 바꾼 통로들. 다른 통로는 그대로 쓴다. */
+function withChamber(
+  shafts: PuzzleState['shafts'],
+  shaft: number,
+  level: number,
+  chamber: Chamber,
+): PuzzleState['shafts'] {
+  return shafts.map((chambers, at) =>
+    at !== shaft ? chambers : chambers.map((before, floor) => (floor === level ? chamber : before)),
   );
-  return {
-    state: {
-      ...state,
-      shafts,
-      status: mixed.burnt ? 'lost' : 'playing',
-      lossCause: mixed.burnt ? 'burnt' : null,
-    },
-    pulled: true,
-    fall,
-    cooled: mixed.cooled,
-    slain: false,
-  };
+}
+
+export function samePlace(a: Place, b: Place): boolean {
+  if (a.kind === 'pit' || b.kind === 'pit') return a.kind === b.kind;
+  return a.shaft === b.shaft && a.level === b.level;
 }
 
 // ───────── 풀이 ─────────
 
 export interface Solution {
-  /** 남은 핀을 모두 뽑는 순서의 수(핀 수의 계승) */
-  orders: number;
-  /** 그 가운데 보물을 얻는 순서의 수. 도중에 이기면 남은 핀의 순서는 모두 이긴 것으로 센다. */
-  winning: number;
-  /** 보물을 얻는 가장 짧은 순서. 얻을 길이 없으면 null */
+  /**
+   * 뽑을 수 있는 핀 가운데 아무거나 고르기를 끝까지 되풀이했을 때 보물을 얻을 확률(0~1).
+   * 자물쇠도 사슬도 없는 판에서는 핀을 뽑는 모든 순서 가운데 이기는 순서의 비율과 같다.
+   */
+  chance: number;
+  /** 보물을 얻는 가장 짧은 순서. 사슬로 묶인 핀은 누르는 것 하나만 적는다. 얻을 길이 없으면 null */
   shortest: readonly Pin[] | null;
-}
-
-function factorial(n: number): number {
-  let product = 1;
-  for (let i = 2; i <= n; i += 1) product *= i;
-  return product;
 }
 
 /** 어느 핀이 꽂혀 있는지와 괴물이 살아 있는지를 수 하나로 적는다. */
@@ -276,46 +421,50 @@ function standingKey(state: PuzzleState): number {
   return state.hero === 'room' ? key + bit : key;
 }
 
+/** 확률을 더하고 나누며 생긴 끝자리의 어긋남을 지운다. 1/20이 0.05보다 털끝만큼 크게 나오는 일이 없게 한다. */
+function tidy(chance: number): number {
+  return Math.round(chance * 1e12) / 1e12;
+}
+
 /**
- * 지금 상태에서 남은 핀을 뽑는 순서를 빠짐없이 따져 본다. state는 startPuzzle과 pull로 만든 것이어야 한다.
- * 핀을 다 뽑으면 모든 것이 구덩이에 모이므로, 어느 순서든 이기거나 지는 것으로 끝난다.
+ * 지금 상태에서 핀을 뽑는 길을 빠짐없이 따져 본다. state는 startPuzzle과 pull로 만든 것이어야 한다.
+ * 핀을 다 뽑으면 모든 것이 구덩이에 모이므로, 어느 길이든 이기거나 지는 것으로 끝난다.
+ * (자물쇠 때문에 더 뽑을 핀이 없어진 상태는 진 것으로 친다.)
  *
- * 순서를 하나하나 늘어놓지는 않는다. 지지 않고 이어지는 상태는 어느 핀이 뽑혔는지와 괴물이 살아 있는지만으로
+ * 길을 하나하나 늘어놓지는 않는다. 지지 않고 이어지는 상태는 어느 핀이 뽑혔는지와 괴물이 살아 있는지만으로
  * 정해지기 때문이다: 같은 핀들을 어떤 차례로 뽑았든 든 것은 같은 칸에 모이고, 용암과 물은 만나는 차례와 상관없이
- * 같은 수만큼 돌이 된다. 그래서 그런 상태마다 한 번만 따지고 적어 둔다. 핀이 아홉 개면 순서는 36만 가지가 넘지만
- * 상태는 많아야 천 개쯤이라서, 판을 낼 때마다 여러 판을 풀어 봐도 금방 끝난다.
+ * 같은 수만큼 돌이 되고, 자물쇠는 열쇠가 든 방 아래가 모두 뚫렸을 때 풀린다. 그래서 그런 상태마다 한 번만 따지고
+ * 적어 둔다. 핀이 아홉 개면 순서는 36만 가지가 넘지만 상태는 많아야 천 개쯤이라서, 판을 낼 때마다 여러 판을
+ * 풀어 봐도 금방 끝난다.
  */
 export function solveFrom(state: PuzzleState): Solution {
-  interface Found {
-    winning: number;
-    shortest: readonly Pin[] | null;
-  }
-  const known = new Map<number, Found>();
+  const known = new Map<number, Solution>();
 
-  const visit = (current: PuzzleState): Found => {
-    const pins = remainingPins(current);
-    if (current.status === 'won') return { winning: factorial(pins.length), shortest: [] };
-    if (current.status === 'lost') return { winning: 0, shortest: null };
+  const visit = (current: PuzzleState): Solution => {
+    if (current.status === 'won') return { chance: 1, shortest: [] };
+    if (current.status === 'lost') return { chance: 0, shortest: null };
     const key = standingKey(current);
     const before = known.get(key);
     if (before) return before;
 
-    let winning = 0;
+    const moves = movesOf(current);
+    let total = 0;
     let shortest: Pin[] | null = null;
     // 길이가 같으면 먼저 따진 핀의 것을 남긴다: 가장 짧은 순서가 여럿이면 핀 순서로 가장 앞선 것이 나온다.
-    for (const pin of pins) {
+    for (const pin of moves) {
       const next = visit(pull(current, pin).state);
-      winning += next.winning;
+      total += next.chance;
       if (next.shortest && (!shortest || next.shortest.length + 1 < shortest.length)) {
         shortest = [pin, ...next.shortest];
       }
     }
-    const found = { winning, shortest };
+    const found = { chance: moves.length > 0 ? total / moves.length : 0, shortest };
     known.set(key, found);
     return found;
   };
 
-  return { orders: factorial(remainingPins(state).length), ...visit(state) };
+  const found = visit(state);
+  return { chance: tidy(found.chance), shortest: found.shortest };
 }
 
 export function solve(puzzle: Puzzle): Solution {
@@ -323,7 +472,7 @@ export function solve(puzzle: Puzzle): Solution {
 }
 
 /**
- * 핀을 limit개까지만 뽑아서 이길 수 있는지. 풀이를 끝까지 세는 것보다 빨라서,
+ * 핀을 limit번까지만 뽑아서 이길 수 있는지. 풀이를 끝까지 따지는 것보다 빨라서,
  * 판을 만들 때 너무 짧게 풀리는 판을 먼저 걸러 내는 데 쓴다.
  * 뽑은 수가 같은 상태를 한 켜씩 넓혀 가고, solveFrom처럼 같은 상태는 한 번만 본다.
  */
@@ -334,7 +483,7 @@ export function canWinWithin(state: PuzzleState, limit: number): boolean {
   for (let pulled = 0; pulled < limit && layer.size > 0; pulled += 1) {
     const next = new Map<number, PuzzleState>();
     for (const current of layer.values()) {
-      for (const pin of remainingPins(current)) {
+      for (const pin of movesOf(current)) {
         const after = pull(current, pin).state;
         if (after.status === 'won') return true;
         if (after.status === 'playing') next.set(standingKey(after), after);
@@ -347,7 +496,7 @@ export function canWinWithin(state: PuzzleState, limit: number): boolean {
 
 /** 아무렇게나 뽑았을 때 이길 확률(0~1). 낮을수록 순서를 따져야 하는 판이다. */
 export function winShare(solution: Solution): number {
-  return solution.winning / solution.orders;
+  return solution.chance;
 }
 
 // ───────── 단계와 판 만들기 ─────────
@@ -444,7 +593,7 @@ function randomShafts(spec: StageSpec, random: () => number): Item[][] {
   let index = 0;
   return shape.map((size) =>
     Array.from({ length: size }, (): Item => {
-      const item = index === treasureAt ? 'treasure' : random() < LAVA_CHANCE ? 'lava' : 'water';
+      const item: Item = index === treasureAt ? 'treasure' : random() < LAVA_CHANCE ? 'lava' : 'water';
       index += 1;
       return item;
     }),
@@ -453,7 +602,7 @@ function randomShafts(spec: StageSpec, random: () => number): Item[][] {
 
 /** 풀어 본 결과가 그 단계의 조건에 맞는지: 이길 수도 질 수도 있고, 충분히 길고, 충분히 까다롭다. */
 export function fitsStage(spec: StageSpec, solution: Solution): boolean {
-  if (!solution.shortest || solution.winning === solution.orders) return false;
+  if (!solution.shortest || solution.chance === 1) return false;
   return solution.shortest.length >= spec.minPulls && winShare(solution) <= spec.maxWinShare;
 }
 
