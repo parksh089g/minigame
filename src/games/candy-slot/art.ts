@@ -85,6 +85,8 @@ export const LOOK = {
   } satisfies Record<CharmKind, { edge: number; face: number }>,
   /** 부적이 붙지 않은 빈자리 */
   emptySlot: { edge: 0x12573b, face: 0x186848 },
+  /** 도감에서 아직 찾지 못한 부적의 칸 */
+  unknownCharm: { edge: THEME.shadow, face: THEME.dim },
   /** 부적 그림 위의 표시: 더하기, 빼기 */
   plus: THEME.good,
   minus: THEME.bad,
@@ -620,6 +622,21 @@ export function emptySlotTexture(scene: Phaser.Scene): string {
     g.fillStyle(LOOK.emptySlot.edge, 1);
     g.fillRoundedRect(-half, -half, CHARM_BOX, CHARM_BOX, 8);
     g.fillStyle(LOOK.emptySlot.face, 1);
+    g.fillRoundedRect(-half + 2, -half + 2, CHARM_BOX - 4, CHARM_BOX - 4, 6);
+  });
+}
+
+/**
+ * 도감에서 아직 찾지 못한 부적의 칸. 무슨 부적인지 짐작할 수 없게 갈래의 색 없이 흐린 칸만 그린다.
+ * 물음표는 씬이 글자로 얹는다.
+ */
+export function unknownCharmTexture(scene: Phaser.Scene): string {
+  const box = { width: CHARM_BOX, height: CHARM_BOX };
+  return bakeShape(scene, 'candy-slot-charm-unknown', box, (g) => {
+    const half = CHARM_BOX / 2;
+    g.fillStyle(LOOK.unknownCharm.edge, 1);
+    g.fillRoundedRect(-half, -half, CHARM_BOX, CHARM_BOX, 8);
+    g.fillStyle(LOOK.unknownCharm.face, 1);
     g.fillRoundedRect(-half + 2, -half + 2, CHARM_BOX - 4, CHARM_BOX - 4, 6);
   });
 }

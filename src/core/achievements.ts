@@ -1,9 +1,10 @@
 /**
  * 업적: 오래 두고 노릴 목표. 달성하면 업적 화면에서 눌러서 코인을 받는다.
- * 진행도는 세이브에 이미 있는 기록(판 수, 최고 점수, 깬 단계, 오늘의 도전, 꾸미기)에서 그때그때 계산하고,
+ * 진행도는 세이브에 이미 있는 기록(판 수, 최고 점수, 깬 단계, 오늘의 도전, 꾸미기, 행운 슬롯의 도감)에서 그때그때 계산하고,
  * 세이브에는 보상을 받은 업적만 남긴다. 그래서 업적이 생기기 전에 쌓은 기록도 그대로 인정된다.
  * 저장소와 화면 어느 쪽에도 의존하지 않는 순수 함수들이다.
  */
+import { CHARMS } from '../games/candy-slot/rules';
 import { CATALOG } from './shop';
 
 /** 업적 화면의 탭 */
@@ -39,6 +40,8 @@ export interface AchievementStats {
   stageBest: number;
   /** 단계를 하나라도 깬 게임의 수 */
   stageGames: number;
+  /** 행운 슬롯의 도감에 모은(한 번이라도 붙여 본) 부적의 수 */
+  slotCharms: number;
 }
 
 /** statsOf가 읽는 세이브의 부분. save.ts를 끌어오지 않으려고 필요한 모양만 적는다. */
@@ -48,6 +51,8 @@ export interface AchievementSource {
   cosmetics: { owned: readonly string[] };
   /** 게임 id → 깬 가장 높은 단계 */
   stages: Readonly<Record<string, number>>;
+  /** 행운 슬롯에서 찾은 부적의 id */
+  slot: { found: readonly string[] };
 }
 
 export function statsOf(save: AchievementSource): AchievementStats {
@@ -70,6 +75,7 @@ export function statsOf(save: AchievementSource): AchievementStats {
     stagesCleared: cleared.reduce((sum, level) => sum + level, 0),
     stageBest: cleared.reduce((best, level) => Math.max(best, level), 0),
     stageGames: cleared.length,
+    slotCharms: save.slot.found.length,
   };
 }
 
@@ -101,9 +107,12 @@ const playedOf =
 const owned = (stats: AchievementStats): number => stats.cosmeticsOwned;
 const stages = (stats: AchievementStats): number => stats.stagesCleared;
 const stageBest = (stats: AchievementStats): number => stats.stageBest;
+const slotCharms = (stats: AchievementStats): number => stats.slotCharms;
 
 /** 살 수 있는 꾸미기의 수. 꾸미기가 늘면 "모두 모으기"의 목표도 따라 늘어난다. */
 const PAID_COSMETICS = CATALOG.filter((item) => item.price > 0).length;
+/** 행운 슬롯의 부적의 수. 부적이 늘면 "모두 찾기"의 목표도 따라 늘어난다. */
+const SLOT_CHARMS = CHARMS.length;
 
 export const ACHIEVEMENTS: readonly Achievement[] = [
   { id: 'play-first', group: 'play', title: '첫걸음', description: '아무 게임이나 한 판', goal: 1, reward: 5, measure: plays },
@@ -181,6 +190,9 @@ export const ACHIEVEMENTS: readonly Achievement[] = [
   { id: 'collect-1', group: 'collect', title: '첫 꾸미기', description: '꾸미기 하나 사기', goal: 1, reward: 10, measure: owned },
   { id: 'collect-4', group: 'collect', title: '멋쟁이', description: '꾸미기 네 개 모으기', goal: 4, reward: 30, measure: owned },
   { id: 'collect-all', group: 'collect', title: '수집왕', description: '꾸미기 모두 모으기', goal: PAID_COSMETICS, reward: 100, measure: owned },
+  // 행운 슬롯의 부적 도감. 한 번이라도 붙여 본 부적을 센다.
+  { id: 'slot-charms-12', group: 'collect', title: '부적 수집가', description: '슬롯 부적 12가지 찾기', goal: 12, reward: 20, measure: slotCharms },
+  { id: 'slot-charms-all', group: 'collect', title: '부적 박사', description: '슬롯 부적 모두 찾기', goal: SLOT_CHARMS, reward: 50, measure: slotCharms },
 ];
 
 export function getAchievement(id: string): Achievement | undefined {
