@@ -10,10 +10,10 @@ export type Item = 'treasure' | 'lava' | 'water';
 
 export const MIN_SHAFTS = 2;
 export const MAX_SHAFTS = 4;
-/** 통로 하나에 위아래로 놓이는 방의 최대 수 */
-export const MAX_STACK = 2;
-/** 핀의 최대 수(문 핀 포함). 뽑는 순서를 모두 따져도 720가지라서 풀이를 빠짐없이 셀 수 있다. */
-export const MAX_PINS = 6;
+/** 통로 하나에 위아래로 놓이는 방의 최대 수. 3층은 뒤쪽 단계에만 나온다. */
+export const MAX_STACK = 3;
+/** 점수 도전에서 핀의 최대 수(문 핀 포함) */
+export const MAX_PINS = 8;
 
 export interface Puzzle {
   /** 통로마다, 위에서 아래 순서로 방에 든 것. 방마다 그 아래를 핀이 받치고 있다. */
@@ -263,31 +263,59 @@ function factorial(n: number): number {
   return product;
 }
 
+/** 어느 핀이 꽂혀 있는지와 괴물이 살아 있는지를 수 하나로 적는다. */
+function standingKey(state: PuzzleState): number {
+  let key = state.monster ? 1 : 0;
+  let bit = 2;
+  for (const chambers of state.shafts) {
+    for (const chamber of chambers) {
+      if (chamber.pinned) key += bit;
+      bit *= 2;
+    }
+  }
+  return state.hero === 'room' ? key + bit : key;
+}
+
 /**
- * 지금 상태에서 남은 핀을 뽑는 순서를 빠짐없이 따져 본다.
+ * 지금 상태에서 남은 핀을 뽑는 순서를 빠짐없이 따져 본다. state는 startPuzzle과 pull로 만든 것이어야 한다.
  * 핀을 다 뽑으면 모든 것이 구덩이에 모이므로, 어느 순서든 이기거나 지는 것으로 끝난다.
+ *
+ * 순서를 하나하나 늘어놓지는 않는다. 지지 않고 이어지는 상태는 어느 핀이 뽑혔는지와 괴물이 살아 있는지만으로
+ * 정해지기 때문이다: 같은 핀들을 어떤 차례로 뽑았든 든 것은 같은 칸에 모이고, 용암과 물은 만나는 차례와 상관없이
+ * 같은 수만큼 돌이 된다. 그래서 그런 상태마다 한 번만 따지고 적어 둔다. 핀이 아홉 개면 순서는 36만 가지가 넘지만
+ * 상태는 많아야 천 개쯤이라서, 판을 낼 때마다 여러 판을 풀어 봐도 금방 끝난다.
  */
 export function solveFrom(state: PuzzleState): Solution {
-  let winning = 0;
-  let shortest: Pin[] | null = null;
+  interface Found {
+    winning: number;
+    shortest: readonly Pin[] | null;
+  }
+  const known = new Map<number, Found>();
 
-  const visit = (current: PuzzleState, path: Pin[]): void => {
+  const visit = (current: PuzzleState): Found => {
     const pins = remainingPins(current);
-    if (current.status === 'won') {
-      winning += factorial(pins.length);
-      if (!shortest || path.length < shortest.length) shortest = [...path];
-      return;
-    }
-    if (current.status === 'lost') return;
-    for (const pin of pins) {
-      path.push(pin);
-      visit(pull(current, pin).state, path);
-      path.pop();
-    }
-  };
-  visit(state, []);
+    if (current.status === 'won') return { winning: factorial(pins.length), shortest: [] };
+    if (current.status === 'lost') return { winning: 0, shortest: null };
+    const key = standingKey(current);
+    const before = known.get(key);
+    if (before) return before;
 
-  return { orders: factorial(remainingPins(state).length), winning, shortest };
+    let winning = 0;
+    let shortest: Pin[] | null = null;
+    // 길이가 같으면 먼저 따진 핀의 것을 남긴다: 가장 짧은 순서가 여럿이면 핀 순서로 가장 앞선 것이 나온다.
+    for (const pin of pins) {
+      const next = visit(pull(current, pin).state);
+      winning += next.winning;
+      if (next.shortest && (!shortest || next.shortest.length + 1 < shortest.length)) {
+        shortest = [pin, ...next.shortest];
+      }
+    }
+    const found = { winning, shortest };
+    known.set(key, found);
+    return found;
+  };
+
+  return { orders: factorial(remainingPins(state).length), ...visit(state) };
 }
 
 export function solve(puzzle: Puzzle): Solution {
@@ -295,13 +323,26 @@ export function solve(puzzle: Puzzle): Solution {
 }
 
 /**
- * 핀을 limit개까지만 뽑아서 이길 수 있는지. 순서를 모두 세는 것보다 훨씬 빨라서,
+ * 핀을 limit개까지만 뽑아서 이길 수 있는지. 풀이를 끝까지 세는 것보다 빨라서,
  * 판을 만들 때 너무 짧게 풀리는 판을 먼저 걸러 내는 데 쓴다.
+ * 뽑은 수가 같은 상태를 한 켜씩 넓혀 가고, solveFrom처럼 같은 상태는 한 번만 본다.
  */
 export function canWinWithin(state: PuzzleState, limit: number): boolean {
   if (state.status === 'won') return true;
-  if (state.status === 'lost' || limit <= 0) return false;
-  return remainingPins(state).some((pin) => canWinWithin(pull(state, pin).state, limit - 1));
+  if (state.status === 'lost') return false;
+  let layer = new Map([[standingKey(state), state]]);
+  for (let pulled = 0; pulled < limit && layer.size > 0; pulled += 1) {
+    const next = new Map<number, PuzzleState>();
+    for (const current of layer.values()) {
+      for (const pin of remainingPins(current)) {
+        const after = pull(current, pin).state;
+        if (after.status === 'won') return true;
+        if (after.status === 'playing') next.set(standingKey(after), after);
+      }
+    }
+    layer = next;
+  }
+  return false;
 }
 
 /** 아무렇게나 뽑았을 때 이길 확률(0~1). 낮을수록 순서를 따져야 하는 판이다. */
@@ -314,28 +355,34 @@ export function winShare(solution: Solution): number {
 export interface StageSpec {
   /** 핀의 수(문 핀 포함) */
   pins: number;
-  /** 위아래로 놓인 방이 나올 수 있는지 */
-  stacked: boolean;
+  /** 통로 하나에 위아래로 놓일 수 있는 방의 수 */
+  maxStack: number;
   /** 구덩이에 괴물이 있을 확률 */
   monsterChance: number;
-  /** 이기는 가장 짧은 순서가 적어도 이만큼은 길어야 한다. 4면 용암을 식혀야만 풀리는 판이다. */
+  /**
+   * 이기는 가장 짧은 순서가 적어도 이만큼은 길어야 한다. 4면 용암을 식혀야만 풀리는 판이고,
+   * 6이면 그런 일을 두 번 해야 풀리는 판이다(3층으로 쌓인 통로가 있어야 나온다).
+   */
   minPulls: number;
   /** 이기는 순서의 비율이 이보다 높으면 너무 쉬운 판이라 쓰지 않는다 */
   maxWinShare: number;
 }
 
 /**
- * 단계별 판의 조건. 핀이 늘고, 위아래로 놓인 방과 괴물이 차례로 나오고,
- * 아무렇게나 뽑아서 이길 확률은 낮아진다. 마지막 줄이 그 뒤의 모든 단계에 쓰인다.
+ * 단계별 판의 조건. 핀이 늘고, 위아래로 놓인 방과 괴물이 차례로 나오고, 아무렇게나 뽑아서 이길 확률은 낮아진다.
+ * 8단계부터는 3층으로 쌓인 통로가 나와서 여섯 번을 뽑아야 풀린다. 마지막 줄이 그 뒤의 모든 단계에 쓰인다.
  */
 export const STAGES: readonly StageSpec[] = [
-  { pins: 3, stacked: false, monsterChance: 0, minPulls: 2, maxWinShare: 0.34 },
-  { pins: 4, stacked: true, monsterChance: 0, minPulls: 2, maxWinShare: 0.34 },
-  { pins: 5, stacked: true, monsterChance: 0, minPulls: 2, maxWinShare: 0.25 },
-  { pins: 5, stacked: true, monsterChance: 0, minPulls: 4, maxWinShare: 0.25 },
-  { pins: 5, stacked: true, monsterChance: 1, minPulls: 4, maxWinShare: 0.1 },
-  { pins: 6, stacked: true, monsterChance: 0.7, minPulls: 4, maxWinShare: 0.1 },
-  { pins: 6, stacked: true, monsterChance: 0.7, minPulls: 4, maxWinShare: 0.05 },
+  { pins: 3, maxStack: 1, monsterChance: 0, minPulls: 2, maxWinShare: 0.34 },
+  { pins: 4, maxStack: 2, monsterChance: 0, minPulls: 2, maxWinShare: 0.34 },
+  { pins: 5, maxStack: 2, monsterChance: 0, minPulls: 2, maxWinShare: 0.25 },
+  { pins: 5, maxStack: 2, monsterChance: 0, minPulls: 4, maxWinShare: 0.25 },
+  { pins: 5, maxStack: 2, monsterChance: 1, minPulls: 4, maxWinShare: 0.1 },
+  { pins: 6, maxStack: 2, monsterChance: 0.7, minPulls: 4, maxWinShare: 0.1 },
+  { pins: 6, maxStack: 2, monsterChance: 0.7, minPulls: 4, maxWinShare: 0.05 },
+  { pins: 7, maxStack: 3, monsterChance: 0.8, minPulls: 6, maxWinShare: 0.05 },
+  { pins: 8, maxStack: 3, monsterChance: 0.8, minPulls: 6, maxWinShare: 0.05 },
+  { pins: 8, maxStack: 3, monsterChance: 0.8, minPulls: 6, maxWinShare: 0.02 },
 ];
 
 /** stage(1부터)의 조건 */
@@ -346,19 +393,23 @@ export function stageSpec(stage: number): StageSpec {
 
 /** 보물이 아닌 방에 용암이 들어갈 확률. 나머지는 물이다. */
 export const LAVA_CHANCE = 0.5;
-/** 조건에 맞는 판이 나올 때까지 다시 만들어 보는 횟수 */
-export const MAX_ATTEMPTS = 1000;
+/**
+ * 조건에 맞는 판이 나올 때까지 다시 만들어 보는 횟수.
+ * 가장 드문 것은 괴물 없이 여섯 번을 뽑아야 하는 8핀 판으로, 백 번에 한 번쯤 나온다.
+ */
+export const MAX_ATTEMPTS = 3000;
 /**
  * 끝내 조건에 맞는 판을 만들지 못했을 때 내는 판: 보물 하나와 용암 하나.
- * 가장 까다로운 단계도 스무 번에 한 번은 맞는 판이 나와서 실제로 쓰일 일은 없다.
+ * 백 번에 한 번 나오는 판도 3000번이면 못 만들 일이 없어서 실제로 쓰일 일은 없다.
  */
 export const FALLBACK_PUZZLE: Puzzle = { shafts: [['treasure'], ['lava']], monster: false };
 
 /**
  * 방 count개를 통로에 나눠 담는 모든 방법. 돌려주는 배열은 통로마다의 방 수다.
- * stacked가 false면 통로마다 방이 하나씩만 놓인다.
+ * 통로 하나에는 방이 maxStack개까지 놓인다.
  */
-export function shaftShapes(count: number, stacked: boolean): number[][] {
+export function shaftShapes(count: number, maxStack: number): number[][] {
+  const tallest = Math.min(MAX_STACK, Math.max(1, Math.floor(maxStack)));
   const shapes: number[][] = [];
   const extend = (shape: number[], left: number): void => {
     if (left === 0) {
@@ -366,7 +417,7 @@ export function shaftShapes(count: number, stacked: boolean): number[][] {
       return;
     }
     if (shape.length === MAX_SHAFTS) return;
-    for (let size = 1; size <= (stacked ? MAX_STACK : 1) && size <= left; size += 1) {
+    for (let size = 1; size <= tallest && size <= left; size += 1) {
       extend([...shape, size], left - size);
     }
   };
@@ -374,10 +425,19 @@ export function shaftShapes(count: number, stacked: boolean): number[][] {
   return shapes;
 }
 
+/**
+ * 그 단계의 판이 쓰는 통로 모양. 3층까지 쌓는 단계는 3층 통로가 있는 모양만 쓴다:
+ * 네 번 넘게 뽑아야 하는 판은 3층 통로가 있어야만 나오므로, 없는 모양은 만들어 봐야 버려진다.
+ */
+export function stageShapes(spec: StageSpec): number[][] {
+  const shapes = shaftShapes(spec.pins - 1, spec.maxStack);
+  return spec.maxStack < MAX_STACK ? shapes : shapes.filter((shape) => shape.includes(MAX_STACK));
+}
+
 /** 조건의 겉모양(핀 수, 쌓인 방)만 맞춰 방을 아무렇게나 채운다. 풀리는지는 따지지 않는다. */
 function randomShafts(spec: StageSpec, random: () => number): Item[][] {
   const count = spec.pins - 1;
-  const shapes = shaftShapes(count, spec.stacked);
+  const shapes = stageShapes(spec);
   const shape = shapes[Math.floor(random() * shapes.length)];
   const treasureAt = Math.floor(random() * count);
 
@@ -425,14 +485,24 @@ export const FIRST_SECONDS = 15;
 export const MIN_SECONDS = 5;
 /**
  * 한 단계 오를 때마다 남은 여유(제한 시간 - 가장 짧은 시간)가 이 비율로 줄어든다.
- * 처음에는 빨리, 갈수록 천천히 줄어서 10단계에 10초, 16단계쯤에 8초 남짓이 된다.
+ * 처음에는 빨리, 갈수록 천천히 줄어서 7단계에 11초 남짓이 된다.
  */
 export const SECONDS_DECAY = 0.93;
+/** 2층까지의 판에서 가장 길게 뽑는 횟수. 시간과 점수는 여기까지를 기준으로 삼고, 더 뽑아야 하는 단계에는 얹어 준다. */
+export const PLAIN_PULLS = 4;
+/** 더 뽑아야 하는 한 번마다 얹어 주는 시간(초). 가장 짧은 시간을 네 번에 나눈 만큼이라서, 한 번에 쓸 시간이 늘지는 않는다. */
+export const EXTRA_PULL_SECONDS = MIN_SECONDS / PLAIN_PULLS;
+
+/** stage(1부터)의 판이 PLAIN_PULLS보다 적어도 몇 번을 더 뽑아야 하는지 */
+function extraPulls(stage: number): number {
+  return Math.max(0, stageSpec(stage).minPulls - PLAIN_PULLS);
+}
 
 /** stage(1부터)의 판 하나에 주어지는 시간(초). 떨어지는 동안과 판이 바뀌는 동안에는 흐르지 않는다. */
 export function puzzleSeconds(stage: number): number {
   const steps = Math.max(1, Math.floor(stage)) - 1;
-  return MIN_SECONDS + (FIRST_SECONDS - MIN_SECONDS) * SECONDS_DECAY ** steps;
+  const plain = MIN_SECONDS + (FIRST_SECONDS - MIN_SECONDS) * SECONDS_DECAY ** steps;
+  return plain + EXTRA_PULL_SECONDS * extraPulls(stage);
 }
 
 export const BASE_POINTS = 10;
@@ -440,11 +510,13 @@ export const BASE_POINTS = 10;
 export const STAGE_POINTS = 2;
 /** 이 단계부터는 기본 점수가 더 늘지 않는다. 오래 버틴 판의 점수가 끝없이 불어나지 않게 한다. */
 export const TOP_POINT_STAGE = 11;
+/** 더 뽑아야 하는 한 번마다 얹어 주는 기본 점수. 길게 풀어야 하는 판이 그만큼 더 값지다. */
+export const EXTRA_PULL_POINTS = 8;
 
 /** stage(1부터)의 판을 깼을 때의 기본 점수 */
 export function stagePoints(stage: number): number {
   const steps = Math.min(TOP_POINT_STAGE, Math.max(1, Math.floor(stage))) - 1;
-  return BASE_POINTS + STAGE_POINTS * steps;
+  return BASE_POINTS + STAGE_POINTS * steps + EXTRA_PULL_POINTS * extraPulls(stage);
 }
 
 /** 남긴 시간 1초마다 1점. 소수점 아래는 버린다. */

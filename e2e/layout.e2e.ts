@@ -6,6 +6,7 @@
 import './app-globals';
 import { expect, test, type Page } from '@playwright/test';
 import { SCENE } from '../src/config';
+import { STAGE_LEVELS } from '../src/core/stages';
 import {
   EVOLVE_LEVEL,
   LANTERN_GAME_ID,
@@ -17,9 +18,19 @@ import {
 } from '../src/games/lantern-keeper/data';
 import { iconKey } from '../src/games/lantern-keeper/icons';
 import { upgradeTitle, type Upgrade } from '../src/games/lantern-keeper/rules';
+import { levelPuzzle } from '../src/games/pin-pull/levels';
+import {
+  MAX_STACK,
+  puzzleSeconds,
+  solve,
+  STAGES,
+  winPoints,
+  type Pin,
+  type Puzzle,
+} from '../src/games/pin-pull/rules';
 import { COMPANY_SCENE, GUIDE_STEPS, OFFICES, PROJECT_ORDER, PROJECTS, RATING } from '../src/games/sprout-company/data';
 import { createCompany, type CompanyState } from '../src/games/sprout-company/rules';
-import { hiddenTexts, it, openApp, startScene, tapText, textPoint, textsOutsideCards, waitForScene } from './app';
+import { hiddenTexts, it, openApp, startScene, tapAt, tapText, textPoint, textsOutsideCards, waitForScene } from './app';
 
 /** 강화권 창, 레벨업 창, 골라내기 화면의 머리글(levelup.ts) */
 const TICKET_TITLE = '무기 강화권';
@@ -300,4 +311,191 @@ it('결과 카드: 기록 일곱 줄과 랭킹 줄에 무기 여섯의 피해 �
   await waitForScene(page, SCENE.result);
   await expect.poll(() => textPoint(page, SCENE.result, '무기별 피해 (%)'), { ...WAIT, message: '피해 줄이 빠지지 않아야 한다' }).not.toBeNull();
   expect(await hiddenTexts(page, SCENE.result), '결과 카드').toEqual([]);
+});
+
+/** 핀 뽑기 장면에서 이 점검이 들여다보는 것 */
+interface PinPullView {
+  stage: number;
+  score: number;
+  phase: string;
+  /** 장면을 연 뒤로 뽑은 핀의 수 */
+  pulls: number;
+  timeLimit: number;
+  /** 0보다 크면 시간이 흐르지 않는다. */
+  grace: number;
+  /** 괴물 알림을 이미 띄웠는지 */
+  monsterSeen: boolean;
+  puzzle: Puzzle | null;
+  layout: {
+    /** 방을 놓는 줄의 수 */
+    floors: number;
+    /** 윗줄 방의 천장 높이 */
+    top: number;
+    rock: Phaser.Geom.Rectangle;
+    pit: Phaser.Geom.Rectangle;
+    room: Phaser.Geom.Rectangle;
+  };
+  pinViews: Array<{ pin: Pin; handle: { x: number; y: number }; zone: Phaser.Geom.Rectangle }>;
+  hints: Phaser.GameObjects.Text[];
+  note: Phaser.GameObjects.Text | null;
+  pinAt(x: number, y: number): unknown;
+  deal(): void;
+}
+
+/** 지금 깔린 판에 대해 이 점검이 읽는 것 */
+interface PinPullBoard {
+  puzzle: Puzzle | null;
+  floors: number;
+  stage: number;
+  score: number;
+  pulls: number;
+  timeLimit: number;
+  /** 동굴 위에 떠 있는 도움말과 알림 */
+  notes: string[];
+  /** 동굴이 어긋난 곳을 "무엇: 까닭"으로 모은 것. 제대로 놓였으면 비어 있다. */
+  problems: string[];
+}
+
+/**
+ * 지금 깔린 판을 읽고, 동굴이 제대로 놓였는지 본다: 구덩이와 옆방, 핀마다 누르는 영역이 바위 안에 들고, 방은 모두 동굴 꼭대기
+ * 아래에 놓이고, 손잡이를 누르면 바로 그 핀이 잡히고, 떠 있는 도움말과 알림은 목숨 아래, 동굴 꼭대기 위에 있어야 한다.
+ * 방과 핀은 그래픽이라 hiddenTexts가 볼 수 없어서, 장면이 잡아 둔 자리를 읽어 견준다.
+ */
+const pinPullBoard = (page: Page): Promise<PinPullBoard> =>
+  page.evaluate((key) => {
+    const scene = window.__pocketArcade?.scene.getScene(key) as unknown as PinPullView;
+    const { rock, pit, room, top, floors } = scene.layout;
+    // 목숨을 그린 판이 바위 꼭대기에서 차지하는 높이(art.ts의 drawHearts: 7 내려온 곳에서 17.5)
+    const heartsBottom = rock.top + 25;
+    const problems: string[] = [];
+    const inRock = (box: Phaser.Geom.Rectangle, label: string): void => {
+      if (box.left < rock.left || box.right > rock.right || box.top < rock.top || box.bottom > rock.bottom) {
+        problems.push(`${label}: 바위 밖 (${Math.round(box.top)}~${Math.round(box.bottom)} / ${rock.top}~${rock.bottom})`);
+      }
+    };
+    inRock(pit, '구덩이');
+    inRock(room, '옆방');
+    for (const view of scene.pinViews) {
+      const { pin, handle, zone } = view;
+      const label = pin.kind === 'door' ? '문 핀' : `통로 ${pin.shaft + 1}의 ${pin.level + 1}번째 핀`;
+      inRock(zone, label);
+      if (pin.kind === 'chamber' && zone.top < top) problems.push(`${label}: 방이 동굴 꼭대기(${top})보다 위 (${zone.top})`);
+      if (scene.pinAt(handle.x, handle.y) !== view) problems.push(`${label}: 손잡이를 눌러도 이 핀이 잡히지 않는다`);
+    }
+    const notes = [...scene.hints, ...(scene.note ? [scene.note] : [])];
+    for (const text of notes) {
+      const box = text.getBounds();
+      const where = `${Math.round(box.top)}~${Math.round(box.bottom)}`;
+      if (box.bottom > top) problems.push(`${text.text}: 동굴 꼭대기(${top})에 걸침 (${where})`);
+      if (box.top < heartsBottom) problems.push(`${text.text}: 목숨(${heartsBottom}까지)에 걸침 (${where})`);
+    }
+    const { puzzle, stage, score, pulls, timeLimit } = scene;
+    return { puzzle, floors, stage, score, pulls, timeLimit, notes: notes.map((text) => text.text), problems };
+  }, SCENE.pinPull);
+
+/** 판이 다 깔리거나 뽑은 핀의 뒤처리가 끝나서, 다음 핀을 누를 수 있을 때까지 기다린다. */
+async function waitForPinPullIdle(page: Page): Promise<void> {
+  await page.waitForFunction(
+    (key) => (window.__pocketArcade?.scene.getScene(key) as unknown as PinPullView | null)?.phase === 'idle',
+    SCENE.pinPull,
+    WAIT,
+  );
+}
+
+/** 손잡이를 차례로 눌러 핀을 뽑는다. 누를 때마다 바로 그 핀이 뽑혔는지 본다. */
+async function pullPins(page: Page, order: readonly Pin[]): Promise<void> {
+  const { pulls } = await pinPullBoard(page);
+  for (const [index, wanted] of order.entries()) {
+    await waitForPinPullIdle(page);
+    const handle = await page.evaluate(
+      ([key, pin]) => {
+        const scene = window.__pocketArcade?.scene.getScene(key) as unknown as PinPullView;
+        const same = (other: Pin): boolean =>
+          pin.kind === 'door'
+            ? other.kind === 'door'
+            : other.kind === 'chamber' && other.shaft === pin.shaft && other.level === pin.level;
+        return scene.pinViews.find((view) => same(view.pin))?.handle ?? null;
+      },
+      [SCENE.pinPull, wanted] as const,
+    );
+    if (!handle) throw new Error(`뽑을 핀이 화면에 없다: ${JSON.stringify(wanted)}`);
+    await tapAt(page, handle.x, handle.y);
+    await expect
+      .poll(async () => (await pinPullBoard(page)).pulls, { ...WAIT, message: `${index + 1}번째 핀이 뽑혀야 한다` })
+      .toBe(pulls + index + 1);
+  }
+}
+
+/** 그 판을 가장 짧게 푸는 순서. 풀 수 없는 판이면 점검이 바로 실패한다. */
+function shortestOrder(puzzle: Puzzle): readonly Pin[] {
+  const { shortest } = solve(puzzle);
+  if (!shortest) throw new Error(`풀 수 없는 판이 나왔다: ${JSON.stringify(puzzle)}`);
+  return shortest;
+}
+
+it('핀 뽑기 단계 도전: 3층으로 쌓인 마지막 단계의 동굴이 바위 안에 놓이고, 손잡이를 눌러 끝까지 풀 수 있다', async ({ page }) => {
+  // 핀을 여덟 번 뽑고 그때마다 내용물이 내려앉기를 기다려서 화면 점검 하나보다 오래 걸린다(CPU가 20배 느리면 40초 남짓).
+  test.slow();
+  // 마지막 단계까지 열린 저장을 앱이 읽기 전에 넣어 둔다. 기기 안(IndexedDB)에 저장이 없으면 앱은 localStorage의 이 자리를
+  // 읽는다(core/store.ts의 FALLBACK_KEY). 읽히지 않으면 잠긴 단계라 점수 도전의 1단계 판이 나와서 아래에서 바로 실패한다.
+  await page.addInitScript(
+    (cleared) => localStorage.setItem('pocket-arcade:save', JSON.stringify({ stages: { 'pin-pull': cleared } })),
+    STAGE_LEVELS - 1,
+  );
+  await openApp(page);
+  await startScene(page, SCENE.pinPull, { stageLevel: STAGE_LEVELS });
+  await waitForPinPullIdle(page);
+
+  const puzzle = levelPuzzle(STAGE_LEVELS);
+  const board = await pinPullBoard(page);
+  expect(board.puzzle, '마지막 단계에 정해진 판이 나와야 한다').toEqual(puzzle);
+  expect(Math.max(...puzzle.shafts.map((chambers) => chambers.length)), '마지막 단계는 3층으로 쌓인 판이다').toBe(MAX_STACK);
+  expect(board.floors, '방을 세 줄로 놓아야 한다').toBe(MAX_STACK);
+  expect(board.problems, '3층 동굴의 배치').toEqual([]);
+
+  await pullPins(page, shortestOrder(puzzle));
+  await waitForScene(page, SCENE.stageResult);
+});
+
+it('핀 뽑기 점수 도전: 3층 방이 나오는 단계에서 동굴과 도움말이 제자리에 놓이고, 판을 풀면 규칙대로 점수가 오른다', async ({ page }) => {
+  // 핀을 적어도 여섯 번 뽑아서 오래 걸린다.
+  test.slow();
+  await openApp(page);
+  await startScene(page, SCENE.pinPull);
+  await waitForPinPullIdle(page);
+
+  // 3층 방이 처음 나오는 단계로 건너뛴다. 1단계의 2층 동굴에 맞춰 떠 있던 도움말 두 줄도 새 동굴에 맞춰 옮겨져야 한다.
+  // 여기까지 온 사람은 괴물 알림을 이미 봤으므로(그 알림이 뜨면 도움말이 치워진다) 본 것으로 해 둔다.
+  // 시간은 여기서 보는 것이 아니라서 세워 둔다. 남긴 시간이 그대로라 받는 점수도 정해진다.
+  const stage = STAGES.findIndex((spec) => spec.maxStack === MAX_STACK) + 1;
+  expect(stage, '3층 방이 나오는 단계가 있어야 한다').toBeGreaterThan(0);
+  await page.evaluate(
+    ([key, to]) => {
+      const scene = window.__pocketArcade?.scene.getScene(key) as unknown as PinPullView;
+      scene.stage = to;
+      scene.monsterSeen = true;
+      scene.deal();
+      scene.grace = Infinity;
+    },
+    [SCENE.pinPull, stage] as const,
+  );
+  const board = await pinPullBoard(page);
+  const puzzle = board.puzzle;
+  if (!puzzle) throw new Error('판이 깔리지 않았다');
+  expect(Math.max(...puzzle.shafts.map((chambers) => chambers.length)), '3층으로 쌓인 통로가 있는 판이 나와야 한다').toBe(MAX_STACK);
+  expect(board.floors, '방을 세 줄로 놓아야 한다').toBe(MAX_STACK);
+  expect(board.notes, '도움말 두 줄이 아직 떠 있어야 옮겨진 자리를 볼 수 있다').toHaveLength(2);
+  expect(board.problems, '3층 동굴과 도움말의 배치').toEqual([]);
+  // 거듭제곱은 브라우저와 Node에서 마지막 자리가 다르게 나올 수 있어서 가까운지로 견준다.
+  expect(board.timeLimit, '뽑을 핀이 많은 만큼 시간을 더 준다').toBeCloseTo(puzzleSeconds(stage), 6);
+
+  const order = shortestOrder(puzzle);
+  expect(order.length, '여러 번을 뽑아야 풀리는 판이 나와야 한다').toBeGreaterThanOrEqual(STAGES[stage - 1].minPulls);
+  await pullPins(page, order);
+  await expect
+    .poll(async () => (await pinPullBoard(page)).stage, { ...WAIT, message: '다음 단계로 넘어가야 한다' })
+    .toBe(stage + 1);
+  expect((await pinPullBoard(page)).score - board.score, '시간을 그대로 남기고 깬 판의 점수').toBe(
+    winPoints(stage, puzzleSeconds(stage)),
+  );
 });

@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   BASE_POINTS,
   canWinWithin,
+  EXTRA_PULL_POINTS,
+  EXTRA_PULL_SECONDS,
   FALLBACK_PUZZLE,
   FIRST_SECONDS,
   fitsStage,
@@ -13,6 +15,7 @@ import {
   MIN_SECONDS,
   MIN_SHAFTS,
   pinsOf,
+  PLAIN_PULLS,
   pull,
   puzzleSeconds,
   remainingPins,
@@ -24,6 +27,7 @@ import {
   STAGE_POINTS,
   stagePoints,
   STAGES,
+  stageShapes,
   stageSpec,
   START_HEARTS,
   startPuzzle,
@@ -80,14 +84,20 @@ function permutations<T>(items: readonly T[]): T[][] {
   );
 }
 
-/** 순서대로 끝까지(이기거나 질 때까지) 뽑아 본다. */
-function outcomeOf(puzzle: Puzzle, order: readonly Pin[]): PuzzleState['status'] {
+/** 순서대로 끝까지(이기거나 질 때까지) 뽑아 본다. pulls는 끝날 때까지 뽑은 핀의 수다. */
+function playOut(puzzle: Puzzle, order: readonly Pin[]): { status: PuzzleState['status']; pulls: number } {
   let state = startPuzzle(puzzle);
+  let pulls = 0;
   for (const next of order) {
     if (state.status !== 'playing') break;
     state = pull(state, next).state;
+    pulls += 1;
   }
-  return state.status;
+  return { status: state.status, pulls };
+}
+
+function outcomeOf(puzzle: Puzzle, order: readonly Pin[]): PuzzleState['status'] {
+  return playOut(puzzle, order).status;
 }
 
 describe('판의 모양', () => {
@@ -288,16 +298,61 @@ describe('풀이', () => {
   });
 
   it('순서를 하나하나 늘어놓고 센 것과 같다', () => {
-    for (const text of ['T L', 'W T/L', 'L/T L W', 'T W/L +M', 'L L/W W T +M', 'T/L L W L/W']) {
+    for (const text of [
+      'T L',
+      'W T/L',
+      'L/T L W',
+      'T W/L +M',
+      'L L/W W T +M',
+      'T/L L W L/W',
+      // 3층으로 쌓인 통로가 있는 판: 핀 6개, 8개(순서는 4만 가지)
+      'T/L/L W W +M',
+      'L/W/T L W',
+      'L/L/W T/L/W W +M',
+      'T/L/L W W/W/L',
+    ]) {
       const puzzle = puzzleOf(text);
       const orders = permutations(pinsOf(puzzle));
-      const wins = orders.filter((order) => outcomeOf(puzzle, order) === 'won').length;
-      const losses = orders.filter((order) => outcomeOf(puzzle, order) === 'lost').length;
+      const ends = orders.map((order) => playOut(puzzle, order));
+      const wins = ends.filter((end) => end.status === 'won');
+      const losses = ends.filter((end) => end.status === 'lost');
       const solution = solve(puzzle);
-      expect(solution.orders).toBe(orders.length);
-      expect(solution.winning).toBe(wins);
+      expect(solution.orders, text).toBe(orders.length);
+      expect(solution.winning, text).toBe(wins.length);
       // 핀을 다 뽑으면 반드시 이기거나 진 것으로 끝난다.
-      expect(wins + losses).toBe(orders.length);
+      expect(wins.length + losses.length, text).toBe(orders.length);
+      // 가장 짧은 순서도 같다. 그런 순서가 여럿이면 핀 순서로 가장 앞선 것을 낸다.
+      const fewest = Math.min(...wins.map((end) => end.pulls));
+      const first = orders.findIndex((_, index) => ends[index].status === 'won' && ends[index].pulls === fewest);
+      expect(solution.shortest, text).toEqual(first < 0 ? null : orders[first].slice(0, fewest));
+    }
+  });
+
+  it('지지 않은 상태는 뽑힌 핀과 괴물의 생사만으로 정해진다: 풀이가 순서를 다 늘어놓지 않아도 되는 까닭', () => {
+    for (const text of ['T L W +M', 'L/W/T L W +M', 'T/L/L W W/W/L', 'L/L/W T/L/W W +M', 'W/L T/L/W L/W L +M']) {
+      const puzzle = puzzleOf(text);
+      const pins = pinsOf(puzzle);
+      const seen = new Map<string, PuzzleState>();
+      let met = 0;
+      const walk = (state: PuzzleState, pulled: number): void => {
+        if (state.status === 'lost') return;
+        const key = `${pulled}/${state.monster}`;
+        const before = seen.get(key);
+        if (before) {
+          // 다른 차례로 같은 핀들을 뽑아 왔다. 방과 구덩이에 든 것까지 모두 같아야 한다.
+          expect(state, `${text} ${key}`).toEqual(before);
+          met += 1;
+          return;
+        }
+        seen.set(key, state);
+        // 이긴 판은 거기서 끝난다. 더 뽑아도 상태가 바뀌지 않는다.
+        if (state.status !== 'playing') return;
+        pins.forEach((pin, index) => {
+          if (isPinned(state, pin)) walk(pull(state, pin).state, pulled | (1 << index));
+        });
+      };
+      walk(startPuzzle(puzzle), 0);
+      expect(met, text).toBeGreaterThan(0);
     }
   });
 
@@ -331,17 +386,50 @@ describe('풀이', () => {
     expect(safe.winning).toBe(safe.orders);
   });
 
+  it('3층으로 쌓인 통로가 있으면 여섯 번, 여덟 번을 뽑아야 하는 판이 나온다', () => {
+    // 보물 밑의 용암 둘을 구덩이로 내려보내 괴물을 없애고, 물 둘로 식힌 다음에야 보물을 내릴 수 있다.
+    expect(solve(puzzleOf('T/L/L W W +M')).shortest).toHaveLength(6);
+    expect(play('T/L/L W W +M', pin(0, 0)).lossCause).toBe('burnt');
+    // 괴물이 없어도 용암 둘을 치워야 해서 여섯 번이다. 2층까지만 쌓으면 네 번을 넘지 않는다.
+    expect(solve(puzzleOf('T/L/L W W')).shortest).toHaveLength(6);
+    expect(solve(puzzleOf('T/L L W W')).shortest).toHaveLength(4);
+    // 방이 일곱 개인 판에서 핀 여덟 개를 모두 뽑아야 하는 것도 있다.
+    expect(solve(puzzleOf('L/L/W T/L/W W +M')).shortest).toHaveLength(8);
+    expect(solve(puzzleOf('T/L/L W W/W/L')).shortest).toHaveLength(8);
+  });
+
+  it('이미 끝난 상태에서는 더 따질 것이 없다', () => {
+    // 이긴 상태는 남은 핀(여기서는 하나)을 어떻게 뽑든 이긴 것으로 세고, 진 상태는 이길 길이 없다.
+    expect(solveFrom(play('T L', pin(0), DOOR))).toEqual({ orders: 1, winning: 1, shortest: [] });
+    expect(solveFrom(play('T L', pin(1), DOOR))).toEqual({ orders: 1, winning: 0, shortest: null });
+    expect(solveFrom(play('T L W W', pin(0), DOOR))).toEqual({ orders: 6, winning: 6, shortest: [] });
+  });
+
   it('몇 번 안에 이길 수 있는지는 가장 짧은 풀이의 길이와 맞아떨어진다', () => {
-    for (const text of ['T L', 'T W', 'W T/L', 'T/W L', 'T W +M', 'T W/L +M', 'L/L T W/L +M']) {
+    for (const text of [
+      'T L',
+      'T W',
+      'W T/L',
+      'T/W L',
+      'T W +M',
+      'T W/L +M',
+      'L/L T W/L +M',
+      'T/L/L W W +M',
+      'L/L/W T/L/W W +M',
+      'T/L/L W W/W/L',
+    ]) {
       const start = startPuzzle(puzzleOf(text));
       const { shortest } = solve(puzzleOf(text));
-      for (let limit = 0; limit <= 6; limit += 1) {
-        expect(canWinWithin(start, limit)).toBe(shortest !== null && shortest.length <= limit);
+      for (let limit = 0; limit <= 9; limit += 1) {
+        expect(canWinWithin(start, limit), `${text} ${limit}번`).toBe(shortest !== null && shortest.length <= limit);
       }
     }
     // 이미 이긴 상태는 더 뽑지 않아도 이긴 것이고, 진 상태는 몇 번을 뽑아도 못 이긴다.
     expect(canWinWithin(play('T L', pin(0), DOOR), 0)).toBe(true);
     expect(canWinWithin(play('T L', pin(1), DOOR), 9)).toBe(false);
+    // 도중의 상태에서는 남은 횟수만 센다.
+    expect(canWinWithin(play('T L W +M', pin(1)), 2)).toBe(false);
+    expect(canWinWithin(play('T L W +M', pin(1)), 3)).toBe(true);
   });
 
   it('도중의 상태에서도 풀어 볼 수 있다', () => {
@@ -366,8 +454,8 @@ describe('단계', () => {
     expect(stageSpec(999)).toBe(STAGES[STAGES.length - 1]);
   });
 
-  it('방의 핀 두 개에서 시작해 여섯 개(문 핀 포함)까지 늘고, 줄어들지 않는다', () => {
-    expect(STAGES[0]).toMatchObject({ pins: 3, stacked: false, monsterChance: 0 });
+  it('방의 핀 두 개에서 시작해 핀 여덟 개(문 핀 포함)까지 늘고, 줄어들지 않는다', () => {
+    expect(STAGES[0]).toMatchObject({ pins: 3, maxStack: 1, monsterChance: 0 });
     expect(STAGES[STAGES.length - 1].pins).toBe(MAX_PINS);
     for (let index = 1; index < STAGES.length; index += 1) {
       expect(STAGES[index].pins).toBeGreaterThanOrEqual(STAGES[index - 1].pins);
@@ -378,53 +466,86 @@ describe('단계', () => {
     for (let index = 1; index < STAGES.length; index += 1) {
       expect(STAGES[index].maxWinShare).toBeLessThanOrEqual(STAGES[index - 1].maxWinShare);
       expect(STAGES[index].minPulls).toBeGreaterThanOrEqual(STAGES[index - 1].minPulls);
+      expect(STAGES[index].maxStack).toBeGreaterThanOrEqual(STAGES[index - 1].maxStack);
     }
-    // 괴물과 위아래로 놓인 방은 첫 단계가 아니라 뒤에 나온다.
-    expect(STAGES.findIndex((spec) => spec.stacked)).toBeGreaterThan(0);
-    expect(STAGES.findIndex((spec) => spec.monsterChance > 0)).toBeGreaterThan(
-      STAGES.findIndex((spec) => spec.stacked),
-    );
+    // 위아래로 놓인 방, 괴물, 3층으로 쌓인 통로는 첫 단계가 아니라 이 차례로 뒤에 나온다.
+    const firstStacked = STAGES.findIndex((spec) => spec.maxStack > 1);
+    const firstMonster = STAGES.findIndex((spec) => spec.monsterChance > 0);
+    const firstTall = STAGES.findIndex((spec) => spec.maxStack === MAX_STACK);
+    expect(firstStacked).toBeGreaterThan(0);
+    expect(firstMonster).toBeGreaterThan(firstStacked);
+    expect(firstTall).toBeGreaterThan(firstMonster);
+    // 네 번 넘게 뽑아야 하는 판은 3층 통로가 있어야 나오므로, 그런 단계는 모두 3층까지 쌓는다.
+    for (const spec of STAGES) {
+      if (spec.minPulls > PLAIN_PULLS) expect(spec.maxStack).toBe(MAX_STACK);
+    }
   });
 
-  it('방을 통로에 나누는 방법은 통로 2~4개, 통로마다 방 1~2개를 지킨다', () => {
-    expect(shaftShapes(2, false)).toEqual([[1, 1]]);
-    expect(shaftShapes(3, true)).toEqual([
+  it('방을 통로에 나누는 방법은 통로 2~4개, 통로마다 정한 층수까지를 지킨다', () => {
+    expect(shaftShapes(2, 1)).toEqual([[1, 1]]);
+    expect(shaftShapes(3, 2)).toEqual([
       [1, 1, 1],
       [1, 2],
       [2, 1],
     ]);
-    expect(shaftShapes(5, false)).toEqual([]);
-    for (const stacked of [false, true]) {
+    // 방 셋을 한 통로에 다 쌓으면 통로가 하나뿐이라서, 3층까지 쌓게 해도 나눌 방법은 같다.
+    expect(shaftShapes(3, 3)).toEqual(shaftShapes(3, 2));
+    expect(shaftShapes(4, 3)).toEqual([
+      [1, 1, 1, 1],
+      [1, 1, 2],
+      [1, 2, 1],
+      [1, 3],
+      [2, 1, 1],
+      [2, 2],
+      [3, 1],
+    ]);
+    expect(shaftShapes(5, 1)).toEqual([]);
+    // 정한 것보다 높이 쌓으라고 해도 MAX_STACK을 넘지 않는다.
+    expect(shaftShapes(6, 9)).toEqual(shaftShapes(6, MAX_STACK));
+    for (let maxStack = 1; maxStack <= MAX_STACK; maxStack += 1) {
       for (let count = 2; count <= MAX_PINS - 1; count += 1) {
-        for (const shape of shaftShapes(count, stacked)) {
+        for (const shape of shaftShapes(count, maxStack)) {
           expect(shape.length).toBeGreaterThanOrEqual(MIN_SHAFTS);
           expect(shape.length).toBeLessThanOrEqual(MAX_SHAFTS);
           expect(shape.reduce((sum, size) => sum + size, 0)).toBe(count);
           for (const size of shape) {
             expect(size).toBeGreaterThanOrEqual(1);
-            expect(size).toBeLessThanOrEqual(stacked ? MAX_STACK : 1);
+            expect(size).toBeLessThanOrEqual(maxStack);
           }
         }
       }
     }
   });
 
-  it('모든 단계에 만들 수 있는 모양이 있다', () => {
+  it('모든 단계에 만들 수 있는 모양이 있고, 3층까지 쌓는 단계는 3층 통로가 있는 모양만 쓴다', () => {
     for (const spec of STAGES) {
       expect(spec.pins).toBeLessThanOrEqual(MAX_PINS);
-      expect(shaftShapes(spec.pins - 1, spec.stacked).length).toBeGreaterThan(0);
+      const shapes = stageShapes(spec);
+      expect(shapes.length).toBeGreaterThan(0);
+      if (spec.maxStack < MAX_STACK) {
+        expect(shapes).toEqual(shaftShapes(spec.pins - 1, spec.maxStack));
+      } else {
+        for (const shape of shapes) expect(Math.max(...shape)).toBe(MAX_STACK);
+        expect(shapes.length).toBeLessThan(shaftShapes(spec.pins - 1, spec.maxStack).length);
+      }
     }
   });
 });
 
 describe('판 만들기', () => {
   const SEEDS = 150;
-  const stages = Array.from({ length: STAGES.length + 3 }, (_, index) => index + 1);
+  // 표가 끝난 뒤의 단계도 몇 개 본다: 마지막 줄을 그대로 쓴다.
+  const stages = Array.from({ length: STAGES.length + 2 }, (_, index) => index + 1);
+  /** 그 단계에서 만들어 볼 판의 수. 3층까지 쌓는 단계는 판 하나를 만드는 데 훨씬 오래 걸려서 덜 만든다. */
+  const seedsOf = (stage: number, most: number): number =>
+    stageSpec(stage).maxStack === MAX_STACK ? Math.ceil(most / 3) : most;
+  /** 판을 많이 만들어 보는 테스트의 제한 시간(ms). 느린 기계에서도 넉넉하다. */
+  const SLOW = 20_000;
 
   it('어느 단계의 어느 시드에서도 이길 수 있고 질 수도 있는, 조건에 맞는 판이 나온다', () => {
     for (const stage of stages) {
       const spec = stageSpec(stage);
-      for (let seed = 1; seed <= SEEDS; seed += 1) {
+      for (let seed = 1; seed <= seedsOf(stage, SEEDS); seed += 1) {
         const puzzle = generatePuzzle(stage, seeded(stage * 10007 + seed));
         const solution = solve(puzzle);
         expect(solution.winning).toBeGreaterThan(0);
@@ -439,17 +560,20 @@ describe('판 만들기', () => {
         expect(chambers.filter((item) => item === 'treasure')).toHaveLength(1);
         for (const shaft of puzzle.shafts) {
           expect(shaft.length).toBeGreaterThanOrEqual(1);
-          expect(shaft.length).toBeLessThanOrEqual(spec.stacked ? MAX_STACK : 1);
+          expect(shaft.length).toBeLessThanOrEqual(spec.maxStack);
+        }
+        if (spec.maxStack === MAX_STACK) {
+          expect(Math.max(...puzzle.shafts.map((shaft) => shaft.length))).toBe(MAX_STACK);
         }
         if (spec.monsterChance === 0) expect(puzzle.monster).toBe(false);
         if (spec.monsterChance === 1) expect(puzzle.monster).toBe(true);
       }
     }
-  });
+  }, SLOW);
 
   it('풀이가 알려 준 순서대로 뽑으면 실제로 보물을 얻는다', () => {
     for (const stage of stages) {
-      for (let seed = 1; seed <= 60; seed += 1) {
+      for (let seed = 1; seed <= seedsOf(stage, 60); seed += 1) {
         const puzzle = generatePuzzle(stage, seeded(stage * 7919 + seed));
         const { shortest } = solve(puzzle);
         expect(shortest).not.toBeNull();
@@ -461,22 +585,40 @@ describe('판 만들기', () => {
   });
 
   it('시드가 같으면 같은 판이 나온다', () => {
-    for (const stage of [1, 3, 5, 7]) {
+    for (const stage of [1, 3, 5, 7, 8, STAGES.length]) {
       expect(generatePuzzle(stage, seeded(42))).toEqual(generatePuzzle(stage, seeded(42)));
     }
-    const variety = new Set(
-      Array.from({ length: 40 }, (_, seed) => JSON.stringify(generatePuzzle(7, seeded(seed + 1)))),
-    );
-    expect(variety.size).toBeGreaterThan(20);
+    // 시드가 다르면 여러 가지 판이 나온다. 3층까지 쌓는 마지막 단계도 그렇다.
+    for (const stage of [7, STAGES.length]) {
+      const variety = new Set(
+        Array.from({ length: 40 }, (_, seed) => JSON.stringify(generatePuzzle(stage, seeded(seed + 1)))),
+      );
+      expect(variety.size, `${stage}단계`).toBeGreaterThan(20);
+    }
+  });
+
+  it('3층까지 쌓는 단계에는 괴물이 없는 판도 섞여 나오고, 그런 판도 여섯 번을 뽑아야 한다', () => {
+    STAGES.forEach((spec, index) => {
+      if (spec.maxStack < MAX_STACK) return;
+      let calm = 0;
+      for (let seed = 1; seed <= 60; seed += 1) {
+        const puzzle = generatePuzzle(index + 1, seeded(index * 4001 + seed));
+        if (puzzle.monster) continue;
+        calm += 1;
+        expect(solve(puzzle).shortest?.length).toBeGreaterThanOrEqual(spec.minPulls);
+      }
+      expect(calm, `${index + 1}단계`).toBeGreaterThan(0);
+    });
   });
 
   it('단계가 오를수록 아무렇게나 뽑아서 이길 확률이 낮아진다', () => {
     const averages = STAGES.map((_, index) => {
+      const seeds = seedsOf(index + 1, SEEDS);
       let total = 0;
-      for (let seed = 1; seed <= SEEDS; seed += 1) {
+      for (let seed = 1; seed <= seeds; seed += 1) {
         total += winShare(solve(generatePuzzle(index + 1, seeded(index * 30011 + seed))));
       }
-      return total / SEEDS;
+      return total / seeds;
     });
     for (let index = 1; index < averages.length; index += 1) {
       // 표본으로 잰 값이라 아주 작은 오차는 봐준다.
@@ -489,18 +631,18 @@ describe('판 만들기', () => {
   it('괴물은 정해 둔 확률만큼 나온다', () => {
     STAGES.forEach((spec, index) => {
       let monsters = 0;
-      const runs = 300;
+      const runs = seedsOf(index + 1, 300);
       for (let seed = 1; seed <= runs; seed += 1) {
         if (generatePuzzle(index + 1, seeded(index * 50021 + seed)).monster) monsters += 1;
       }
-      expect(monsters / runs).toBeGreaterThanOrEqual(spec.monsterChance - 0.08);
-      expect(monsters / runs).toBeLessThanOrEqual(spec.monsterChance + 0.08);
+      expect(monsters / runs, `${index + 1}단계`).toBeGreaterThanOrEqual(spec.monsterChance - 0.08);
+      expect(monsters / runs, `${index + 1}단계`).toBeLessThanOrEqual(spec.monsterChance + 0.08);
     });
-  });
+  }, SLOW);
 
   it('피할 판을 주면 그것과 다른 판이 나온다', () => {
-    for (const stage of [1, 2, 4, 7]) {
-      for (let seed = 1; seed <= 60; seed += 1) {
+    for (const stage of [1, 2, 4, 7, STAGES.length]) {
+      for (let seed = 1; seed <= seedsOf(stage, 60); seed += 1) {
         const first = generatePuzzle(stage, seeded(seed));
         const second = generatePuzzle(stage, seeded(seed), first);
         expect(samePuzzle(first, second)).toBe(false);
@@ -519,34 +661,62 @@ describe('판 만들기', () => {
 });
 
 describe('시간과 점수', () => {
+  /** 그 단계의 판이 PLAIN_PULLS보다 더 뽑아야 하는 횟수 */
+  const extraPulls = (stage: number): number => Math.max(0, stageSpec(stage).minPulls - PLAIN_PULLS);
+  /** 더 뽑아야 하는 만큼 얹어 준 시간을 뺀 것 */
+  const plainSeconds = (stage: number): number => puzzleSeconds(stage) - EXTRA_PULL_SECONDS * extraPulls(stage);
+
   it('목숨은 세 개로 시작한다', () => {
     expect(START_HEARTS).toBe(3);
   });
 
-  it('제한 시간은 15초에서 시작해 단계마다 줄어든다', () => {
+  it('제한 시간은 15초에서 시작하고, 더 뽑아야 해서 얹어 준 시간을 빼면 단계마다 줄어든다', () => {
     expect(puzzleSeconds(1)).toBe(FIRST_SECONDS);
     expect(puzzleSeconds(0)).toBe(FIRST_SECONDS);
     for (let stage = 2; stage <= 60; stage += 1) {
-      expect(puzzleSeconds(stage)).toBeLessThan(puzzleSeconds(stage - 1));
+      expect(plainSeconds(stage)).toBeLessThan(plainSeconds(stage - 1));
     }
   });
 
   it('줄어드는 폭은 갈수록 작아지고, 가장 짧은 시간 아래로는 내려가지 않는다', () => {
     for (let stage = 3; stage <= 60; stage += 1) {
-      const step = puzzleSeconds(stage - 1) - puzzleSeconds(stage);
-      const before = puzzleSeconds(stage - 2) - puzzleSeconds(stage - 1);
+      const step = plainSeconds(stage - 1) - plainSeconds(stage);
+      const before = plainSeconds(stage - 2) - plainSeconds(stage - 1);
       expect(step).toBeLessThan(before);
       expect(step).toBeLessThan(1);
     }
-    expect(puzzleSeconds(500)).toBeGreaterThanOrEqual(MIN_SECONDS);
-    expect(puzzleSeconds(500)).toBeCloseTo(MIN_SECONDS, 3);
+    expect(plainSeconds(500)).toBeGreaterThanOrEqual(MIN_SECONDS);
+    expect(plainSeconds(500)).toBeCloseTo(MIN_SECONDS, 3);
   });
 
-  it('10단계에 10초쯤, 16단계에 8초 남짓이다', () => {
-    expect(puzzleSeconds(10)).toBeGreaterThan(9.5);
-    expect(puzzleSeconds(10)).toBeLessThan(10.8);
-    expect(puzzleSeconds(16)).toBeGreaterThan(7.8);
-    expect(puzzleSeconds(16)).toBeLessThan(8.8);
+  it('네 번보다 더 뽑아야 하는 단계는 더 뽑는 한 번마다 시간을 얹어 받는다', () => {
+    expect(EXTRA_PULL_SECONDS).toBe(MIN_SECONDS / PLAIN_PULLS);
+    const tall = STAGES.findIndex((spec) => spec.minPulls > PLAIN_PULLS) + 1;
+    expect(tall).toBeGreaterThan(1);
+    expect(extraPulls(tall - 1)).toBe(0);
+    expect(plainSeconds(tall - 1)).toBe(puzzleSeconds(tall - 1));
+    // 길게 풀어야 하는 판이 처음 나오는 단계는 바로 앞 단계보다 시간이 길다.
+    expect(puzzleSeconds(tall)).toBeGreaterThan(puzzleSeconds(tall - 1));
+    expect(puzzleSeconds(tall) - plainSeconds(tall)).toBeCloseTo(EXTRA_PULL_SECONDS * extraPulls(tall));
+    // 단계가 아무리 올라도 뽑아야 하는 횟수만큼의 가장 짧은 시간은 남는다.
+    expect(puzzleSeconds(500)).toBeCloseTo(MIN_SECONDS + EXTRA_PULL_SECONDS * extraPulls(500), 3);
+  });
+
+  it('한 번 뽑는 데 쓸 수 있는 시간은 단계마다 줄어든다: 얹어 준 시간이 판을 쉽게 만들지 않는다', () => {
+    const perPull = (stage: number): number => puzzleSeconds(stage) / (PLAIN_PULLS + extraPulls(stage));
+    for (let stage = 2; stage <= 60; stage += 1) {
+      expect(perPull(stage), `${stage}단계`).toBeLessThan(perPull(stage - 1));
+    }
+    expect(perPull(500)).toBeCloseTo(MIN_SECONDS / PLAIN_PULLS, 3);
+  });
+
+  it('7단계에 11초 남짓, 여섯 번을 뽑는 8단계에 13초 남짓, 16단계에 11초쯤이다', () => {
+    expect(puzzleSeconds(7)).toBeGreaterThan(11);
+    expect(puzzleSeconds(7)).toBeLessThan(12);
+    expect(puzzleSeconds(8)).toBeGreaterThan(13);
+    expect(puzzleSeconds(8)).toBeLessThan(14);
+    expect(puzzleSeconds(16)).toBeGreaterThan(10.4);
+    expect(puzzleSeconds(16)).toBeLessThan(11.4);
   });
 
   it('기본 점수는 단계마다 늘다가 정해진 단계부터는 그대로다', () => {
@@ -554,10 +724,22 @@ describe('시간과 점수', () => {
     expect(stagePoints(0)).toBe(BASE_POINTS);
     expect(stagePoints(2)).toBe(BASE_POINTS + STAGE_POINTS);
     for (let stage = 2; stage <= TOP_POINT_STAGE; stage += 1) {
-      expect(stagePoints(stage) - stagePoints(stage - 1)).toBe(STAGE_POINTS);
+      // 더 뽑아야 하는 판이 나오기 시작하는 단계에서는 그만큼 한꺼번에 더 는다.
+      const longer = extraPulls(stage) - extraPulls(stage - 1);
+      expect(stagePoints(stage) - stagePoints(stage - 1)).toBe(STAGE_POINTS + EXTRA_PULL_POINTS * longer);
     }
     expect(stagePoints(TOP_POINT_STAGE + 1)).toBe(stagePoints(TOP_POINT_STAGE));
     expect(stagePoints(999)).toBe(stagePoints(TOP_POINT_STAGE));
+  });
+
+  it('여섯 번을 뽑아야 하는 단계는 네 번을 뽑는 단계보다 기본 점수를 더 받는다', () => {
+    const tall = STAGES.findIndex((spec) => spec.minPulls > PLAIN_PULLS) + 1;
+    expect(stagePoints(tall)).toBe(
+      BASE_POINTS + STAGE_POINTS * (tall - 1) + EXTRA_PULL_POINTS * (stageSpec(tall).minPulls - PLAIN_PULLS),
+    );
+    expect(stagePoints(tall) - stagePoints(tall - 1)).toBeGreaterThan(STAGE_POINTS);
+    // 조건이 더 바뀌지 않는 단계에 이르기 전에 표가 끝나야, 그 뒤의 점수가 그대로라는 말이 맞다.
+    expect(STAGES.length).toBeLessThanOrEqual(TOP_POINT_STAGE);
   });
 
   it('남긴 시간은 1초에 1점이고 소수점 아래는 버린다', () => {
@@ -581,5 +763,6 @@ describe('시간과 점수', () => {
     // 빨리 풀수록, 단계가 높을수록 많이 받는다.
     expect(winPoints(3, 9)).toBeGreaterThan(winPoints(3, 2));
     expect(winPoints(6, 4)).toBeGreaterThan(winPoints(2, 4));
+    expect(winPoints(9, 4)).toBeGreaterThan(winPoints(7, 4));
   });
 });
