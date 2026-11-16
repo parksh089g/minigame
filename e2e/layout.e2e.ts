@@ -267,6 +267,55 @@ it('새싹 컴퍼니: 이름이 가장 긴 게임을 다 만들었을 때도 띠
   expect(hidden.filter((line) => strip.some((label) => line.startsWith(`${label}:`))), '다 만든 게임의 띠').toEqual([]);
 });
 
+/** 새싹 컴퍼니 장면에서 이 점검이 들여다보는 것 */
+interface CompanyView {
+  state: CompanyState;
+  /** 만드는 게임의 띠에 놓인 것들 */
+  strip: { list: Array<{ type: string; text?: string }> };
+}
+
+it('새싹 컴퍼니: 만드는 게임의 띠에 끝낸 카드 수가 가려지지 않게 적히고, 카드를 끝내면 따라 오른다', async ({ page }) => {
+  await openApp(page);
+  // 카드가 가장 많은 게임을 스무 장 끝낸 회사. 남은 카드는 일감함과 그 뒤에 쌓여 있고, 맡은 친구는 없다.
+  const biggest = [...PROJECT_ORDER].sort((a, b) => PROJECTS[b].cards.length - PROJECTS[a].cards.length)[0];
+  const cards = PROJECTS[biggest].cards;
+  const done = 20;
+  const state = createCompany('sprout', Date.now());
+  state.office = OFFICES.length - 1;
+  state.guide = GUIDE_STEPS.length;
+  state.project = { id: biggest, done, total: cards.length, care: done * RATING.full };
+  state.backlog = cards.slice(done).map((kind) => ({ kind, left: 1000, total: 1000 }));
+  await seedCompany(page, state);
+  await page.reload();
+  await waitForScene(page, 'Hub');
+  await startScene(page, COMPANY_SCENE);
+
+  const count = (finished: number): string => `${finished}/${cards.length}`;
+  // 띠에 적힌 글자(이름, 몇 번째 출시인지, 끝낸 카드 수, 받을 잎사귀와 평판)가 서로나 꽃에 가리지 않는지 본다.
+  const expectStripClear = async (name: string): Promise<void> => {
+    const strip = await page.evaluate((key) => {
+      const scene = window.__pocketArcade?.scene.getScene(key) as unknown as CompanyView;
+      return scene.strip.list.flatMap((item) => (item.type === 'Text' && item.text ? [item.text] : []));
+    }, COMPANY_SCENE);
+    expect(strip, name).toContain(PROJECTS[biggest].title);
+    const hidden = await hiddenTexts(page, COMPANY_SCENE);
+    expect(hidden.filter((line) => strip.some((label) => line.startsWith(`${label}:`))), name).toEqual([]);
+  };
+  await expect.poll(() => textPoint(page, COMPANY_SCENE, count(done)), { ...WAIT, message: '끝낸 카드 수가 띠에 적혀야 한다' }).not.toBeNull();
+  await expectStripClear('스무 장을 끝낸 띠');
+
+  // 일감함의 카드 한 장을 사장의 책상에 올리고 일을 거의 끝내 둔다. 게임이 그 카드를 끝낸 것으로 세면 띠의 수도 한 장 오른다.
+  await page.evaluate((key) => {
+    const { state: company } = window.__pocketArcade?.scene.getScene(key) as unknown as CompanyView;
+    const card = company.inbox.shift();
+    if (!card) throw new Error('일감함에 카드가 없다');
+    company.desks[0].task = { ...card, left: 0.001 };
+  }, COMPANY_SCENE);
+  await expect.poll(() => textPoint(page, COMPANY_SCENE, count(done + 1)), { ...WAIT, message: '카드를 끝내면 수가 올라야 한다' }).not.toBeNull();
+  expect(await textPoint(page, COMPANY_SCENE, count(done)), '지난 수는 지워져야 한다').toBeNull();
+  await expectStripClear('한 장을 더 끝낸 띠');
+});
+
 it('결과 카드: 기록 일곱 줄과 랭킹 줄에 무기 여섯의 피해 줄까지 가려지지 않고 들어간다', async ({ page }) => {
   // 깊은 밤에서 한 잔치의 밤 판에 도전 과제까지 이룬 판의 결과. 가장 작은 화면에서는 기록 줄을 좁혀야 들어간다.
   await openApp(page);

@@ -184,8 +184,8 @@ const MARGIN = 8;
 const INNER = W - MARGIN * 2;
 
 const STRIP = { top: 42, height: 40 } as const;
-/** 만드는 게임의 진행 막대의 너비. 그 옆에 평가의 꽃이 놓인다. */
-const STRIP_BAR = 70;
+/** 만드는 게임의 진행 막대. 끝낸 카드 수를 안에 적으므로 작은 글자 한 줄이 들어가는 높이다. 그 옆에 평가의 꽃이 놓인다. */
+const STRIP_BAR = { width: 70, height: 11 } as const;
 /** 몇 번째 출시인지 적은 글과 그 옆에 놓인 것(출시하기 버튼, 받을 잎사귀, 평가의 꽃) 사이에 두는 틈 */
 const STRIP_TAG_GAP = 3;
 const ROOM_TOP = 88;
@@ -1045,12 +1045,25 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
       this.button(strip, buttonLeft, top + 5, 76, 28, '출시하기', 'pink', () => this.releaseProject());
       return;
     }
-    const barWidth = STRIP_BAR;
+    const bar = { ...STRIP_BAR, top: top + 21 };
+    const middle = bar.top + bar.height / 2;
     const share = project.done / project.total;
-    strip.add(addRoundRect(this, barLeft, top + 23, barWidth, 7, 3.5, THEME.dim));
-    if (share > 0) strip.add([...new Pill(this, barLeft, top + 23, 7, THEME.mintDeep).setLength(Math.max(7, barWidth * share)).parts]);
+    strip.add(addRoundRect(this, barLeft, bar.top, bar.width, bar.height, bar.height / 2, THEME.dim));
+    if (share > 0) {
+      const length = Math.max(bar.height, bar.width * share);
+      strip.add([...new Pill(this, barLeft, bar.top, bar.height, THEME.mintDeep).setLength(length).parts]);
+    }
+    // 끝낸 카드 수를 막대 안에 적는다. 카드가 서른두 장인 게임은 막대만 보고는 몇 장 남았는지 가늠하기 어렵다.
+    strip.add(
+      addText(this, barLeft + bar.width / 2, middle, `${project.done}/${project.total}`, {
+        size: FONT_SIZE.small,
+        color: THEME_CSS.inkDeep,
+        originX: 0.5,
+        originY: 0.5,
+      }),
+    );
     // 여태 끝낸 카드로 받는 평가. 끝낸 카드가 없으면 모두 피지 않은 꽃이다.
-    strip.add(this.flowerRow(barLeft + barWidth + 9, top + 26.5, 8, 1, flowers));
+    strip.add(this.flowerRow(barLeft + bar.width + 9, middle, 8, 1, flowers));
     // 출시하면 받는 것. 잎사귀는 지금의 평가대로 받는 만큼이다.
     const right = MARGIN + INNER - 8;
     const bonus = addText(this, right, top + 5, `+${formatLeaves(ratedBonus(state))}`, {
