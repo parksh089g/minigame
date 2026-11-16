@@ -193,4 +193,5 @@ export const SCENE = {
   blockFill: 'BlockFill',
   chosungQuiz: 'ChosungQuiz',
   matchThree: 'MatchThree',
+  brickBreak: 'BrickBreak',
 } as const;
