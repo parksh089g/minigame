@@ -49,7 +49,7 @@ describe('텃밭의 저장', () => {
 
   it('저장한 것을 다시 열면 그대로 있다', async () => {
     const a = await opened();
-    a.set(buyUpgrade({ ...createMeta(), seeds: 90, best: 6, startDay: 6 }, 'power'), T);
+    a.set(buyUpgrade({ ...createMeta(), seeds: 90, best: 6, bestEver: 6, startDay: 6 }, 'power'), T);
     await a.flush();
     const b = await opened();
     expect(b.data).toEqual(a.data);

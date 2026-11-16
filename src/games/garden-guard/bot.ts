@@ -67,7 +67,10 @@ export function playCareer(meta: GardenMeta, runs: number, style: BotStyle, seed
   for (let run = 0; run < runs; run += 1) {
     const wanted = Math.max(1, next.best - back);
     const start = clampStartDay(Math.max(...startDays(next.best).filter((day) => day <= wanted)), next.best);
-    const state = playRun({ seed: seed * 1000 + run, startDay: start, levels: next.levels, bestBefore: next.best }, style);
+    const state = playRun(
+      { seed: seed * 1000 + run, startDay: start, levels: next.levels, bestBefore: next.best, fields: next.fields },
+      style,
+    );
     const seeds = Math.floor(state.seeds);
     next = buyCheapest(applyRun(bankSeeds(next, seeds), state.lastCleared, state.kills));
     log.push({ start, cleared: state.lastCleared, seconds: state.t, seeds });
