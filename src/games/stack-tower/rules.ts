@@ -19,23 +19,40 @@ export const GROW_WIDTH = 6;
 
 export const START_SPEED = 130;
 export const MAX_SPEED = 300;
-/** 한 층 쌓을 때마다 빨라지는 정도(px/s). 43층쯤에 가장 빨라진다. */
+/** 한 층 쌓을 때마다 빨라지는 정도(px/s). 43층쯤에 MAX_SPEED에 닿는다. */
 const SPEED_GAIN = 4;
+/** MAX_SPEED에 닿은 뒤로도 층마다 조금씩 더 빨라진다. 높이 쌓은 판이 한 난이도에 머물지 않게 한다. */
+export const LATE_SPEED_GAIN = 1;
+/** 아무리 높이 쌓아도 이보다 빨라지지는 않는다. */
+export const TOP_SPEED = 360;
 /** 속도가 층마다 위아래로 흔들리는 비율. 같은 박자로만 눌러서는 맞지 않게 한다. */
 export const SPEED_JITTER = 0.1;
 /** 이 층부터 속도가 흔들린다. 처음 몇 층은 박자를 익히는 구간이다. */
 export const JITTER_FROM_FLOOR = 5;
+/** MAX_SPEED에 닿은 뒤로는 흔들림도 층마다 이만큼씩 커져서 TOP_JITTER까지 간다. */
+export const LATE_JITTER_GAIN = 0.0025;
+export const TOP_JITTER = 0.2;
+
+/** 속도가 MAX_SPEED에 닿는 층 */
+export const MAX_SPEED_FLOOR = Math.ceil((MAX_SPEED - START_SPEED) / SPEED_GAIN);
 
 /** 흔들림을 뺀 속도(px/s). floors는 지금까지 쌓은 층 수. */
 export function baseSpeed(floors: number): number {
-  return Math.min(MAX_SPEED, START_SPEED + SPEED_GAIN * Math.max(0, floors));
+  const at = Math.max(0, floors);
+  if (at <= MAX_SPEED_FLOOR) return Math.min(MAX_SPEED, START_SPEED + SPEED_GAIN * at);
+  return Math.min(TOP_SPEED, MAX_SPEED + LATE_SPEED_GAIN * (at - MAX_SPEED_FLOOR));
+}
+
+/** 그 층에서 속도가 흔들리는 비율. 처음 몇 층은 0이고, 높이 쌓을수록 커진다. */
+export function speedJitter(floors: number): number {
+  if (floors < JITTER_FROM_FLOOR) return 0;
+  return Math.min(TOP_JITTER, SPEED_JITTER + LATE_JITTER_GAIN * Math.max(0, floors - MAX_SPEED_FLOOR));
 }
 
 /** 다음 블록이 움직이는 속도(px/s). roll은 0 이상 1 미만의 수(Math.random()의 결과). */
 export function moverSpeed(floors: number, roll: number): number {
-  const base = baseSpeed(floors);
-  if (floors < JITTER_FROM_FLOOR) return base;
-  return base * (1 - SPEED_JITTER + 2 * SPEED_JITTER * roll);
+  const jitter = speedJitter(floors);
+  return baseSpeed(floors) * (1 - jitter + 2 * jitter * roll);
 }
 
 /** 블록이 오가는 범위(왼쪽 가장자리 기준). 양 끝에서는 블록의 절반이 화면 밖으로 나간다. */

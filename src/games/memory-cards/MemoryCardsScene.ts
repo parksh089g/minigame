@@ -199,7 +199,7 @@ export class MemoryCardsScene extends MiniGameScene {
       : null;
 
     const dealMs = this.cards.length * DEAL_STAGGER_MS + 120;
-    this.time.delayedCall(dealMs + previewMs(pairs), () => {
+    this.time.delayedCall(dealMs + previewMs(pairs, this.boardIndex), () => {
       hint?.destroy();
       for (const card of this.cards) this.setFace(card, false);
       sfx.go();

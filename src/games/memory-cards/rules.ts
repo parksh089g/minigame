@@ -25,9 +25,21 @@ export function pairCount(size: BoardSize): number {
   return (size.cols * size.rows) / 2;
 }
 
-/** 판을 시작할 때 카드를 모두 보여 주는 시간(ms). 카드가 많을수록 조금 길다. */
-export function previewMs(pairs: number): number {
-  return 1000 + 100 * pairs;
+/** 판이 더 커지지 않는 첫 판의 번호(0부터): 이 판부터는 4×5가 이어진다. */
+export const LARGEST_BOARD_INDEX = 2;
+/** 가장 큰 판이 이어지는 동안 판마다 줄어드는 미리 보기 시간(ms) */
+export const PREVIEW_CUT_MS = 250;
+/** 미리 보기 시간의 바닥(ms). 이보다 짧으면 카드를 훑어볼 수조차 없다. */
+export const MIN_PREVIEW_MS = 800;
+
+/**
+ * 판을 시작할 때 카드를 모두 보여 주는 시간(ms). 카드가 많을수록 조금 길다.
+ * 판은 셋째 판부터 더 커지지 않으므로, 그 뒤로는 판마다 미리 보는 시간이 줄어서 계속 어려워진다.
+ * boardIndex는 0부터 세는 판 번호다.
+ */
+export function previewMs(pairs: number, boardIndex = 0): number {
+  const repeats = Math.max(0, Math.floor(boardIndex) - LARGEST_BOARD_INDEX);
+  return Math.max(MIN_PREVIEW_MS, 1000 + 100 * pairs - PREVIEW_CUT_MS * repeats);
 }
 
 /** 실수 없이 연속으로 맞히면 한 번에 5점씩 보너스가 붙는다(최대 +20). */

@@ -9,6 +9,9 @@ import {
   matchPoints,
   pairCount,
   previewMs,
+  LARGEST_BOARD_INDEX,
+  MIN_PREVIEW_MS,
+  PREVIEW_CUT_MS,
   streakBonus,
 } from './rules';
 
@@ -49,6 +52,18 @@ describe('판 크기', () => {
     expect(previewMs(8)).toBeGreaterThan(previewMs(6));
     expect(previewMs(10)).toBeGreaterThan(previewMs(8));
     expect(previewMs(10)).toBeLessThanOrEqual(2500);
+    // 판이 더 커지지 않는 셋째 판까지는 그대로이고, 그 뒤로는 판마다 줄어들다가 바닥에서 멈춘다.
+    expect(previewMs(10, 0)).toBe(previewMs(10));
+    expect(previewMs(10, LARGEST_BOARD_INDEX)).toBe(previewMs(10));
+    expect(previewMs(10, LARGEST_BOARD_INDEX + 1)).toBe(previewMs(10) - PREVIEW_CUT_MS);
+    for (let board = LARGEST_BOARD_INDEX + 1; board < 12; board += 1) {
+      expect(previewMs(10, board)).toBeLessThanOrEqual(previewMs(10, board - 1));
+      expect(previewMs(10, board)).toBeGreaterThanOrEqual(MIN_PREVIEW_MS);
+    }
+    expect(previewMs(10, 50)).toBe(MIN_PREVIEW_MS);
+    // 가장 큰 판이 처음 나오는 판이 boardSize가 말하는 그 판이다.
+    expect(boardSize(LARGEST_BOARD_INDEX)).toEqual(boardSize(LARGEST_BOARD_INDEX + 5));
+    expect(boardSize(LARGEST_BOARD_INDEX - 1)).not.toEqual(boardSize(LARGEST_BOARD_INDEX));
   });
 });
 

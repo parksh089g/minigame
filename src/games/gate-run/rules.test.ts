@@ -15,6 +15,8 @@ import {
   laneCenter,
   MAX_CROWD,
   MAX_SPEED,
+  RATIO_TOP,
+  TOP_SPEED,
   newCourse,
   newRun,
   nextSegment,
@@ -182,7 +184,12 @@ describe('난이도', () => {
       expect(scrollSpeed(segment)).toBeGreaterThanOrEqual(scrollSpeed(segment - 1));
     }
     expect(scrollSpeed(5)).toBeGreaterThan(scrollSpeed(4));
-    expect(scrollSpeed(1000)).toBe(MAX_SPEED);
+    // 30구간에 MAX_SPEED에 닿고, 그 뒤로도 TOP_SPEED까지 천천히 더 빨라진다.
+    expect(scrollSpeed(30)).toBeCloseTo(MAX_SPEED);
+    expect(scrollSpeed(31)).toBeGreaterThan(MAX_SPEED);
+    expect(scrollSpeed(31) - scrollSpeed(30)).toBeLessThan(scrollSpeed(30) - scrollSpeed(29));
+    expect(scrollSpeed(60)).toBeGreaterThan(scrollSpeed(45));
+    expect(scrollSpeed(1000)).toBe(TOP_SPEED);
   });
 
   it('적의 비율은 구간마다 오르고 상한에서 멈춘다', () => {
@@ -192,13 +199,18 @@ describe('난이도', () => {
       expect(enemyRatio(segment)).toBeGreaterThan(enemyRatio(segment - 1));
     }
     expect(enemyRatio(RATIO_FULL_SEGMENT)).toBeCloseTo(RATIO_MAX);
-    expect(enemyRatio(500)).toBeCloseTo(RATIO_MAX);
+    // 그 뒤로도 RATIO_TOP까지 천천히 더 오른다.
+    expect(enemyRatio(RATIO_FULL_SEGMENT + 1)).toBeGreaterThan(RATIO_MAX);
+    expect(enemyRatio(50)).toBeGreaterThan(enemyRatio(40));
+    expect(enemyRatio(500)).toBeCloseTo(RATIO_TOP);
+    expect(RATIO_TOP).toBeLessThan(1);
     expect(RATIO_MAX).toBeLessThan(1);
   });
 
   it('적은 가장 좋은 무리에 비율을 곱한 수이고, 언제나 그보다 적다', () => {
     expect(enemiesFor(20, 0)).toBe(Math.round(20 * RATIO_START));
-    expect(enemiesFor(100, 500)).toBe(Math.round(100 * RATIO_MAX));
+    expect(enemiesFor(100, RATIO_FULL_SEGMENT)).toBe(Math.round(100 * RATIO_MAX));
+    expect(enemiesFor(100, 500)).toBe(Math.round(100 * RATIO_TOP));
     for (let ideal = 2; ideal <= 400; ideal += 1) {
       for (const segment of [0, 7, 19, 30, 90]) {
         const enemies = enemiesFor(ideal, segment);
@@ -383,7 +395,10 @@ describe('길 만들기', () => {
         expect(segment.enemies).toBeLessThan(segment.idealAtWall);
         // 적 앞에 선 무리는 반올림 때문에 다 잡아먹힐 만큼 적지는 않다.
         expect(segment.idealAtWall).toBeGreaterThanOrEqual(4);
-        expect(segment.enemies).toBe(Math.round(segment.idealAtWall * enemyRatio(segment.index)));
+        // 비율이 높은 뒤쪽 구간에서 무리가 작으면 반올림한 수가 무리와 같아지므로, 그때는 한 마리를 남긴다.
+        expect(segment.enemies).toBe(
+          Math.min(segment.idealAtWall - 1, Math.round(segment.idealAtWall * enemyRatio(segment.index))),
+        );
       }
     }
   });

@@ -53,12 +53,20 @@ export function steer(x: number, target: number, dt: number): number {
 
 export const START_SPEED = 72;
 export const MAX_SPEED = 150;
-/** 구간을 하나 지날 때마다 빨라지는 정도(px/s). 30구간에 가장 빨라진다. */
+/** 구간을 하나 지날 때마다 빨라지는 정도(px/s). 30구간에 MAX_SPEED에 닿는다. */
 const SPEED_GAIN = 2.6;
+/** MAX_SPEED에 닿은 뒤로도 구간마다 조금씩 더 빨라진다. 오래 버틴 판이 한 난이도에 머물지 않게 한다. */
+export const LATE_SPEED_GAIN = 0.5;
+/** 아무리 오래 달려도 이보다 빨라지지는 않는다. 관문 줄 하나를 0.8초쯤에 지나는 속도다. */
+export const TOP_SPEED = 180;
 
 /** 길이 흘러내리는 속도(px/s). segment는 지금 달리는 구간 번호(0부터). */
 export function scrollSpeed(segment: number): number {
-  return Math.min(MAX_SPEED, START_SPEED + SPEED_GAIN * Math.max(0, segment));
+  const at = Math.max(0, segment);
+  const early = START_SPEED + SPEED_GAIN * at;
+  if (early <= MAX_SPEED) return early;
+  const knee = (MAX_SPEED - START_SPEED) / SPEED_GAIN;
+  return Math.min(TOP_SPEED, MAX_SPEED + LATE_SPEED_GAIN * (at - knee));
 }
 
 /** 줄(관문 줄, 적)과 다음 줄 사이의 거리. 처음에는 한 줄에 2초쯤, 가장 빠를 때는 1초쯤 걸린다. */
@@ -120,13 +128,21 @@ export function betterSide(crowd: number, pair: GatePair): Side {
 /** 적의 수를 정하는 비율: 가장 잘 고른 무리의 이만큼이 적으로 나온다. */
 export const RATIO_START = 0.4;
 export const RATIO_MAX = 0.85;
-/** 이 구간에서 비율이 상한에 닿는다. */
+/** 이 구간에서 비율이 RATIO_MAX에 닿는다. */
 export const RATIO_FULL_SEGMENT = 30;
 /** 1보다 크면 처음에는 천천히, 뒤로 갈수록 가파르게 오른다. 초반의 실수 한 번은 봐주려는 것이다. */
 const RATIO_CURVE = 1.5;
+/** RATIO_MAX에 닿은 뒤로도 구간마다 조금씩 더 오른다. */
+export const LATE_RATIO_GAIN = 0.0025;
+/** 아무리 오래 달려도 비율은 이보다 커지지 않는다. 가장 잘 고르면 언제나 몇 마리는 남는다. */
+export const RATIO_TOP = 0.92;
 
 export function enemyRatio(segment: number): number {
-  const progress = Math.min(1, Math.max(0, segment) / RATIO_FULL_SEGMENT);
+  const at = Math.max(0, segment);
+  if (at > RATIO_FULL_SEGMENT) {
+    return Math.min(RATIO_TOP, RATIO_MAX + LATE_RATIO_GAIN * (at - RATIO_FULL_SEGMENT));
+  }
+  const progress = at / RATIO_FULL_SEGMENT;
   return RATIO_START + (RATIO_MAX - RATIO_START) * progress ** RATIO_CURVE;
 }
 
