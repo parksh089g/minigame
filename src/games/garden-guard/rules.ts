@@ -4,6 +4,7 @@
  */
 import {
   BOSS_EVERY,
+  BOSS_ROTATION,
   COMMON_KINDS,
   DAY,
   ENEMIES,
@@ -11,6 +12,7 @@ import {
   FIELD,
   GUN,
   STEP,
+  SWARM,
   UPGRADE_ORDER,
   UPGRADES,
   type EnemyKind,
@@ -67,6 +69,12 @@ export function isBossDay(day: number): boolean {
   return day > 0 && day % BOSS_EVERY === 0;
 }
 
+/** 그날 나오는 대장. 대장의 날마다 BOSS_ROTATION을 차례로 돈다(5일째 두더지, 10일째 장수풍뎅이, ...). 대장의 날이 아니면 null */
+export function bossKind(day: number): EnemyKind | null {
+  if (!isBossDay(day)) return null;
+  return BOSS_ROTATION[(day / BOSS_EVERY - 1) % BOSS_ROTATION.length];
+}
+
 /**
  * 그날 나오는 대장의 수. 대장의 날마다 하나다.
  * 대장을 둘, 셋으로 늘리면 그날만 갑자기 두 배가 되어서 그 앞에서 오래 막혔다. 세지는 것은 체력의 배율에 맡긴다.
@@ -105,7 +113,8 @@ export interface Spawn {
 /**
  * 그날 나올 벌레를 나오는 차례대로 정한다. random은 0 이상 1 미만의 수를 돌려주는 함수다.
  * 나오는 때는 시간을 고르게 나눈 칸 안에서 흔들어서, 몰려 나오기도 하지만 한꺼번에 다 나오지는 않는다.
- * 대장은 날이 시작되고 곧 가운데에서 나온다.
+ * 떼로 오는 벌레(모기)는 한 번 뽑히면 그 수만큼의 칸을 쓰고, 한자리에 붙어서 거의 한꺼번에 나온다.
+ * 그래서 그날 나오는 벌레의 수는 떼가 섞여도 dayCount와 같다. 대장은 날이 시작되고 곧 가운데에서 나온다.
  */
 export function planDay(day: number, random: () => number): Spawn[] {
   const count = dayCount(day);
@@ -113,7 +122,8 @@ export function planDay(day: number, random: () => number): Spawn[] {
   const weights = COMMON_KINDS.map((kind) => kindWeight(kind, day));
   const total = weights.reduce((sum, weight) => sum + weight, 0);
   const spawns: Spawn[] = [];
-  for (let index = 0; index < count; index += 1) {
+  let index = 0;
+  while (index < count) {
     let roll = random() * total;
     let kind: EnemyKind = COMMON_KINDS[0];
     for (let pick = 0; pick < COMMON_KINDS.length; pick += 1) {
@@ -123,15 +133,24 @@ export function planDay(day: number, random: () => number): Spawn[] {
         break;
       }
     }
-    spawns.push({
-      at: ((index + random()) / count) * window,
-      kind,
-      x: FIELD.margin + random() * (FIELD.width - FIELD.margin * 2),
-    });
+    const at = ((index + random()) / count) * window;
+    const x = FIELD.margin + random() * (FIELD.width - FIELD.margin * 2);
+    const group = Math.min(ENEMIES[kind].swarm ?? 1, count - index);
+    for (let member = 0; member < group; member += 1) {
+      // 가운데에서 좌우로 번갈아 벌어지게 놓되, 판 안쪽을 벗어나지 않게 한다.
+      const offset = Math.ceil(member / 2) * (member % 2 === 0 ? 1 : -1) * SWARM.spread;
+      spawns.push({
+        at: Math.min(window, at + member * SWARM.stagger),
+        kind,
+        x: Math.min(FIELD.width - FIELD.margin, Math.max(FIELD.margin, x + offset)),
+      });
+    }
+    index += group;
   }
+  const boss = bossKind(day);
   const bosses = bossCount(day);
-  for (let index = 0; index < bosses; index += 1) {
-    spawns.push({ at: 1.5 + index * 6, kind: 'mole', x: (FIELD.width * (index + 1)) / (bosses + 1) });
+  for (let index = 0; boss && index < bosses; index += 1) {
+    spawns.push({ at: 1.5 + index * 6, kind: boss, x: (FIELD.width * (index + 1)) / (bosses + 1) });
   }
   return spawns.sort((a, b) => a.at - b.at);
 }
@@ -168,9 +187,10 @@ export interface Stats {
   stormDamage: number;
 }
 
-export function statsFor(levels: Levels): Stats {
+/** 강화를 반영한 능력치. fields는 지금까지 일군 새 밭의 수로, 물총 피해와 받는 씨앗을 늘린다(처음 밭이면 0). */
+export function statsFor(levels: Levels, fields = 0): Stats {
   const level = (id: UpgradeId): number => levelOf(levels, id);
-  const damage = Math.round(GUN.damage * STEP.power ** level('power'));
+  const damage = Math.round(GUN.damage * STEP.power ** level('power') * fieldDamage(fields));
   const splash = level('splash');
   const chill = level('chill');
   const storm = level('storm');
@@ -187,7 +207,7 @@ export function statsFor(levels: Levels): Stats {
     fenceMax: FENCE_BASE + STEP.fence * level('fence'),
     mend: STEP.mend.base + STEP.mend.step * level('mend'),
     thorns: damage * STEP.thorn * level('thorn'),
-    seedMult: 1 + STEP.harvest * level('harvest'),
+    seedMult: (1 + STEP.harvest * level('harvest')) * fieldSeeds(fields),
     helpers: level('helper'),
     helperDamage: damage * (STEP.compost.base + STEP.compost.step * level('compost')),
     stormCooldown: storm > 0 ? STEP.storm.cooldown - STEP.storm.cooldownStep * (storm - 1) : 0,
@@ -199,8 +219,8 @@ const percent = (ratio: number): string => `${Math.round(ratio * 100)}%`;
 const tenth = (value: number): string => (Math.round(value * 10) / 10).toFixed(1);
 
 /** 그 단계에서 강화가 주는 값을 짧게 적는다(앞에 붙는 말과 값). 값이 없는 단계는 "없음"이다. */
-function effectParts(id: UpgradeId, level: number): readonly [label: string, value: string] {
-  const stats = statsFor({ [id]: level });
+function effectParts(id: UpgradeId, level: number, fields: number): readonly [label: string, value: string] {
+  const stats = statsFor({ [id]: level }, fields);
   const none = level <= 0;
   switch (id) {
     case 'power':
@@ -236,13 +256,13 @@ function effectParts(id: UpgradeId, level: number): readonly [label: string, val
 
 /**
  * 준비 화면의 목록에서 이름 아래에 적는 한 줄: 지금 값과 한 단계 올렸을 때의 값("피해 20 → 21").
- * 다 올린 강화는 지금 값만 적는다.
+ * 다 올린 강화는 지금 값만 적는다. fields(일군 새 밭의 수)가 늘린 피해와 씨앗도 넣어서 적는다.
  */
-export function effectLine(id: UpgradeId, level: number): string {
-  const [label, now] = effectParts(id, level);
+export function effectLine(id: UpgradeId, level: number, fields = 0): string {
+  const [label, now] = effectParts(id, level, fields);
   const head = label ? `${label} ` : '';
   if (level >= UPGRADES[id].maxLevel) return `${head}${now}`;
-  return `${head}${now} → ${effectParts(id, level + 1)[1]}`;
+  return `${head}${now} → ${effectParts(id, level + 1, fields)[1]}`;
 }
 
 // ------------------------------------------------------------ 강화의 값
@@ -289,15 +309,18 @@ export function recordBonus(day: number): number {
 
 // ------------------------------------------------------------ 판 밖 진행
 
-/** 2: 새 출발점이 열리면 시작하는 날을 저절로 그리로 옮긴다. 1의 저장은 읽을 때 가장 늦은 출발점으로 맞춘다. */
-export const META_VERSION = 2;
+/**
+ * 2: 새 출발점이 열리면 시작하는 날을 저절로 그리로 옮긴다. 1의 저장은 읽을 때 가장 늦은 출발점으로 맞춘다.
+ * 3: 새 밭 일구기(fields, bestEver)가 생겼다. 2까지의 저장은 아직 새 밭을 일구지 않은 처음 밭이다.
+ */
+export const META_VERSION = 3;
 
 export interface GardenMeta {
   version: number;
   /** 가진 씨앗 */
   seeds: number;
   levels: Levels;
-  /** 가장 멀리 지킨 날. 하루도 못 지켰으면 0 */
+  /** 지금 밭에서 가장 멀리 지킨 날. 하루도 못 지켰으면 0. 새 밭을 일구면 0으로 돌아간다. */
   best: number;
   /** 마친 판 수 */
   runs: number;
@@ -305,12 +328,27 @@ export interface GardenMeta {
   kills: number;
   /** 준비 화면에서 고른 시작하는 날 */
   startDay: number;
+  /** 지금까지 일군 새 밭의 수. 처음 밭이면 0이다. 하나마다 물총 피해와 받는 씨앗이 늘고, 줄지 않는다. */
+  fields: number;
+  /** 모든 밭을 통틀어 가장 멀리 지킨 날. 새 밭을 일궈도 남는다. */
+  bestEver: number;
   /** 저장한 때(ms). 같은 기기의 다른 곳이 더 늦게 저장한 것을 가리는 데 쓴다. */
   savedAt: number;
 }
 
 export function createMeta(): GardenMeta {
-  return { version: META_VERSION, seeds: 0, levels: {}, best: 0, runs: 0, kills: 0, startDay: 1, savedAt: 0 };
+  return {
+    version: META_VERSION,
+    seeds: 0,
+    levels: {},
+    best: 0,
+    runs: 0,
+    kills: 0,
+    startDay: 1,
+    fields: 0,
+    bestEver: 0,
+    savedAt: 0,
+  };
 }
 
 const count = (value: unknown): number =>
@@ -344,6 +382,9 @@ export function normalizeMeta(raw: unknown): GardenMeta {
   meta.runs = count(data.runs);
   meta.kills = count(data.kills);
   meta.savedAt = count(data.savedAt);
+  meta.fields = count(data.fields);
+  // 버전 2까지는 밭이 하나뿐이어서 지금 밭의 기록이 곧 모든 밭의 기록이다.
+  meta.bestEver = Math.max(count(data.bestEver), meta.best);
   const levels = typeof data.levels === 'object' && data.levels !== null ? (data.levels as Record<string, unknown>) : {};
   for (const id of UPGRADE_ORDER) {
     const level = Math.min(count(levels[id]), UPGRADES[id].maxLevel);
@@ -369,7 +410,12 @@ export function raiseBest(meta: GardenMeta, day: number): GardenMeta {
   const cleared = count(day);
   if (cleared <= meta.best) return meta;
   const opened = latestStart(cleared) > latestStart(meta.best);
-  return { ...meta, best: cleared, startDay: opened ? latestStart(cleared) : meta.startDay };
+  return {
+    ...meta,
+    best: cleared,
+    bestEver: Math.max(meta.bestEver, cleared),
+    startDay: opened ? latestStart(cleared) : meta.startDay,
+  };
 }
 
 /** 앞의 저장(before)과 견주어 새 출발점이 열렸으면 그 날을, 아니면 null을 준다. */
@@ -403,4 +449,48 @@ export function bankSeeds(meta: GardenMeta, seeds: number): GardenMeta {
 /** 한 판을 마친 기록을 넣는다. lastCleared는 그 판에서 마지막으로 지킨 날(없으면 0)이다. */
 export function applyRun(meta: GardenMeta, lastCleared: number, kills: number): GardenMeta {
   return raiseBest({ ...meta, runs: meta.runs + 1, kills: meta.kills + count(kills) }, lastCleared);
+}
+
+// ------------------------------------------------------------ 새 밭 일구기
+
+/**
+ * 새 밭을 일굴 수 있게 되는 날. 지금 밭에서 이 날까지 지켜 냈으면 일굴 수 있다.
+ * 자동 플레이로 재 보면 처음 밭은 70일째 근처부터 크게 느려진다. 그 한참 앞에서 열어서 고를 틈을 준다.
+ */
+export const PLOW_FROM = 50;
+
+/** 일군 밭 하나마다 물총 피해와 받는 씨앗에 더하는 비율. 밭이 쌓이면 더해서 늘린다(둘이면 +60%). */
+export const FIELD_BONUS = { damage: 0.3, seeds: 0.3 } as const;
+
+/** 일군 밭의 수가 물총 피해에 곱하는 배율 */
+export function fieldDamage(fields: number): number {
+  return 1 + FIELD_BONUS.damage * count(fields);
+}
+
+/** 일군 밭의 수가 받는 씨앗에 곱하는 배율 */
+export function fieldSeeds(fields: number): number {
+  return 1 + FIELD_BONUS.seeds * count(fields);
+}
+
+/** 새 밭을 일굴 수 있는지 */
+export function canPlow(meta: GardenMeta): boolean {
+  return meta.best >= PLOW_FROM;
+}
+
+/**
+ * 새 밭을 일군다. 씨앗, 강화, 지금 밭의 기록과 열린 출발점을 내려놓고 1일째부터 다시 시작하는 대신,
+ * 일군 밭이 하나 늘어서 물총 피해와 받는 씨앗이 영원히 늘어난다. 판 수, 벌레 수, 모든 밭의 기록은 남는다.
+ * 아직 일굴 수 없으면 그대로 돌려준다.
+ */
+export function plowField(meta: GardenMeta): GardenMeta {
+  if (!canPlow(meta)) return meta;
+  return {
+    ...meta,
+    seeds: 0,
+    levels: {},
+    best: 0,
+    startDay: 1,
+    fields: meta.fields + 1,
+    bestEver: Math.max(meta.bestEver, meta.best),
+  };
 }

@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { buyCheapest, playCareer, playRun } from './bot';
-import { DAY, ENEMIES, FIELD, GUN, HOP, SHOOTER, STORM, SUMMON, type EnemyKind } from './data';
+import { CHARGE, DAY, DIG, ENEMIES, FIELD, GUN, HOP, SHOOTER, STORM, SUMMON, type EnemyKind } from './data';
 import { clearBonus, createMeta, hpScale, recordBonus, type Levels } from './rules';
 import {
   autoAim,
+  chargePhase,
   clampAim,
   createRun,
+  isBuried,
   runScore,
   step,
   stormReady,
@@ -303,6 +305,103 @@ describe('벌레', () => {
   });
 });
 
+describe('새 벌레와 대장', () => {
+  it('땅강아지는 판의 가운데에서 땅속에 숨고, 숨은 동안에는 겨누지도 맞히지도 못한다', () => {
+    const state = emptied({ splash: 3, storm: 1 });
+    const digger = put(state, 'digger', SHOOTER.x, (DIG.from + DIG.to) / 2, 500);
+    expect(isBuried(digger)).toBe(true);
+    expect(autoAim(state, SHOOTER)).toBeNull();
+    // 바로 앞을 겨눠 쏴도 물방울이 그냥 지나간다.
+    const events = run(state, 1, { aim: { x: digger.x, y: digger.y }, storm: false });
+    expect(count(events, 'fire')).toBeGreaterThan(0);
+    expect(count(events, 'hit')).toBe(0);
+    // 물벼락도 닿지 않는다.
+    state.stormIn = 0;
+    step(state, DT, { aim: null, storm: true });
+    expect(digger.hp).toBe(digger.maxHp);
+    // 땅 위로 나오면 다시 맞는다.
+    const out = put(state, 'digger', SHOOTER.x, DIG.to + 5, 500);
+    expect(isBuried(out)).toBe(false);
+    expect(autoAim(state, SHOOTER)?.x).toBe(out.x);
+  });
+
+  it('땅강아지는 울타리에 닿기 전에 땅 위로 나온다', () => {
+    expect(DIG.from).toBeGreaterThan(0);
+    expect(DIG.to).toBeLessThan(FIELD.depth - ENEMIES.digger.radius - 40);
+    const state = emptied();
+    state.fireIn = 1e9;
+    const digger = put(state, 'digger', 100, 0);
+    const seen = new Set<boolean>();
+    for (let time = 0; time < 20 && !digger.biting; time += DT) {
+      step(state, DT);
+      seen.add(isBuried(digger));
+    }
+    expect([...seen].sort()).toEqual([false, true]);
+    expect(digger.biting).toBe(true);
+    expect(isBuried(digger)).toBe(false);
+  });
+
+  it('장수풍뎅이는 웅크려 멈췄다가 빠르게 돌진하고, 부하는 부르지 않는다', () => {
+    const state = emptied({}, 10);
+    state.fireIn = 1e9;
+    const rhino = put(state, 'rhino', 120, 0);
+    rhino.summonIn = CHARGE.every;
+    const phases: Array<{ phase: string; dy: number }> = [];
+    let spawns = 0;
+    for (let time = 0; time < CHARGE.every * 2; time += DT) {
+      const before = rhino.y;
+      // 이 프레임의 걸음은 프레임을 시작할 때의 때를 따른다.
+      const phase = chargePhase(rhino);
+      spawns += count(step(state, DT), 'spawn');
+      phases.push({ phase, dy: rhino.y - before });
+    }
+    expect(spawns).toBe(0);
+    expect(state.enemies).toHaveLength(1);
+    const walk = phases.filter((frame) => frame.phase === 'walk');
+    const windup = phases.filter((frame) => frame.phase === 'windup');
+    const rush = phases.filter((frame) => frame.phase === 'rush');
+    expect(windup.length).toBeGreaterThan(0);
+    expect(rush.length).toBeGreaterThan(0);
+    for (const frame of windup) expect(frame.dy).toBe(0);
+    const pace = (frames: typeof phases): number => frames.reduce((sum, frame) => sum + frame.dy, 0) / (frames.length * DT);
+    expect(pace(walk)).toBeCloseTo(ENEMIES.rhino.speed, 3);
+    expect(pace(rush)).toBeCloseTo(ENEMIES.rhino.speed * CHARGE.speed, 3);
+    // 웅크리는 때와 돌진하는 때가 차례로 온다.
+    const firstWindup = phases.findIndex((frame) => frame.phase === 'windup');
+    const firstRush = phases.findIndex((frame) => frame.phase === 'rush');
+    expect(firstWindup).toBeLessThan(firstRush);
+  });
+
+  it('장수풍뎅이는 젖으면 돌진의 박자도 느려진다', () => {
+    const rushesIn = (slow: number): number => {
+      const state = emptied({}, 10);
+      state.fireIn = 1e9;
+      const rhino = put(state, 'rhino', 120, 0);
+      rhino.summonIn = CHARGE.every;
+      rhino.slow = slow;
+      rhino.slowLeft = 99;
+      let time = 0;
+      while (chargePhase(rhino) !== 'rush') {
+        step(state, DT);
+        time += DT;
+      }
+      return time;
+    };
+    expect(rushesIn(0.5)).toBeGreaterThan(rushesIn(0) * 1.8);
+  });
+
+  it('대장의 날에는 그날의 대장이 나온다', () => {
+    for (const [day, kind] of [
+      [5, 'mole'],
+      [10, 'rhino'],
+    ] as const) {
+      const state = start({}, day, 0);
+      const events = run(state, 3);
+      expect(events.some((event) => event.type === 'spawn' && event.kind === kind), `${day}`).toBe(true);
+    }
+  });
+});
+
 describe('물벼락', () => {
   it('강화가 없으면 쓸 수 없다', () => {
     const state = emptied();
@@ -337,9 +436,9 @@ describe('물벼락', () => {
 });
 
 describe('하루', () => {
-  it('벌레를 다 쫓아내면 날이 넘어가고, 씨앗을 받고, 잠깐 쉰 뒤 다음 날이 온다', () => {
+  it('벌레를 다 쫓아내면 날이 넘어가고, 씨앗을 받고, 강화를 고르고 잠깐 쉰 뒤 다음 날이 온다', () => {
     const state = start();
-    const events = run(state, 60);
+    const events = run(state, 60, { aim: null, storm: false, pick: 0 });
     const clear = events.find((event) => event.type === 'dayClear');
     expect(clear).toMatchObject({ type: 'dayClear', day: 1, record: true });
     expect(count(events, 'kill')).toBeGreaterThanOrEqual(DAY.count.first);
@@ -356,6 +455,8 @@ describe('하루', () => {
     expect(ant.hp).toBeLessThanOrEqual(0);
     expect(count(events, 'dayClear')).toBe(1);
     expect(state.phase).toBe('rest');
+    // 강화를 고르는 것은 boons.test.ts에서 본다. 여기서는 고를 것이 없을 때의 쉬는 시간만 본다.
+    state.offer = [];
     state.stormIn = 0;
     expect(stormReady(state)).toBe(false);
     const day = state.day;
@@ -411,31 +512,37 @@ describe('하루', () => {
 });
 
 describe('밸런스', () => {
-  it('강화 없이는 첫 대장을 넘지 못하지만 며칠은 버틴다', () => {
-    for (const seed of [1, 2, 3]) {
+  it('영구 강화 없이는 지켜보기만 해서 첫 대장을 넘지 못하고, 직접 겨누고 잘 골라도 둘째 대장은 넘지 못한다', () => {
+    let passedFirstBoss = 0;
+    const seeds = [1, 2, 3, 4, 5, 6];
+    for (const seed of seeds) {
       const idle = playRun({ seed, startDay: 1, levels: {}, bestBefore: 0 }, 'idle');
       const active = playRun({ seed, startDay: 1, levels: {}, bestBefore: 0 }, 'active');
       expect(idle.phase).toBe('over');
       expect(idle.lastCleared, `idle ${seed}`).toBeGreaterThanOrEqual(2);
+      expect(idle.lastCleared, `idle ${seed}`).toBeLessThan(5);
       expect(active.lastCleared, `active ${seed}`).toBeGreaterThanOrEqual(idle.lastCleared);
-      expect(active.lastCleared, `active ${seed}`).toBeLessThanOrEqual(5);
+      expect(active.lastCleared, `active ${seed}`).toBeLessThan(10);
+      if (active.lastCleared >= 5) passedFirstBoss += 1;
       // 첫 판에서도 강화 하나는 살 만큼 번다.
       expect(Math.floor(idle.seeds), `idle ${seed}`).toBeGreaterThanOrEqual(12);
       // 한 판이 너무 길지 않다.
-      expect(active.t).toBeLessThan(240);
+      expect(active.t).toBeLessThan(300);
     }
+    // 고른 강화가 잘 맞은 판에서는 첫 대장을 넘기도 하지만, 늘 그렇지는 않다.
+    expect(passedFirstBoss).toBeLessThan(seeds.length);
   });
 
   it('판을 거듭하며 강화를 사면 점점 더 멀리 간다', () => {
     const career = playCareer(createMeta(), 10, 'active', 5);
     const bests = career.runs.map((_, index) => Math.max(...career.runs.slice(0, index + 1).map((run) => run.cleared)));
-    expect(bests[0]).toBeLessThanOrEqual(5);
+    expect(bests[0]).toBeLessThan(10);
     expect(bests[4]).toBeGreaterThan(bests[0]);
     expect(bests[9]).toBeGreaterThan(bests[4]);
     expect(career.meta.best).toBe(bests[9]);
     expect(career.meta.runs).toBe(10);
     // 열 판으로 끝을 보지는 못한다.
-    expect(career.meta.best).toBeLessThan(25);
+    expect(career.meta.best).toBeLessThan(35);
     // 판마다 무언가를 살 만큼은 번다.
     for (const played of career.runs) expect(played.seeds).toBeGreaterThanOrEqual(10);
   });

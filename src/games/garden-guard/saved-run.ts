@@ -7,11 +7,11 @@
  * RunState, Enemy, Shot, Spawn, Stats에 필드를 더하면 아래의 *_SHAPE에도 적어야 타입 검사를 통과한다.
  * 필드를 더했으면 RUN_VERSION도 올린다. 옛 저장에는 새 필드가 없어서 어차피 버려지지만, 숫자로 남겨 두면 알아보기 쉽다.
  */
-import { ENEMIES, type EnemyKind } from './data';
+import { BOONS, ENEMIES, type BoonId, type EnemyKind } from './data';
 import { applyRun, bankSeeds, type GardenMeta, type Spawn, type Stats } from './rules';
 import type { Enemy, Phase, RunState, Shot } from './sim';
 
-export const RUN_VERSION = 1;
+export const RUN_VERSION = 2;
 
 export interface SavedRun {
   state: RunState;
@@ -54,6 +54,8 @@ const STATE_SHAPE: Record<keyof RunState, Kind> = {
   kills: 'number',
   seeds: 'number',
   lastCleared: 'number',
+  boons: 'array',
+  offer: 'array',
 };
 
 const ENEMY_SHAPE: Record<keyof Enemy, Kind> = {
@@ -128,12 +130,14 @@ function fits(value: unknown, shape: Record<string, Kind>): value is Record<stri
 }
 
 const isKind = (value: unknown): value is EnemyKind => typeof value === 'string' && Object.hasOwn(ENEMIES, value);
+const isBoon = (value: unknown): value is BoonId => typeof value === 'string' && Object.hasOwn(BOONS, value);
 const allNumbers = (value: unknown): boolean => Array.isArray(value) && value.every((item) => kindOf(item) === 'number');
+const allBoons = (value: unknown): boolean => Array.isArray(value) && value.every(isBoon);
 
 function isRunState(value: unknown): value is RunState {
   if (!fits(value, STATE_SHAPE)) return false;
   if (!LIVE_PHASES.includes(value.phase as Phase) || !fits(value.stats, STATS_SHAPE)) return false;
-  if (!allNumbers(value.helperIn)) return false;
+  if (!allNumbers(value.helperIn) || !allBoons(value.boons) || !allBoons(value.offer)) return false;
   const queue = value.queue as unknown[];
   const enemies = value.enemies as unknown[];
   const shots = value.shots as unknown[];

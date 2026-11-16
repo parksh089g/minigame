@@ -19,11 +19,12 @@ import {
   type WeaponId,
 } from '../src/games/lantern-keeper/data';
 import { CHARMS, REROLL_COST, SLOTS, type RunState } from '../src/games/candy-slot/rules';
-import { GARDEN_SCENE, UPGRADE_ORDER, UPGRADES } from '../src/games/garden-guard/data';
+import { BOON_PICKS, BOONS, GARDEN_SCENE, UPGRADE_ORDER, UPGRADES, type BoonId } from '../src/games/garden-guard/data';
 import { iconKey } from '../src/games/lantern-keeper/icons';
 import { NEWS_GAP, newsLine, normalizeMeta, unknownNews } from '../src/games/lantern-keeper/meta';
 import { echoText, upgradeDescription, upgradeTitle, type Upgrade } from '../src/games/lantern-keeper/rules';
 import { levelPuzzle as pathLinkPuzzle } from '../src/games/path-link/rules';
+import { GAMES, gamesInGroup, HUB_GROUP_LABEL } from '../src/games/registry';
 import { levelPuzzle } from '../src/games/pin-pull/levels';
 import {
   MAX_STACK,
@@ -137,6 +138,157 @@ const levelUpOf = (page: Page): Promise<{ options: Upgrade[]; rerolls: number; b
     const sim = (window.__pocketArcade?.scene.getScene(key) as unknown as LanternView).sim!;
     return { options: sim.options(), rerolls: sim.rerolls, banishes: sim.banishes };
   }, LANTERN_SCENE);
+
+/** 허브 세이브를 앱이 읽기 전에 넣어 둔다. 저장하는 곳과 이름은 core/store.ts와 같고, 빠진 값은 normalizeSave가 채워 읽는다. */
+async function seedSave(page: Page, save: object): Promise<void> {
+  await page.evaluate(
+    (value) =>
+      new Promise<void>((resolve, reject) => {
+        const open = indexedDB.open('pocket-arcade');
+        open.onupgradeneeded = () => open.result.createObjectStore('kv');
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const tx = open.result.transaction('kv', 'readwrite');
+          tx.objectStore('kv').put(value, 'save');
+          tx.oncomplete = () => {
+            open.result.close();
+            resolve();
+          };
+          tx.onerror = () => reject(tx.error);
+        };
+      }),
+    save,
+  );
+}
+
+/** 허브에 보이는 글자들. 카드(컨테이너) 안에 든 것까지 모으고, 줄인 글자는 얼마나 줄였는지도 함께 준다. */
+const hubTexts = (page: Page): Promise<Array<{ text: string; scale: number }>> =>
+  page.evaluate((key) => {
+    const scene = window.__pocketArcade?.scene.getScene(key);
+    if (!scene) return [];
+    const all = (list: Phaser.GameObjects.GameObject[]): Phaser.GameObjects.GameObject[] =>
+      list.flatMap((item) => (item.type === 'Container' ? all((item as Phaser.GameObjects.Container).list) : [item]));
+    return all(scene.children.list).flatMap((item) => {
+      const text = item as Phaser.GameObjects.Text;
+      return item.type === 'Text' && text.visible && text.alpha > 0 ? [{ text: text.text, scale: text.scaleX }] : [];
+    });
+  }, SCENE.hub);
+
+/** 허브의 쪽 넘김 줄에서 "다음 쪽" 버튼의 자리. 쪽이 하나뿐이거나 마지막 쪽이면 null이다. */
+const hubNextPage = (page: Page): Promise<{ x: number; y: number } | null> =>
+  page.evaluate((key) => {
+    const scene = window.__pocketArcade?.scene.getScene(key);
+    if (!scene) return null;
+    const arrow = scene.children.list.find((item): item is Phaser.GameObjects.Image => {
+      const image = item as Phaser.GameObjects.Image;
+      return item.type === 'Image' && image.texture.key === 'icon-play' && image.visible && image.alpha === 1;
+    });
+    return arrow ? { x: arrow.x, y: arrow.y } : null;
+  }, SCENE.hub);
+
+/** 허브의 게임 목록을 옆으로 민다. 왼쪽으로 밀면(direction 1) 다음 쪽이나 다음 갈래로 넘어간다. */
+async function swipeHub(page: Page, direction: 1 | -1): Promise<void> {
+  const box = await page.locator('canvas').boundingBox();
+  if (!box) throw new Error('캔버스가 보이지 않는다');
+  const scale = box.width / GAME_WIDTH;
+  const y = box.y + 240 * scale;
+  const from = box.x + (GAME_WIDTH / 2 + direction * 60) * scale;
+  const to = box.x + (GAME_WIDTH / 2 - direction * 60) * scale;
+  await page.mouse.move(from, y);
+  await page.mouse.down();
+  await page.mouse.move(to, y, { steps: 6 });
+  await page.mouse.up();
+}
+
+it('허브: 꾸준히 하는 게임과 짧게 즐기는 게임이 탭으로 나뉘고, 두 탭의 모든 쪽에서 카드의 글이 가려지거나 줄어들지 않는다', async ({
+  page,
+}) => {
+  const steady = gamesInGroup(GAMES, 'steady');
+  const quick = gamesInGroup(GAMES, 'quick');
+  const titles = (games: readonly { title: string }[]): string[] => games.map((game) => game.title).sort();
+  /** 지금 허브에 카드로 보이는 게임의 이름 */
+  const shownTitles = async (games: readonly { title: string }[]): Promise<string[]> => {
+    const texts = new Set((await hubTexts(page)).map((item) => item.text));
+    return games.map((game) => game.title).filter((title) => texts.has(title));
+  };
+  /** 탭의 이름과 한 줄 소개처럼 줄여 적으면 안 되는 글 가운데 줄어든 것 */
+  const shrunk = async (labels: readonly string[]): Promise<string[]> =>
+    (await hubTexts(page)).filter((item) => labels.includes(item.text) && item.scale < 0.999).map((item) => item.text);
+  const tabLabels = Object.values(HUB_GROUP_LABEL);
+
+  // 처음 여는 허브(해 본 게임이 없다)는 꾸준히 하는 게임을 보여 준다.
+  await openApp(page);
+  await expect.poll(async () => (await shownTitles(steady)).sort(), WAIT).toEqual(titles(steady));
+  expect(await shownTitles(quick), '짧게 즐기는 게임은 다른 탭에 있다').toEqual([]);
+  expect(await hiddenTexts(page, SCENE.hub), '처음 여는 허브').toEqual([]);
+
+  // 기록과 오늘 할 일이 있는 저장: 등불지기는 "오늘의 판 아직", 텃밭 지키기는 "강화 가능"이 기록 자리에 뜬다.
+  // 가장 최근에 한 게임이 짧게 즐기는 게임이라, 다시 열면 그쪽 탭이 열린다.
+  const now = Date.now();
+  const played = (best: number, minutesAgo: number): object => ({ best, plays: 3, lastPlayedAt: now - minutesAgo * 60_000 });
+  await seedSave(page, {
+    coins: 98765,
+    favorites: [quick[3].id],
+    games: {
+      ...Object.fromEntries(steady.map((game, index) => [game.id, played(123456, 30 + index)])),
+      ...Object.fromEntries(quick.slice(0, 8).map((game, index) => [game.id, played(98765, 5 + index)])),
+    },
+  });
+  await seedLanternMeta(page, { clears: 1, runs: 3, bestSeconds: 600 });
+  await seedGardenMeta(page, { version: 2, seeds: 98765, levels: {}, best: 13, runs: 21, kills: 2890, startDay: 1, savedAt: now + 60_000 });
+  await page.reload();
+  await waitForScene(page, SCENE.hub);
+  await expect.poll(() => textPoint(page, SCENE.hub, '퍼즐 단계'), { ...WAIT, message: '최근에 한 게임이 있는 탭이 열려야 한다' }).not.toBeNull();
+  expect(await shownTitles(steady), '꾸준히 하는 게임은 다른 탭에 있다').toEqual([]);
+
+  // 짧게 즐기는 게임: 쪽을 끝까지 넘겨 가며 본다. 게임마다 한 번씩, 그리고 퍼즐 단계 카드가 나와야 한다.
+  const walkQuick = async (where: string): Promise<void> => {
+    const seen: string[] = [];
+    for (let turn = 0; turn < quick.length; turn += 1) {
+      expect(await hiddenTexts(page, SCENE.hub), `${where}: 짧게 즐기는 게임 ${turn + 1}쪽`).toEqual([]);
+      expect(await shrunk(tabLabels), `${where}: 탭의 이름은 줄여 적지 않는다`).toEqual([]);
+      const shown = await shownTitles(quick);
+      expect(shown.length, `${where}: ${turn + 1}쪽에 카드가 있어야 한다`).toBeGreaterThan(0);
+      seen.push(...shown);
+      const next = await hubNextPage(page);
+      if (!next) break;
+      await tapAt(page, next.x, next.y);
+      await expect.poll(() => shownTitles(quick), WAIT).not.toEqual(shown);
+      await page.waitForTimeout(200);
+    }
+    expect([...seen].sort(), `${where}: 짧게 즐기는 게임이 모두 한 번씩 나와야 한다`).toEqual(titles(quick));
+  };
+  // 꾸준히 하는 게임: 한 쪽에 모두 보이고, 한 줄 소개와 기록 자리의 글(오늘 할 일 포함)이 서로 가리지 않는다.
+  const intros = steady.map((game) => game.steady ?? '');
+  const checkSteady = async (where: string): Promise<void> => {
+    await tapText(page, SCENE.hub, HUB_GROUP_LABEL.steady);
+    await expect.poll(async () => (await shownTitles(steady)).sort(), WAIT).toEqual(titles(steady));
+    expect(await shownTitles(quick)).toEqual([]);
+    await expect.poll(() => textPoint(page, SCENE.hub, '강화 가능'), { ...WAIT, message: '텃밭 지키기의 할 일' }).not.toBeNull();
+    await expect.poll(() => textPoint(page, SCENE.hub, '오늘의 판 아직'), { ...WAIT, message: '등불지기의 할 일' }).not.toBeNull();
+    await page.waitForTimeout(200);
+    expect(await hiddenTexts(page, SCENE.hub), `${where}: 꾸준히 하는 게임`).toEqual([]);
+    expect((await hubTexts(page)).map((item) => item.text), '게임마다 한 줄 소개가 보여야 한다').toEqual(expect.arrayContaining(intros));
+    expect(await shrunk([...intros, ...tabLabels]), `${where}: 한 줄 소개와 탭의 이름은 줄여 적지 않는다`).toEqual([]);
+  };
+  await walkQuick('휴대폰');
+  await checkSteady('휴대폰');
+
+  // 옆으로 밀면 갈래를 넘나든다: 꾸준히 하는 게임에서 왼쪽으로 밀면 짧게 즐기는 게임의 첫 쪽, 거기서 오른쪽으로 밀면 되돌아온다.
+  await swipeHub(page, 1);
+  await expect.poll(() => textPoint(page, SCENE.hub, '퍼즐 단계'), { ...WAIT, message: '밀어서 짧게 즐기는 게임으로' }).not.toBeNull();
+  await page.waitForTimeout(200);
+  await swipeHub(page, -1);
+  await expect.poll(async () => (await shownTitles(steady)).sort(), { ...WAIT, message: '밀어서 꾸준히 하는 게임으로' }).toEqual(titles(steady));
+
+  // 태블릿처럼 가로로 넓은 화면은 논리 높이가 가장 짧다(400). 카드를 조금 낮춰 놓는 그 화면에서도 두 탭을 다시 본다.
+  await page.setViewportSize({ width: 768, height: 1024 });
+  await page.reload();
+  await waitForScene(page, SCENE.hub);
+  await expect.poll(() => textPoint(page, SCENE.hub, '퍼즐 단계'), WAIT).not.toBeNull();
+  await walkQuick('가장 짧은 화면');
+  await checkSteady('가장 짧은 화면');
+});
 
 it('등불지기 잔치의 밤: 고르는 창, 강화권 카드 넷~여섯 장(진화 카드 포함), 일시정지 빌드, 레벨업 창, 골라내기 화면이 가려지지 않는다', async ({ page }) => {
   // 판을 하나 끝까지 하는 셈이라 화면 점검 하나보다 오래 걸린다.
@@ -1260,6 +1412,81 @@ it('텃밭 지키기: 준비 화면의 강화 줄(모든 쪽)과 판 화면이 �
   expect(await hiddenTexts(page, GARDEN_SCENE), '돌아온 준비 화면').toEqual([]);
 });
 
+it('텃밭 지키기: 날을 지키면 강화 셋을 내놓고, 고른 것이 그 판에 붙고, 고르던 중에 나갔다 와도 같은 셋을 다시 내놓는다', async ({ page }) => {
+  await openApp(page);
+  // 물벼락과 해바라기까지 가진 저장이라, 그것을 키우는 강화도 나올 수 있다.
+  await seedGardenMeta(page, {
+    version: 2,
+    seeds: 0,
+    levels: { power: 20, rapid: 6, fence: 10, helper: 1, storm: 1 },
+    best: 0,
+    runs: 5,
+    kills: 100,
+    startDay: 1,
+    savedAt: Date.now() + 60_000,
+  });
+  await page.reload();
+  await waitForScene(page, 'Hub');
+  await startScene(page, GARDEN_SCENE);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, '출발!'), WAIT).not.toBeNull();
+  await tapText(page, GARDEN_SCENE, '출발!');
+  type Picking = { day: number; offer: BoonId[]; boons: BoonId[]; fenceMax: number };
+  const picking = (): Promise<Picking | null> =>
+    page.evaluate((key) => {
+      const scene = window.__pocketArcade?.scene.getScene(key) as unknown as {
+        run: { day: number; offer: BoonId[]; boons: BoonId[]; stats: { fenceMax: number } } | null;
+      } | null;
+      const run = scene?.run;
+      return run ? { day: run.day, offer: [...run.offer], boons: [...run.boons], fenceMax: run.stats.fenceMax } : null;
+    }, GARDEN_SCENE);
+  const title = '강화를 하나 골라요';
+
+  // 첫날을 지키면 고르는 창이 뜬다. 내놓은 셋의 이름과 설명이 가려지지 않는다.
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, title), { timeout: 60_000, message: '고르는 창' }).not.toBeNull();
+  const first = (await picking())!;
+  expect(first.day).toBe(1);
+  expect(first.offer).toHaveLength(3);
+  expect(await textPoint(page, GARDEN_SCENE, `이 판에서만 써요 · 1/${BOON_PICKS}`)).not.toBeNull();
+  // 그날을 지킨 알림은 창의 맨 위에 함께 적힌다.
+  expect(await textPoint(page, GARDEN_SCENE, '1일째 지킴!')).not.toBeNull();
+  for (const id of first.offer) {
+    expect(await textPoint(page, GARDEN_SCENE, BOONS[id].name), BOONS[id].name).not.toBeNull();
+    expect(await textPoint(page, GARDEN_SCENE, BOONS[id].blurb), BOONS[id].blurb).not.toBeNull();
+  }
+  expect(await hiddenTexts(page, GARDEN_SCENE), '고르는 창').toEqual([]);
+
+  // 고르지 않고 준비 화면으로 나갔다가 이어 하면, 같은 셋을 다시 내놓는다.
+  await page.evaluate((key) => (window.__pocketArcade?.scene.getScene(key) as unknown as { pauseGame(): void }).pauseGame(), GARDEN_SCENE);
+  await waitForScene(page, SCENE.pause);
+  await tapText(page, SCENE.pause, '준비 화면으로');
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, '이어하기 · 1일째'), WAIT).not.toBeNull();
+  await tapText(page, GARDEN_SCENE, '이어하기 · 1일째');
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, title), { ...WAIT, message: '이어 한 판의 고르는 창' }).not.toBeNull();
+  expect((await picking())!.offer).toEqual(first.offer);
+
+  // 가운데 것을 고르면 창이 닫히고 그 강화가 붙은 채로 다음 날이 온다.
+  const chosen = first.offer[1];
+  await expect
+    .poll(
+      async () => {
+        const point = await textPoint(page, GARDEN_SCENE, BOONS[chosen].blurb);
+        if (point) await tapAt(page, point.x, point.y);
+        return (await picking())?.boons ?? [];
+      },
+      { ...WAIT, message: '고른 강화가 붙어야 한다' },
+    )
+    .toEqual([chosen]);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, title), WAIT).toBeNull();
+  await expect.poll(async () => (await picking())?.day, { ...WAIT, message: '다음 날' }).toBe(2);
+
+  // 멈추면 이 판에서 고른 강화가 보인다.
+  await page.evaluate((key) => (window.__pocketArcade?.scene.getScene(key) as unknown as { pauseGame(): void }).pauseGame(), GARDEN_SCENE);
+  await waitForScene(page, SCENE.pause);
+  await expect.poll(() => textPoint(page, SCENE.pause, `이 판에서 고른 강화 1/${BOON_PICKS}`), WAIT).not.toBeNull();
+  expect(await textPoint(page, SCENE.pause, BOONS[chosen].name)).not.toBeNull();
+  expect(await hiddenTexts(page, SCENE.pause), '일시정지의 고른 강화').toEqual([]);
+});
+
 it('텃밭 지키기: 하던 판을 두고 나가거나 앱이 꺼져도 준비 화면에서 그 자리부터 이어 하고, 새 판을 고르면 그 판을 마친다', async ({ page }) => {
   await openApp(page);
   await seedGardenMeta(page, {
@@ -1324,4 +1551,77 @@ it('텃밭 지키기: 하던 판을 두고 나가거나 앱이 꺼져도 준비 
   const texts = await gardenTexts(page);
   expect(texts.some((text) => text.startsWith('6판')), `판 수가 하나 늘어야 한다: ${texts.join(' / ')}`).toBe(true);
   expect(texts).not.toContain('이어하기 · 1일째');
+});
+
+it('텃밭 지키기: 50일째를 지키면 새 밭을 일굴 수 있고, 잃는 것과 얻는 것을 보여 준 뒤 두 번 눌러야 일군다', async ({ page }) => {
+  // 준비 화면의 글(garden-guard/lobby.ts). lobby.ts는 Phaser를 불러서 여기서 가져올 수 없다.
+  const PLOW_LABEL = '새 밭 일구기';
+  const PLOW_GO = '일구기';
+  const PLOW_SURE = '정말 일구기';
+  const PLOW_CONFIRM = '되돌릴 수 없어요.\n한 번 더 누르면 새 밭으로 가요.';
+  await openApp(page);
+  const levels = Object.fromEntries(UPGRADE_ORDER.map((id) => [id, Math.min(UPGRADES[id].maxLevel, 8)]));
+  await seedGardenMeta(page, {
+    version: 2,
+    seeds: 98765,
+    levels,
+    best: 63,
+    runs: 88,
+    kills: 123456,
+    startDay: 61,
+    savedAt: Date.now() + 60_000,
+  });
+  await page.reload();
+  await waitForScene(page, 'Hub');
+  await startScene(page, GARDEN_SCENE);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, PLOW_LABEL), { ...WAIT, message: '새 밭 일구기 버튼' }).not.toBeNull();
+  expect(await hiddenTexts(page, GARDEN_SCENE), '새 밭 버튼이 있는 준비 화면').toEqual([]);
+
+  // 버튼을 누르면 준비 화면 대신 두고 가는 것, 얻는 것, 남는 것이 보인다.
+  await tapText(page, GARDEN_SCENE, PLOW_LABEL);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, '두고 가는 것'), { ...WAIT, message: '새 밭 쪽' }).not.toBeNull();
+  const texts = await gardenTexts(page);
+  for (const line of ['· 씨앗 98765개', '· 강화 14가지 (모두 0단계로)', '· 최고 63일째와 열린 출발점', '· 물총 피해 +0% → +30%', '· 받는 씨앗 +0% → +30%']) {
+    expect(texts, line).toContain(line);
+  }
+  expect(texts, '준비 화면의 출발 버튼은 감춘다').not.toContain('출발!');
+  expect(await hiddenTexts(page, GARDEN_SCENE), '새 밭 쪽').toEqual([]);
+
+  // 한 번 누르면 되묻기만 하고, 그만두면 그대로인 준비 화면으로 돌아간다.
+  await tapText(page, GARDEN_SCENE, PLOW_GO);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, PLOW_CONFIRM), { ...WAIT, message: '한 번 더 묻는다' }).not.toBeNull();
+  expect(await textPoint(page, GARDEN_SCENE, PLOW_SURE)).not.toBeNull();
+  expect(await hiddenTexts(page, GARDEN_SCENE), '되묻는 새 밭 쪽').toEqual([]);
+  await tapText(page, GARDEN_SCENE, '그만두기');
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, '최고 63일째'), { ...WAIT, message: '그만두면 그대로' }).not.toBeNull();
+  expect(await textPoint(page, GARDEN_SCENE, '61일째'), '고른 시작 날도 그대로').not.toBeNull();
+
+  // 두 번 누르면 일군다: 1일째부터, 씨앗 0, 강화 0단계, "2번째 밭"이 보이고 효과 줄에 늘어난 피해가 들어간다.
+  await tapText(page, GARDEN_SCENE, PLOW_LABEL);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, PLOW_GO), WAIT).not.toBeNull();
+  await tapText(page, GARDEN_SCENE, PLOW_GO);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, PLOW_SURE), WAIT).not.toBeNull();
+  await tapText(page, GARDEN_SCENE, PLOW_SURE);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, '출발!'), { ...WAIT, message: '새 밭의 준비 화면' }).not.toBeNull();
+  const after = await gardenTexts(page);
+  expect(after).toContain('2번째 밭을 일궜어요!\n물총 피해와 씨앗이 +30%예요.');
+  expect(after).toContain('2번째 밭 · 88판');
+  expect(after).toContain('아직 하루도 못 지켰어요');
+  expect(after, '시작하는 날을 고르는 칸이 없어진다').not.toContain('61일째');
+  expect(after, '새 밭 버튼은 다시 50일째를 지켜야 생긴다').not.toContain(PLOW_LABEL);
+  expect(after.filter((text) => text === '0단계').length, '강화가 0단계로 돌아간다').toBeGreaterThan(0);
+  expect(await hiddenTexts(page, GARDEN_SCENE), '새 밭의 준비 화면').toEqual([]);
+  const stored = await page.evaluate(
+    () =>
+      new Promise<{ seeds: number; fields: number; best: number; bestEver: number }>((resolve, reject) => {
+        const open = indexedDB.open('pocket-arcade-garden');
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const request = open.result.transaction('kv').objectStore('kv').get('meta');
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        };
+      }),
+  );
+  expect(stored).toMatchObject({ seeds: 0, fields: 1, best: 0, bestEver: 63 });
 });

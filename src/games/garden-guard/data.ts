@@ -30,10 +30,23 @@ export const HELPER_SPOTS = [
 
 // ------------------------------------------------------------ 벌레
 
-export type EnemyKind = 'ant' | 'ladybug' | 'snail' | 'bee' | 'hopper' | 'beetle' | 'mole';
+export type EnemyKind =
+  | 'ant'
+  | 'ladybug'
+  | 'snail'
+  | 'bee'
+  | 'hopper'
+  | 'beetle'
+  | 'mosquito'
+  | 'digger'
+  | 'mole'
+  | 'rhino';
 
-/** 벌레가 다가오는 방식. walk는 곧장 걷고, weave는 좌우로 흔들며 날고, hop은 쉬었다가 폴짝 뛴다. */
-export type Gait = 'walk' | 'weave' | 'hop';
+/**
+ * 벌레가 다가오는 방식. walk는 곧장 걷고, weave는 좌우로 흔들며 날고, hop은 쉬었다가 폴짝 뛰고,
+ * dig는 판의 가운데쯤에서 땅속으로 들어가 숨어서 지나간다(DIG).
+ */
+export type Gait = 'walk' | 'weave' | 'hop' | 'dig';
 
 export interface EnemyDef {
   name: string;
@@ -55,7 +68,11 @@ export interface EnemyDef {
   fromDay: number;
   /** 섞이는 비중: 나오기 시작한 날의 값(first)에서 하루에 step씩 늘어 max까지 */
   weight: { first: number; step: number; max: number };
+  /** 한 번 뽑히면 이만큼이 한 무리로 붙어서 나온다(모기). 그날 나올 벌레 수에서 그만큼을 쓴다. */
+  swarm?: number;
   boss?: boolean;
+  /** 대장의 솜씨: summon은 부하를 부르고(SUMMON), charge는 웅크렸다가 돌진한다(CHARGE). */
+  skill?: 'summon' | 'charge';
 }
 
 export const ENEMIES: Readonly<Record<EnemyKind, EnemyDef>> = {
@@ -132,6 +149,31 @@ export const ENEMIES: Readonly<Record<EnemyKind, EnemyDef>> = {
     fromDay: 8,
     weight: { first: 1.5, step: 0.5, max: 5 },
   },
+  mosquito: {
+    name: '모기',
+    hp: 9,
+    speed: 40,
+    bite: 3,
+    biteEvery: 0.7,
+    radius: 6,
+    seeds: 1,
+    gait: 'walk',
+    swarm: 4,
+    fromDay: 14,
+    weight: { first: 1.2, step: 0.15, max: 2.4 },
+  },
+  digger: {
+    name: '땅강아지',
+    hp: 64,
+    speed: 25,
+    bite: 9,
+    biteEvery: 1.1,
+    radius: 9,
+    seeds: 3,
+    gait: 'dig',
+    fromDay: 24,
+    weight: { first: 1.5, step: 0.3, max: 4 },
+  },
   mole: {
     name: '대장 두더지',
     hp: 700,
@@ -144,21 +186,60 @@ export const ENEMIES: Readonly<Record<EnemyKind, EnemyDef>> = {
     fromDay: 5,
     weight: { first: 0, step: 0, max: 0 },
     boss: true,
+    skill: 'summon',
+  },
+  rhino: {
+    name: '대장 장수풍뎅이',
+    hp: 840,
+    speed: 5.5,
+    bite: 24,
+    biteEvery: 1.6,
+    radius: 18,
+    seeds: 12,
+    gait: 'walk',
+    fromDay: 10,
+    weight: { first: 0, step: 0, max: 0 },
+    boss: true,
+    skill: 'charge',
   },
 };
 
 /** 여느 날에 섞여 나오는 벌레(대장 빼고)를 나오기 시작하는 날 순서로 */
-export const COMMON_KINDS: readonly EnemyKind[] = ['ant', 'ladybug', 'snail', 'bee', 'hopper', 'beetle'];
+export const COMMON_KINDS: readonly EnemyKind[] = [
+  'ant',
+  'ladybug',
+  'snail',
+  'bee',
+  'hopper',
+  'beetle',
+  'mosquito',
+  'digger',
+];
 
 /** 꿀벌이 좌우로 흔들리는 폭(한쪽)과 한 번 오가는 시간(초) */
 export const WEAVE = { reach: 34, period: 2.4 } as const;
 /** 메뚜기가 쉬는 시간과 뛰는 시간(초). 뛰는 동안에만 움직인다. */
 export const HOP = { rest: 0.85, leap: 0.25 } as const;
 
+/** 모기 떼가 나올 때 한 마리씩 벌어지는 거리(x)와 나오는 때의 어긋남(초) */
+export const SWARM = { spread: 11, stagger: 0.12 } as const;
+/**
+ * 땅강아지가 땅속에 숨어 지나가는 높이(시뮬레이션 y). 이 사이에서는 물방울도 물벼락도 닿지 않고,
+ * 물총과 해바라기도 겨누지 않는다. 울타리(FIELD.depth)에 닿기 전에 다시 나온다.
+ */
+export const DIG = { from: 70, to: 225 } as const;
+
 /** 대장이 나오는 날의 간격. 이 날을 지키면 그다음 날부터 시작할 수 있다. */
 export const BOSS_EVERY = 5;
-/** 대장이 부하를 부르는 간격(초)과 한 번에 부르는 수 */
+/** 대장의 날마다 차례로 나오는 대장: 5일째 두더지, 10일째 장수풍뎅이, 15일째 두더지, ... */
+export const BOSS_ROTATION: readonly EnemyKind[] = ['mole', 'rhino'];
+/** 대장 두더지가 부하를 부르는 간격(초)과 한 번에 부르는 수 */
 export const SUMMON = { every: 7, count: 2, kind: 'ant' as EnemyKind } as const;
+/**
+ * 대장 장수풍뎅이의 돌진. every초마다 windup초 동안 멈춰 웅크렸다가 rush초 동안 speed배로 내달린다.
+ * 찬물과 물벼락에 젖어 느려지면 이 박자도 같이 느려진다.
+ */
+export const CHARGE = { every: 6, windup: 0.9, rush: 1.1, speed: 5 } as const;
 
 // ------------------------------------------------------------ 하루
 
@@ -171,6 +252,8 @@ export const DAY = {
   bossEscort: 0.6,
   /** 날을 지킨 뒤 다음 날이 시작되기까지 쉬는 시간(초) */
   rest: 2.2,
+  /** 강화를 고른 뒤에는 쉬는 시간이 이만큼만 남는다(초). 고르느라 이미 쉬었다. */
+  afterPick: 1,
   /** 판에 벌레가 하나도 없으면 다음 벌레가 이 시간(초) 안에 나오도록 당긴다. 쉬운 날이 빨리 지나간다. */
   hurry: 0.35,
 } as const;
@@ -293,3 +376,107 @@ export const STEP = {
 
 /** 강화 없이 시작하는 울타리의 체력 */
 export const FENCE_BASE = 100;
+
+// ------------------------------------------------------------ 판마다 고르는 강화
+
+/**
+ * 날을 지킬 때마다 셋 가운데 하나를 골라 그 판에서만 쓰는 강화. 판이 끝나면 사라진다.
+ * 값은 BOON_STEP에 있고, 효과는 boons.ts의 applyBoon이 판의 능력치(Stats)에 바로 더한다.
+ */
+export type BoonId =
+  | 'jet'
+  | 'quick'
+  | 'needle'
+  | 'lance'
+  | 'spray'
+  | 'frost'
+  | 'plank'
+  | 'patch'
+  | 'bramble'
+  | 'bloom'
+  | 'cloud'
+  | 'sack';
+
+export interface BoonDef {
+  name: string;
+  /** 무엇을 하는지 한 줄. 고르는 카드에 적는다. */
+  blurb: string;
+  /** 카드에 그리는 그림. 닮은 영구 강화의 그림을 빌려 쓴다. */
+  icon: UpgradeId;
+  /** 한 판에 고를 수 있는 횟수 */
+  max: number;
+  /** 뽑히는 무게. 클수록 자주 나온다. */
+  weight: number;
+}
+
+/** 한 판에 고르는 횟수. 이만큼 고른 뒤로는 날을 지켜도 더 나오지 않는다. */
+export const BOON_PICKS = 8;
+/** 한 번에 내놓는 수 */
+export const BOON_CHOICES = 3;
+/**
+ * 고른 강화만큼 벌레도 세진다: 그 판에서 지킨 날마다(많아야 BOON_PICKS번) 벌레의 체력에 이 값을 곱한다.
+ * 강화를 고르는 만큼 물총이 세지므로, 이것이 없으면 판마다 훨씬 멀리 가서 영구 강화의 값어치가 줄어든다.
+ * 고른 강화의 힘과 얼추 맞춰 두어서, 잘 고르면 전보다 조금 더 가고 아무렇게나 고르면 전과 비슷하게 간다
+ * (자동 플레이 100판, 네 씨앗: 60일째까지 강화가 없을 때 232분, 맨 앞의 것만 고르면 236분, 골라서 고르면 210분).
+ * 판을 앞쪽 날에서 시작해 강화를 미리 모아도, 벌레도 같이 세져 있어서 득이 없다.
+ */
+export const BOON_HEAT = 1.08;
+
+/** 고를 때마다 바뀌는 값 */
+export const BOON_STEP = {
+  /** 센 물살: 물총의 피해 × */
+  jet: 1.12,
+  /** 날랜 손: 쏘는 빠르기 × (쏘는 간격은 이만큼으로 나눈다) */
+  quick: 1.1,
+  /** 콕콕 찌르기: 치명타 확률 + */
+  needle: 0.08,
+  /** 긴 물줄기: 뚫고 지나가는 벌레 수 + */
+  lance: 1,
+  /** 큰 물보라: 물보라가 없으면 first를 주고, 있으면 반지름과 피해 비율을 더한다. */
+  spray: { radius: 19, ratio: 0.3, radiusStep: 4, ratioStep: 0.1 },
+  /** 얼음물: 찬물이 없으면 first를 주고, 있으면 느려지는 정도를 더한다(많아도 max). */
+  frost: { slow: 0.18, seconds: 1.4, slowStep: 0.08, max: 0.6 },
+  /** 덧댄 울타리: 울타리 체력 + (지금의 가장 큰 체력에 대한 비율). 늘어난 만큼 바로 찬다. */
+  plank: 0.2,
+  /** 급한 수리: 울타리를 가장 큰 체력의 이만큼 바로 고친다. 울타리가 below 아래로 깎였을 때만 나온다. */
+  patch: { heal: 0.5, below: 0.75 },
+  /** 가시덤불: 갉을 때마다 물방울 피해의 이만큼을 더 되돌려 준다. */
+  bramble: 0.5,
+  /** 활짝 핀 꽃: 해바라기의 피해 × */
+  bloom: 1.3,
+  /** 먹구름: 물벼락을 다시 쓸 때까지의 시간 × */
+  cloud: 0.75,
+  /** 씨앗 주머니: 이 판에서 받는 씨앗 × */
+  sack: 1.25,
+} as const;
+
+export const BOONS: Readonly<Record<BoonId, BoonDef>> = {
+  jet: { name: '센 물살', blurb: '물총의 피해 +12%', icon: 'power', max: 4, weight: 3 },
+  quick: { name: '날랜 손', blurb: '쏘는 빠르기 +10%', icon: 'rapid', max: 4, weight: 3 },
+  needle: { name: '콕콕 찌르기', blurb: '크게 맞힐 확률 +8%', icon: 'crit', max: 3, weight: 2 },
+  lance: { name: '긴 물줄기', blurb: '물방울이 벌레 하나를 더 뚫어요', icon: 'pierce', max: 1, weight: 1 },
+  spray: { name: '큰 물보라', blurb: '물보라가 더 크게 튀어요', icon: 'splash', max: 2, weight: 2 },
+  frost: { name: '얼음물', blurb: '맞은 벌레가 더 느려져요', icon: 'chill', max: 2, weight: 2 },
+  plank: { name: '덧댄 울타리', blurb: '울타리 체력 +20%', icon: 'fence', max: 3, weight: 3 },
+  patch: { name: '급한 수리', blurb: '울타리를 절반만큼 바로 고쳐요', icon: 'mend', max: BOON_PICKS, weight: 3 },
+  bramble: { name: '가시덤불', blurb: '갉는 벌레가 가시에 더 찔려요', icon: 'thorn', max: 3, weight: 2 },
+  bloom: { name: '활짝 핀 꽃', blurb: '해바라기의 씨가 30% 세져요', icon: 'compost', max: 3, weight: 2 },
+  cloud: { name: '먹구름', blurb: '물벼락을 더 자주 써요', icon: 'storm', max: 2, weight: 2 },
+  sack: { name: '씨앗 주머니', blurb: '이 판에서 받는 씨앗 +25%', icon: 'harvest', max: 3, weight: 2 },
+};
+
+/** 뽑을 때 살펴보는 차례. 저장한 판을 읽을 때 아는 강화인지도 이것으로 본다. */
+export const BOON_ORDER: readonly BoonId[] = [
+  'jet',
+  'quick',
+  'needle',
+  'lance',
+  'spray',
+  'frost',
+  'plank',
+  'patch',
+  'bramble',
+  'bloom',
+  'cloud',
+  'sack',
+];

@@ -5,11 +5,12 @@ import { homeScene } from '../../core/home';
 import { sfx, tone } from '../../core/sfx';
 import { addText, fadeToScene, PixelButton } from '../../core/ui';
 import { showBanner } from '../../scenes/GameHud';
-import { MiniGameScene, type ResultStat } from '../../scenes/MiniGameScene';
+import { MiniGameScene, type PauseExtra, type ResultStat } from '../../scenes/MiniGameScene';
 import { LOOK, registerGardenTextures, TEX } from './art';
-import { ENEMIES, GARDEN_GAME_ID, GARDEN_SCENE } from './data';
+import { BOONS, ENEMIES, GARDEN_GAME_ID, GARDEN_SCENE, type EnemyKind } from './data';
 import { buildLobby } from './lobby';
-import { applyRun, bankSeeds, clampStartDay, isBossDay, openedStart, raiseBest, type GardenMeta } from './rules';
+import { openPickPanel, pickedInfo, type ClearedNote, type PickPanel } from './picks';
+import { applyRun, bankSeeds, bossKind, clampStartDay, isBossDay, openedStart, raiseBest, type GardenMeta } from './rules';
 import { settleSavedRun } from './saved-run';
 import { createRun, runScore, step, stormReady, type Input, type RunState, type SimEvent } from './sim';
 import { gardenStore } from './store';
@@ -38,7 +39,7 @@ const HUD_HEIGHT = 46;
  * 버튼(일시정지, 물벼락)은 층을 따로 정할 수 없어서 0층에 놓인다. 판은 그보다 아래에, HUD의 글자와 알림은 위에 둔다.
  * hudBack은 HUD 뒤를 덮는 바탕으로, 판보다는 위이고 버튼보다는 아래다.
  */
-const DEPTH = { field: -20, aim: -12, hudBack: -2, hud: 1, banner: 10 } as const;
+const DEPTH = { field: -20, aim: -12, hudBack: -2, hud: 1, banner: 10, picks: 20 } as const;
 /** 그날 쫓아낸 벌레의 비율을 보여 주는 막대 */
 const DAY_BAR = { x: 70, y: 31, width: 100, height: 6 } as const;
 /** 울타리 체력 막대. 화면 맨 아래에 놓인다. */
@@ -49,17 +50,30 @@ const STORM_BUTTON = { size: 36, right: 6, bottom: 24 } as const;
 const ENDING_MS = 1500;
 /** 판을 시작할 때 화면 아래에 뜨는 조작 안내가 보이는 시간(초)과, 이만큼 해 본 사람에게는 띄우지 않는 판 수 */
 const HINT = { seconds: 7, untilRuns: 3 } as const;
+/** 새 벌레의 안내는 그 벌레가 나오기 시작한 날에서 이만큼 더 간 사람에게는 띄우지 않는다. */
+const BUG_TIP_DAYS = 4;
 /** 하던 판을 저장하는 간격(판 안의 초). 멈출 때와 날을 넘길 때도 저장하므로, 이것은 앱이 갑자기 꺼질 때를 위한 것이다. */
 const SAVE_EVERY = 10;
 /** 이어 할 때 벌레가 움직이기 전에 숨을 고르는 시간(초) */
 const RESUME_HOLD = 1.2;
+/** 날을 지킨 뒤 강화를 고르는 창이 뜨기까지의 시간(초). 마지막 벌레가 쫓겨나는 것을 보여 주고 띄운다. */
+const PICK_DELAY = 0.6;
 
 /** 화면에 적는 글. 글꼴에 들어 있는 글자만 쓰는지 테스트가 확인한다. */
 export const TEXT = {
   hint: '화면을 누르고 있으면\n그쪽으로 더 빨리 쏴요',
-  boss: '대장 두더지!',
-  bossTip: '대장은 부하를 불러요. 먼저 쫓아내요!',
-  beetleTip: '풍뎅이는 단단해요. 크게 맞혀야 통해요',
+  /** 대장의 날에 뜨는 이름(대장의 이름 뒤에 느낌표)과, 그 대장을 처음 만나는 날에 뜨는 안내 */
+  boss: (name: string) => `${name}!`,
+  bossTips: {
+    mole: '두더지는 부하를 불러요. 먼저 쫓아내요!',
+    rhino: '웅크리면 곧 돌진해요. 찬물로 늦춰요!',
+  } as Partial<Record<EnemyKind, string>>,
+  /** 새 벌레가 처음 나올 무렵에 뜨는 안내 */
+  bugTips: {
+    beetle: '풍뎅이는 단단해요. 크게 맞혀야 통해요',
+    mosquito: '모기는 떼로 와요. 물보라가 잘 들어요',
+    digger: '땅강아지는 땅속에 숨어요. 나오면 쏴요!',
+  } as Partial<Record<EnemyKind, string>>,
   record: '새 기록!',
   over: '울타리가 무너졌어요',
   fence: '울타리',
@@ -101,6 +115,15 @@ export class GardenGuardScene extends MiniGameScene {
   private aimPointer: number | null = null;
   private aimAt = { x: 0, y: 0 };
   private stormAsked = false;
+  /** 강화를 고르는 창과, 거기서 고른 자리. 고른 것은 다음 걸음에 시뮬레이션으로 넘긴다. */
+  private picks: PickPanel | null = null;
+  private pickAsked: number | null = null;
+  /** 내놓은 강화를 고르는 창을 띄울 때(판 안의 초). 이어 한 판은 0이라 바로 뜬다. */
+  private picksAt = 0;
+  /** 방금 지킨 날의 알림. 강화를 고를 날에는 가운데에 띄우는 대신 고르는 창의 맨 위에 적는다. */
+  private cleared: ClearedNote | null = null;
+  /** 강화를 고른 뒤에 띄울 "다음 판은 N일째부터!". 고르는 창에 가리지 않게 미뤄 둔다. */
+  private nextStartNote: string | null = null;
   private readonly seen = new Set<string>();
 
   private dayText!: Phaser.GameObjects.Text;
@@ -134,6 +157,11 @@ export class GardenGuardScene extends MiniGameScene {
     this.hold = 0;
     this.aimPointer = null;
     this.stormAsked = false;
+    this.picks = null;
+    this.pickAsked = null;
+    this.picksAt = 0;
+    this.cleared = null;
+    this.nextStartNote = null;
     this.seen.clear();
     this.stormButton = undefined;
     this.stormText = undefined;
@@ -202,6 +230,11 @@ export class GardenGuardScene extends MiniGameScene {
     return TEXT.backToLobby;
   }
 
+  /** 멈춘 김에 이 판에서 고른 강화를 보여 준다. */
+  protected override pauseExtra(): PauseExtra | undefined {
+    return this.run ? pickedInfo(this.run.boons) : undefined;
+  }
+
   protected override canFinishEarly(): boolean {
     return this.phase === 'run';
   }
@@ -230,6 +263,7 @@ export class GardenGuardScene extends MiniGameScene {
         startDay: clampStartDay(meta.startDay, meta.best),
         levels: meta.levels,
         bestBefore: meta.best,
+        fields: meta.fields,
       }));
     }
     this.run = state;
@@ -324,7 +358,8 @@ export class GardenGuardScene extends MiniGameScene {
 
   private listenForAim(): void {
     const onDown = (pointer: Phaser.Input.Pointer): void => {
-      if (this.phase !== 'run' || this.aimPointer !== null) return;
+      // 강화를 고르는 동안에는 누른 것을 겨누는 것으로 치지 않는다.
+      if (this.phase !== 'run' || this.aimPointer !== null || this.picks) return;
       if (pointer.worldY < HUD_HEIGHT || this.onStormButton(pointer.worldX, pointer.worldY)) return;
       this.aimPointer = pointer.id;
       this.aimAt = { x: pointer.worldX, y: pointer.worldY };
@@ -395,15 +430,24 @@ export class GardenGuardScene extends MiniGameScene {
     const input: Input = {
       aim: this.aimPointer === null ? null : toSim(this.layout, this.aimAt.x, this.aimAt.y),
       storm: this.stormAsked,
+      pick: this.pickAsked ?? undefined,
     };
+    let stepped = false;
     while (this.pending >= STEP && state.phase !== 'over') {
       this.pending -= STEP;
       const events = step(state, STEP, input);
-      // 물벼락은 한 번만 넘긴다.
+      stepped = true;
+      // 물벼락과 고른 강화는 한 번만 넘긴다.
       input.storm = false;
+      input.pick = undefined;
       if (events.length > 0) this.react(events);
     }
-    this.stormAsked = false;
+    // 화면이 빨리 바뀌는 기기에서는 한 프레임에 한 걸음도 못 갈 때가 있다. 그때 누른 것은 다음 프레임으로 넘긴다.
+    if (stepped) {
+      this.stormAsked = false;
+      this.pickAsked = null;
+    }
+    if (state.offer.length > 0 && !this.picks && state.t >= this.picksAt) this.openPicks(state);
     this.view.sync(state, frame);
     this.drawAim(state);
     this.refreshHud();
@@ -466,26 +510,51 @@ export class GardenGuardScene extends MiniGameScene {
           tone(1500, 0.3, { type: 'sawtooth', slideTo: 300, volume: 0.12, delay: 0.05 });
           this.cameras.main.flash(180, 191, 227, 255);
           break;
-        case 'spawn':
-          if (event.kind === 'beetle' && gardenStore.data.best < 12) this.showTip('beetle', TEXT.beetleTip);
+        case 'offer':
+          this.picksAt = (this.run?.t ?? 0) + PICK_DELAY;
           break;
-        case 'dayStart':
+        case 'boon':
+          this.closePicks();
+          sfx.pop();
+          showBanner(this, fieldMiddle - 8, `${BOONS[event.id].name}!`, THEME_CSS.good, 1100, DEPTH.banner, 16);
+          if (this.nextStartNote) {
+            showBanner(this, fieldMiddle + 16, this.nextStartNote, THEME_CSS.good, 2200, DEPTH.banner, FONT_SIZE.normal);
+            this.nextStartNote = null;
+          }
+          // 고른 것이 저장에 남아야 이어 할 때 같은 것을 또 고르지 않는다.
+          this.saveRun();
+          break;
+        case 'spawn': {
+          const tip = TEXT.bugTips[event.kind];
+          if (tip && gardenStore.data.best < ENEMIES[event.kind].fromDay + BUG_TIP_DAYS) this.showTip(event.kind, tip);
+          break;
+        }
+        case 'dayStart': {
           this.bounce(this.dayText);
-          if (event.boss) {
-            showBanner(this, fieldMiddle - 30, TEXT.boss, THEME_CSS.bad, 1700, DEPTH.banner, FONT_SIZE.large);
+          const boss = event.boss ? bossKind(event.day) : null;
+          if (boss) {
+            showBanner(this, fieldMiddle - 30, TEXT.boss(ENEMIES[boss].name), THEME_CSS.bad, 1700, DEPTH.banner, FONT_SIZE.large);
             tone(196, 0.22, { type: 'sawtooth', volume: 0.2 });
             tone(147, 0.3, { type: 'sawtooth', volume: 0.2, delay: 0.24 });
-            if (gardenStore.data.best < event.day) this.showTip('boss', TEXT.bossTip);
+            const tip = TEXT.bossTips[boss];
+            if (tip && gardenStore.data.best < event.day) this.showTip('boss', tip);
           }
           break;
+        }
         case 'dayClear': {
           sfx.gold();
-          showBanner(this, fieldMiddle - 30, `${event.day}일째 지킴!`, THEME_CSS.good, 1600, DEPTH.banner, FONT_SIZE.large);
+          const title = `${event.day}일째 지킴!`;
           const bonus = `씨앗 +${Math.floor(event.seeds)}${event.record ? ` · ${TEXT.record}` : ''}`;
-          showBanner(this, fieldMiddle - 4, bonus, THEME_CSS.accent, 1600, DEPTH.banner, FONT_SIZE.normal);
           // 대장을 처음 물리쳤으면 다음 판은 그다음 날부터라는 것을 알린다.
-          if (event.record && isBossDay(event.day)) {
-            showBanner(this, fieldMiddle + 16, TEXT.nextStart(event.day + 1), THEME_CSS.good, 2200, DEPTH.banner, FONT_SIZE.normal);
+          const nextStart = event.record && isBossDay(event.day) ? TEXT.nextStart(event.day + 1) : null;
+          if ((this.run?.offer.length ?? 0) > 0) {
+            // 곧 강화를 고르는 창이 뜬다. 알림이 창에 가리지 않게, 창의 맨 위에 적고 나머지는 고른 뒤에 띄운다.
+            this.cleared = { title, detail: bonus };
+            this.nextStartNote = nextStart;
+          } else {
+            showBanner(this, fieldMiddle - 30, title, THEME_CSS.good, 1600, DEPTH.banner, FONT_SIZE.large);
+            showBanner(this, fieldMiddle - 4, bonus, THEME_CSS.accent, 1600, DEPTH.banner, FONT_SIZE.normal);
+            if (nextStart) showBanner(this, fieldMiddle + 16, nextStart, THEME_CSS.good, 2200, DEPTH.banner, FONT_SIZE.normal);
           }
           this.bounce(this.seedText);
           this.bankSoFar(event.day);
@@ -497,6 +566,28 @@ export class GardenGuardScene extends MiniGameScene {
           break;
       }
     }
+  }
+
+  /** 내놓은 강화 셋을 고르는 창을 띄운다. 고르면 다음 걸음에 시뮬레이션이 그 강화를 붙이고 'boon'으로 알린다. */
+  private openPicks(state: RunState): void {
+    this.aimPointer = null;
+    this.picks = openPickPanel(
+      this,
+      { top: this.layout.top, bottom: this.layout.fenceY },
+      DEPTH.picks,
+      state.offer,
+      state.boons,
+      this.cleared,
+      (index) => {
+        this.pickAsked = index;
+      },
+    );
+    this.cleared = null;
+  }
+
+  private closePicks(): void {
+    this.picks?.destroy();
+    this.picks = null;
   }
 
   private bounce(text: Phaser.GameObjects.Text): void {
@@ -604,6 +695,8 @@ export class GardenGuardScene extends MiniGameScene {
     this.phase = 'over';
     this.aimPointer = null;
     this.aimLine.clear();
+    // 강화를 고르다가 "기록하고 끝내기"로 끝낸 판이다.
+    this.closePicks();
     this.settle();
     if (state.phase === 'over') {
       this.cameras.main.shake(260, 0.012);
