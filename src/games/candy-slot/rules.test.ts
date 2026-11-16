@@ -23,7 +23,7 @@ import {
   lineTimesOf,
   MACHINE_FRAME,
   MIN_WEIGHT,
-  MISS_CANDY,
+  MISS_COIN,
   newRun,
   nextRound,
   oddsOf,
@@ -43,7 +43,7 @@ import {
   SLOTS,
   spin,
   spinsOf,
-  START_CANDY,
+  START_COIN,
   SYMBOLS,
   targetOf,
   valuesOf,
@@ -139,9 +139,9 @@ describe('부적의 목록', () => {
     expect(charmOf('no-such-charm')).toBeUndefined();
   });
 
-  it('처음 가진 사탕과 첫 라운드의 평균 벌이로 첫 가게에서 한 장은 살 수 있다', () => {
+  it('처음 가진 금화와 첫 라운드의 평균 벌이로 첫 가게에서 한 장은 살 수 있다', () => {
     const cheapest = Math.min(...CHARMS.map((charm) => charm.price));
-    expect(cheapest).toBeLessThanOrEqual(START_CANDY + 2 * BASE_SPINS - targetOf(1));
+    expect(cheapest).toBeLessThanOrEqual(START_COIN + 2 * BASE_SPINS - targetOf(1));
   });
 
   it('이름과 설명은 가게의 카드에 들어가는 길이이고, 글꼴에 들어 있는 한글만 쓴다', () => {
@@ -271,14 +271,14 @@ describe('한 번 돌린 결과', () => {
     expect(outcome.grid).toEqual(grid);
   });
 
-  it('꽝이면 위로 사탕만 받고, 위로 사탕 부적이 있으면 더 받는다', () => {
+  it('꽝이면 위로 금화만 받고, 위로 금화 부적이 있으면 더 받는다', () => {
     expect(scoreSpin(MISS_GRID, [], PLAIN).wins).toEqual([]);
-    expect(scoreSpin(MISS_GRID, [], PLAIN).total).toBe(MISS_CANDY);
-    expect(scoreSpin(MISS_GRID, ['comfort'], PLAIN).total).toBe(MISS_CANDY + 2);
-    expect(scoreSpin(MISS_GRID, ['comfort'], PLAIN).consolation).toBe(MISS_CANDY + 2);
+    expect(scoreSpin(MISS_GRID, [], PLAIN).total).toBe(MISS_COIN);
+    expect(scoreSpin(MISS_GRID, ['comfort'], PLAIN).total).toBe(MISS_COIN + 2);
+    expect(scoreSpin(MISS_GRID, ['comfort'], PLAIN).consolation).toBe(MISS_COIN + 2);
     // 꽝에는 곱하는 부적이 듣지 않는다.
     expect(scoreSpin(MISS_GRID, ['comfort', 'finale', 'rebound'], { last: true, afterMiss: true }).total).toBe(
-      MISS_CANDY + 2,
+      MISS_COIN + 2,
     );
   });
 
@@ -354,7 +354,7 @@ describe('한 번 돌린 결과', () => {
         afterMiss: random() < 0.5,
       });
       expect(Number.isInteger(outcome.total)).toBe(true);
-      expect(outcome.total).toBeGreaterThanOrEqual(outcome.wins.length === 0 ? MISS_CANDY : outcome.base);
+      expect(outcome.total).toBeGreaterThanOrEqual(outcome.wins.length === 0 ? MISS_COIN : outcome.base);
     }
   });
 });
@@ -379,7 +379,7 @@ describe('라운드', () => {
     expect(spinsOf(['extra'])).toBe(BASE_SPINS + 1);
   });
 
-  it('저금통은 남은 사탕 다섯 개마다 하나를 한도까지 준다', () => {
+  it('저금통은 남은 금화 다섯 개마다 하나를 한도까지 준다', () => {
     expect(savingsFor(100, [])).toBe(0);
     expect(savingsFor(SAVINGS_PER - 1, ['piggy'])).toBe(0);
     expect(savingsFor(SAVINGS_PER, ['piggy'])).toBe(1);
@@ -389,9 +389,9 @@ describe('라운드', () => {
   });
 });
 
-/** 스핀을 다 쓰고 사탕을 candy개 가진 run */
-function spent(candy: number, extra: Partial<RunState> = {}): RunState {
-  return { ...newRun(), spinsLeft: 0, candy, ...extra };
+/** 스핀을 다 쓰고 금화를 coin개 가진 run */
+function spent(coin: number, extra: Partial<RunState> = {}): RunState {
+  return { ...newRun(), spinsLeft: 0, coin, ...extra };
 }
 
 describe('한 판', () => {
@@ -401,7 +401,7 @@ describe('한 판', () => {
       phase: 'spin',
       round: 1,
       spinsLeft: BASE_SPINS,
-      candy: START_CANDY,
+      coin: START_COIN,
       earned: 0,
       charms: [],
       shop: null,
@@ -410,7 +410,7 @@ describe('한 판', () => {
     expect(scoreOf(run)).toBe(0);
   });
 
-  it('돌리면 스핀이 줄고 받은 사탕이 쌓인다', () => {
+  it('돌리면 스핀이 줄고 받은 금화가 쌓인다', () => {
     const random = seeded(5);
     let run = newRun();
     let earned = 0;
@@ -422,7 +422,7 @@ describe('한 판', () => {
       best = Math.max(best, result!.outcome.total);
       run = result!.run;
       expect(run.spinsLeft).toBe(BASE_SPINS - n - 1);
-      expect(run.candy).toBe(START_CANDY + earned);
+      expect(run.coin).toBe(START_COIN + earned);
       expect(run.earned).toBe(earned);
       expect(run.afterMiss).toBe(result!.outcome.wins.length === 0);
     }
@@ -453,7 +453,7 @@ describe('한 판', () => {
     expect(settled.paid).toBe(targetOf(1));
     expect(settled.savings).toBe(0);
     expect(settled.run.phase).toBe('shop');
-    expect(settled.run.candy).toBe(7);
+    expect(settled.run.coin).toBe(7);
     expect(settled.run.shop?.offers).toHaveLength(OFFERS);
     expect(settled.run.shop?.rerollCost).toBe(REROLL_COST);
     expect(clearedRounds(settled.run)).toBe(1);
@@ -461,10 +461,10 @@ describe('한 판', () => {
     expect(settleRound(spent(targetOf(1)), seeded(1))!.cleared).toBe(true);
   });
 
-  it('저금통의 덤은 내고 남은 사탕에 붙고 점수에도 든다', () => {
+  it('저금통의 덤은 내고 남은 금화에 붙고 점수에도 든다', () => {
     const settled = settleRound(spent(targetOf(1) + 12, { charms: ['piggy'], earned: 40 }), seeded(1))!;
     expect(settled.savings).toBe(2);
-    expect(settled.run.candy).toBe(14);
+    expect(settled.run.coin).toBe(14);
     expect(settled.run.earned).toBe(42);
   });
 
@@ -474,7 +474,7 @@ describe('한 판', () => {
     expect(settled.paid).toBe(0);
     expect(settled.run.phase).toBe('over');
     expect(settled.run.shop).toBeNull();
-    expect(settled.run.candy).toBe(targetOf(1) - 1);
+    expect(settled.run.coin).toBe(targetOf(1) - 1);
     expect(scoreOf(settled.run)).toBe(9);
     expect(clearedRounds(settled.run)).toBe(0);
     // 끝난 판은 더 돌리지도 맺지도 못한다.
@@ -483,9 +483,9 @@ describe('한 판', () => {
   });
 });
 
-/** 사탕을 candy개 가지고 offers를 파는 가게에 있는 run */
-function shopping(candy: number, offers: (string | null)[], charms: string[] = []): RunState {
-  return { ...newRun(), phase: 'shop', spinsLeft: 0, candy, charms, shop: { offers, rerollCost: REROLL_COST } };
+/** 금화를 coin개 가지고 offers를 파는 가게에 있는 run */
+function shopping(coin: number, offers: (string | null)[], charms: string[] = []): RunState {
+  return { ...newRun(), phase: 'shop', spinsLeft: 0, coin, charms, shop: { offers, rerollCost: REROLL_COST } };
 }
 
 describe('가게', () => {
@@ -511,7 +511,7 @@ describe('가게', () => {
     const run = shopping(10, ['comfort', 'wide', 'crown']);
     expect(buyBlock(run, 0)).toBeNull();
     const bought = buy(run, 0);
-    expect(bought.candy).toBe(10 - charmOf('comfort')!.price);
+    expect(bought.coin).toBe(10 - charmOf('comfort')!.price);
     expect(bought.charms).toEqual(['comfort']);
     expect(bought.shop?.offers).toEqual([null, 'wide', 'crown']);
     // 사는 것으로는 점수가 바뀌지 않는다.
@@ -521,9 +521,9 @@ describe('가게', () => {
     expect(buy(bought, 0)).toBe(bought);
   });
 
-  it('사탕이 모자라거나 자리가 없으면 살 수 없다', () => {
+  it('금화가 모자라거나 자리가 없으면 살 수 없다', () => {
     const poor = shopping(charmOf('wide')!.price - 1, ['wide', null, null]);
-    expect(buyBlock(poor, 0)).toBe('candy');
+    expect(buyBlock(poor, 0)).toBe('coin');
     expect(buy(poor, 0)).toBe(poor);
 
     const full = shopping(99, ['wide', null, null], ['twins', 'crown', 'piggy', 'extra', 'comfort']);
@@ -533,7 +533,7 @@ describe('가게', () => {
     // 한 장을 떼면 살 수 있다.
     const freed = discard(full, 2);
     expect(freed.charms).toEqual(['twins', 'crown', 'extra', 'comfort']);
-    expect(freed.candy).toBe(99);
+    expect(freed.coin).toBe(99);
     expect(buy(freed, 0).charms).toEqual(['twins', 'crown', 'extra', 'comfort', 'wide']);
 
     expect(buyBlock(shopping(99, ['wide', null, null]), 7)).toBe('sold');
@@ -543,12 +543,12 @@ describe('가게', () => {
   it('다시 뽑으면 값을 치르고, 다음 값이 오른다', () => {
     const run = shopping(10, ['comfort', null, null], ['wide']);
     const again = reroll(run, seeded(4));
-    expect(again.candy).toBe(10 - REROLL_COST);
+    expect(again.coin).toBe(10 - REROLL_COST);
     expect(again.shop?.rerollCost).toBe(REROLL_COST + REROLL_STEP);
     expect(again.shop?.offers).toHaveLength(OFFERS);
     expect(again.shop?.offers).not.toContain('wide');
     expect(again.shop?.offers).not.toContain(null);
-    // 사탕이 모자라면 그대로다.
+    // 금화가 모자라면 그대로다.
     const poor = shopping(REROLL_COST - 1, ['comfort', null, null]);
     expect(reroll(poor, seeded(4))).toBe(poor);
     expect(reroll(newRun(), seeded(4)).shop).toBeNull();
@@ -566,7 +566,7 @@ describe('가게', () => {
   it('가게를 닫으면 다음 라운드가 스핀을 채워 시작된다', () => {
     const run = { ...shopping(4, [null, 'wide', null], ['extra']), round: 3, afterMiss: true };
     const next = nextRound(run);
-    expect(next).toMatchObject({ phase: 'spin', round: 4, spinsLeft: BASE_SPINS + 1, candy: 4, shop: null });
+    expect(next).toMatchObject({ phase: 'spin', round: 4, spinsLeft: BASE_SPINS + 1, coin: 4, shop: null });
     expect(next.afterMiss).toBe(false);
     expect(clearedRounds(next)).toBe(3);
     expect(nextRound(next)).toBe(next);
@@ -638,7 +638,7 @@ describe('화면의 자리', () => {
 
 // ───────── 자동 플레이로 보는 밸런스 ─────────
 
-/** 붙인 부적으로 라운드 하나에서 버는 사탕의 평균 */
+/** 붙인 부적으로 라운드 하나에서 버는 금화의 평균 */
 function averageRound(charms: readonly string[], rounds: number, random: () => number): number {
   let total = 0;
   for (let n = 0; n < rounds; n += 1) {
@@ -707,7 +707,7 @@ describe('밸런스', () => {
   it('부적마다 값어치가 있다: 붙이면 평균 벌이가 줄지 않는다', () => {
     const base = averageRound([], 4_000, seeded(104));
     for (const charm of CHARMS) {
-      // 저금통은 벌이가 아니라 남은 사탕에 듣는다.
+      // 저금통은 벌이가 아니라 남은 금화에 듣는다.
       if (charm.effect.savingsCap !== undefined) continue;
       expect(averageRound([charm.id], 4_000, seeded(104)), charm.id).toBeGreaterThan(base);
     }

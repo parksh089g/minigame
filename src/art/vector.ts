@@ -781,7 +781,7 @@ const ICONS: Record<string, Art> = {
       roundRect(c, 8.500, 22.700, 15, 3.600, 1.800, '#c9bcf8');
     },
   },
-  /** 사탕 슬롯: 7 셋이 나란히 뜬 기계와, 오른쪽의 손잡이 */
+  /** 행운 슬롯: 7 셋이 나란히 뜬 기계와, 오른쪽의 손잡이 */
   'icon-slot': {
     width: 32,
     height: 32,

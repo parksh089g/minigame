@@ -8,8 +8,8 @@ import { addTapZone, addText, drawPanel } from '../../core/ui';
 import { floatText, GameHud, HUD_HEIGHT, showBanner } from '../../scenes/GameHud';
 import { MiniGameScene, type ResultStrip } from '../../scenes/MiniGameScene';
 import {
-  CANDY_ICON,
-  candyTexture,
+  COIN_ICON,
+  coinTexture,
   CHARM_BOX,
   charmChipTexture,
   charmTexture,
@@ -91,11 +91,15 @@ const SHOP_FOOT_MIN = 20;
 /** 판을 시작할 때 보여 주는 그림. 맞은 줄이 없는 판이다. */
 const START_GRID: readonly number[] = [0, 1, 2, 3, 4, 5, 1, 2, 0];
 
-const HINTS = ['돌리기를 눌러요', '같은 그림 셋이 한 줄이면 사탕!'] as const;
+/** 이 라운드까지는 돌리기 전에 상금을 따지는 여덟 줄을 흐리게 그어 보여 준다. */
+const GUIDE_ROUNDS = 1;
+const HINTS = ['돌리기를 눌러요', '같은 그림 셋이 한 줄이면 금화!'] as const;
 
 const DEPTH = {
   machine: 1,
   glow: 2,
+  /** 첫 라운드에 보여 주는 여덟 줄의 길잡이. 맞은 칸의 빛 위, 맞은 줄의 선 아래에 깔린다. */
+  guide: 2.2,
   /** 맞은 줄을 긋는 선. 그림 밑에 깔려서, 선이 지나가도 무슨 그림인지 그대로 보인다. */
   line: 2.5,
   cell: 3,
@@ -126,12 +130,12 @@ type ButtonTone = keyof typeof BUTTON_TONES;
 
 /**
  * 눌리는 느낌이 나는 둥근 버튼. 공용 버튼(core/ui.ts의 PixelButton)과 같은 모양이지만,
- * 가게 창 위에 놓을 수 있게 층을 정할 수 있고, 다 쓰면 치울 수 있고, 글 옆에 사탕 값을 적을 수 있다.
+ * 가게 창 위에 놓을 수 있게 층을 정할 수 있고, 다 쓰면 치울 수 있고, 글 옆에 금화 값을 적을 수 있다.
  */
 class SoftButton {
   private readonly graphics: Graphics;
   private readonly label: Text;
-  private readonly candy: Image;
+  private readonly coin: Image;
   private readonly amount: Text;
   /** 누르는 자리. 버튼을 누른 것인지 가려야 하는 쪽에서 읽는다. */
   readonly zone: Phaser.GameObjects.Zone;
@@ -149,7 +153,7 @@ class SoftButton {
   ) {
     this.graphics = scene.add.graphics().setDepth(depth);
     this.label = addText(scene, 0, 0, text, { color: LOOK.text.ink, originY: 0.5 }).setDepth(depth);
-    this.candy = scene.add.image(0, 0, candyTexture(scene)).setDepth(depth).setVisible(false);
+    this.coin = scene.add.image(0, 0, coinTexture(scene)).setDepth(depth).setVisible(false);
     this.amount = addText(scene, 0, 0, '', { color: LOOK.text.ink, originY: 0.5 }).setDepth(depth).setVisible(false);
     this.zone = addTapZone(
       scene,
@@ -177,10 +181,10 @@ class SoftButton {
     return this;
   }
 
-  /** 글 옆에 사탕 그림과 값을 적는다. null이면 지운다. */
+  /** 글 옆에 금화 그림과 값을 적는다. null이면 지운다. */
   setPrice(price: number | null): this {
     this.price = price;
-    this.candy.setVisible(price !== null && this.graphics.visible);
+    this.coin.setVisible(price !== null && this.graphics.visible);
     this.amount.setVisible(price !== null && this.graphics.visible).setText(price === null ? '' : String(price));
     this.draw();
     return this;
@@ -190,7 +194,7 @@ class SoftButton {
     this.enabled = enabled;
     this.pressed = false;
     const alpha = enabled ? 1 : 0.45;
-    for (const part of [this.graphics, this.label, this.candy, this.amount]) part.setAlpha(alpha);
+    for (const part of [this.graphics, this.label, this.coin, this.amount]) part.setAlpha(alpha);
     this.draw();
     return this;
   }
@@ -198,7 +202,7 @@ class SoftButton {
   setVisible(visible: boolean): this {
     this.graphics.setVisible(visible);
     this.label.setVisible(visible);
-    this.candy.setVisible(visible && this.price !== null);
+    this.coin.setVisible(visible && this.price !== null);
     this.amount.setVisible(visible && this.price !== null);
     if (visible) this.zone.setInteractive();
     else this.zone.disableInteractive();
@@ -206,7 +210,7 @@ class SoftButton {
   }
 
   destroy(): void {
-    for (const part of [this.graphics, this.label, this.candy, this.amount, this.zone]) part.destroy();
+    for (const part of [this.graphics, this.label, this.coin, this.amount, this.zone]) part.destroy();
   }
 
   private draw(): void {
@@ -223,14 +227,14 @@ class SoftButton {
     g.fillStyle(colors.face, 1);
     g.fillRoundedRect(x, y + offset, width, face, radius);
 
-    // 글과 사탕 값을 한 덩어리로 가운데에 놓는다.
+    // 글과 금화 값을 한 덩어리로 가운데에 놓는다.
     const centerY = Math.round(y + offset + face / 2);
-    const extra = this.price === null ? 0 : 4 + CANDY_ICON.width + 2 + Math.ceil(this.amount.width);
+    const extra = this.price === null ? 0 : 4 + COIN_ICON.width + 2 + Math.ceil(this.amount.width);
     let left = Math.round(x + (width - Math.ceil(this.label.width) - extra) / 2);
     this.label.setPosition(left, centerY);
     left += Math.ceil(this.label.width) + 4;
-    this.candy.setPosition(left + CANDY_ICON.width / 2, centerY);
-    this.amount.setPosition(left + CANDY_ICON.width + 2, centerY);
+    this.coin.setPosition(left + COIN_ICON.width / 2, centerY);
+    this.amount.setPosition(left + COIN_ICON.width + 2, centerY);
   }
 }
 
@@ -260,14 +264,14 @@ interface OfferRow {
   name: Text;
   description: Text;
   priceBack: Graphics;
-  candy: Image;
+  coin: Image;
   price: Text;
   pressed: boolean;
 }
 
 /**
- * 사탕 슬롯: 3×3 칸의 그림을 돌려 같은 그림 셋이 놓인 줄마다 사탕을 받고, 라운드마다 오르는 목표만큼 사탕을 낸다.
- * 남은 사탕으로는 가게에서 부적을 사서 그림이 나올 확률과 줄의 상금을 바꾼다.
+ * 행운 슬롯: 3×3 칸의 그림을 돌려 같은 그림 셋이 놓인 줄마다 금화를 받고, 라운드마다 오르는 목표만큼 금화를 낸다.
+ * 남은 금화로는 가게에서 부적을 사서 그림이 나올 확률과 줄의 상금을 바꾼다.
  * 규칙은 rules.ts에 있고, 이 씬은 입력과 그리기만 맡는다.
  */
 export class CandySlotScene extends MiniGameScene {
@@ -284,6 +288,7 @@ export class CandySlotScene extends MiniGameScene {
   private cells: Image[] = [];
   private glow!: Graphics;
   private lineFx!: Graphics;
+  private guideFx!: Graphics;
   private sparks!: Phaser.GameObjects.Particles.ParticleEmitter;
   private goalBack!: Graphics;
   private goalLabel!: Text;
@@ -296,9 +301,9 @@ export class CandySlotScene extends MiniGameScene {
   private shownValues: number[] = [];
   private spinButton!: SoftButton;
   private reel: Reel | null = null;
-  /** 받았지만 아직 화면의 수에 넣지 않은 사탕. 맞은 줄을 하나씩 보여 주는 동안 줄어든다. */
+  /** 받았지만 아직 화면의 수에 넣지 않은 금화. 맞은 줄을 하나씩 보여 주는 동안 줄어든다. */
   private pending = 0;
-  private hints: Text[] = [];
+  private hints: Array<Text | Graphics> = [];
   /** 가게가 열려 있는 동안 떠 있는 것들 */
   private shopViews: Disposable[] = [];
   private offerRows: Array<OfferRow | null> = [];
@@ -342,6 +347,7 @@ export class CandySlotScene extends MiniGameScene {
     this.refreshOdds(false);
     this.bindInput();
     this.showHints();
+    this.showGuide();
     sfx.go();
     this.playing = true;
   }
@@ -428,6 +434,8 @@ export class CandySlotScene extends MiniGameScene {
     blink();
     if (!reducedMotion()) this.time.addEvent({ delay: BULB_MS, loop: true, callback: blink });
     this.glow = this.add.graphics().setDepth(DEPTH.glow);
+    this.guideFx = this.add.graphics().setDepth(DEPTH.guide).setAlpha(0);
+    this.drawGuide();
     this.lineFx = this.add.graphics().setDepth(DEPTH.line);
     for (let index = 0; index < CELLS; index += 1) {
       const { x, y } = this.centerOf(index);
@@ -498,14 +506,14 @@ export class CandySlotScene extends MiniGameScene {
 
   // ───────── 고쳐 그리기 ─────────
 
-  /** 가진 사탕, 목표, 남은 스핀, 점수를 지금 상태대로 적는다. 아직 보여 주지 않은 사탕(pending)은 뺀다. */
+  /** 가진 금화, 목표, 남은 스핀, 점수를 지금 상태대로 적는다. 아직 보여 주지 않은 금화(pending)은 뺀다. */
   private refreshNumbers(): void {
     const { goal } = this.layout;
     const { run } = this;
     const shopping = run.phase === 'shop';
-    const candy = Math.max(0, run.candy - this.pending);
+    const coin = Math.max(0, run.coin - this.pending);
     const target = targetOf(shopping ? run.round + 1 : run.round);
-    const reached = candy >= target;
+    const reached = coin >= target;
 
     this.hud.setScore(Math.max(0, scoreOf(run) - this.pending));
     this.hud.setSide(`라운드 ${run.round}`);
@@ -520,12 +528,12 @@ export class CandySlotScene extends MiniGameScene {
     drawPanel(g, goal.x, goal.y, goal.width, goal.height, { radius: 10, depth: 2 });
     g.fillStyle(LOOK.goalBar.back, 1);
     g.fillRoundedRect(bar.x, bar.y, bar.width, bar.height, bar.height / 2);
-    const ratio = Phaser.Math.Clamp(candy / target, 0, 1);
+    const ratio = Phaser.Math.Clamp(coin / target, 0, 1);
     if (ratio > 0) {
       g.fillStyle(reached ? LOOK.goalBar.full : LOOK.goalBar.fill, 1);
       g.fillRoundedRect(bar.x, bar.y, Math.max(bar.height, bar.width * ratio), bar.height, bar.height / 2);
     }
-    this.goalText.setText(`${candy} / ${target}`).setX(Math.round(bar.x + bar.width / 2));
+    this.goalText.setText(`${coin} / ${target}`).setX(Math.round(bar.x + bar.width / 2));
   }
 
   private refreshSlots(): void {
@@ -566,21 +574,25 @@ export class CandySlotScene extends MiniGameScene {
     this.shownValues = values;
   }
 
+  /** 처음의 도움말. 그림 위에서도 잘 읽히게 흰 판에 얹어 기계 한가운데에 띄운다. */
   private showHints(): void {
     const middle = this.machineMiddle;
-    this.hints = [
-      addText(this, GAME_WIDTH / 2, middle - 17, HINTS[0], {
-        color: LOOK.text.ink,
-        originX: 0.5,
-        stroke: LOOK.text.outline,
-      }),
-      addText(this, GAME_WIDTH / 2, middle + 1, HINTS[1], {
-        color: LOOK.text.sub,
-        originX: 0.5,
-        stroke: LOOK.text.outline,
-      }),
+    const lines = [
+      addText(this, GAME_WIDTH / 2, middle - 17, HINTS[0], { color: LOOK.text.ink, originX: 0.5 }),
+      addText(this, GAME_WIDTH / 2, middle + 1, HINTS[1], { color: LOOK.text.sub, originX: 0.5 }),
     ];
-    for (const hint of this.hints) hint.setDepth(DEPTH.hint);
+    const width = Math.max(...lines.map((line) => line.width)) + 20;
+    const back = this.add.graphics().setDepth(DEPTH.hint);
+    const box = { x: Math.round(GAME_WIDTH / 2 - width / 2), y: middle - 23, width: Math.round(width), height: 44 };
+    back.fillStyle(LOOK.machine.trimLip, 1);
+    back.fillRoundedRect(box.x, box.y + 2, box.width, box.height, 10);
+    back.fillStyle(LOOK.machine.trim, 1);
+    back.fillRoundedRect(box.x, box.y, box.width, box.height, 10);
+    back.fillStyle(THEME.white, 1);
+    back.fillRoundedRect(box.x + 2, box.y + 2, box.width - 4, box.height - 4, 8);
+    this.hints = [back, ...lines];
+    // 글은 판보다 위에 놓는다.
+    for (const line of lines) line.setDepth(DEPTH.hint + 0.5);
   }
 
   /** 처음의 도움말을 치운다. now면 흐려지는 움직임 없이 바로 치운다(그 위에 다른 것이 덮일 때). */
@@ -632,6 +644,7 @@ export class CandySlotScene extends MiniGameScene {
     const result = spin(this.run, Math.random);
     if (!result) return;
     this.hideHints();
+    this.hideGuide();
     this.hideBubble();
     this.clearWins();
     this.busy = true;
@@ -665,6 +678,38 @@ export class CandySlotScene extends MiniGameScene {
     vibrate(5);
   }
 
+  /** 상금을 따지는 여덟 줄을 흐리게 긋는다. 줄의 양 끝에는 점을 찍어서 어디에서 어디까지인지 보이게 한다. */
+  private drawGuide(): void {
+    const g = this.guideFx;
+    const reach = this.layout.cell * 0.36;
+    for (const line of LINES) {
+      const from = this.centerOf(line.cells[0]);
+      const to = this.centerOf(line.cells[2]);
+      const length = Math.hypot(to.x - from.x, to.y - from.y);
+      const ux = (to.x - from.x) / length;
+      const uy = (to.y - from.y) / length;
+      const a = { x: from.x - ux * reach, y: from.y - uy * reach };
+      const b = { x: to.x + ux * reach, y: to.y + uy * reach };
+      g.lineStyle(2, LOOK.guide, 0.5);
+      g.lineBetween(a.x, a.y, b.x, b.y);
+      g.fillStyle(LOOK.guide, 0.8);
+      g.fillCircle(a.x, a.y, 2);
+      g.fillCircle(b.x, b.y, 2);
+    }
+  }
+
+  /** 첫 라운드에서 돌리기를 기다리는 동안 여덟 줄의 길잡이를 보여 준다. */
+  private showGuide(): void {
+    if (this.run.phase !== 'spin' || this.run.round > GUIDE_ROUNDS) return;
+    this.tweens.killTweensOf(this.guideFx);
+    this.tweens.add({ targets: this.guideFx, alpha: 1, duration: 220 });
+  }
+
+  private hideGuide(): void {
+    this.tweens.killTweensOf(this.guideFx);
+    this.guideFx.setAlpha(0);
+  }
+
   private clearWins(): void {
     this.glow.clear();
     this.lineFx.clear();
@@ -677,7 +722,7 @@ export class CandySlotScene extends MiniGameScene {
       const { goal } = this.layout;
       sfx.expire();
       this.note('꽝', LOOK.text.sub);
-      this.floatCandy(goal.x + goal.width / 2, goal.y + goal.height, outcome.total);
+      this.floatCoin(goal.x + goal.width / 2, goal.y + goal.height, outcome.total);
       this.time.delayedCall(MISS_MS, () => this.afterSpin(outcome));
       return;
     }
@@ -689,7 +734,7 @@ export class CandySlotScene extends MiniGameScene {
     this.time.delayedCall(linesEnd + (boosted ? BOOST_MS : 0), () => this.afterSpin(outcome));
   }
 
-  /** 맞은 줄 하나: 줄을 긋고, 세 칸이 튀고, 그 줄의 사탕이 떠오른다. */
+  /** 맞은 줄 하나: 줄을 긋고, 세 칸이 튀고, 그 줄의 금화가 떠오른다. */
   private showWin(win: LineWin, order: number): void {
     const line = LINES[win.line];
     const centers = line.cells.map((cell) => this.centerOf(cell));
@@ -762,8 +807,8 @@ export class CandySlotScene extends MiniGameScene {
     }
   }
 
-  /** 사탕을 얼마 받았는지(또는 냈는지) 띄운다. */
-  private floatCandy(x: number, y: number, amount: number): void {
+  /** 금화를 얼마 받았는지(또는 냈는지) 띄운다. */
+  private floatCoin(x: number, y: number, amount: number): void {
     if (amount === 0) return;
     const bounds = new Phaser.Geom.Rectangle(0, HUD_HEIGHT, GAME_WIDTH, this.scale.height - HUD_HEIGHT);
     const color = amount > 0 ? LOOK.text.good : LOOK.text.bad;
@@ -777,12 +822,14 @@ export class CandySlotScene extends MiniGameScene {
     this.refreshNumbers();
     if (outcome.wins.length > 0) {
       const { goal } = this.layout;
-      this.floatCandy(goal.x + goal.width / 2, goal.y + goal.height, outcome.total);
+      this.floatCoin(goal.x + goal.width / 2, goal.y + goal.height, outcome.total);
       if (outcome.total >= targetOf(this.run.round) * BIG_WIN_RATIO && outcome.boosts.length === 0) sfx.coin();
     }
     if (this.run.spinsLeft > 0) {
       this.busy = false;
       this.spinButton.setEnabled(true);
+      // 맞은 줄을 보여 주는 동안에는 길잡이를 겹쳐 긋지 않는다.
+      if (outcome.wins.length === 0) this.showGuide();
       return;
     }
     this.time.delayedCall(SETTLE_DELAY_MS, () => this.settle());
@@ -792,12 +839,12 @@ export class CandySlotScene extends MiniGameScene {
 
   private settle(): void {
     if (!this.playing) return;
-    const short = targetOf(this.run.round) - this.run.candy;
+    const short = targetOf(this.run.round) - this.run.coin;
     const settlement = settleRound(this.run, Math.random);
     if (!settlement) return;
     this.run = settlement.run;
     if (!settlement.cleared) {
-      this.endRun(`사탕이 ${short}개 모자라요`);
+      this.endRun(`금화가 ${short}개 모자라요`);
       return;
     }
     const { goal } = this.layout;
@@ -807,10 +854,10 @@ export class CandySlotScene extends MiniGameScene {
     this.sparks.setParticleTint(THEME.mintDeep);
     this.sparks.explode(12, GAME_WIDTH / 2, this.machineMiddle);
     // 목표만큼 낸 것과 저금통의 덤을 따로 보여 준다.
-    this.floatCandy(goal.x + goal.width / 2 - 24, goal.y + goal.height, -settlement.paid);
+    this.floatCoin(goal.x + goal.width / 2 - 24, goal.y + goal.height, -settlement.paid);
     if (settlement.savings > 0) {
       this.time.delayedCall(260, () =>
-        this.floatCandy(goal.x + goal.width / 2 + 24, goal.y + goal.height, settlement.savings),
+        this.floatCoin(goal.x + goal.width / 2 + 24, goal.y + goal.height, settlement.savings),
       );
     }
     this.time.delayedCall(SHOP_DELAY_MS, () => this.openShop());
@@ -848,7 +895,7 @@ export class CandySlotScene extends MiniGameScene {
       scoreOf(run),
       [
         ['넘긴 라운드', `${clearedRounds(run)}번`],
-        ['가장 큰 한 방', `사탕 ${run.bestSpin}개`],
+        ['가장 큰 한 방', `금화 ${run.bestSpin}개`],
       ],
       OVER_RESULT_MS,
       strip,
@@ -956,8 +1003,8 @@ export class CandySlotScene extends MiniGameScene {
         depth,
       ),
       priceBack: this.add.graphics().setDepth(depth),
-      candy: this.add
-        .image(box.x + box.width - pill.width - 5 + 4 + CANDY_ICON.width / 2, middle, candyTexture(this))
+      coin: this.add
+        .image(box.x + box.width - pill.width - 5 + 4 + COIN_ICON.width / 2, middle, coinTexture(this))
         .setDepth(depth),
       price: addText(this, box.x + box.width - 5 - 6, middle, '', { originX: 1, originY: 0.5 }).setDepth(depth),
       pressed: false,
@@ -974,7 +1021,7 @@ export class CandySlotScene extends MiniGameScene {
       },
       () => this.tryBuy(offer),
     ).setDepth(depth);
-    this.shopViews.push(row.back, row.icon, row.name, row.description, row.priceBack, row.candy, row.price, zone);
+    this.shopViews.push(row.back, row.icon, row.name, row.description, row.priceBack, row.coin, row.price, zone);
     return row;
   }
 
@@ -994,7 +1041,7 @@ export class CandySlotScene extends MiniGameScene {
     row.priceBack.clear();
 
     const sold = !charm;
-    for (const part of [row.icon, row.description, row.candy, row.price]) part.setVisible(!sold);
+    for (const part of [row.icon, row.description, row.coin, row.price]) part.setVisible(!sold);
     if (!charm) {
       row.name.setText('붙였어요').setColor(LOOK.text.faint).setY(Math.round(middle - row.name.height / 2));
       return;
@@ -1007,17 +1054,17 @@ export class CandySlotScene extends MiniGameScene {
     row.description.setScale(Math.min(1, room / Math.max(1, row.description.width / row.description.scaleX)));
 
     const pill = { x: box.x + box.width - 45, y: middle - 11, width: 40, height: 22 };
-    const afford = block !== 'candy';
+    const afford = block !== 'coin';
     row.priceBack.fillStyle(afford ? THEME.butter : THEME.dim, 1);
     row.priceBack.fillRoundedRect(pill.x, pill.y, pill.width, pill.height, 11);
     row.price.setText(String(charm.price)).setColor(afford ? LOOK.text.ink : LOOK.text.bad);
-    row.candy.setAlpha(afford ? 1 : 0.5);
+    row.coin.setAlpha(afford ? 1 : 0.5);
   }
 
   private refreshShop(): void {
     for (let offer = 0; offer < OFFERS; offer += 1) this.drawOfferRow(offer);
     const cost = this.run.shop?.rerollCost ?? 0;
-    this.rerollButton?.setPrice(cost).setEnabled(this.run.candy >= cost);
+    this.rerollButton?.setPrice(cost).setEnabled(this.run.coin >= cost);
   }
 
   private tryBuy(offer: number): void {
@@ -1029,7 +1076,7 @@ export class CandySlotScene extends MiniGameScene {
       sfx.deny();
       const y = this.layout.slots[0].y - 14;
       if (block === 'full') this.note('자리가 없어요. 부적을 눌러 떼요', LOOK.text.bad, y);
-      else this.note('사탕이 모자라요', LOOK.text.bad, y);
+      else this.note('금화가 모자라요', LOOK.text.bad, y);
       return;
     }
     this.run = buy(this.run, offer);

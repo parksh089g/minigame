@@ -627,7 +627,7 @@ it('핀 뽑기 점수 도전: 3층 방이 나오는 단계에서 동굴과 도�
   );
 });
 
-/** 사탕 슬롯 장면에서 이 점검이 들여다보는 것 */
+/** 행운 슬롯 장면에서 이 점검이 들여다보는 것 */
 interface CandySlotView {
   run: RunState;
   busy: boolean;
@@ -635,7 +635,7 @@ interface CandySlotView {
   openShop(): void;
 }
 
-it('사탕 슬롯: 가게의 부적 세 줄과 붙인 부적의 설명, 상금이 가장 큰 확률 줄이 가려지지 않는다', async ({ page }) => {
+it('행운 슬롯: 가게의 부적 세 줄과 붙인 부적의 설명, 상금이 가장 큰 확률 줄이 가려지지 않는다', async ({ page }) => {
   await openApp(page);
   await startScene(page, SCENE.candySlot);
   expect(await hiddenTexts(page, SCENE.candySlot), '시작 화면').toEqual([]);
@@ -646,7 +646,7 @@ it('사탕 슬롯: 가게의 부적 세 줄과 붙인 부적의 설명, 상금�
   await page.evaluate(
     ([key, offers, charms, rerollCost]) => {
       const scene = window.__pocketArcade?.scene.getScene(key) as unknown as CandySlotView;
-      scene.run = { ...scene.run, phase: 'shop', spinsLeft: 0, candy: 999, charms, shop: { offers, rerollCost } };
+      scene.run = { ...scene.run, phase: 'shop', spinsLeft: 0, coin: 999, charms, shop: { offers, rerollCost } };
       scene.openShop();
     },
     [SCENE.candySlot, longest.map((charm) => charm.id), widest.map((charm) => charm.id), REROLL_COST] as const,

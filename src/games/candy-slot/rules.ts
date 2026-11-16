@@ -1,13 +1,13 @@
 /**
- * 사탕 슬롯의 규칙. 화면과 분리된 순수 함수라서 숫자만 바꿔 밸런스를 조정할 수 있다.
+ * 행운 슬롯의 규칙. 화면과 분리된 순수 함수라서 숫자만 바꿔 밸런스를 조정할 수 있다.
  *
- * 3×3 칸에 그림이 하나씩 나오고, 가로·세로·대각선 여덟 줄 가운데 같은 그림 셋이 놓인 줄마다 사탕을 받는다.
- * 라운드마다 정해진 횟수만 돌릴 수 있고, 다 돌리면 그 라운드의 목표만큼 사탕을 낸다. 모자라면 판이 끝난다.
- * 낸 뒤에 남은 사탕으로는 가게에서 부적을 사서 붙인다. 부적은 그림이 나올 확률이나 줄의 상금을 바꾼다.
+ * 3×3 칸에 그림이 하나씩 나오고, 가로·세로·대각선 여덟 줄 가운데 같은 그림 셋이 놓인 줄마다 금화를 받는다.
+ * 라운드마다 정해진 횟수만 돌릴 수 있고, 다 돌리면 그 라운드의 목표만큼 금화를 낸다. 모자라면 판이 끝난다.
+ * 낸 뒤에 남은 금화로는 가게에서 부적을 사서 붙인다. 부적은 그림이 나올 확률이나 줄의 상금을 바꾼다.
  *
  * 칸 번호는 왼쪽 위부터 오른쪽으로 매긴다(칸 번호 = 줄 × SIZE + 열).
  * 무작위가 필요한 곳은 random(0 이상 1 미만의 수를 돌려주는 함수)을 받아서 쓴다.
- * 여기서 말하는 사탕은 이 게임 안에서만 쓰는 것이고, 앱의 코인과는 상관없다.
+ * 여기서 말하는 금화는 이 게임 안에서만 쓰는 것이고, 앱의 코인과는 상관없다.
  */
 
 // ───────── 그림 ─────────
@@ -20,7 +20,7 @@ export type SymbolKey = 'cherry' | 'clover' | 'bell' | 'horseshoe' | 'diamond' |
 export interface SymbolInfo {
   key: SymbolKey;
   name: string;
-  /** 이 그림 셋이 한 줄에 놓였을 때 받는 사탕 */
+  /** 이 그림 셋이 한 줄에 놓였을 때 받는 금화 */
   value: number;
   /** 한 칸에 이 그림이 나오는 무게. 확률은 이 값을 모든 그림의 무게의 합으로 나눈 것이다. */
   weight: number;
@@ -101,7 +101,7 @@ export interface CharmEffect {
   lineTimes?: readonly [kind: LineKind, times: number];
   /** 라운드마다 더 돌릴 수 있는 횟수 */
   spins?: number;
-  /** 한 줄도 맞지 않았을 때 더 받는 사탕 */
+  /** 한 줄도 맞지 않았을 때 더 받는 금화 */
   consolation?: number;
   /** 한 번에 lines줄 이상 맞았을 때 그 스핀의 상금에 곱하는 값 */
   combo?: readonly [lines: number, times: number];
@@ -111,7 +111,7 @@ export interface CharmEffect {
   reboundTimes?: number;
   /** 가운데 칸이 다른 그림 대신 7로 나올 확률(0~1). 그림을 뽑기 전에 먼저 따진다. */
   centerWild?: number;
-  /** 라운드를 넘길 때, 남은 사탕 SAVINGS_PER개마다 한 개씩 받는 덤의 한도 */
+  /** 라운드를 넘길 때, 남은 금화 SAVINGS_PER개마다 한 개씩 받는 덤의 한도 */
   savingsCap?: number;
 }
 
@@ -131,7 +131,7 @@ const BELL = 2;
 const HORSESHOE = 3;
 const DIAMOND = 4;
 
-/** 저금통: 남은 사탕 이만큼마다 한 개를 덤으로 받는다. */
+/** 저금통: 남은 금화 이만큼마다 한 개를 덤으로 받는다. */
 export const SAVINGS_PER = 5;
 
 /**
@@ -160,8 +160,8 @@ export const CHARMS: readonly CharmInfo[] = [
   { id: 'slant', name: '대각선 세 배', description: '대각선의 상금이 세 배', kind: 'line', price: 8, effect: { lineTimes: ['diag', 3] } },
   // 재주: 판의 흐름을 바꾼다.
   { id: 'extra', name: '덤 스핀', description: '라운드마다 한 번 더 돌려요', kind: 'trick', price: 7, effect: { spins: 1 } },
-  { id: 'piggy', name: '저금통', description: '남긴 사탕 5개마다 +1', kind: 'trick', price: 6, effect: { savingsCap: 8 } },
-  { id: 'comfort', name: '위로 사탕', description: '꽝이면 사탕을 2개 더 받아요', kind: 'trick', price: 5, effect: { consolation: 2 } },
+  { id: 'piggy', name: '저금통', description: '남긴 금화 5개마다 +1', kind: 'trick', price: 6, effect: { savingsCap: 8 } },
+  { id: 'comfort', name: '위로 금화', description: '꽝이면 금화를 2개 더 받아요', kind: 'trick', price: 5, effect: { consolation: 2 } },
   { id: 'twins', name: '쌍둥이 줄', description: '두 줄 넘게 맞으면 두 배', kind: 'trick', price: 9, effect: { combo: [2, 2] } },
   { id: 'crown', name: '왕관', description: '세 줄 넘게 맞으면 두 배', kind: 'trick', price: 6, effect: { combo: [3, 2] } },
   { id: 'middle', name: '가운데 7', description: '가운데에 7이 자주 떠요', kind: 'trick', price: 9, effect: { centerWild: 0.25 } },
@@ -265,15 +265,15 @@ export function rollGrid(charms: readonly string[], random: () => number): numbe
 
 /** 아홉 칸이 모두 맞았을 때(여덟 줄이 다 맞았을 때) 상금에 곱하는 기본 값 */
 export const JACKPOT_TIMES = 2;
-/** 한 줄도 맞지 않은 스핀(꽝)에 주는 위로 사탕. 부적이 없어도 준다. */
-export const MISS_CANDY = 1;
+/** 한 줄도 맞지 않은 스핀(꽝)에 주는 위로 금화. 부적이 없어도 준다. */
+export const MISS_COIN = 1;
 
 export interface LineWin {
   /** LINES에서의 번호 */
   line: number;
   /** 맞은 그림 */
   symbol: number;
-  /** 이 줄로 받는 사탕(줄의 갈래에 곱하는 값까지 넣은 것) */
+  /** 이 줄로 받는 금화(줄의 갈래에 곱하는 값까지 넣은 것) */
   amount: number;
 }
 
@@ -292,9 +292,9 @@ export interface SpinOutcome {
   base: number;
   /** base에 곱해진 것들. 곱해진 차례대로 들어 있다. */
   boosts: Boost[];
-  /** 한 줄도 맞지 않아서 받은 위로 사탕 */
+  /** 한 줄도 맞지 않아서 받은 위로 금화 */
   consolation: number;
-  /** 이번 스핀으로 받는 사탕 */
+  /** 이번 스핀으로 받는 금화 */
   total: number;
   /** 아홉 칸이 모두 맞았는지 */
   jackpot: boolean;
@@ -307,7 +307,7 @@ export interface SpinContext {
   afterMiss: boolean;
 }
 
-/** 나온 판과 붙인 부적으로 받는 사탕을 셈한다. */
+/** 나온 판과 붙인 부적으로 받는 금화를 셈한다. */
 export function scoreSpin(grid: Grid, charms: readonly string[], context: SpinContext): SpinOutcome {
   const values = valuesOf(charms);
   const times = lineTimesOf(charms);
@@ -341,7 +341,7 @@ export function scoreSpin(grid: Grid, charms: readonly string[], context: SpinCo
     }
   }
   const consolation =
-    wins.length === 0 ? effects.reduce((sum, effect) => sum + (effect.consolation ?? 0), MISS_CANDY) : 0;
+    wins.length === 0 ? effects.reduce((sum, effect) => sum + (effect.consolation ?? 0), MISS_COIN) : 0;
   const total = boosts.reduce((amount, item) => amount * item.times, base) + consolation;
   return { grid: [...grid], wins, base, boosts, consolation, total, jackpot };
 }
@@ -350,12 +350,12 @@ export function scoreSpin(grid: Grid, charms: readonly string[], context: SpinCo
 
 /** 라운드마다 돌릴 수 있는 기본 횟수 */
 export const BASE_SPINS = 6;
-/** 판을 시작할 때 가진 사탕 */
-export const START_CANDY = 3;
+/** 판을 시작할 때 가진 금화 */
+export const START_COIN = 3;
 
 /**
- * 라운드마다 내야 하는 사탕. 적힌 것보다 뒤의 라운드는 앞 라운드의 한 배 반씩 오른다(정수로만 셈한다).
- * 부적 다섯 장으로 벌 수 있는 사탕에는 끝이 있어서, 아무리 잘 골라도 판은 언젠가 끝난다.
+ * 라운드마다 내야 하는 금화. 적힌 것보다 뒤의 라운드는 앞 라운드의 한 배 반씩 오른다(정수로만 셈한다).
+ * 부적 다섯 장으로 벌 수 있는 금화에는 끝이 있어서, 아무리 잘 골라도 판은 언젠가 끝난다.
  */
 const TARGETS: readonly number[] = [5, 10, 16, 24, 34, 48, 66, 90, 122, 165, 222, 300];
 
@@ -372,11 +372,11 @@ export function spinsOf(charms: readonly string[]): number {
   return BASE_SPINS + effectsOf(charms).reduce((sum, effect) => sum + (effect.spins ?? 0), 0);
 }
 
-/** 라운드를 넘길 때 남은 사탕에 붙는 덤. 저금통이 없으면 0이다. */
-export function savingsFor(candy: number, charms: readonly string[]): number {
+/** 라운드를 넘길 때 남은 금화에 붙는 덤. 저금통이 없으면 0이다. */
+export function savingsFor(coin: number, charms: readonly string[]): number {
   return effectsOf(charms).reduce(
     (sum, effect) =>
-      sum + (effect.savingsCap ? Math.min(effect.savingsCap, Math.floor(Math.max(0, candy) / SAVINGS_PER)) : 0),
+      sum + (effect.savingsCap ? Math.min(effect.savingsCap, Math.floor(Math.max(0, coin) / SAVINGS_PER)) : 0),
     0,
   );
 }
@@ -417,9 +417,9 @@ export interface RunState {
   round: number;
   /** 이 라운드에 남은 스핀 */
   spinsLeft: number;
-  /** 가진 사탕 */
-  candy: number;
-  /** 이번 판에 받은 사탕을 모두 더한 것. 이것이 점수다. */
+  /** 가진 금화 */
+  coin: number;
+  /** 이번 판에 받은 금화를 모두 더한 것. 이것이 점수다. */
   earned: number;
   /** 붙인 부적의 id. 많아야 SLOTS장이다. */
   charms: string[];
@@ -427,7 +427,7 @@ export interface RunState {
   shop: Shop | null;
   /** 바로 앞 스핀에서 한 줄도 맞지 않았는지. 라운드가 바뀌면 지워진다. */
   afterMiss: boolean;
-  /** 한 번의 스핀으로 받은 가장 많은 사탕 */
+  /** 한 번의 스핀으로 받은 가장 많은 금화 */
   bestSpin: number;
 }
 
@@ -436,7 +436,7 @@ export function newRun(): RunState {
     phase: 'spin',
     round: 1,
     spinsLeft: spinsOf([]),
-    candy: START_CANDY,
+    coin: START_COIN,
     earned: 0,
     charms: [],
     shop: null,
@@ -463,7 +463,7 @@ export function spin(run: RunState, random: () => number): { run: RunState; outc
     run: {
       ...run,
       spinsLeft: run.spinsLeft - 1,
-      candy: run.candy + outcome.total,
+      coin: run.coin + outcome.total,
       earned: run.earned + outcome.total,
       afterMiss: outcome.wins.length === 0,
       bestSpin: Math.max(run.bestSpin, outcome.total),
@@ -475,23 +475,23 @@ export interface Settlement {
   run: RunState;
   /** 목표를 채웠는지. false면 판이 끝났다. */
   cleared: boolean;
-  /** 낸 사탕(목표). 채우지 못했으면 0이다. */
+  /** 낸 금화(목표). 채우지 못했으면 0이다. */
   paid: number;
   /** 저금통으로 받은 덤 */
   savings: number;
 }
 
 /**
- * 스핀을 다 쓴 라운드를 맺는다. 가진 사탕이 목표 이상이면 목표만큼 내고 가게를 열고, 모자라면 판이 끝난다.
+ * 스핀을 다 쓴 라운드를 맺는다. 가진 금화가 목표 이상이면 목표만큼 내고 가게를 열고, 모자라면 판이 끝난다.
  * 아직 스핀이 남았거나 맺을 라운드가 아니면 null을 돌려준다.
  */
 export function settleRound(run: RunState, random: () => number): Settlement | null {
   if (run.phase !== 'spin' || run.spinsLeft > 0) return null;
   const target = targetOf(run.round);
-  if (run.candy < target) {
+  if (run.coin < target) {
     return { run: { ...run, phase: 'over', shop: null }, cleared: false, paid: 0, savings: 0 };
   }
-  const left = run.candy - target;
+  const left = run.coin - target;
   const savings = savingsFor(left, run.charms);
   return {
     cleared: true,
@@ -500,7 +500,7 @@ export function settleRound(run: RunState, random: () => number): Settlement | n
     run: {
       ...run,
       phase: 'shop',
-      candy: left + savings,
+      coin: left + savings,
       earned: run.earned + savings,
       afterMiss: false,
       shop: { offers: drawOffers(run.charms, random), rerollCost: REROLL_COST },
@@ -509,7 +509,7 @@ export function settleRound(run: RunState, random: () => number): Settlement | n
 }
 
 /** 가게에서 offer번째 부적을 살 수 없는 까닭. 살 수 있으면 null. */
-export type BuyBlock = 'closed' | 'sold' | 'candy' | 'full';
+export type BuyBlock = 'closed' | 'sold' | 'coin' | 'full';
 
 export function buyBlock(run: RunState, offer: number): BuyBlock | null {
   const id = run.phase === 'shop' ? run.shop?.offers[offer] : undefined;
@@ -518,7 +518,7 @@ export function buyBlock(run: RunState, offer: number): BuyBlock | null {
   if (!charm) return 'sold';
   if (run.charms.includes(charm.id)) return 'sold';
   if (run.charms.length >= SLOTS) return 'full';
-  if (run.candy < charm.price) return 'candy';
+  if (run.coin < charm.price) return 'coin';
   return null;
 }
 
@@ -531,18 +531,18 @@ export function buy(run: RunState, offer: number): RunState {
   const offers = run.shop.offers.map((item, index) => (index === offer ? null : item));
   return {
     ...run,
-    candy: run.candy - charm.price,
+    coin: run.coin - charm.price,
     charms: [...run.charms, id],
     shop: { ...run.shop, offers },
   };
 }
 
-/** 가게의 부적을 값을 치르고 다시 뽑는다. 사탕이 모자라거나 가게가 아니면 run을 그대로 돌려준다. */
+/** 가게의 부적을 값을 치르고 다시 뽑는다. 금화가 모자라거나 가게가 아니면 run을 그대로 돌려준다. */
 export function reroll(run: RunState, random: () => number): RunState {
-  if (run.phase !== 'shop' || !run.shop || run.candy < run.shop.rerollCost) return run;
+  if (run.phase !== 'shop' || !run.shop || run.coin < run.shop.rerollCost) return run;
   return {
     ...run,
-    candy: run.candy - run.shop.rerollCost,
+    coin: run.coin - run.shop.rerollCost,
     shop: { offers: drawOffers(run.charms, random), rerollCost: run.shop.rerollCost + REROLL_STEP },
   };
 }
@@ -566,7 +566,7 @@ export function nextRound(run: RunState): RunState {
   };
 }
 
-/** 이번 판의 점수: 받은 사탕을 모두 더한 것 */
+/** 이번 판의 점수: 받은 금화를 모두 더한 것 */
 export function scoreOf(run: RunState): number {
   return run.earned;
 }

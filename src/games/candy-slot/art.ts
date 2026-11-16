@@ -1,10 +1,10 @@
 /**
- * 사탕 슬롯의 그림. 색은 LOOK 한곳에 모아 둔다. 슬롯의 여섯 그림은 카지노 슬롯에서 보는 것들
+ * 행운 슬롯의 그림. 색은 LOOK 한곳에 모아 둔다. 슬롯의 여섯 그림은 카지노 슬롯에서 보는 것들
  * (체리, 클로버, 종, 말굽, 다이아, 7)이고, 이 앱의 다른 그림처럼 아래로 도톰한 두께를 넣어 그린다.
  * 그림과 부적은 한 번 구워 텍스처로 두고, 씬은 그것을 놓고 움직이기만 한다.
  *
  * 여섯 그림은 색과 함께 모양이 모두 달라서, 색을 가려 보기 어려워도 모양으로 줄을 알아볼 수 있다.
- * 부적은 갈래마다 테두리 색이 다르지만, 무엇을 하는 부적인지는 안에 그린 그림과 표시(더하기, 빼기, 사탕)로 알 수 있다.
+ * 부적은 갈래마다 테두리 색이 다르지만, 무엇을 하는 부적인지는 안에 그린 그림과 표시(더하기, 빼기, 금화)로 알 수 있다.
  */
 import type Phaser from 'phaser';
 import { THEME, THEME_CSS } from '../../config';
@@ -70,6 +70,8 @@ export const LOOK = {
   shine: THEME.white,
   /** 맞은 줄을 긋는 선: 겉과 속 */
   winLine: { edge: THEME.accent, core: THEME.gold },
+  /** 첫 라운드에 흐리게 그어 보여 주는 여덟 줄의 길잡이 */
+  guide: 0xb5810f,
   /** 맞은 칸의 바닥에 잠깐 깔리는 빛 */
   winGlow: THEME.butter,
   /** 부적의 갈래마다의 테두리 */
@@ -88,7 +90,7 @@ export const LOOK = {
   /** 줄 부적의 작은 판: 여느 칸과 곱해지는 칸 */
   dot: THEME.white,
   dotOn: THEME.accent,
-  candy: { face: THEME.pink, lip: THEME.pinkDeep, wrap: THEME.pinkSoft, swirl: THEME.white },
+  coin: { face: 0xffd24a, lip: 0xb5810f, ring: 0xd9981c, shine: THEME.white },
   goalBar: { back: THEME.dim, fill: THEME.gold, full: THEME.mintDeep },
   sparks: [THEME.gold, THEME.pink, THEME.mintDeep, THEME.skyDeep, THEME.white],
   text: {
@@ -392,32 +394,34 @@ export function miniSymbolTexture(scene: Phaser.Scene, symbol: number): string {
   );
 }
 
-// ───────── 사탕 ─────────
+// ───────── 금화 ─────────
 
-/** 포장한 사탕 하나를 (x, y)를 한가운데로 그린다. r은 알맹이의 반지름이다. */
-function drawCandy(g: Graphics, x: number, y: number, r: number): void {
-  const look = LOOK.candy;
-  // 양쪽으로 묶인 포장 끝
-  for (const side of [-1, 1]) {
-    g.fillStyle(look.lip, 1);
-    g.fillTriangle(x + side * r * 0.7, y, x + side * r * 1.9, y - r * 0.8, x + side * r * 1.9, y + r * 0.8);
-    g.fillStyle(look.wrap, 1);
-    g.fillTriangle(x + side * r * 0.8, y, x + side * r * 1.75, y - r * 0.5, x + side * r * 1.75, y + r * 0.5);
-  }
+/**
+ * 금화 하나를 (x, y)를 한가운데로 그린다. r은 반지름이다.
+ * 앱의 코인과 헷갈리지 않게, 안쪽에 테를 한 줄 두르고 가운데에 마름모를 새겼다.
+ */
+function drawCoin(g: Graphics, x: number, y: number, r: number): void {
+  const look = LOOK.coin;
   g.fillStyle(look.lip, 1);
-  g.fillCircle(x, y + r * 0.14, r);
+  g.fillCircle(x, y + r * 0.16, r);
   g.fillStyle(look.face, 1);
-  g.fillCircle(x, y - r * 0.06, r * 0.94);
-  g.fillStyle(look.swirl, 0.85);
-  g.fillEllipse(x - r * 0.3, y - r * 0.38, r * 0.7, r * 0.4);
+  g.fillCircle(x, y - r * 0.06, r * 0.96);
+  g.lineStyle(Math.max(0.7, r * 0.15), look.ring, 1);
+  g.strokeCircle(x, y - r * 0.06, r * 0.64);
+  const half = r * 0.3;
+  g.fillStyle(look.ring, 1);
+  g.fillTriangle(x - half, y - r * 0.06, x, y - r * 0.06 - half * 1.25, x + half, y - r * 0.06);
+  g.fillTriangle(x - half, y - r * 0.06, x, y - r * 0.06 + half * 1.25, x + half, y - r * 0.06);
+  g.fillStyle(look.shine, 0.85);
+  g.fillEllipse(x - r * 0.42, y - r * 0.5, r * 0.5, r * 0.28);
 }
 
-/** 사탕 아이콘의 크기 */
-export const CANDY_ICON = { width: 16, height: 12 } as const;
+/** 금화 아이콘의 크기 */
+export const COIN_ICON = { width: 12, height: 12 } as const;
 
-/** 사탕의 수 옆에 놓는 작은 사탕 */
-export function candyTexture(scene: Phaser.Scene): string {
-  return bakeShape(scene, 'candy-slot-candy', CANDY_ICON, (g) => drawCandy(g, 0, 0, 4.2));
+/** 금화의 수 옆에 놓는 작은 금화 */
+export function coinTexture(scene: Phaser.Scene): string {
+  return bakeShape(scene, 'candy-slot-coin', COIN_ICON, (g) => drawCoin(g, 0, -0.4, 5));
 }
 
 // ───────── 부적 ─────────
@@ -480,8 +484,8 @@ const TRICKS: Readonly<Record<string, (g: Graphics) => void>> = {
     g.fillCircle(4.4, -1.6, 1);
     g.fillRoundedRect(-2.4, -5.9, 4.8, 1.3, 0.6);
   },
-  /** 위로 사탕: 큼직한 사탕 */
-  comfort: (g) => drawCandy(g, 0, 0, 5.6),
+  /** 위로 금화: 큼직한 금화 */
+  comfort: (g) => drawCoin(g, 0, 0, 8.4),
   /** 쌍둥이 줄: 나란한 두 줄 */
   twins: (g) => {
     for (const y of [-4.4, 4.4]) {
@@ -575,8 +579,8 @@ function drawCharm(g: Graphics, charm: CharmInfo): void {
   } else if (effect.value) {
     drawSymbol(g, SYMBOLS[effect.value[0]].key, -2, -1.5, 7.6);
     g.fillStyle(LOOK.mark, 1);
-    g.fillEllipse(6.4, 8, 14.6, 9);
-    drawCandy(g, 6.4, 8, 3);
+    g.fillCircle(7.6, 7.8, 5.6);
+    drawCoin(g, 7.6, 7.8, 4.2);
   } else if (effect.lineTimes) {
     drawMiniGrid(g, lineCells(effect.lineTimes[0]));
   } else {
