@@ -10,6 +10,7 @@ import { LOOK, registerGardenTextures, TEX } from './art';
 import { ENEMIES, GARDEN_GAME_ID, GARDEN_SCENE } from './data';
 import { buildLobby } from './lobby';
 import { applyRun, bankSeeds, clampStartDay, isBossDay, openedStart, raiseBest, type GardenMeta } from './rules';
+import { settleSavedRun } from './saved-run';
 import { createRun, runScore, step, stormReady, type Input, type RunState, type SimEvent } from './sim';
 import { gardenStore } from './store';
 import { FieldView, layoutField, toSim, type FieldLayout } from './view';
@@ -22,8 +23,8 @@ let freshStart: number | null = null;
 
 /** 씬을 시작할 때 넘기는 값. 없으면 준비 화면부터 연다. */
 interface StartData {
-  /** run이면 준비 화면을 거치지 않고 바로 판을 시작한다. */
-  mode?: 'run';
+  /** run이면 준비 화면을 거치지 않고 바로 새 판을 시작하고, resume이면 두고 간 판을 이어 한다. */
+  mode?: 'run' | 'resume';
 }
 
 type Phase = 'loading' | 'lobby' | 'run' | 'over';
@@ -48,6 +49,10 @@ const STORM_BUTTON = { size: 36, right: 6, bottom: 24 } as const;
 const ENDING_MS = 1500;
 /** 판을 시작할 때 화면 아래에 뜨는 조작 안내가 보이는 시간(초)과, 이만큼 해 본 사람에게는 띄우지 않는 판 수 */
 const HINT = { seconds: 7, untilRuns: 3 } as const;
+/** 하던 판을 저장하는 간격(판 안의 초). 멈출 때와 날을 넘길 때도 저장하므로, 이것은 앱이 갑자기 꺼질 때를 위한 것이다. */
+const SAVE_EVERY = 10;
+/** 이어 할 때 벌레가 움직이기 전에 숨을 고르는 시간(초) */
+const RESUME_HOLD = 1.2;
 
 /** 화면에 적는 글. 글꼴에 들어 있는 글자만 쓰는지 테스트가 확인한다. */
 export const TEXT = {
@@ -59,6 +64,7 @@ export const TEXT = {
   over: '울타리가 무너졌어요',
   fence: '울타리',
   backToLobby: '준비 화면으로',
+  resumed: (day: number) => `${day}일째 이어서!`,
   /** 대장을 처음 물리친 날에 띄운다. 다음 판은 그다음 날부터 시작한다. */
   nextStart: (day: number) => `다음 판은 ${day}일째부터!`,
 } as const;
@@ -87,6 +93,10 @@ export class GardenGuardScene extends MiniGameScene {
   private banked = 0;
   /** 판의 기록(판 수, 쫓아낸 벌레)을 이미 넣었는지 */
   private settled = false;
+  /** 하던 판을 마지막으로 저장한 때(판 안의 초) */
+  private savedT = 0;
+  /** 이어 할 때 벌레가 움직이기 전까지 남은 시간(초) */
+  private hold = 0;
   /** 겨누고 있는 손가락과 그 자리(화면 좌표) */
   private aimPointer: number | null = null;
   private aimAt = { x: 0, y: 0 };
@@ -120,6 +130,8 @@ export class GardenGuardScene extends MiniGameScene {
     this.pending = 0;
     this.banked = 0;
     this.settled = false;
+    this.savedT = 0;
+    this.hold = 0;
     this.aimPointer = null;
     this.stormAsked = false;
     this.seen.clear();
@@ -128,14 +140,14 @@ export class GardenGuardScene extends MiniGameScene {
     this.hint = undefined;
     this.tip = undefined;
 
-    // 판을 하다가 나가도(그만하기, 준비 화면으로) 그때까지 번 씨앗과 기록은 남긴다.
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.settle());
+    // 판을 하다가 나가면(그만하기, 준비 화면으로) 그때까지 번 씨앗을 넣고 판을 저장해 둔다. 준비 화면에서 이어 한다.
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.keepRun());
 
     // 다른 곳에서 그사이 저장한 것이 있으면 그것을 읽어 와서 연다.
     void gardenStore.refresh().then(() => {
       // 불러오는 사이에 씬을 떠났으면 아무것도 하지 않는다.
       if (!this.sys.isActive() || this.phase !== 'loading') return;
-      if (mode === 'run') this.startRun();
+      if (mode === 'run' || mode === 'resume') this.startRun(mode === 'resume');
       else this.openLobby();
     });
   }
@@ -144,15 +156,31 @@ export class GardenGuardScene extends MiniGameScene {
 
   private openLobby(): void {
     this.phase = 'lobby';
-    const opened = freshStart;
-    freshStart = null;
+    const saved = gardenStore.run;
+    // 이어 할 판이 있으면 시작하는 날을 고르지 않으므로, 새 출발점의 알림은 그 판을 마친 뒤로 미룬다.
+    const opened = saved ? null : freshStart;
+    if (!saved) freshStart = null;
     buildLobby(this, {
       notice: opened !== null ? lobbyNotice(opened) : null,
+      saved: saved ? { day: saved.state.day } : null,
       getMeta: () => gardenStore.data,
       setMeta: (meta) => gardenStore.set(meta),
       onStart: () => this.scene.restart({ mode: 'run' } satisfies StartData),
+      onResume: () => this.scene.restart({ mode: 'resume' } satisfies StartData),
+      onAbandon: () => {
+        this.closeSaved();
+        this.scene.restart({} satisfies StartData);
+      },
       onBack: () => fadeToScene(this, homeScene()),
     });
+  }
+
+  /** 두고 간 판을 이어 하지 않고 마친다. 아직 넣지 않은 씨앗과 판의 기록을 넣고 저장을 지운다. */
+  private closeSaved(): void {
+    const saved = gardenStore.run;
+    if (!saved) return;
+    this.save(settleSavedRun(gardenStore.data, saved));
+    gardenStore.setRun(null);
   }
 
   /** 준비 화면에서는 뒤로 가기가 허브로 나가고, 판을 하는 동안에는 일시정지한다. */
@@ -165,6 +193,8 @@ export class GardenGuardScene extends MiniGameScene {
     // 준비 화면에는 멈출 판이 없다.
     if (this.phase !== 'run') return;
     this.aimPointer = null;
+    // 앱이 가려진 채로 닫혀도 이어 할 수 있게 먼저 저장한다.
+    this.keepRun();
     super.pauseGame();
   }
 
@@ -182,16 +212,26 @@ export class GardenGuardScene extends MiniGameScene {
 
   // ------------------------------------------------------------ 판
 
-  private startRun(): void {
-    const meta = gardenStore.data;
+  /** resume이면 두고 간 판을 이어 하고, 아니면(또는 이어 할 판이 없으면) 새 판을 시작한다. */
+  private startRun(resume: boolean): void {
     const { height } = this.scale;
-    const startDay = clampStartDay(meta.startDay, meta.best);
-    const { state, events } = createRun({
-      seed: Math.floor(Math.random() * 0x7fffffff),
-      startDay,
-      levels: meta.levels,
-      bestBefore: meta.best,
-    });
+    const saved = resume ? gardenStore.run : null;
+    let state: RunState;
+    let events: SimEvent[] = [];
+    if (saved) {
+      state = structuredClone(saved.state);
+      this.banked = saved.banked;
+    } else {
+      // 두고 간 판이 남아 있으면 마치고 새로 시작한다.
+      this.closeSaved();
+      const meta = gardenStore.data;
+      ({ state, events } = createRun({
+        seed: Math.floor(Math.random() * 0x7fffffff),
+        startDay: clampStartDay(meta.startDay, meta.best),
+        levels: meta.levels,
+        bestBefore: meta.best,
+      }));
+    }
     this.run = state;
     this.layout = layoutField(height, HUD_HEIGHT);
     this.view = new FieldView(this, this.layout, DEPTH.field, state.stats.helpers);
@@ -200,7 +240,14 @@ export class GardenGuardScene extends MiniGameScene {
     this.listenForAim();
     this.phase = 'run';
     this.playing = true;
-    if (meta.runs < HINT.untilRuns) {
+    // 시작하자마자 저장해 두어서, 첫 저장 전에 앱이 꺼져도 이 판을 이어 할 수 있게 한다.
+    this.saveRun();
+    if (saved) {
+      this.hold = RESUME_HOLD;
+      const fieldMiddle = (this.layout.top + this.layout.fenceY) / 2;
+      showBanner(this, fieldMiddle - 30, TEXT.resumed(state.day), THEME_CSS.good, 1400, DEPTH.banner, FONT_SIZE.large);
+      this.view.sync(state, 0);
+    } else if (gardenStore.data.runs < HINT.untilRuns) {
       this.hint = addText(this, GAME_WIDTH / 2, this.layout.fenceY - 46, TEXT.hint, {
         color: THEME_CSS.ink,
         originX: 0.5,
@@ -335,6 +382,13 @@ export class GardenGuardScene extends MiniGameScene {
       return;
     }
     if (this.phase !== 'run') return;
+    if (this.hold > 0) {
+      // 이어 한 판은 잠깐 멈춘 채로 보여 주고 시작한다.
+      this.hold -= frame;
+      this.view.sync(state, frame);
+      this.refreshHud();
+      return;
+    }
     this.pending += frame;
     if (this.hint && state.t > HINT.seconds) this.dropHint();
 
@@ -354,6 +408,7 @@ export class GardenGuardScene extends MiniGameScene {
     this.drawAim(state);
     this.refreshHud();
     if (state.phase === 'over') this.endRun();
+    else if (state.t - this.savedT >= SAVE_EVERY) this.saveRun();
   }
 
   /** 직접 겨누는 동안, 물총에서 누른 자리 쪽으로 옅은 점선을 그어 어디를 쏘는지 보여 준다. */
@@ -434,6 +489,8 @@ export class GardenGuardScene extends MiniGameScene {
           }
           this.bounce(this.seedText);
           this.bankSoFar(event.day);
+          // 넣어 둔 씨앗의 양이 바뀌었으니 판도 함께 저장한다. 둘이 어긋나면 이어 할 때 씨앗을 두 번 넣는다.
+          this.saveRun();
           break;
         }
         default:
@@ -508,13 +565,29 @@ export class GardenGuardScene extends MiniGameScene {
     this.save(meta);
   }
 
-  /** 판의 기록(판 수, 쫓아낸 벌레, 남은 씨앗)을 넣는다. 판이 끝났을 때와 판을 하다가 나갈 때 한 번만 넣는다. */
+  /** 하던 판을 저장해 둔다. 끝난 판은 저장하지 않는다. */
+  private saveRun(): void {
+    const state = this.run;
+    if (!state || this.phase !== 'run' || state.phase === 'over') return;
+    this.savedT = state.t;
+    gardenStore.setRun({ state, banked: this.banked });
+  }
+
+  /** 판을 두고 갈 때(멈출 때, 판을 하다가 나갈 때) 그때까지 번 씨앗을 넣고 판을 저장한다. */
+  private keepRun(): void {
+    if (this.phase !== 'run' || this.run?.phase === 'over') return;
+    this.bankSoFar();
+    this.saveRun();
+  }
+
+  /** 판이 끝났을 때 판의 기록(판 수, 쫓아낸 벌레, 남은 씨앗)을 한 번만 넣고, 저장해 둔 판을 지운다. */
   private settle(): void {
     const state = this.run;
-    if (!state || this.settled || (this.phase !== 'run' && this.phase !== 'over')) return;
+    if (!state || this.settled) return;
     this.settled = true;
     this.bankSoFar();
     this.save(applyRun(gardenStore.data, state.lastCleared, state.kills));
+    gardenStore.setRun(null);
   }
 
   /** 판 밖 진행을 저장한다. 새 출발점이 열렸으면 다음 준비 화면에서 알려 주도록 적어 둔다. */

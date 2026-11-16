@@ -1206,3 +1206,69 @@ it('텃밭 지키기: 준비 화면의 강화 줄(모든 쪽)과 판 화면이 �
   expect(after, '고른 시작 날이 그대로 남아야 한다').toContain('6일째');
   expect(await hiddenTexts(page, GARDEN_SCENE), '돌아온 준비 화면').toEqual([]);
 });
+
+it('텃밭 지키기: 하던 판을 두고 나가거나 앱이 꺼져도 준비 화면에서 그 자리부터 이어 하고, 새 판을 고르면 그 판을 마친다', async ({ page }) => {
+  await openApp(page);
+  await seedGardenMeta(page, {
+    version: 2,
+    seeds: 0,
+    levels: {},
+    best: 0,
+    runs: 5,
+    kills: 100,
+    startDay: 1,
+    savedAt: Date.now() + 60_000,
+  });
+  await page.reload();
+  await waitForScene(page, 'Hub');
+  await startScene(page, GARDEN_SCENE);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, '출발!'), WAIT).not.toBeNull();
+  await tapText(page, GARDEN_SCENE, '출발!');
+  type Snapshot = { day: number; t: number; enemies: number; phase: string };
+  const runOf = (): Promise<Snapshot | null> =>
+    page.evaluate((key) => {
+      const scene = window.__pocketArcade?.scene.getScene(key) as unknown as {
+        run: { day: number; t: number; enemies: unknown[]; phase: string } | null;
+      } | null;
+      const run = scene?.run;
+      return run ? { day: run.day, t: run.t, enemies: run.enemies.length, phase: run.phase } : null;
+    }, GARDEN_SCENE);
+  await expect.poll(async () => (await runOf())?.enemies ?? 0, { ...WAIT, message: '벌레가 나와야 한다' }).toBeGreaterThan(0);
+
+  // 멈추고 준비 화면으로 나가면, 준비 화면의 맨 아래가 "새 판"과 "이어하기"다.
+  await page.evaluate((key) => (window.__pocketArcade?.scene.getScene(key) as unknown as { pauseGame(): void }).pauseGame(), GARDEN_SCENE);
+  await waitForScene(page, SCENE.pause);
+  const paused = (await runOf())!;
+  await tapText(page, SCENE.pause, '준비 화면으로');
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, '이어하기 · 1일째'), { ...WAIT, message: '이어하기 버튼' }).not.toBeNull();
+  expect(await textPoint(page, GARDEN_SCENE, '새 판')).not.toBeNull();
+  expect(await textPoint(page, GARDEN_SCENE, '출발!'), '두고 간 판이 있으면 출발 버튼 대신 이어하기').toBeNull();
+  expect(await hiddenTexts(page, GARDEN_SCENE), '이어하기가 있는 준비 화면').toEqual([]);
+
+  // 이어 하면 멈춘 자리(같은 날, 같은 때, 같은 벌레)에서 시작한다.
+  await tapText(page, GARDEN_SCENE, '이어하기 · 1일째');
+  await expect.poll(async () => (await runOf())?.t ?? -1, WAIT).toBeGreaterThanOrEqual(paused.t);
+  const resumed = (await runOf())!;
+  expect(resumed.day).toBe(paused.day);
+  expect(resumed.t - paused.t, '멈춘 자리에서 이어 한다').toBeLessThan(1);
+  expect(resumed.enemies).toBe(paused.enemies);
+
+  // 앱이 그대로 꺼져도(멈추지도 나가지도 않고) 다시 열면 이어 할 수 있다.
+  await page.reload();
+  await waitForScene(page, 'Hub');
+  await startScene(page, GARDEN_SCENE);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, '이어하기 · 1일째'), { ...WAIT, message: '꺼진 뒤의 이어하기' }).not.toBeNull();
+
+  // 새 판은 한 번 더 물어보고, 두 번째에 두고 간 판을 마친 뒤(판 수가 하나 는다) 여느 준비 화면이 된다.
+  await tapText(page, GARDEN_SCENE, '새 판');
+  await expect
+    .poll(async () => (await gardenTexts(page)).some((text) => text.includes('한 번 더 누르면')), { ...WAIT, message: '새 판을 한 번 더 묻는다' })
+    .toBe(true);
+  expect(await textPoint(page, GARDEN_SCENE, '이어하기 · 1일째'), '한 번 눌러서는 판이 남아 있다').not.toBeNull();
+  expect(await hiddenTexts(page, GARDEN_SCENE), '새 판을 묻는 준비 화면').toEqual([]);
+  await tapText(page, GARDEN_SCENE, '새 판');
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, '출발!'), { ...WAIT, message: '여느 준비 화면' }).not.toBeNull();
+  const texts = await gardenTexts(page);
+  expect(texts.some((text) => text.startsWith('6판')), `판 수가 하나 늘어야 한다: ${texts.join(' / ')}`).toBe(true);
+  expect(texts).not.toContain('이어하기 · 1일째');
+});
