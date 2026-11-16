@@ -14,6 +14,7 @@ import { BoxPushScene } from './games/box-push/BoxPushScene';
 import { ChosungQuizScene } from './games/chosung-quiz/ChosungQuizScene';
 import { ColorSortScene } from './games/color-sort/ColorSortScene';
 import { DuelScene } from './games/duel/DuelScene';
+import { GardenGuardScene } from './games/garden-guard/GardenGuardScene';
 import { GateRunScene } from './games/gate-run/GateRunScene';
 import { JumpRunnerScene } from './games/jump-runner/JumpRunnerScene';
 import { LanternKeeperScene } from './games/lantern-keeper/LanternKeeperScene';
@@ -120,6 +121,7 @@ async function boot(): Promise<void> {
       ChosungQuizScene,
       DuelScene,
       LanternKeeperScene,
+      GardenGuardScene,
       SproutCompanyScene,
       PauseScene,
       ResultScene,

@@ -13,6 +13,8 @@ import {
   type WeeklyState,
 } from '../core/weekly';
 import type { SpriteKey } from '../art/sprites';
+import { GARDEN_GAME_ID, GARDEN_SCENE } from './garden-guard/data';
+import { coinsFor as gardenCoins } from './garden-guard/rules';
 import { LANTERN_GAME_ID, LANTERN_SCENE } from './lantern-keeper/data';
 import { coinsFor as lanternCoins } from './lantern-keeper/rules';
 import { COMPANY_GAME_ID, COMPANY_SCENE } from './sprout-company/data';
@@ -260,6 +262,16 @@ export const GAMES: readonly MiniGameInfo[] = [
         [4, 60],
       ],
     },
+  },
+  {
+    id: GARDEN_GAME_ID,
+    title: '텃밭 지키기',
+    icon: 'icon-garden',
+    sceneKey: GARDEN_SCENE,
+    coinsFor: gardenCoins,
+    // 영구 강화를 얼마나 했느냐에 따라 점수가 크게 달라서 오늘의 도전에는 넣지 않는다.
+    dailyTargets: [],
+    genre: 'action',
   },
   {
     id: COMPANY_GAME_ID,

@@ -194,4 +194,5 @@ export const SCENE = {
   chosungQuiz: 'ChosungQuiz',
   matchThree: 'MatchThree',
   boxPush: 'BoxPush',
+  gardenGuard: 'GardenGuard',
 } as const;
