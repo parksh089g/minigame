@@ -2211,7 +2211,8 @@ export class CandySlotScene extends MiniGameScene {
     // 설명 칸에 글을 적는다. 설명이 없으면(아무 칸도 누르지 않았을 때의 안내) 한 줄을 칸의 가운데 높이에 놓는다.
     const write = (head: string, body: string, color: string): void => {
       name.setText(head).setColor(color);
-      description.setText(body);
+      // 빈 설명도 글자 상자는 남아서 가운데에 놓인 한 줄과 겹치므로, 적을 것이 없으면 감춘다.
+      description.setText(body).setVisible(body !== '');
       name.setY(body ? detail.y + 6 : Math.round(detail.y + (detail.height - name.height) / 2));
     };
     write(foundCount(found) > 0 ? COLLECTION_TEXT.hint : COLLECTION_TEXT.empty, '', LOOK.text.sub);
