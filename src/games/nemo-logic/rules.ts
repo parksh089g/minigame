@@ -712,3 +712,68 @@ export function levelRun(level: number): RunState {
   const picture = levelPicture(level);
   return startRun(toLevel(level), freshBoard(picturePuzzle(picture), picture));
 }
+
+// ───────── 연습 판 ─────────
+
+/**
+ * 처음 하는 사람이 본 게임에 앞서 따라 해 보는 연습 판. 한 걸음에 한 줄씩, 무엇을 보고 어디를 칠하는지 짚어 준다.
+ * 시간이 흐르지 않고 틀려도 목숨이 줄지 않는다(forgive). 다 칠하면 본 게임이 시작된다.
+ */
+export const PRACTICE_PICTURE: Picture = {
+  name: '하트',
+  rows: ['.r.r.', 'rrrrr', 'rrrrr', '.rrr.', '..r..'],
+};
+
+export interface PracticeStep {
+  /** 이번에 볼 가로줄 */
+  row: number;
+  /** 있으면 칠하는 대신 그 줄의 이 칸(세로줄 번호)에 X를 표시해 보는 걸음이다. */
+  markCol?: number;
+  /** 판 위에 띄우는 두 줄 */
+  lines: readonly [string, string];
+}
+
+/**
+ * 연습의 걸음들. 앞의 걸음을 마치면 다음 걸음의 줄은 그 줄만 보고도 칠할 칸이 정해진다(테스트가 확인한다).
+ * 꽉 찬 줄을 끌어서 칠하기, 띄워서 칠하기와 X 표시, 저절로 생긴 X를 실마리로 쓰기를 차례로 해 본다.
+ */
+export const PRACTICE_STEPS: readonly PracticeStep[] = [
+  { row: 1, lines: ['숫자는 이어서 칠할 칸의 수예요', '5가 적힌 줄을 끌어서 다 칠해요'] },
+  { row: 2, lines: ['잘했어요! 아래 줄도 5예요', '누른 채 옆으로 끌어서 칠해요'] },
+  { row: 0, markCol: 2, lines: ['1 1은 한 칸씩 띄워서 칠해요', '표시를 켜고 가운데 칸을 눌러요'] },
+  { row: 0, lines: ['이제 칠하기를 다시 켜요', 'X 양옆의 두 칸을 칠해요'] },
+  { row: 3, lines: ['X는 칠하지 않는 칸이에요', '3이니까 남은 세 칸을 칠해요'] },
+  { row: 4, lines: ['세로줄의 숫자도 맞아야 해요', '마지막 한 칸을 칠해요'] },
+];
+
+/** 연습 판으로 시작한다. */
+export function practiceRun(): RunState {
+  return startRun(1, freshBoard(picturePuzzle(PRACTICE_PICTURE), PRACTICE_PICTURE));
+}
+
+function isPracticeStepDone(board: Board, step: PracticeStep): boolean {
+  if (isRowDone(board, step.row)) return true;
+  // X를 표시해 보는 걸음은 그 칸이 빈칸이 아니게 되면 마친 것이다(잘못 칠해서 드러난 X도 X다).
+  return step.markCol !== undefined && board.cells[step.row * board.cols + step.markCol] !== 'blank';
+}
+
+/** 지금 해 볼 걸음의 번호. 앞에서부터 아직 마치지 않은 첫 걸음이고, 모두 마쳤으면 걸음의 수와 같다. */
+export function practiceStep(board: Board): number {
+  const at = PRACTICE_STEPS.findIndex((step) => !isPracticeStepDone(board, step));
+  return at < 0 ? PRACTICE_STEPS.length : at;
+}
+
+/** 그 걸음에서 눈여겨볼 칸들: 칠하는 걸음은 그 줄 전체, X를 표시하는 걸음은 그 칸 하나 */
+export function practiceCells(size: BoardSize, step: PracticeStep): number[] {
+  return step.markCol === undefined ? rowCells(size, step.row) : [step.row * size.cols + step.markCol];
+}
+
+/** 그 걸음에서 쓰는 도구 */
+export function practiceTool(step: PracticeStep): Tool {
+  return step.markCol === undefined ? 'fill' : 'mark';
+}
+
+/** 연습에서는 틀려도 목숨이 줄지 않는다: 줄어든 목숨을 다시 채운다. */
+export function forgive(run: RunState): RunState {
+  return run.hearts === START_HEARTS ? run : { ...run, hearts: START_HEARTS };
+}

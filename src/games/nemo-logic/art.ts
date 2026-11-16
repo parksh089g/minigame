@@ -34,6 +34,8 @@ export const LOOK = {
   /** 손으로 그은 X와, 틀려서 드러난 X */
   mark: THEME.faint,
   miss: THEME.bad,
+  /** 연습에서 지금 볼 곳에 두르는 테 */
+  focus: THEME.skyDeep,
   /** 손가락이 지나가는 칸에 미리 보여 주는 테: 칠하기와 X */
   stroke: { fill: THEME.lilacDeep, mark: THEME.coralDeep },
   /** 무작위로 만든 판을 다 칠했을 때 입히는 색. 판마다 차례로 돌아가며 쓴다. */
@@ -223,6 +225,18 @@ export function drawStroke(
     g.fillRoundedRect(x + 1, y + 1, cell - 2, cell - 2, cell * 0.24);
     g.lineStyle(2, color, 1);
     g.strokeRoundedRect(x + 1, y + 1, cell - 2, cell - 2, cell * 0.24);
+  }
+}
+
+/** 연습에서 지금 볼 곳(줄이나 칸, 단추)에 테를 두른다. 깜빡이는 것은 씬이 한다. */
+export function drawFocus(
+  g: Graphics,
+  spots: ReadonlyArray<{ x: number; y: number; width: number; height: number; radius: number }>,
+): void {
+  g.clear();
+  g.lineStyle(3, LOOK.focus, 1);
+  for (const { x, y, width, height, radius } of spots) {
+    g.strokeRoundedRect(x - 1, y - 1, width + 2, height + 2, radius);
   }
 }
 

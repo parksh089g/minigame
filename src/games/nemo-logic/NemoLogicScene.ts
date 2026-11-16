@@ -5,7 +5,9 @@ import { vibrate } from '../../core/haptics';
 import { LENS_ROOM } from '../../core/lens';
 import { PressLens } from '../../core/lens-view';
 import { sfx } from '../../core/sfx';
+import { clearedOf } from '../../core/stages';
 import { StartGate } from '../../core/start-gate';
+import { store } from '../../core/store';
 import { addBackdrop, addTapZone, addText } from '../../core/ui';
 import { floatText, GameHud, HUD_HEIGHT, showBanner } from '../../scenes/GameHud';
 import { MiniGameScene, type ResultStat } from '../../scenes/MiniGameScene';
@@ -13,6 +15,7 @@ import {
   ART_CELL,
   drawBoard,
   drawClueStrips,
+  drawFocus,
   drawHearts,
   drawStroke,
   drawToggle,
@@ -31,6 +34,7 @@ import {
   cellOf,
   cellsLeft,
   elapse,
+  forgive,
   HEADER_HEIGHT,
   isColDone,
   isOver,
@@ -39,6 +43,11 @@ import {
   newRun,
   nextStage,
   paint,
+  PRACTICE_STEPS,
+  practiceCells,
+  practiceRun,
+  practiceStep,
+  practiceTool,
   START_HEARTS,
   strokeCells,
   TIME_BANK_SECONDS,
@@ -62,9 +71,20 @@ interface Stroke {
   path: number[];
 }
 
+/** 씬을 열 때 넘겨받는 것 가운데 이 게임만 쓰는 것 */
+interface PracticeStart {
+  /** 연습 판을 막 마쳤거나 건너뛰고 다시 연 것인지 */
+  practiced?: boolean;
+}
+
+/**
+ * 앱을 연 뒤로 연습 판을 마쳤거나 건너뛴 적이 있는지. 한 판도 끝내지 못하고 다시 하는 사람에게
+ * 연습을 또 시키지 않는다. 앱을 다시 열면 지워지지만, 그때도 한 판이라도 마쳤으면 연습은 나오지 않는다.
+ */
+let practicedThisSession = false;
+
 /** 끌던 손가락이 판 밖으로 이만큼(칸 크기의 배수)까지 벗어나도 가장 가까운 칸을 누른 것으로 본다. */
 const DRAG_SLOP = 0.6;
-/** 판 위에 도움말 두 줄을 적는 자리의 높이. 판이 작은 처음 두 판에서만 비워 둔다. */
 
 /** 화면 아래의 줄: 목숨, 판 번호, 칠하기·X 단추 */
 const BAR = {
@@ -105,6 +125,10 @@ const BONUS = { offsetY: 32, height: 18, padding: 9, alpha: 0.92 } as const;
 const RESUME_GRACE_SECONDS = 0.6;
 /** 남은 시간이 이 아래로 내려가면 1초마다 소리로 알린다 */
 const TICK_FROM_SECONDS = 5;
+/** 연습 판을 다 칠한 뒤 본 게임이 열리기까지(ms). 그림에 색이 번지고 "잘했어요!"를 읽을 틈이다. */
+const PRACTICE_DONE_MS = 2200;
+/** 연습 판의 오른쪽 위에 두는 건너뛰기 단추: 글자와, 누르는 자리의 크기 */
+const SKIP = { label: '건너뛰기', width: 76, height: 40 } as const;
 /** 도움말 한 묶음이 떠 있는 시간(ms) */
 const HINT_MS = 7000;
 
@@ -123,7 +147,7 @@ const HINTS = {
 const TOOL_LABELS: Record<Tool, string> = { fill: '칠하기', mark: '표시' };
 
 /** 판과 아래 줄은 깊이를 따로 주지 않고 만든 순서대로 겹친다. */
-const DEPTH = { effect: 20, lens: 25, hud: 30, banner: 40 } as const;
+const DEPTH = { focus: 19, effect: 20, lens: 25, hud: 30, banner: 40 } as const;
 /** 칸이 이보다 작은 판에서는 누른 칸을 손가락 위에 크게 띄워 보여 준다. */
 const LENS_BELOW_CELL = 33;
 /** 그림의 이름이 이 글자 수를 넘으면 조금 작게 적는다(화면의 폭을 넘지 않게). */
@@ -134,6 +158,7 @@ const LONG_NAME = 5;
  * 숫자는 그 줄에서 이어서 칠할 칸의 수다. 칠하기 도구로 누르거나 끌면 칸이 칠해지고, X 도구로는 칠하지 않을 칸을 표시해 둔다.
  * 칠하면 안 되는 칸을 칠하면 목숨이 줄고, 목숨이나 시간이 다하면 끝난다. 모든 판은 찍지 않고 풀 수 있다.
  * 점수 도전에서는 판을 깨면 시간을 돌려받고 더 큰 판이 나오고, 단계 모드에서는 단계마다 정해진 그림을 그린다.
+ * 한 판도 마친 적이 없는 사람에게는 본 게임에 앞서 연습 판이 나온다: 한 줄씩 따라 칠하며 방법을 익힌다.
  */
 export class NemoLogicScene extends MiniGameScene {
   protected readonly gameId = 'nemo-logic';
@@ -151,8 +176,12 @@ export class NemoLogicScene extends MiniGameScene {
   private stroke: Stroke | null = null;
   /** 손가락이 눌려 있는 단추 반쪽 */
   private pressedSide: Tool | null = null;
-  /** 첫 판에서 여기부터 보라고 들썩이고 있는 숫자 */
-  private pointed: Phaser.GameObjects.Text | null = null;
+  /** 여기부터 보라고 들썩이고 있는 숫자들 */
+  private pointed: Phaser.GameObjects.Text[] = [];
+  /** 연습 판을 하고 있는지. 시간이 흐르지 않고 틀려도 목숨이 줄지 않으며, 다 칠하면 본 게임이 열린다. */
+  private practice = false;
+  /** 연습에서 지금 안내하고 있는 걸음. 아직 안내한 것이 없으면 -1 */
+  private practiceAt = -1;
   /** 판 위에 떠 있는 도움말 줄들. 사라진 뒤에는 비어 있다. */
   private hints: Phaser.GameObjects.Text[] = [];
   /** 첫 판의 첫 도움말이 아직 떠 있는지. 첫 칸을 칠하면 다음 도움말로 넘어간다. */
@@ -178,6 +207,8 @@ export class NemoLogicScene extends MiniGameScene {
   private tileLayer!: Phaser.GameObjects.Container;
   /** 손가락이 지나가는 칸에 두르는 테 */
   private strokeView!: Phaser.GameObjects.Graphics;
+  /** 연습에서 지금 볼 곳에 두르는 깜빡이는 테 */
+  private focusView!: Phaser.GameObjects.Graphics;
   private heartsView!: Phaser.GameObjects.Graphics;
   private stageLabel!: Phaser.GameObjects.Text;
   private toggleView!: Phaser.GameObjects.Graphics;
@@ -190,7 +221,10 @@ export class NemoLogicScene extends MiniGameScene {
   }
 
   create(): void {
+    // 연습을 마치고 다시 연 것인지는 beginMiniGame이 넘겨받은 것을 지우기 전에 읽는다.
+    const practiced = (this.scene.settings.data as PracticeStart | undefined)?.practiced === true;
     this.beginMiniGame();
+    this.practice = !practiced && this.isNewcomer();
     this.resetState();
 
     this.playArea = new Phaser.Geom.Rectangle(0, HUD_HEIGHT, GAME_WIDTH, this.scale.height - HUD_HEIGHT);
@@ -202,6 +236,7 @@ export class NemoLogicScene extends MiniGameScene {
     this.tileLayer = this.add.container(0, 0);
     this.boardBox = this.add.container(0, 0, [this.boardCard, this.clueStrips, this.clueLayer, this.tileLayer]);
     this.strokeView = this.add.graphics().setDepth(DEPTH.effect);
+    this.focusView = this.add.graphics().setDepth(DEPTH.focus);
     this.sparks = {
       fill: this.createSparks(LOOK.sparks.fill, 60),
       miss: this.createSparks(LOOK.sparks.miss, 90),
@@ -213,7 +248,8 @@ export class NemoLogicScene extends MiniGameScene {
     this.addPauseButton();
     this.hud = new GameHud(this, DEPTH.hud);
     this.hud.setTime(TIME_BANK_SECONDS, TIME_BANK_SECONDS);
-    if (this.stageLevel !== null) this.hud.showStage(this.stageLevel);
+    if (this.practice) this.showPracticeHud();
+    else if (this.stageLevel !== null) this.hud.showStage(this.stageLevel);
 
     this.bindInput();
     this.dealBoard();
@@ -231,8 +267,8 @@ export class NemoLogicScene extends MiniGameScene {
       this.gate.wait(dt);
       return;
     }
-    // 단계 모드에는 시간 제한이 없다.
-    if (this.stageLevel !== null) return;
+    // 단계 모드와 연습 판에는 시간 제한이 없다.
+    if (this.stageLevel !== null || this.practice) return;
 
     this.run = elapse(this.run, dt);
     this.hud.setTime(this.run.timeLeft, TIME_BANK_SECONDS);
@@ -250,7 +286,9 @@ export class NemoLogicScene extends MiniGameScene {
 
   private resetState(): void {
     this.random = this.levelRandom();
-    this.run = this.stageLevel === null ? newRun(this.random) : levelRun(this.stageLevel);
+    if (this.practice) this.run = practiceRun();
+    else this.run = this.stageLevel === null ? newRun(this.random) : levelRun(this.stageLevel);
+    this.practiceAt = -1;
     this.tool = 'fill';
     this.pads = [];
     this.marks = [];
@@ -258,12 +296,105 @@ export class NemoLogicScene extends MiniGameScene {
     this.colLabels = [];
     this.stroke = null;
     this.pressedSide = null;
-    this.pointed = null;
+    this.pointed = [];
     this.hints = [];
     this.nameLabel = null;
     this.grace = 0;
     this.gate.reset();
     this.lastTickSecond = 0;
+  }
+
+  // ───────── 연습 판 ─────────
+
+  /** 이 게임을 한 판도 마친 적이 없는지: 점수 도전을 끝낸 적도, 단계를 깬 적도 없는 사람 */
+  private isNewcomer(): boolean {
+    if (practicedThisSession) return false;
+    const { games, stages } = store.data;
+    return (games[this.gameId]?.plays ?? 0) === 0 && clearedOf(stages, this.gameId) === 0;
+  }
+
+  /** 연습 판의 HUD: 점수와 시간 대신 "연습"을 적고, 오른쪽 위에 건너뛰기 단추를 둔다. */
+  private showPracticeHud(): void {
+    this.hud.showTitle('연습');
+    this.hud.setSide(SKIP.label);
+    addTapZone(
+      this,
+      GAME_WIDTH - SKIP.width,
+      0,
+      SKIP.width,
+      SKIP.height,
+      () => undefined,
+      () => {
+        sfx.click();
+        this.endPractice();
+      },
+    );
+    this.tweens.add({
+      targets: this.focusView,
+      alpha: { from: 1, to: 0.3 },
+      duration: 520,
+      ease: 'Sine.InOut',
+      yoyo: true,
+      repeat: -1,
+    });
+  }
+
+  /**
+   * 지금 해 볼 걸음을 안내한다: 판 위에 두 줄로 적고, 볼 줄의 숫자를 들썩이고, 칠할 곳에 테를 두른다.
+   * 칸을 칠하거나 X를 표시할 때마다 불러서, 걸음을 마쳤으면 다음 걸음으로 넘어간다.
+   */
+  private showPracticeStep(): void {
+    const at = practiceStep(this.run.board);
+    const step = PRACTICE_STEPS[at];
+    if (!step) return;
+    if (at !== this.practiceAt) {
+      if (this.practiceAt >= 0) sfx.pop();
+      this.practiceAt = at;
+      this.showHints([step.lines], true);
+      this.stopPointing();
+      this.point(this.rowLabels[step.row] ?? []);
+    }
+    this.drawPracticeFocus();
+  }
+
+  /** 지금 걸음에서 칠할 곳에 테를 두른다. 그 걸음에 쓸 도구가 켜져 있지 않으면 켤 단추에도 두른다. */
+  private drawPracticeFocus(): void {
+    const step = PRACTICE_STEPS[this.practiceAt];
+    if (!this.practice || !step) {
+      this.focusView.clear();
+      return;
+    }
+    const { board } = this.run;
+    const { cell, left, top } = this.layout;
+    const cells = practiceCells(board, step);
+    const first = cellOf(board, cells[0]);
+    const spots = [
+      { x: left + first.col * cell, y: top + first.row * cell, width: cells.length * cell, height: cell, radius: 7 },
+    ];
+    const tool = practiceTool(step);
+    if (tool !== this.tool) {
+      spots.push({
+        x: TOGGLE_LEFT + (tool === 'fill' ? 0 : BAR.segment),
+        y: this.barTop,
+        width: BAR.segment,
+        height: BAR.height,
+        radius: BAR.height / 2,
+      });
+    }
+    drawFocus(this.focusView, spots);
+  }
+
+  /** 연습을 마친다(다 칠했거나 건너뛰었다): 본 게임으로 다시 연다. */
+  private endPractice(): void {
+    if (!this.practice) return;
+    this.practice = false;
+    this.playing = false;
+    practicedThisSession = true;
+    this.cancelStroke();
+    this.scene.restart({
+      stageLevel: this.stageLevel ?? undefined,
+      practiced: true,
+    } satisfies PracticeStart & { stageLevel?: number });
   }
 
   // ───────── 화면 구성 ─────────
@@ -356,9 +487,12 @@ export class NemoLogicScene extends MiniGameScene {
     this.tool = tool;
     this.drawToggleView();
     drawBoard(this.boardCard, this.run.board, this.layout.cell, tool);
+    this.drawPracticeFocus();
   }
 
   private showCellsLeft(bounce: boolean): void {
+    // 연습 판에서는 그 자리에 건너뛰기 단추가 있다.
+    if (this.practice) return;
     this.hud.setSide(`남은 칸 ${cellsLeft(this.run.board)}`, bounce);
   }
 
@@ -417,7 +551,7 @@ export class NemoLogicScene extends MiniGameScene {
     this.marks = board.cells.map((state, index) => (state === 'marked' ? this.addMark(index, 0) : null));
     this.refreshClues();
     // 단계 모드에서는 단계 번호가 위쪽에 적혀 있다.
-    this.stageLabel.setText(this.stageLevel === null ? `${stage}판` : '');
+    this.stageLabel.setText(this.stageLevel === null && !this.practice ? `${stage}판` : '');
     this.showCellsLeft(stage > 1 && this.stageLevel === null);
 
     this.tweens.add({
@@ -428,8 +562,9 @@ export class NemoLogicScene extends MiniGameScene {
       ease: 'Back.Out',
     });
     this.clearHints();
-    this.startHintUp = stage === 1;
-    if (stage === 1) this.showHints([HINTS.start], true);
+    this.startHintUp = stage === 1 && !this.practice;
+    if (this.practice) this.showPracticeStep();
+    else if (stage === 1) this.showHints([HINTS.start], true);
     else if (stage === 2) this.showHints([HINTS.drag]);
     const first = stage === 1 || this.stageLevel !== null;
     if (!first) sfx.pop();
@@ -438,7 +573,7 @@ export class NemoLogicScene extends MiniGameScene {
       this.playing = true;
       if (!first) return;
       sfx.go();
-      if (stage === 1) this.pointOutFullLine();
+      if (stage === 1 && !this.practice) this.pointOutFullLine();
     });
   }
 
@@ -457,7 +592,7 @@ export class NemoLogicScene extends MiniGameScene {
     this.marks = [];
     this.rowLabels = [];
     this.colLabels = [];
-    this.pointed = null;
+    this.pointed = [];
   }
 
   /** 줄마다의 숫자를 적는다. 가로줄의 숫자는 판의 왼쪽에 오른쪽으로 붙여서, 세로줄의 숫자는 위쪽에 아래로 붙여서 적는다. */
@@ -542,10 +677,15 @@ export class NemoLogicScene extends MiniGameScene {
     const row = board.rowClues.findIndex((clue) => clue[0] === board.cols);
     const col = board.colClues.findIndex((clue) => clue[0] === board.rows);
     const label = row >= 0 ? this.rowLabels[row]?.[0] : col >= 0 ? this.colLabels[col]?.[0] : undefined;
-    if (!label) return;
-    this.pointed = label;
+    if (label) this.point([label]);
+  }
+
+  /** 숫자들을 들썩여서 눈에 띄게 한다. 칸을 누르면 멈춘다. */
+  private point(labels: readonly Phaser.GameObjects.Text[]): void {
+    if (labels.length === 0) return;
+    this.pointed = [...labels];
     this.tweens.add({
-      targets: label,
+      targets: this.pointed,
       scale: 1.35,
       duration: 340,
       ease: 'Sine.InOut',
@@ -555,10 +695,10 @@ export class NemoLogicScene extends MiniGameScene {
   }
 
   private stopPointing(): void {
-    if (!this.pointed) return;
+    if (this.pointed.length === 0) return;
     this.tweens.killTweensOf(this.pointed);
-    this.pointed.setScale(1);
-    this.pointed = null;
+    for (const label of this.pointed) label.setScale(1);
+    this.pointed = [];
   }
 
   // ───────── 입력 ─────────
@@ -601,13 +741,13 @@ export class NemoLogicScene extends MiniGameScene {
   private onPause(): void {
     this.cancelStroke();
     // 끝난 뒤 결과 화면이 뜰 때는 판을 그대로 보여 준다. 시간이 흐르지 않는 단계 모드에서도 가리지 않는다.
-    if (this.playing && this.stageLevel === null) this.setSecretsVisible(false);
+    if (this.playing && this.stageLevel === null && !this.practice) this.setSecretsVisible(false);
   }
 
   private onResume(): void {
     this.setSecretsVisible(true);
     // 아직 시간이 가지 않고 있었으면 숨 고를 시간도 필요 없다.
-    if (!this.playing || !this.gate.open || this.stageLevel !== null) return;
+    if (!this.playing || !this.gate.open || this.stageLevel !== null || this.practice) return;
     this.grace = RESUME_GRACE_SECONDS;
     showBanner(this, this.boardBox.y, '준비!', LOOK.text.ready, RESUME_GRACE_SECONDS * 1000, DEPTH.banner);
   }
@@ -697,17 +837,14 @@ export class NemoLogicScene extends MiniGameScene {
   private applyStroke(path: readonly number[], tool: Tool): void {
     const before = this.run.board.cells[path[0]];
     const { run, outcome } = paint(this.run, path, tool);
-    this.run = run;
-    if (outcome.kind === 'filled') {
-      this.onFilled(outcome);
-      return;
-    }
-    if (outcome.kind === 'marked') {
-      this.onMarked(outcome.marked, outcome.unmarked);
-      return;
-    }
+    // 연습에서는 틀려도 목숨이 줄지 않는다.
+    this.run = this.practice ? forgive(run) : run;
+    if (outcome.kind === 'filled') this.onFilled(outcome);
+    else if (outcome.kind === 'marked') this.onMarked(outcome.marked, outcome.unmarked);
     // X를 그어 둔 칸은 칠해지지 않는다. X가 도리도리 흔들려서 알려 준다.
-    if (tool === 'fill' && before === 'marked') this.refuseMarked(path[0]);
+    else if (tool === 'fill' && before === 'marked') this.refuseMarked(path[0]);
+    // 연습에서는 걸음을 마쳤으면 다음 걸음을 안내한다(다 칠했으면 판이 넘어가는 중이다).
+    if (this.practice && this.playing) this.showPracticeStep();
   }
 
   private onMarked(marked: readonly number[], unmarked: readonly number[]): void {
@@ -791,14 +928,11 @@ export class NemoLogicScene extends MiniGameScene {
       sfx.hit(Math.min(filled.length - 1, 8));
       vibrate(8);
       this.sparks.fill.explode(Math.min(10, 2 + filled.length), spot.x, spot.y);
-      this.floatPoints(
-        spot.x,
-        spot.y - this.layout.cell / 2,
-        outcome.points,
-        LOOK.text.points,
-        this.playArea,
-        DEPTH.effect,
-      );
+      // 연습 판에는 점수가 없다.
+      if (!this.practice) {
+        const top = spot.y - this.layout.cell / 2;
+        this.floatPoints(spot.x, top, outcome.points, LOOK.text.points, this.playArea, DEPTH.effect);
+      }
     }
     if (missed !== null) this.onMissed(missed);
 
@@ -894,6 +1028,23 @@ export class NemoLogicScene extends MiniGameScene {
     this.hud.setTime(this.run.timeLeft, TIME_BANK_SECONDS);
     this.clearHints();
     const revealed = this.reveal();
+
+    if (this.practice) {
+      // 연습 판을 다 칠했다: 하트에 색이 번지면 칭찬하고, 잠깐 뒤에 본 게임을 연다.
+      this.practiceAt = -1;
+      this.drawPracticeFocus();
+      this.hud.setSide('');
+      this.time.delayedCall(revealed, () => {
+        sfx.gold();
+        vibrate([15, 30, 15]);
+        this.sparks.clear.explode(18, this.boardBox.x, this.boardBox.y);
+        // 색이 입혀진 하트를 가리지 않게 판 위쪽(도움말이 있던 자리)에 띄운다.
+        const y = this.layout.top - this.layout.clueHeight - HEADER_HEIGHT / 2;
+        showBanner(this, y, '잘했어요!', LOOK.text.good, PRACTICE_DONE_MS - revealed, DEPTH.banner);
+      });
+      this.time.delayedCall(PRACTICE_DONE_MS, () => this.endPractice());
+      return;
+    }
 
     if (this.stageLevel !== null) {
       // 단계 모드는 그림 하나가 한 판이다. 그림이 다 드러나면 이름을 알려 주고, 다음 단계는 결과 화면에서 고른다.

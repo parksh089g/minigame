@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { GAME_WIDTH, MAX_GAME_HEIGHT, MIN_GAME_HEIGHT } from '../../config';
 import { seededRandom as seeded, STAGE_HEARTS, STAGE_LEVELS } from '../../core/stages';
-import { PICTURES } from './pictures';
+import { PICTURE_COLORS, PICTURES } from './pictures';
 import {
   type Board,
   BOARD_MARGIN,
@@ -23,6 +23,7 @@ import {
   FIRST_CLEAR_SECONDS,
   fitsArea,
   FLAWLESS_POINTS,
+  forgive,
   freshBoard,
   HEADER_HEIGHT,
   HEADER_STAGES,
@@ -45,6 +46,12 @@ import {
   newRun,
   nextStage,
   paint,
+  PRACTICE_PICTURE,
+  PRACTICE_STEPS,
+  practiceCells,
+  practiceRun,
+  practiceStep,
+  practiceTool,
   type Puzzle,
   puzzleOf,
   rowCells,
@@ -566,5 +573,128 @@ describe('화면 배치', () => {
     expect(boardLayout(big, areaFor(MIN_GAME_HEIGHT)).clueSize).toBeLessThan(
       boardLayout(HEART, areaFor(MAX_GAME_HEIGHT)).clueSize,
     );
+  });
+});
+
+describe('연습 판', () => {
+  /** 주아 글꼴에 들어 있는 한글: KS X 1001의 완성형 2,350자 (how-to.test.ts와 같은 방법) */
+  const fontSyllables = (): Set<string> => {
+    const decoder = new TextDecoder('euc-kr');
+    const syllables = new Set<string>();
+    for (let lead = 0xb0; lead <= 0xc8; lead += 1) {
+      for (let trail = 0xa1; trail <= 0xfe; trail += 1) {
+        syllables.add(decoder.decode(new Uint8Array([lead, trail])));
+      }
+    }
+    return syllables;
+  };
+
+  /** 그 걸음대로 한다: 칠하는 걸음은 그 줄의 칠할 칸을 모두 칠하고, X를 표시하는 걸음은 그 칸에 X를 표시한다. */
+  const follow = (run: RunState, at: number): RunState => {
+    const step = PRACTICE_STEPS[at];
+    const cells = practiceCells(run.board, step);
+    if (practiceTool(step) === 'mark') return paint(run, cells, 'mark').run;
+    return paint(
+      run,
+      cells.filter((cell) => run.board.solution[cell]),
+      'fill',
+    ).run;
+  };
+
+  it('가장 작은 판이고, 찍지 않고 풀리며, 정해 둔 색으로만 그린다', () => {
+    const run = practiceRun();
+    expect([run.board.cols, run.board.rows]).toEqual([5, 5]);
+    expect(isSolvable(run.board)).toBe(true);
+    expect(run.board.picture).toBe(PRACTICE_PICTURE);
+    expect(run.hearts).toBe(START_HEARTS);
+    expect(run.board.cells.every((cell) => cell === 'blank')).toBe(true);
+    for (const letter of PRACTICE_PICTURE.rows.join('').replaceAll('.', '')) {
+      expect(PICTURE_COLORS[letter]).toBeDefined();
+    }
+  });
+
+  it('걸음을 차례로 따라 하면 한 걸음씩 넘어가서 끝에는 판을 깬다', () => {
+    let run = practiceRun();
+    for (let at = 0; at < PRACTICE_STEPS.length; at += 1) {
+      expect(practiceStep(run.board), `${at}번째 걸음`).toBe(at);
+      run = follow(run, at);
+    }
+    expect(practiceStep(run.board)).toBe(PRACTICE_STEPS.length);
+    expect(isCleared(run.board)).toBe(true);
+    expect(run.mistakes).toBe(0);
+  });
+
+  it('칠하는 걸음의 줄은 그때까지 칠한 것과 X만 보고도 칠할 칸이 하나로 정해진다', () => {
+    let run = practiceRun();
+    PRACTICE_STEPS.forEach((step, at) => {
+      if (practiceTool(step) === 'fill') {
+        const { board } = run;
+        const line = rowCells(board, step.row);
+        // 그 줄에 숫자대로 칠하는 방법을 모두 늘어놓고, 지금 판과 어긋나지 않는 것만 남긴다.
+        const fits = Array.from({ length: 1 << line.length }, (_, mask) =>
+          line.map((_cell, bit) => ((mask >> bit) & 1) === 1),
+        ).filter(
+          (filled) =>
+            clueOf(filled).join(',') === board.rowClues[step.row].join(',') &&
+            line.every((cell, bit) =>
+              board.cells[cell] === 'filled' ? filled[bit] : board.cells[cell] === 'blank' || !filled[bit],
+            ),
+        );
+        expect(fits, step.lines[0]).toHaveLength(1);
+        expect(fits[0]).toEqual(line.map((cell) => board.solution[cell]));
+      }
+      run = follow(run, at);
+    });
+  });
+
+  it('X를 표시하는 걸음은 비워 둘 칸 하나를 가리키고, 잘못 칠해서 X가 드러나도 넘어간다', () => {
+    const at = PRACTICE_STEPS.findIndex((step) => practiceTool(step) === 'mark');
+    expect(at).toBeGreaterThan(0);
+    let run = practiceRun();
+    for (let before = 0; before < at; before += 1) run = follow(run, before);
+    const [cell] = practiceCells(run.board, PRACTICE_STEPS[at]);
+    expect(practiceCells(run.board, PRACTICE_STEPS[at])).toHaveLength(1);
+    expect(run.board.solution[cell]).toBe(false);
+    expect(run.board.cells[cell]).toBe('blank');
+
+    const missed = paint(run, [cell], 'fill').run;
+    expect(missed.board.cells[cell]).toBe('crossed');
+    expect(practiceStep(missed.board)).toBe(at + 1);
+    // 표시를 건너뛰고 그 줄을 바로 다 칠해도 그다음 걸음들까지 넘어간다.
+    const skipped = follow(run, at + 1);
+    expect(practiceStep(skipped.board)).toBeGreaterThan(at + 1);
+  });
+
+  it('걸음마다 눈여겨볼 칸은 한 가로줄 안에 있다', () => {
+    const { board } = practiceRun();
+    for (const step of PRACTICE_STEPS) {
+      const cells = practiceCells(board, step);
+      expect(cells.length).toBeGreaterThan(0);
+      expect(cells.every((cell) => cellOf(board, cell).row === step.row)).toBe(true);
+    }
+  });
+
+  it('틀려도 목숨이 줄지 않게 다시 채운다', () => {
+    const run = practiceRun();
+    expect(forgive(run)).toBe(run);
+    const missed = paint(run, [0], 'fill').run;
+    expect(missed.hearts).toBe(START_HEARTS - 1);
+    const forgiven = forgive(missed);
+    expect(forgiven.hearts).toBe(START_HEARTS);
+    expect(forgiven.board).toBe(missed.board);
+    expect(isOver(forgive(paint(paint(forgiven, [2], 'fill').run, [4], 'fill').run))).toBe(false);
+  });
+
+  it('안내 글은 두 줄이고, 화면 폭에 들어가는 길이이며, 글꼴에 들어 있는 한글만 쓴다', () => {
+    const known = fontSyllables();
+    expect(known.size).toBe(2350);
+    for (const { lines } of PRACTICE_STEPS) {
+      expect(lines).toHaveLength(2);
+      for (const line of lines) {
+        expect(line.length, line).toBeLessThanOrEqual(18);
+        expect(line.trim(), line).toBe(line);
+        for (const letter of line.match(/[ㄱ-ㆎ가-힣]/g) ?? []) expect(known.has(letter), `${letter}: ${line}`).toBe(true);
+      }
+    }
   });
 });
