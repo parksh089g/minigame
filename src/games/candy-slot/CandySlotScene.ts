@@ -58,6 +58,18 @@ import {
   type RunState,
   type SpinOutcome,
 } from './rules';
+import { store } from '../../core/store';
+import { unknownCharmTexture } from './art';
+import {
+  COLLECTION_SIZE,
+  COLLECTION_TEXT,
+  collectionEntries,
+  collectionLabel,
+  entryText,
+  foundCount,
+  type CollectionEntry,
+} from './collection';
+import { RESUME_TEXT, resumeCaption, savedRunOf, withFound, withRun } from './save';
 
 // ───────── 움직임 ─────────
 
@@ -95,6 +107,15 @@ const START_GRID: readonly number[] = [0, 1, 2, 3, 4, 5, 1, 2, 0];
 /** 이 라운드까지는 돌리기 전에 상금을 따지는 여덟 줄을 흐리게 그어 보여 준다. */
 const GUIDE_ROUNDS = 1;
 const HINTS = ['돌리기를 눌러요', '같은 그림 셋이 한 줄이면 금화!'] as const;
+
+/** 두고 간 판을 이어 할지 묻는 카드. 처음의 도움말이 놓이던 자리(기계 한가운데)에 같은 높이에서 시작한다. */
+const RESUME_CARD = { width: 204, height: 58, top: -23 } as const;
+/** 시작 화면의 도감 버튼: 그 위의 카드(도움말이나 이어 하기)와의 틈과 버튼의 높이 */
+const BOOK_BUTTON = { gap: 6, height: 24 } as const;
+/** 부적 도감의 창이 놓이는 층. 가게와 알림 글자까지, 이 게임의 모든 것 위에 덮인다. */
+const BOOK_DEPTH = 50;
+/** 도감의 창: 한 줄에 놓는 부적의 수, 칸 하나가 차지하는 한 변(그림 30에 틈 4), 창의 폭, 머리글과 설명 칸과 닫기 버튼의 높이 */
+const BOOK = { cols: 6, pitch: 34, width: 224, head: 32, detail: 42, close: 32 } as const;
 
 const DEPTH = {
   machine: 1,
@@ -257,6 +278,14 @@ interface Disposable {
   destroy(): void;
 }
 
+/** "도감 7/24"가 적힌 작은 버튼 */
+interface BookButton extends Disposable {
+  /** 찾은 부적의 수를 다시 적는다. bounce면 글이 톡 튄다(새 부적을 찾았을 때). */
+  refresh(bounce?: boolean): void;
+  /** 흐려지며 사라진다. */
+  fade(): void;
+}
+
 /** 가게에 놓인 부적 한 줄 */
 interface OfferRow {
   box: Box;
@@ -311,6 +340,15 @@ export class CandySlotScene extends MiniGameScene {
   private rerollButton: SoftButton | null = null;
   /** 붙인 부적을 눌렀을 때 뜨는 설명 */
   private bubble: { views: Disposable[]; zones: Phaser.GameObjects.GameObject[] } | null = null;
+  /** 두고 간 판을 이어 할지 묻는 카드에 놓인 것들. 묻고 있지 않으면 비어 있다. */
+  private resumeViews: Disposable[] = [];
+  /** 시작 화면의 도감 버튼과, 가게의 머리글에 놓인 도감 버튼 */
+  private startBook: BookButton | null = null;
+  private shopBook: BookButton | null = null;
+  /** 열려 있는 도감에 놓인 것들. 닫혀 있으면 null이다. */
+  private book: Disposable[] | null = null;
+  /** 판이 끝났는지. 끝난 뒤에는 도감을 열지 않는다(곧 결과 화면이 뜬다). */
+  private ended = false;
 
   constructor() {
     super(SCENE.candySlot);
@@ -351,6 +389,7 @@ export class CandySlotScene extends MiniGameScene {
     this.showGuide();
     sfx.go();
     this.playing = true;
+    this.offerResume();
   }
 
   override update(_time: number, deltaMs: number): void {
@@ -390,6 +429,7 @@ export class CandySlotScene extends MiniGameScene {
     this.offerRows = [];
     this.rerollButton = null;
     this.bubble = null;
+    this.resetSaveViews();
   }
 
   // ───────── 놓기 ─────────
@@ -594,10 +634,12 @@ export class CandySlotScene extends MiniGameScene {
     this.hints = [back, ...lines];
     // 글은 판보다 위에 놓는다.
     for (const line of lines) line.setDepth(DEPTH.hint + 0.5);
+    this.showStartBook(box.y + box.height + BOOK_BUTTON.gap);
   }
 
   /** 처음의 도움말을 치운다. now면 흐려지는 움직임 없이 바로 치운다(그 위에 다른 것이 덮일 때). */
   private hideHints(now = false): void {
+    this.hideStartBook(now);
     if (this.hints.length === 0) return;
     const hints = this.hints;
     this.hints = [];
@@ -650,6 +692,7 @@ export class CandySlotScene extends MiniGameScene {
     this.clearWins();
     this.busy = true;
     this.run = result.run;
+    this.keepRun();
     this.pending = result.outcome.total;
     this.reel = { outcome: result.outcome, elapsed: 0, sinceFlick: 0, stopped: 0 };
     this.spinButton.setEnabled(false);
@@ -848,6 +891,7 @@ export class CandySlotScene extends MiniGameScene {
       this.endRun(`금화가 ${short}개 모자라요`);
       return;
     }
+    this.keepRun();
     const { goal } = this.layout;
     showBanner(this, this.machineMiddle, '목표 달성!', LOOK.text.good, SHOP_DELAY_MS, DEPTH.banner, FONT_SIZE.large);
     sfx.coin();
@@ -872,6 +916,7 @@ export class CandySlotScene extends MiniGameScene {
     this.reel = null;
     this.hideHints();
     this.hideBubble();
+    this.wrapUp();
     this.spinButton.setEnabled(false);
     this.rerollButton?.setEnabled(false);
     vibrate([20, 40, 20]);
@@ -912,9 +957,23 @@ export class CandySlotScene extends MiniGameScene {
     this.endRun('여기까지!');
   }
 
-  /** 한 판이 길어서, 점수가 있는 판을 그만두려 하면 한 번 더 묻는다. */
+  /**
+   * 하던 판은 저장되어 있어서 그만두어도 잃는 것이 없다. 그래도 한 번 더 물으면서, 다음에 이어 할 수 있다는 것을 알리고
+   * 여기서 점수를 기록하고 끝낼 길도 함께 보여 준다.
+   */
   protected override quitWarning(): string | null {
-    return this.playing && scoreOf(this.run) > 0 ? '지금 점수는 기록되지 않아요' : null;
+    return this.playing && store.data.slot.run !== null ? RESUME_TEXT.quit : null;
+  }
+
+  /** 하던 판이 남아 있으면 "처음부터 다시"는 판을 버리지 않고 시작 화면으로 가서, 이어 할지 새로 할지 묻게 된다. */
+  protected override restartLabel(): string | null {
+    return store.data.slot.run !== null ? RESUME_TEXT.restart : null;
+  }
+
+  /** 도감이 열려 있으면 뒤로 가기로는 도감만 닫는다. */
+  override onBackRequest(): void {
+    if (this.book) this.closeBook();
+    else super.onBackRequest();
   }
 
   // ───────── 가게 ─────────
@@ -943,6 +1002,7 @@ export class CandySlotScene extends MiniGameScene {
       originX: 1,
     }).setDepth(DEPTH.shop);
     this.shopViews.push(panel, blocker, title, guide);
+    this.addShopBook(title, guide);
 
     // 창이 길면 줄을 조금 키우고, 그래도 남는 자리에는 한 줄 안내를 적는다.
     const spare = shop.height - SHOP_HEAD - OFFERS * SHOP_ROW - 4;
@@ -1081,6 +1141,7 @@ export class CandySlotScene extends MiniGameScene {
       return;
     }
     this.run = buy(this.run, offer);
+    this.keepRun(this.run.charms[this.run.charms.length - 1]);
     sfx.coin();
     vibrate(12);
     this.refreshNumbers();
@@ -1101,6 +1162,7 @@ export class CandySlotScene extends MiniGameScene {
       return;
     }
     this.run = next;
+    this.keepRun();
     sfx.flip();
     this.refreshNumbers();
     this.refreshShop();
@@ -1118,6 +1180,7 @@ export class CandySlotScene extends MiniGameScene {
     this.offerRows = [];
     this.rerollButton = null;
     this.run = nextRound(this.run);
+    this.keepRun();
     this.spinButton.setVisible(true).setEnabled(true);
     this.refreshNumbers();
     showBanner(this, this.machineMiddle, `라운드 ${this.run.round}`, LOOK.text.good, 700, DEPTH.banner, FONT_SIZE.large);
@@ -1188,10 +1251,391 @@ export class CandySlotScene extends MiniGameScene {
     this.hideBubble();
     if (next === this.run) return;
     this.run = next;
+    this.keepRun();
     sfx.pull();
     this.refreshNumbers();
     this.refreshSlots();
     this.refreshOdds(true);
     this.refreshShop();
+  }
+
+  // ───────── 이어 하기 ─────────
+
+  /** 씬을 다시 열 때 이어 하기와 도감에 딸린 것들을 처음 상태로 돌린다. 놓여 있던 것은 씬이 닫힐 때 이미 치워졌다. */
+  private resetSaveViews(): void {
+    this.resumeViews = [];
+    this.startBook = null;
+    this.shopBook = null;
+    this.book = null;
+    this.ended = false;
+    // 도감을 연 채로 씬이 닫혔으면 키보드가 꺼진 채로 남아 있다.
+    if (this.input.keyboard) this.input.keyboard.enabled = true;
+  }
+
+  /**
+   * 지금 판을 세이브에 적는다. 판이 바뀔 때마다(스핀의 결과가 판에 들어간 바로 뒤, 라운드를 맺은 뒤, 가게에서 사고 떼고
+   * 다시 뽑고 닫은 뒤) 불러서, 언제 앱이 꺼져도 그 자리에서 이어 할 수 있게 한다.
+   * 아직 한 번도 돌리지 않은 판은 남기지 않는다. found를 주면 그 부적을 도감에도 넣는다.
+   */
+  private keepRun(found?: string): void {
+    const before = store.data.slot;
+    const slot = withRun(found ? withFound(before, found) : before, this.run);
+    const isNew = slot.found !== before.found;
+    // 적을 판도 지울 판도 없고 도감도 그대로면 저장할 것이 없다.
+    if (slot.run === null && before.run === null && !isNew) return;
+    store.update((save) => void (save.slot = slot));
+    if (isNew) this.shopBook?.refresh(true);
+  }
+
+  /** 세이브에 남은 하던 판을 지운다(판이 끝났거나 새 판을 하기로 했다). */
+  private dropRun(): void {
+    if (store.data.slot.run === null) return;
+    store.update((save) => void (save.slot = withRun(save.slot, null)));
+  }
+
+  /** 판이 끝났을 때: 도감을 닫고 다시 열리지 않게 하며, 세이브에 남은 하던 판을 지운다. */
+  private wrapUp(): void {
+    this.ended = true;
+    this.closeBook();
+    this.dropRun();
+  }
+
+  /**
+   * 두고 간 판이 있으면 처음의 도움말 대신 이어 할지 묻는 카드를 띄운다. 고를 때까지는 판이 시작되지 않은 것으로 둬서
+   * 돌리기를 받지 않는다. 두고 간 판이 없으면 아무 일도 하지 않는다.
+   */
+  private offerResume(): void {
+    const saved = savedRunOf(store.data.slot);
+    if (!saved) return;
+    this.playing = false;
+    this.spinButton.setEnabled(false);
+    this.hideHints(true);
+    this.hideGuide();
+
+    const box = {
+      x: Math.round((GAME_WIDTH - RESUME_CARD.width) / 2),
+      y: Math.round(this.machineMiddle + RESUME_CARD.top),
+      width: RESUME_CARD.width,
+      height: RESUME_CARD.height,
+    };
+    // 처음의 도움말과 같은, 금테를 두른 흰 판
+    const back = this.add.graphics().setDepth(DEPTH.hint);
+    back.fillStyle(LOOK.machine.trimLip, 1);
+    back.fillRoundedRect(box.x, box.y + 2, box.width, box.height, 10);
+    back.fillStyle(LOOK.machine.trim, 1);
+    back.fillRoundedRect(box.x, box.y, box.width, box.height, 10);
+    back.fillStyle(THEME.white, 1);
+    back.fillRoundedRect(box.x + 2, box.y + 2, box.width - 4, box.height - 4, 8);
+    const depth = DEPTH.hint + 0.5;
+    const caption = addText(this, GAME_WIDTH / 2, box.y + 6, resumeCaption(saved), {
+      color: LOOK.text.ink,
+      originX: 0.5,
+    }).setDepth(depth);
+
+    const pad = 7;
+    const gap = 6;
+    const row = { y: box.y + 23, height: 29 };
+    const narrow = 66;
+    const wide = box.width - pad * 2 - gap - narrow;
+    const resume = new SoftButton(
+      this,
+      { x: box.x + pad, y: row.y, width: wide, height: row.height },
+      'gold',
+      depth,
+      RESUME_TEXT.resume,
+      () => this.resumeRun(saved),
+    );
+    const fresh = new SoftButton(
+      this,
+      { x: box.x + pad + wide + gap, y: row.y, width: narrow, height: row.height },
+      'mint',
+      depth,
+      RESUME_TEXT.fresh,
+      () => this.startFresh(),
+    );
+    this.resumeViews = [back, caption, resume, fresh];
+    this.showStartBook(box.y + box.height + BOOK_BUTTON.gap);
+  }
+
+  private closeResumeCard(): void {
+    for (const view of this.resumeViews) view.destroy();
+    this.resumeViews = [];
+    this.hideStartBook(true);
+  }
+
+  /**
+   * 두고 간 판을 그 자리에서 이어 한다. 기계에는 마지막으로 나온 판을 보여 주고, 가게가 열려 있었으면 같은 부적으로
+   * 가게를 다시 열고, 스핀을 다 쓴 채였으면(결과를 보다가 닫혔으면) 라운드를 맺는다.
+   */
+  private resumeRun(saved: RunState): void {
+    if (this.resumeViews.length === 0) return;
+    this.closeResumeCard();
+    this.run = saved;
+    this.playing = true;
+    this.refreshNumbers();
+    this.refreshSlots();
+    this.refreshOdds(false);
+    saved.lastGrid?.forEach((symbol, cell) => this.cells[cell]?.setTexture(symbolTexture(this, symbol)));
+    if (saved.phase === 'shop') {
+      this.openShop();
+      return;
+    }
+    const bannerMs = 700;
+    showBanner(this, this.machineMiddle, `라운드 ${saved.round}`, LOOK.text.good, bannerMs, DEPTH.banner, FONT_SIZE.large);
+    if (saved.spinsLeft <= 0) {
+      // 금화는 마지막 스핀을 돌릴 때 이미 받았으니, 라운드를 맺기만 하면 된다. 라운드를 알리는 글이 지나간 뒤에 맺는다.
+      this.busy = true;
+      this.time.delayedCall(bannerMs + SETTLE_DELAY_MS, () => this.settle());
+      return;
+    }
+    this.spinButton.setEnabled(true);
+    this.showGuide();
+  }
+
+  /** 두고 간 판을 버리고 새 판을 시작한다. */
+  private startFresh(): void {
+    if (this.resumeViews.length === 0) return;
+    this.closeResumeCard();
+    this.dropRun();
+    this.playing = true;
+    this.spinButton.setEnabled(true);
+    this.showHints();
+    this.showGuide();
+  }
+
+  // ───────── 부적 도감 ─────────
+
+  /**
+   * "도감 7/24"처럼 찾은 부적의 수를 적은 작은 금빛 버튼을 놓는다. 누르면 도감이 열린다.
+   * centerX는 버튼의 가운데, top은 위쪽 끝이다. 누르는 자리는 보이는 것보다 위아래로 reach만큼 넓다.
+   */
+  private addBookButton(
+    centerX: number,
+    top: number,
+    height: number,
+    depth: number,
+    size: number = FONT_SIZE.normal,
+    reach = 0,
+  ): BookButton {
+    const back = this.add.graphics().setDepth(depth);
+    const label = addText(this, Math.round(centerX), Math.round(top + height / 2), '', {
+      size,
+      color: LOOK.text.ink,
+      originX: 0.5,
+      originY: 0.5,
+    }).setDepth(depth + 0.5);
+    let pressed = false;
+    let gone = false;
+    let width = 0;
+    const draw = (): void => {
+      if (gone) return;
+      const left = Math.round(centerX - width / 2);
+      back.clear();
+      back.fillStyle(LOOK.machine.trimLip, 1);
+      back.fillRoundedRect(left, top, width, height, height / 2);
+      back.fillStyle(pressed ? LOOK.machine.bulbOff : LOOK.machine.trim, 1);
+      back.fillRoundedRect(left + 1.5, top + 1.5, width - 3, height - 3, (height - 3) / 2);
+    };
+    const write = (): void => {
+      label.setText(collectionLabel(store.data.slot.found));
+      width = Math.ceil(label.width) + 18;
+      draw();
+    };
+    write();
+    const zone = addTapZone(
+      this,
+      Math.round(centerX - width / 2) - 4,
+      top - reach,
+      width + 8,
+      height + reach * 2,
+      (down) => {
+        pressed = down;
+        draw();
+      },
+      () => {
+        sfx.click();
+        vibrate(8);
+        this.openBook();
+      },
+    ).setDepth(depth + 0.5);
+    const destroy = (): void => {
+      if (gone) return;
+      gone = true;
+      this.tweens.killTweensOf([back, label]);
+      for (const part of [back, label, zone]) part.destroy();
+    };
+    return {
+      destroy,
+      refresh: (bounce = false) => {
+        if (gone) return;
+        write();
+        if (!bounce) return;
+        this.tweens.killTweensOf(label);
+        this.tweens.add({ targets: label, scale: { from: 1.4, to: 1 }, duration: 260, ease: 'Back.Out' });
+      },
+      fade: () => {
+        if (gone) return;
+        zone.disableInteractive();
+        this.tweens.add({ targets: [back, label], alpha: 0, duration: 200, onComplete: destroy });
+      },
+    };
+  }
+
+  /** 시작 화면의 도감 버튼을 카드 바로 밑에 놓는다. top은 버튼의 위쪽 끝이다. */
+  private showStartBook(top: number): void {
+    this.startBook?.destroy();
+    this.startBook = this.addBookButton(GAME_WIDTH / 2, Math.round(top), BOOK_BUTTON.height, DEPTH.hint);
+  }
+
+  /** 시작 화면의 도감 버튼을 치운다. 처음의 도움말과 함께 사라진다. */
+  private hideStartBook(now: boolean): void {
+    const button = this.startBook;
+    if (!button) return;
+    this.startBook = null;
+    if (now) button.destroy();
+    else button.fade();
+  }
+
+  /** 가게의 머리글에, 가게의 이름과 오른쪽의 안내 사이 한가운데에 도감 버튼을 놓는다. */
+  private addShopBook(title: Text, guide: Text): void {
+    const { shop } = this.layout;
+    const left = title.x + title.width;
+    const right = guide.x - guide.width;
+    const height = 18;
+    this.shopBook = this.addBookButton(
+      (left + right) / 2,
+      shop.y + Math.round((SHOP_HEAD - height) / 2) + 1,
+      height,
+      DEPTH.shop,
+      FONT_SIZE.small,
+      3,
+    );
+    this.shopViews.push(this.shopBook);
+  }
+
+  /**
+   * 도감을 연다. 화면을 덮는 창에 모든 부적을 칸칸이 늘어놓는다. 찾은 부적은 그림이 보이고 누르면 이름과 설명이 나오며,
+   * 아직 찾지 못한 부적은 물음표가 적힌 흐린 칸으로만 보인다.
+   */
+  private openBook(): void {
+    if (this.book || this.ended) return;
+    this.hideBubble();
+    const { width: screenWidth, height: screenHeight } = this.scale;
+    const found = store.data.slot.found;
+    const entries = collectionEntries(found);
+    const rows = Math.ceil(entries.length / BOOK.cols);
+    const gridHeight = rows * BOOK.pitch;
+    const height = BOOK.head + gridHeight + 6 + BOOK.detail + 8 + BOOK.close + 10;
+    const box: Box = {
+      x: Math.round((GAME_WIDTH - BOOK.width) / 2),
+      y: Math.max(4, Math.round((screenHeight - height) / 2)),
+      width: BOOK.width,
+      height,
+    };
+    const depth = BOOK_DEPTH;
+    const views: Disposable[] = [];
+
+    // 밑의 것이 눌리지 않게 화면을 덮는다. 창 밖을 누르면 닫히고, 창 안의 빈 곳은 눌러도 그대로다.
+    const scrim = this.add.rectangle(0, 0, screenWidth, screenHeight, THEME.inkDeep, 0.6).setOrigin(0, 0).setDepth(depth);
+    const outside = addTapZone(this, 0, 0, screenWidth, screenHeight, () => undefined, () => this.closeBook()).setDepth(depth);
+    const panel = this.add.graphics().setDepth(depth);
+    drawPanel(panel, box.x, box.y, box.width, box.height, { radius: 14 });
+    const inside = this.add.zone(box.x, box.y, box.width, box.height).setOrigin(0, 0).setInteractive().setDepth(depth);
+    const title = addText(this, box.x + 14, box.y + 9, COLLECTION_TEXT.title, { color: LOOK.text.ink }).setDepth(depth);
+    const count = addText(this, box.x + box.width - 14, box.y + 9, `${foundCount(found)}/${COLLECTION_SIZE}`, {
+      color: LOOK.text.points,
+      originX: 1,
+    }).setDepth(depth);
+    views.push(scrim, outside, panel, inside, title, count);
+
+    // 누른 부적의 이름과 설명이 놓이는 칸
+    const detail: Box = { x: box.x + 10, y: box.y + BOOK.head + gridHeight + 6, width: box.width - 20, height: BOOK.detail };
+    const detailBack = this.add.graphics().setDepth(depth);
+    detailBack.fillStyle(THEME.bg, 1);
+    detailBack.fillRoundedRect(detail.x, detail.y, detail.width, detail.height, 10);
+    const name = addText(this, detail.x + 10, detail.y + 6, '', { color: LOOK.text.ink }).setDepth(depth);
+    const description = addText(this, detail.x + 10, detail.y + 24, '', {
+      size: FONT_SIZE.small,
+      color: LOOK.text.sub,
+    }).setDepth(depth);
+    const ring = this.add.graphics().setDepth(depth);
+    views.push(detailBack, name, description, ring);
+    // 설명 칸에 글을 적는다. 설명이 없으면(아무 칸도 누르지 않았을 때의 안내) 한 줄을 칸의 가운데 높이에 놓는다.
+    const write = (head: string, body: string, color: string): void => {
+      name.setText(head).setColor(color);
+      description.setText(body);
+      name.setY(body ? detail.y + 6 : Math.round(detail.y + (detail.height - name.height) / 2));
+    };
+    write(foundCount(found) > 0 ? COLLECTION_TEXT.hint : COLLECTION_TEXT.empty, '', LOOK.text.sub);
+
+    const gridLeft = Math.round(box.x + (box.width - BOOK.cols * BOOK.pitch) / 2);
+    const gridTop = box.y + BOOK.head;
+    const select = (entry: CollectionEntry, x: number, y: number): void => {
+      const text = entryText(entry);
+      write(text.name, text.description, entry.found ? LOOK.text.ink : LOOK.text.faint);
+      const half = BOOK.pitch / 2;
+      ring.clear();
+      ring.lineStyle(2, THEME.accent, 1);
+      ring.strokeRoundedRect(x - half + 1, y - half + 1, BOOK.pitch - 2, BOOK.pitch - 2, 9);
+    };
+    entries.forEach((entry, index) => {
+      const x = gridLeft + ((index % BOOK.cols) + 0.5) * BOOK.pitch;
+      const y = gridTop + (Math.floor(index / BOOK.cols) + 0.5) * BOOK.pitch;
+      const texture = entry.found ? charmTexture(this, entry.charm.id) : unknownCharmTexture(this);
+      const tile = this.add.image(x, y, texture).setDepth(depth);
+      views.push(tile);
+      if (!entry.found) {
+        views.push(
+          addText(this, x, y, COLLECTION_TEXT.unknownMark, {
+            size: 14,
+            color: LOOK.text.faint,
+            originX: 0.5,
+            originY: 0.5,
+          }).setDepth(depth),
+        );
+      }
+      views.push(
+        addTapZone(
+          this,
+          x - BOOK.pitch / 2,
+          y - BOOK.pitch / 2,
+          BOOK.pitch,
+          BOOK.pitch,
+          (pressed) => tile.setScale(pressed ? 0.9 : 1),
+          () => {
+            sfx.click();
+            select(entry, x, y);
+          },
+        ).setDepth(depth),
+      );
+    });
+
+    const closeWidth = 104;
+    views.push(
+      new SoftButton(
+        this,
+        {
+          x: Math.round(box.x + (box.width - closeWidth) / 2),
+          y: detail.y + detail.height + 8,
+          width: closeWidth,
+          height: BOOK.close,
+        },
+        'gold',
+        depth,
+        COLLECTION_TEXT.close,
+        () => this.closeBook(),
+      ),
+    );
+    this.book = views;
+    // 도감이 떠 있는 동안에는 키보드로 돌리지 못하게 한다.
+    if (this.input.keyboard) this.input.keyboard.enabled = false;
+    sfx.pop();
+  }
+
+  private closeBook(): void {
+    if (!this.book) return;
+    for (const view of this.book) view.destroy();
+    this.book = null;
+    if (this.input.keyboard) this.input.keyboard.enabled = true;
   }
 }
