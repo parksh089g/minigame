@@ -70,8 +70,21 @@ const DANGER_REACH = CELL_HEIGHT * 3;
 const TRAIL = { count: 2, rate: 26, alpha: 0.28 } as const;
 /** 벽이나 천장에 튀는 소리는 이보다 잦게 내지 않는다(초). 공이 여럿이면 소리가 쏟아지기 때문이다. */
 const WALL_SOUND_GAP = 0.08;
-/** 알림 글자가 놓이는 높이(판의 천장에서부터). 바닥 선 바로 위다. */
+/** 알림 글자가 놓이는 높이(판의 천장에서부터). 바닥 선 바로 위다. 작은 줄은 그 아래 NOTICE_SUB_GAP에 놓인다. */
 const NOTICE_Y = LIMIT_Y - 44;
+const NOTICE_SUB_GAP = 28;
+/**
+ * 판이 끝났을 때의 알림 자리. 끝나는 순간에는 맨 아래 벽돌 줄이 바닥 선에 닿아 있으므로,
+ * 큰 글자는 바닥 선 바로 위에 두고 작은 줄은 바닥 선 아래(벽돌이 없는 곳)에 둔다.
+ */
+const OVER_NOTICE = { y: LIMIT_Y - 20, subY: LIMIT_Y + 16 } as const;
+/** 떠오르는 점수 글자가 판의 천장 위(HUD와 판 사이)로 나가지 않게 이만큼 아래에서부터 띄운다. */
+const FLOAT_TOP = 14;
+/**
+ * 판을 연 뒤 이 시간(ms) 안의 누름은 조종으로 치지 않는다. 결과 화면의 "다시 하기"를 두 번 잇달아 누르면
+ * 두 번째 누름이 새 판에 떨어지는데, 그것이 첫 조작이 되어 공이 바로 떠나지 않게 한다.
+ */
+const OPEN_TAP_GUARD_MS = 400;
 /** 도움말이 떠 있는 시간(ms) */
 const HINT_MS = 5000;
 /** 이어서 깬 수가 이만큼은 되어야 "연속"을 띄운다. */
@@ -96,8 +109,10 @@ export class BrickBreakScene extends MiniGameScene {
   private keyDir = 0;
   /** 처음 화면을 누르거나 잠깐 기다릴 때까지 공이 떠나지 않는다. 처음 하는 사람이 설명을 읽을 틈이다. */
   private readonly gate = new StartGate();
-  /** 0보다 크면 일시정지에서 막 돌아와 잠깐 멈춰 있는 중 */
+  /** 0보다 크면 일시정지에서 막 돌아와 잠깐 멈춰 있는 중. 그동안에는 막대도 서 있다. */
   private grace = 0;
+  /** 판을 연 때(performance.now, 이벤트의 timeStamp와 같은 시계). OPEN_TAP_GUARD_MS가 지나기 전의 누름은 조종이 아니다. */
+  private openedAt = 0;
   /** 벽에 튀는 소리를 마지막으로 낸 뒤 지난 시간(초) */
   private sinceWallSound = 0;
   /** 벽돌이 바닥 선에 가까워서 선 둘레가 깜빡이는 중인지 */
@@ -108,7 +123,8 @@ export class BrickBreakScene extends MiniGameScene {
   private sideLabel = '';
 
   private hud!: GameHud;
-  private playArea!: Phaser.Geom.Rectangle;
+  /** 떠오르는 점수 글자가 머무는 곳: 판의 안쪽 */
+  private floatArea!: Phaser.Geom.Rectangle;
   private rowViews = new Map<number, RowView>();
   private ballViews: BallView[] = [];
   private paddle!: Phaser.GameObjects.Graphics;
@@ -133,7 +149,7 @@ export class BrickBreakScene extends MiniGameScene {
     const { height } = this.scale;
     const spare = height - HUD_HEIGHT - FIELD_TOP_GAP - FIELD_HEIGHT - FINGER_ROOM;
     this.fieldTop = HUD_HEIGHT + FIELD_TOP_GAP + Math.round(Math.max(0, spare) * SPARE_ABOVE_RATIO);
-    this.playArea = new Phaser.Geom.Rectangle(0, HUD_HEIGHT, GAME_WIDTH, height - HUD_HEIGHT);
+    this.floatArea = new Phaser.Geom.Rectangle(0, this.fieldTop + FLOAT_TOP, GAME_WIDTH, FIELD_HEIGHT - FLOAT_TOP);
 
     addBackdrop(this);
     drawField(this.add.graphics().setPosition(0, this.fieldTop).setDepth(DEPTH.field));
@@ -167,13 +183,19 @@ export class BrickBreakScene extends MiniGameScene {
     if (!this.playing) return;
     // 탭이 가려졌다 돌아와도 시간이 한꺼번에 흐르지 않게 한 프레임의 길이를 제한한다.
     const dt = Math.min(deltaMs, 100) / 1000;
+
+    if (this.grace > 0) {
+      // 일시정지에서 돌아와 잠깐 멈춘 동안에는 막대도 서 있다. 멈춘 판을 보면서 받을 자리를 미리 골라 둘 수 없다.
+      // 그동안의 손가락과 키는 잊어서, 다시 움직이기 시작할 때 막대가 한꺼번에 옮겨 가지도 않는다.
+      this.grace -= dt;
+      this.targetX = this.board.paddleX;
+      this.render(dt);
+      return;
+    }
     if (this.keyDir !== 0) this.targetX = clampPaddle(this.targetX + this.keyDir * KEY_SPEED * dt);
 
-    // 출발하기 전과 잠깐 멈춘 동안에도 막대는 손가락을 따라 움직인다. 공과 벽돌만 멈춰 있다.
-    if (this.grace > 0) {
-      this.grace -= dt;
-      this.board = aim(this.board, dt, this.targetX);
-    } else if (!this.gate.open) {
+    // 출발하기 전에는 막대만 손가락을 따라 움직인다. 공과 벽돌은 멈춰 있다.
+    if (!this.gate.open) {
       if (this.gate.wait(dt)) this.setOff();
       this.board = aim(this.board, dt, this.targetX);
     } else {
@@ -192,6 +214,7 @@ export class BrickBreakScene extends MiniGameScene {
     this.keyDir = 0;
     this.gate.reset();
     this.grace = 0;
+    this.openedAt = performance.now();
     this.sinceWallSound = 0;
     this.danger = false;
     this.sideLabel = '';
@@ -213,14 +236,19 @@ export class BrickBreakScene extends MiniGameScene {
    * 판 가운데에 큰 글자를 잠깐 띄운다. sub를 주면 그 아래에 작은 줄을 덧붙인다.
    * 앞서 띄운 것이 아직 떠 있으면 지우고 띄운다. 공을 놓친 알림이 떠 있는 채로 판이 끝나도 글자가 겹치지 않는다.
    */
-  private showNotice(label: string, color: string, durationMs: number, sub?: string): void {
+  private showNotice(
+    label: string,
+    color: string,
+    durationMs: number,
+    sub?: string,
+    place: { y: number; subY: number } = { y: NOTICE_Y, subY: NOTICE_Y + NOTICE_SUB_GAP },
+  ): void {
     for (const line of this.notices) {
       this.tweens.killTweensOf(line);
       line.destroy();
     }
-    const y = this.fieldTop + NOTICE_Y;
     const lines = [
-      addText(this, GAME_WIDTH / 2, y, label, {
+      addText(this, GAME_WIDTH / 2, this.fieldTop + place.y, label, {
         size: FONT_SIZE.huge,
         color,
         originX: 0.5,
@@ -231,7 +259,7 @@ export class BrickBreakScene extends MiniGameScene {
     ];
     if (sub) {
       lines.push(
-        addText(this, GAME_WIDTH / 2, y + 28, sub, {
+        addText(this, GAME_WIDTH / 2, this.fieldTop + place.subY, sub, {
           color,
           originX: 0.5,
           originY: 0.5,
@@ -257,6 +285,8 @@ export class BrickBreakScene extends MiniGameScene {
 
   private bindInput(): void {
     const follow = (pointer: Phaser.Input.Pointer): void => {
+      // 일시정지에서 돌아와 멈춘 동안에는 막대가 서 있다(update가 붙잡아 둔다).
+      if (this.grace > 0) return;
       this.targetX = clampPaddle(pointer.worldX);
     };
     const letGo = (pointer: Phaser.Input.Pointer): void => {
@@ -265,6 +295,9 @@ export class BrickBreakScene extends MiniGameScene {
     this.input.on(Phaser.Input.Events.POINTER_DOWN, (pointer: Phaser.Input.Pointer) => {
       // 위쪽 HUD(일시정지 버튼)를 누른 것은 조종이 아니다.
       if (pointer.worldY < HUD_HEIGHT) return;
+      // 판을 막 열었을 때의 누름은 앞 화면(결과 화면의 "다시 하기")을 두 번 누른 것이다.
+      // 누른 때는 이벤트가 생긴 때로 잰다. 느린 기기에서 새 판을 그리느라 이벤트가 늦게 처리되어도 같다.
+      if (pointer.downTime - this.openedAt < OPEN_TAP_GUARD_MS) return;
       this.dragId = pointer.id;
       follow(pointer);
       if (this.playing && this.gate.start()) this.setOff();
@@ -369,7 +402,7 @@ export class BrickBreakScene extends MiniGameScene {
           this.fieldTop + event.y - 6,
           event.extra ? '공 하나 더!' : `+${event.points}`,
           LOOK.text.gift,
-          this.playArea,
+          this.floatArea,
           DEPTH.effect,
         );
         if (!event.extra) this.hud.setScore(this.board.score);
@@ -398,12 +431,16 @@ export class BrickBreakScene extends MiniGameScene {
       view.bricks[event.col]?.destroy();
       view.bricks[event.col] = null;
       view.looks[event.col] = null;
+      // 천장에서 들어오는 중인 줄의 벽돌은 들어온 만큼 납작하게 보이므로 깨지는 그림도 그만큼 납작하다.
+      const squash = view.container.scaleY;
       const ghost = this.add
         .image(event.x, y, brickTexture(this, look, tone))
+        .setScale(1, squash)
         .setDepth(DEPTH.brick);
       this.tweens.add({
         targets: ghost,
-        scale: 1.25,
+        scaleX: 1.25,
+        scaleY: 1.25 * squash,
         alpha: 0,
         duration: 140,
         onComplete: () => ghost.destroy(),
@@ -412,7 +449,7 @@ export class BrickBreakScene extends MiniGameScene {
     this.sparks[tone].explode(5, event.x, y);
     sfx.hit(event.streak - 1);
     if (event.points > 1) {
-      floatText(this, event.x, y - 4, `+${event.points}`, LOOK.text.points, this.playArea, DEPTH.effect);
+      floatText(this, event.x, y - 4, `+${event.points}`, LOOK.text.points, this.floatArea, DEPTH.effect);
     }
     this.hud.setScore(this.board.score);
     // 길게 이어 깨기 시작하면 오른쪽 위가 "연속"으로 바뀌면서 한 번 튄다.
@@ -432,7 +469,7 @@ export class BrickBreakScene extends MiniGameScene {
     vibrate([40, 30, 80]);
     this.cameras.main.shake(180, 0.012);
     this.setDanger(false);
-    this.showNotice('끝!', LOOK.text.over, 900, '벽돌이 점선에 닿았어요');
+    this.showNotice('끝!', LOOK.text.over, 900, '벽돌이 점선에 닿았어요', OVER_NOTICE);
     this.finishMiniGame(this.board.score, [
       ['깬 벽돌', `${this.board.broken}개`],
       ['가장 긴 연속', `${this.board.bestStreak}개`],
