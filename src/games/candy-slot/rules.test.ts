@@ -388,6 +388,11 @@ describe('라운드', () => {
   it('저금통은 남은 금화 세 개마다 하나를 한도까지 준다', () => {
     expect(SAVINGS_PER).toBe(3);
     expect(savingsFor(100, [])).toBe(0);
+    // 설명에는 몇 개마다 받는지와 한도가 함께 적혀 있다.
+    const piggy = charmOf('piggy')!;
+    expect(piggy.description).toContain(`${SAVINGS_PER}개마다`);
+    expect(piggy.description).toContain(`${piggy.effect.savingsCap}까지`);
+    expect(savingsFor(SAVINGS_PER * 1000, ['piggy'])).toBe(piggy.effect.savingsCap);
     expect(savingsFor(SAVINGS_PER - 1, ['piggy'])).toBe(0);
     expect(savingsFor(SAVINGS_PER, ['piggy'])).toBe(1);
     expect(savingsFor(23, ['piggy'])).toBe(7);
@@ -652,6 +657,10 @@ describe('가게', () => {
     expect(full.charms).toHaveLength(SLOTS);
     expect(buyBlock(full, 0)).toBe('full');
     expect(buy(full, 0)).toBe(full);
+    // 자리도 없고 금화도 모자라면 금화부터 알린다. 자리부터 알리면 부적을 떼고 나서야 살 수 없는 줄 알게 된다.
+    const fullAndPoor = { ...full, coin: charmOf('wide')!.price - 1 };
+    expect(buyBlock(fullAndPoor, 0)).toBe('coin');
+    expect(buy(fullAndPoor, 0)).toBe(fullAndPoor);
     // 한 장을 떼면 살 수 있다.
     const freed = discard(full, 2);
     expect(freed.charms).toEqual(['twins', 'crown', 'extra', 'comfort']);

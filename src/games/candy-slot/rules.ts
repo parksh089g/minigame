@@ -166,13 +166,13 @@ export const CHARMS: readonly CharmInfo[] = [
   { id: 'slant', name: '대각선 세 배', description: '대각선의 상금이 세 배', kind: 'line', price: 9, effect: { lineTimes: ['diag', 3] } },
   // 재주: 판의 흐름을 바꾼다.
   { id: 'extra', name: '덤 스핀', description: '라운드마다 세 번 더 돌려요', kind: 'trick', price: 6, effect: { spins: 3 } },
-  { id: 'piggy', name: '저금통', description: '남긴 금화 3개마다 +1', kind: 'trick', price: 4, effect: { savingsCap: 20 } },
+  { id: 'piggy', name: '저금통', description: '남긴 3개마다 +1, 20까지', kind: 'trick', price: 4, effect: { savingsCap: 20 } },
   { id: 'comfort', name: '위로 금화', description: '꽝이면 금화를 4개 더 받아요', kind: 'trick', price: 4, effect: { consolation: 4 } },
   { id: 'twins', name: '쌍둥이 줄', description: '두 줄 이상 맞으면 두 배', kind: 'trick', price: 13, effect: { combo: [2, 2] } },
   { id: 'crown', name: '왕관', description: '세 줄 이상 맞으면 두 배', kind: 'trick', price: 7, effect: { combo: [3, 2] } },
-  { id: 'middle', name: '가운데 7', description: '가운데에 7이 자주 떠요', kind: 'trick', price: 11, effect: { centerWild: 0.35 } },
+  { id: 'middle', name: '가운데 7', description: '가운데 칸이 셋에 한 번 7', kind: 'trick', price: 11, effect: { centerWild: 0.35 } },
   { id: 'finale', name: '막판 한 방', description: '마지막 스핀의 상금이 네 배', kind: 'trick', price: 10, effect: { lastTimes: 4 } },
-  { id: 'rebound', name: '오뚝이', description: '꽝 다음 스핀의 상금이 세 배', kind: 'trick', price: 10, effect: { reboundTimes: 3 } },
+  { id: 'rebound', name: '오뚝이', description: '같은 라운드의 꽝 다음 세 배', kind: 'trick', price: 10, effect: { reboundTimes: 3 } },
 ];
 
 const CHARM_BY_ID: ReadonlyMap<string, CharmInfo> = new Map(CHARMS.map((charm) => [charm.id, charm]));
