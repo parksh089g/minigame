@@ -3,6 +3,7 @@
  * 씬은 입력(겨눈 자리, 물벼락)을 넘기고 step이 돌려준 일(SimEvent)을 그리기만 한다.
  * 자동 플레이(bot.ts)와 테스트도 같은 step을 돌려서, 화면에서 하는 판과 숫자가 같다.
  */
+import { applyBoon, drawOffer, heatScale } from './boons';
 import {
   CHARGE,
   DIG,
@@ -17,6 +18,7 @@ import {
   STORM,
   SUMMON,
   WEAVE,
+  type BoonId,
   type EnemyKind,
 } from './data';
 import {
@@ -116,6 +118,10 @@ export interface RunState {
   seeds: number;
   /** 이 판에서 마지막으로 지킨 날. 하루도 못 지켰으면 0 */
   lastCleared: number;
+  /** 이 판에서 고른 강화. 고른 차례대로다. */
+  boons: BoonId[];
+  /** 지금 내놓은 강화. 비어 있지 않으면 하나를 고를 때까지 다음 날이 시작되지 않는다. */
+  offer: BoonId[];
 }
 
 export interface RunConfig {
@@ -130,6 +136,8 @@ export interface Input {
   aim: { x: number; y: number } | null;
   /** 물벼락 버튼을 눌렀는지 */
   storm: boolean;
+  /** 내놓은 강화 가운데 고른 것의 자리(0부터). 고르지 않았으면 적지 않는다. */
+  pick?: number;
 }
 
 export const NO_INPUT: Input = { aim: null, storm: false };
@@ -143,6 +151,8 @@ export type SimEvent =
   | { type: 'kill'; x: number; y: number; kind: EnemyKind; seeds: number }
   | { type: 'bite'; x: number; damage: number }
   | { type: 'storm' }
+  | { type: 'offer'; choices: BoonId[] }
+  | { type: 'boon'; id: BoonId }
   | { type: 'over' };
 
 /** 한 프레임에 한꺼번에 살아 있을 수 있는 벌레 수. 대장이 부하를 끝없이 불러도 넘지 않는다. */
@@ -191,6 +201,8 @@ export function createRun(config: RunConfig): { state: RunState; events: SimEven
     kills: 0,
     seeds: 0,
     lastCleared: 0,
+    boons: [],
+    offer: [],
   };
   const events: SimEvent[] = [];
   beginDay(state, config.startDay, events);
@@ -209,7 +221,7 @@ export function stormReady(state: RunState): boolean {
 
 function spawnEnemy(state: RunState, kind: EnemyKind, x: number, y: number, events: SimEvent[]): void {
   const def = ENEMIES[kind];
-  const hp = def.hp * hpScale(state.day);
+  const hp = def.hp * hpScale(state.day) * heatScale(state.day - state.startDay);
   const reach = def.gait === 'weave' ? WEAVE.reach : 0;
   const homeX = Math.min(FIELD.width - def.radius - reach, Math.max(def.radius + reach, x));
   state.enemies.push({
@@ -492,9 +504,22 @@ export function step(state: RunState, dt: number, input: Input = NO_INPUT): SimE
   if (state.phase === 'over') return events;
   state.t += dt;
 
+  if (state.offer.length > 0 && input.pick !== undefined) {
+    const id = state.offer[input.pick];
+    if (id !== undefined) {
+      applyBoon(state, id);
+      state.offer = [];
+      state.restLeft = Math.min(state.restLeft, DAY.afterPick);
+      events.push({ type: 'boon', id });
+    }
+  }
+
   if (state.phase === 'rest') {
-    state.restLeft -= dt;
-    if (state.restLeft <= 0) beginDay(state, state.day + 1, events);
+    // 내놓은 강화를 고를 때까지는 다음 날이 시작되지 않는다. 날아가던 물방울은 그대로 움직인다.
+    if (state.offer.length === 0) {
+      state.restLeft -= dt;
+      if (state.restLeft <= 0) beginDay(state, state.day + 1, events);
+    }
   } else {
     state.dayTime += dt;
     // 판이 비어 있으면 다음 벌레를 당겨서, 금방 쫓아내는 날은 금방 지나가게 한다.
@@ -533,6 +558,8 @@ export function step(state: RunState, dt: number, input: Input = NO_INPUT): SimE
     state.phase = 'rest';
     state.restLeft = DAY.rest;
     events.push({ type: 'dayClear', day: state.day, seeds, record, mended: state.fence - before });
+    state.offer = drawOffer(state);
+    if (state.offer.length > 0) events.push({ type: 'offer', choices: [...state.offer] });
   }
   return events;
 }
