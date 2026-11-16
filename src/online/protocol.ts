@@ -28,6 +28,7 @@ export const RANKED_GAMES = [
   'lantern-keeper',
   'sprout-company',
   'match-three',
+  'box-push',
   'brick-break',
 ] as const;
 

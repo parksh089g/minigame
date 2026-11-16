@@ -155,6 +155,8 @@ export const ACHIEVEMENTS: readonly Achievement[] = [
   { id: 'block-1600', group: 'score', title: '블록의 달인', description: '블록 1600점 이상', goal: 1600, reward: 50, measure: bestOf('block-fill') },
   { id: 'match-3000', group: 'score', title: '착착 맞추기', description: '맞추기 3000점 이상', goal: 3000, reward: 20, measure: bestOf('match-three') },
   { id: 'match-6000', group: 'score', title: '맞추기의 달인', description: '맞추기 6000점 이상', goal: 6000, reward: 50, measure: bestOf('match-three') },
+  { id: 'box-150', group: 'score', title: '영차영차', description: '상자 밀기 150점 이상', goal: 150, reward: 20, measure: bestOf('box-push') },
+  { id: 'box-350', group: 'score', title: '상자의 달인', description: '상자 밀기 350점 이상', goal: 350, reward: 50, measure: bestOf('box-push') },
   { id: 'chosung-500', group: 'score', title: '낱말 박사', description: '초성 퀴즈 500점 이상', goal: 500, reward: 20, measure: bestOf('chosung-quiz') },
   { id: 'chosung-1000', group: 'score', title: '초성의 달인', description: '초성 퀴즈 1000점 이상', goal: 1000, reward: 50, measure: bestOf('chosung-quiz') },
   { id: 'brick-300', group: 'score', title: '와르르 벽돌', description: '벽돌 깨기 300점 이상', goal: 300, reward: 20, measure: bestOf('brick-break') },
