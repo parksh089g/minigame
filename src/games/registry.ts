@@ -212,6 +212,16 @@ export const GAMES: readonly MiniGameInfo[] = [
     stageMode: true,
   },
   {
+    id: 'box-push',
+    title: '상자 밀기',
+    icon: 'icon-box',
+    sceneKey: SCENE.boxPush,
+    coinsFor: (score) => Math.floor(score / 25),
+    dailyTargets: [60, 140, 260],
+    genre: 'puzzle',
+    stageMode: true,
+  },
+  {
     id: 'chosung-quiz',
     title: '초성 퀴즈',
     icon: 'icon-chosung',
