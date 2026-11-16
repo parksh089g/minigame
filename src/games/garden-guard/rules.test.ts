@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { BOSS_EVERY, COMMON_KINDS, DAY, ENEMIES, FENCE_BASE, FIELD, GUN, UPGRADE_ORDER, UPGRADES } from './data';
+import { BOSS_EVERY, BOSS_ROTATION, COMMON_KINDS, DAY, ENEMIES, FENCE_BASE, FIELD, GUN, UPGRADE_ORDER, UPGRADES } from './data';
 import {
   applyRun,
   bankSeeds,
   biteScale,
   bossCount,
+  bossKind,
   buyUpgrade,
   canBuyAny,
   clampStartDay,
@@ -79,6 +80,16 @@ describe('날마다의 난이도', () => {
     for (const day of [5, 25, 30, 60, 95]) expect(bossCount(day), `${day}`).toBe(1);
   });
 
+  it('대장의 날마다 두더지와 장수풍뎅이가 번갈아 나온다', () => {
+    expect([4, 5, 10, 15, 20, 25, 30].map(bossKind)).toEqual([null, 'mole', 'rhino', 'mole', 'rhino', 'mole', 'rhino']);
+    for (const kind of BOSS_ROTATION) {
+      expect(ENEMIES[kind].boss, kind).toBe(true);
+      expect(ENEMIES[kind].skill, kind).toBeDefined();
+      expect(COMMON_KINDS, kind).not.toContain(kind);
+    }
+    expect(new Set(BOSS_ROTATION).size).toBe(BOSS_ROTATION.length);
+  });
+
   it('체력은 LATE_FROM일째까지 빠르게, 그 뒤로는 천천히 불어나고 이어진다', () => {
     expect(hpScale(LATE_FROM)).toBeCloseTo(HP_GROWTH ** (LATE_FROM - 1), 9);
     expect(hpScale(LATE_FROM + 1) / hpScale(LATE_FROM)).toBeCloseTo(HP_GROWTH_LATE, 9);
@@ -103,6 +114,10 @@ describe('날마다의 난이도', () => {
       expect(kindWeight(kind, from), kind).toBeGreaterThan(0);
     }
     expect(kindWeight('mole', 50)).toBe(0);
+    expect(kindWeight('rhino', 50)).toBe(0);
+    // 8일째 뒤로도 새 벌레가 나온다: 14일째쯤 모기 떼, 24일째쯤 땅강아지
+    expect(ENEMIES.mosquito.fromDay).toBeGreaterThan(10);
+    expect(ENEMIES.digger.fromDay).toBeGreaterThan(20);
     // 첫날에는 개미만 나온다.
     expect(COMMON_KINDS.filter((kind) => kindWeight(kind, 1) > 0)).toEqual(['ant']);
   });
@@ -121,10 +136,31 @@ describe('그날 나올 벌레', () => {
         expect(spawn.at).toBeLessThanOrEqual(Math.max(dayWindow(day), 1.5 + bossCount(day) * 6));
         expect(spawn.x).toBeGreaterThanOrEqual(FIELD.margin);
         expect(spawn.x).toBeLessThanOrEqual(FIELD.width - FIELD.margin);
-        if (spawn.kind !== 'mole') expect(ENEMIES[spawn.kind].fromDay).toBeLessThanOrEqual(day);
+        if (!ENEMIES[spawn.kind].boss) expect(ENEMIES[spawn.kind].fromDay).toBeLessThanOrEqual(day);
       }
-      expect(spawns.filter((spawn) => spawn.kind === 'mole')).toHaveLength(bossCount(day));
+      const bosses = spawns.filter((spawn) => ENEMIES[spawn.kind].boss);
+      expect(bosses).toHaveLength(bossCount(day));
+      for (const boss of bosses) expect(boss.kind).toBe(bossKind(day));
     }
+  });
+
+  it('모기는 떼로 붙어서 나오고, 떼가 섞여도 그날 나오는 수는 같다', () => {
+    const size = ENEMIES.mosquito.swarm ?? 1;
+    expect(size).toBeGreaterThan(1);
+    let swarms = 0;
+    for (let seed = 1; seed <= 20; seed += 1) {
+      const day = 31;
+      const spawns = planDay(day, randomFrom(seed));
+      expect(spawns).toHaveLength(dayCount(day));
+      const gnats = spawns.filter((spawn) => spawn.kind === 'mosquito');
+      if (gnats.length >= size) swarms += 1;
+      // 모기는 다른 모기 곁에서 거의 한꺼번에 나온다. 외톨이는 남은 칸이 하나뿐이던 마지막 떼 하나까지다.
+      const alone = gnats.filter(
+        (gnat) => !gnats.some((other) => other !== gnat && Math.abs(other.at - gnat.at) < 1 && Math.abs(other.x - gnat.x) < 40),
+      );
+      expect(alone.length, `seed ${seed}`).toBeLessThanOrEqual(1);
+    }
+    expect(swarms).toBeGreaterThan(5);
   });
 
   it('같은 난수면 같은 날이 나온다', () => {

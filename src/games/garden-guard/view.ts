@@ -8,7 +8,7 @@ import { GAME_WIDTH } from '../../config';
 import { store } from '../../core/store';
 import { ENEMY_TINT, enemyTexture, LOOK, TEX } from './art';
 import { ENEMIES, FIELD, HELPER_SPOTS, HOP, SHOOTER, type EnemyKind } from './data';
-import type { Enemy, RunState, SimEvent } from './sim';
+import { chargePhase, isBuried, type Enemy, type RunState, type SimEvent } from './sim';
 
 export interface FieldLayout {
   /** 벌레가 나타나는 줄(시뮬레이션의 y = 0)의 화면 y */
@@ -62,7 +62,12 @@ interface BugView {
   kind: EnemyKind;
   /** 벌레마다 걸음의 박자가 어긋나게 하는 값 */
   beat: number;
+  /** 지난번에 땅속에 있었는지. 들어가고 나오는 순간에 흙을 튀긴다. */
+  buried: boolean;
 }
+
+/** 흙의 색: 땅강아지가 파고들고 나올 때와 장수풍뎅이가 내달릴 때 튄다. */
+const DIRT = 0xd9b48f;
 
 const PARTICLE_CAP = 160;
 
@@ -284,10 +289,21 @@ export class FieldView {
       seen.add(enemy.id);
       let bug = this.bugs.get(enemy.id);
       if (!bug) {
-        bug = { image: this.take(enemyTexture(enemy.kind)), kind: enemy.kind, beat: (enemy.id * 1.7) % 6.28 };
+        bug = { image: this.take(enemyTexture(enemy.kind)), kind: enemy.kind, beat: (enemy.id * 1.7) % 6.28, buried: false };
         this.bugs.set(enemy.id, bug);
       }
-      this.poseBug(bug, enemy, toScreenY(layout, enemy.y));
+      const y = toScreenY(layout, enemy.y);
+      const buried = isBuried(enemy);
+      if (buried !== bug.buried) {
+        bug.buried = buried;
+        bug.image.setTexture(buried ? TEX.mound : enemyTexture(enemy.kind));
+        this.burst(enemy.x, y, DIRT, 7, 70, 2.2);
+      }
+      // 내달리는 장수풍뎅이 뒤로 흙먼지가 인다.
+      if (chargePhase(enemy) === 'rush' && Math.random() < 0.35) {
+        this.burst(enemy.x + (Math.random() - 0.5) * 24, y - ENEMIES[enemy.kind].radius, DIRT, 1, 30, 2.6);
+      }
+      this.poseBug(bug, enemy, y);
     }
     for (const [id, bug] of this.bugs) {
       if (seen.has(id)) continue;
@@ -311,7 +327,19 @@ export class FieldView {
     let lift = 0;
     let scale = 1;
     let angle = wave * (def.boss ? 2.5 : 6);
-    if (enemy.biting) {
+    const charge = chargePhase(enemy);
+    if (bug.buried) {
+      // 흙더미가 꿈틀거리며 지나간다.
+      angle = wave * 3;
+      scale = 1 + Math.abs(wave) * 0.05;
+    } else if (charge === 'windup') {
+      // 돌진하기 전에 부르르 떨며 웅크린다.
+      angle = Math.sin(this.clock * 48) * 4;
+      scale = 1.06;
+    } else if (charge === 'rush') {
+      angle = 0;
+      scale = 1.04;
+    } else if (enemy.biting) {
       // 울타리를 갉는 동안에는 앞뒤로 들이받는다.
       lift = -Math.abs(Math.sin(this.clock * 9 + bug.beat)) * 2.5;
       angle = wave * 3;
@@ -381,7 +409,7 @@ export class FieldView {
     const { layout } = this;
     g.clear();
     for (const enemy of state.enemies) {
-      if (enemy.hp >= enemy.maxHp || enemy.hp <= 0) continue;
+      if (enemy.hp >= enemy.maxHp || enemy.hp <= 0 || isBuried(enemy)) continue;
       const def = ENEMIES[enemy.kind];
       const width = def.boss ? 36 : 14;
       const height = def.boss ? 4 : 2.5;

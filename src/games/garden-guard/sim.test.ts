@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { buyCheapest, playCareer, playRun } from './bot';
-import { DAY, ENEMIES, FIELD, GUN, HOP, SHOOTER, STORM, SUMMON, type EnemyKind } from './data';
+import { CHARGE, DAY, DIG, ENEMIES, FIELD, GUN, HOP, SHOOTER, STORM, SUMMON, type EnemyKind } from './data';
 import { clearBonus, createMeta, hpScale, recordBonus, type Levels } from './rules';
 import {
   autoAim,
+  chargePhase,
   clampAim,
   createRun,
+  isBuried,
   runScore,
   step,
   stormReady,
@@ -299,6 +301,103 @@ describe('벌레', () => {
       expect(enemy.kind).toBe(SUMMON.kind);
       expect(enemy.x).toBeGreaterThanOrEqual(ENEMIES[SUMMON.kind].radius);
       expect(enemy.x).toBeLessThanOrEqual(FIELD.width - ENEMIES[SUMMON.kind].radius);
+    }
+  });
+});
+
+describe('새 벌레와 대장', () => {
+  it('땅강아지는 판의 가운데에서 땅속에 숨고, 숨은 동안에는 겨누지도 맞히지도 못한다', () => {
+    const state = emptied({ splash: 3, storm: 1 });
+    const digger = put(state, 'digger', SHOOTER.x, (DIG.from + DIG.to) / 2, 500);
+    expect(isBuried(digger)).toBe(true);
+    expect(autoAim(state, SHOOTER)).toBeNull();
+    // 바로 앞을 겨눠 쏴도 물방울이 그냥 지나간다.
+    const events = run(state, 1, { aim: { x: digger.x, y: digger.y }, storm: false });
+    expect(count(events, 'fire')).toBeGreaterThan(0);
+    expect(count(events, 'hit')).toBe(0);
+    // 물벼락도 닿지 않는다.
+    state.stormIn = 0;
+    step(state, DT, { aim: null, storm: true });
+    expect(digger.hp).toBe(digger.maxHp);
+    // 땅 위로 나오면 다시 맞는다.
+    const out = put(state, 'digger', SHOOTER.x, DIG.to + 5, 500);
+    expect(isBuried(out)).toBe(false);
+    expect(autoAim(state, SHOOTER)?.x).toBe(out.x);
+  });
+
+  it('땅강아지는 울타리에 닿기 전에 땅 위로 나온다', () => {
+    expect(DIG.from).toBeGreaterThan(0);
+    expect(DIG.to).toBeLessThan(FIELD.depth - ENEMIES.digger.radius - 40);
+    const state = emptied();
+    state.fireIn = 1e9;
+    const digger = put(state, 'digger', 100, 0);
+    const seen = new Set<boolean>();
+    for (let time = 0; time < 20 && !digger.biting; time += DT) {
+      step(state, DT);
+      seen.add(isBuried(digger));
+    }
+    expect([...seen].sort()).toEqual([false, true]);
+    expect(digger.biting).toBe(true);
+    expect(isBuried(digger)).toBe(false);
+  });
+
+  it('장수풍뎅이는 웅크려 멈췄다가 빠르게 돌진하고, 부하는 부르지 않는다', () => {
+    const state = emptied({}, 10);
+    state.fireIn = 1e9;
+    const rhino = put(state, 'rhino', 120, 0);
+    rhino.summonIn = CHARGE.every;
+    const phases: Array<{ phase: string; dy: number }> = [];
+    let spawns = 0;
+    for (let time = 0; time < CHARGE.every * 2; time += DT) {
+      const before = rhino.y;
+      // 이 프레임의 걸음은 프레임을 시작할 때의 때를 따른다.
+      const phase = chargePhase(rhino);
+      spawns += count(step(state, DT), 'spawn');
+      phases.push({ phase, dy: rhino.y - before });
+    }
+    expect(spawns).toBe(0);
+    expect(state.enemies).toHaveLength(1);
+    const walk = phases.filter((frame) => frame.phase === 'walk');
+    const windup = phases.filter((frame) => frame.phase === 'windup');
+    const rush = phases.filter((frame) => frame.phase === 'rush');
+    expect(windup.length).toBeGreaterThan(0);
+    expect(rush.length).toBeGreaterThan(0);
+    for (const frame of windup) expect(frame.dy).toBe(0);
+    const pace = (frames: typeof phases): number => frames.reduce((sum, frame) => sum + frame.dy, 0) / (frames.length * DT);
+    expect(pace(walk)).toBeCloseTo(ENEMIES.rhino.speed, 3);
+    expect(pace(rush)).toBeCloseTo(ENEMIES.rhino.speed * CHARGE.speed, 3);
+    // 웅크리는 때와 돌진하는 때가 차례로 온다.
+    const firstWindup = phases.findIndex((frame) => frame.phase === 'windup');
+    const firstRush = phases.findIndex((frame) => frame.phase === 'rush');
+    expect(firstWindup).toBeLessThan(firstRush);
+  });
+
+  it('장수풍뎅이는 젖으면 돌진의 박자도 느려진다', () => {
+    const rushesIn = (slow: number): number => {
+      const state = emptied({}, 10);
+      state.fireIn = 1e9;
+      const rhino = put(state, 'rhino', 120, 0);
+      rhino.summonIn = CHARGE.every;
+      rhino.slow = slow;
+      rhino.slowLeft = 99;
+      let time = 0;
+      while (chargePhase(rhino) !== 'rush') {
+        step(state, DT);
+        time += DT;
+      }
+      return time;
+    };
+    expect(rushesIn(0.5)).toBeGreaterThan(rushesIn(0) * 1.8);
+  });
+
+  it('대장의 날에는 그날의 대장이 나온다', () => {
+    for (const [day, kind] of [
+      [5, 'mole'],
+      [10, 'rhino'],
+    ] as const) {
+      const state = start({}, day, 0);
+      const events = run(state, 3);
+      expect(events.some((event) => event.type === 'spawn' && event.kind === kind), `${day}`).toBe(true);
     }
   });
 });

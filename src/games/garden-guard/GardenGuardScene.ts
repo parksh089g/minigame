@@ -7,9 +7,9 @@ import { addText, fadeToScene, PixelButton } from '../../core/ui';
 import { showBanner } from '../../scenes/GameHud';
 import { MiniGameScene, type ResultStat } from '../../scenes/MiniGameScene';
 import { LOOK, registerGardenTextures, TEX } from './art';
-import { ENEMIES, GARDEN_GAME_ID, GARDEN_SCENE } from './data';
+import { ENEMIES, GARDEN_GAME_ID, GARDEN_SCENE, type EnemyKind } from './data';
 import { buildLobby } from './lobby';
-import { applyRun, bankSeeds, clampStartDay, isBossDay, openedStart, raiseBest, type GardenMeta } from './rules';
+import { applyRun, bankSeeds, bossKind, clampStartDay, isBossDay, openedStart, raiseBest, type GardenMeta } from './rules';
 import { createRun, runScore, step, stormReady, type Input, type RunState, type SimEvent } from './sim';
 import { gardenStore } from './store';
 import { FieldView, layoutField, toSim, type FieldLayout } from './view';
@@ -48,13 +48,24 @@ const STORM_BUTTON = { size: 36, right: 6, bottom: 24 } as const;
 const ENDING_MS = 1500;
 /** 판을 시작할 때 화면 아래에 뜨는 조작 안내가 보이는 시간(초)과, 이만큼 해 본 사람에게는 띄우지 않는 판 수 */
 const HINT = { seconds: 7, untilRuns: 3 } as const;
+/** 새 벌레의 안내는 그 벌레가 나오기 시작한 날에서 이만큼 더 간 사람에게는 띄우지 않는다. */
+const BUG_TIP_DAYS = 4;
 
 /** 화면에 적는 글. 글꼴에 들어 있는 글자만 쓰는지 테스트가 확인한다. */
 export const TEXT = {
   hint: '화면을 누르고 있으면\n그쪽으로 더 빨리 쏴요',
-  boss: '대장 두더지!',
-  bossTip: '대장은 부하를 불러요. 먼저 쫓아내요!',
-  beetleTip: '풍뎅이는 단단해요. 크게 맞혀야 통해요',
+  /** 대장의 날에 뜨는 이름(대장의 이름 뒤에 느낌표)과, 그 대장을 처음 만나는 날에 뜨는 안내 */
+  boss: (name: string) => `${name}!`,
+  bossTips: {
+    mole: '두더지는 부하를 불러요. 먼저 쫓아내요!',
+    rhino: '웅크리면 곧 돌진해요. 찬물로 늦춰요!',
+  } as Partial<Record<EnemyKind, string>>,
+  /** 새 벌레가 처음 나올 무렵에 뜨는 안내 */
+  bugTips: {
+    beetle: '풍뎅이는 단단해요. 크게 맞혀야 통해요',
+    mosquito: '모기는 떼로 와요. 물보라가 잘 들어요',
+    digger: '땅강아지는 땅속에 숨어요. 나오면 쏴요!',
+  } as Partial<Record<EnemyKind, string>>,
   record: '새 기록!',
   over: '울타리가 무너졌어요',
   fence: '울타리',
@@ -411,18 +422,23 @@ export class GardenGuardScene extends MiniGameScene {
           tone(1500, 0.3, { type: 'sawtooth', slideTo: 300, volume: 0.12, delay: 0.05 });
           this.cameras.main.flash(180, 191, 227, 255);
           break;
-        case 'spawn':
-          if (event.kind === 'beetle' && gardenStore.data.best < 12) this.showTip('beetle', TEXT.beetleTip);
+        case 'spawn': {
+          const tip = TEXT.bugTips[event.kind];
+          if (tip && gardenStore.data.best < ENEMIES[event.kind].fromDay + BUG_TIP_DAYS) this.showTip(event.kind, tip);
           break;
-        case 'dayStart':
+        }
+        case 'dayStart': {
           this.bounce(this.dayText);
-          if (event.boss) {
-            showBanner(this, fieldMiddle - 30, TEXT.boss, THEME_CSS.bad, 1700, DEPTH.banner, FONT_SIZE.large);
+          const boss = event.boss ? bossKind(event.day) : null;
+          if (boss) {
+            showBanner(this, fieldMiddle - 30, TEXT.boss(ENEMIES[boss].name), THEME_CSS.bad, 1700, DEPTH.banner, FONT_SIZE.large);
             tone(196, 0.22, { type: 'sawtooth', volume: 0.2 });
             tone(147, 0.3, { type: 'sawtooth', volume: 0.2, delay: 0.24 });
-            if (gardenStore.data.best < event.day) this.showTip('boss', TEXT.bossTip);
+            const tip = TEXT.bossTips[boss];
+            if (tip && gardenStore.data.best < event.day) this.showTip('boss', tip);
           }
           break;
+        }
         case 'dayClear': {
           sfx.gold();
           showBanner(this, fieldMiddle - 30, `${event.day}일째 지킴!`, THEME_CSS.good, 1600, DEPTH.banner, FONT_SIZE.large);
