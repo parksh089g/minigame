@@ -107,6 +107,55 @@ export const RATING = {
 
 // ───────── 직원 ─────────
 
+/** 교육으로 이 레벨이 되면 그 친구의 기술이 열린다. */
+export const SKILL_LEVEL = 3;
+
+/**
+ * 친구마다 하나씩 가진 기술. 교육으로 SKILL_LEVEL이 되면 쓰고, 사장이 된 친구도 제 기술을 쓴다.
+ * 수는 아래 SKILL에 있고, 여기 description은 직원 창의 좁은 줄에 적히므로 짧게 쓴다.
+ */
+export const SKILLS = {
+  aura: { name: '다정함', description: '옆자리 친구가 15% 빨라요' },
+  neat: { name: '꼼꼼함', description: '끝낸 카드의 정성 +1' },
+  hunter: { name: '버그 사냥', description: '버그를 스스로 잡아요' },
+  peppy: { name: '신바람', description: '응원받으면 세 배 빨라요' },
+  leader: { name: '응원단장', description: '응원이 옆자리로 번져요' },
+  lucky: { name: '행운', description: '대박이 두 배 잘 나요' },
+  focus: { name: '집중', description: '응원이 두 배 오래가요' },
+  fixer: { name: '해결사', description: '급한 의뢰는 세 배 빨라요' },
+  dash: { name: '재빠름', description: '카드를 받자마자 20% 해요' },
+  handy: { name: '만능', description: '어떤 업무든 잘 맞아요' },
+  team: { name: '협동', description: '옆자리가 일하면 빨라요' },
+  trader: { name: '장사꾼', description: '카드를 끝내면 잎을 받아요' },
+} as const satisfies Record<string, { name: string; description: string }>;
+
+export type SkillId = keyof typeof SKILLS;
+export const SKILL_IDS = Object.keys(SKILLS) as SkillId[];
+
+/** 기술마다의 수 */
+export const SKILL = {
+  /** 다정함: 옆자리(같은 줄의 바로 옆)에 앉은 친구의 일 속도에 더하는 몫 */
+  aura: { speed: 0.15 },
+  /** 꼼꼼함: 이 친구가 끝낸 카드가 더 받는 정성 */
+  neat: { care: 1 },
+  /** 신바람: 응원받는 동안의 배수(다른 친구는 CHEER_BOOST) */
+  peppy: { boost: 3 },
+  /** 행운: 회사에 있으면 대박 확률에 곱하는 값 */
+  lucky: { chance: 2 },
+  /** 집중: 이 친구가 받는 응원이 이어지는 시간에 곱하는 값 */
+  focus: { seconds: 2 },
+  /** 해결사: 급한 의뢰의 카드는 무슨 업무든 적어도 이만큼 배로 빨리 한다. */
+  fixer: { boost: 3 },
+  /** 재빠름: 카드를 받는 순간 그 카드의 일을 이만큼 해 둔다. */
+  dash: { share: 0.2 },
+  /** 만능: 특기가 아닌 업무도 이만큼 배로 하고, 평가에서 맞는 친구로 친다. */
+  handy: { boost: 1.5 },
+  /** 협동: 일하고 있는 옆자리 한 명마다 이만큼 빨라진다. */
+  team: { boost: 0.2 },
+  /** 장사꾼: 카드를 끝낼 때마다 seconds초 동안의 수익을 받고, 적어도 least(사무실 단계가 오를 때마다 네 배)는 받는다. */
+  trader: { seconds: 5, least: 5 },
+} as const;
+
 export interface StaffDef {
   name: string;
   /** 꾸미기의 캐릭터 id(art/cosmetics.ts의 RUNNER_LOOKS). 없으면 texture를 쓴다. */
@@ -117,21 +166,23 @@ export interface StaffDef {
   specialty: TaskKind;
   /** 타고난 성격. 작은 보너스 하나 */
   trait: Effect;
+  /** 이 친구만의 기술. 교육으로 SKILL_LEVEL이 되면 쓴다. */
+  skill: SkillId;
 }
 
 export const STAFF = {
-  sprout: { name: '새싹이', look: 'runner-sprout', specialty: 'plan', trait: { key: 'bonus', amount: 0.1 } },
-  drop: { name: '물방울', look: 'runner-drop', specialty: 'art', trait: { key: 'workSpeed', amount: 0.1 } },
-  duck: { name: '오리', look: 'runner-duck', specialty: 'code', trait: { key: 'workSpeed', amount: 0.1 } },
-  chick: { name: '병아리', look: 'runner-chick', specialty: 'test', trait: { key: 'income', amount: 0.1 } },
-  dog: { name: '강아지', look: 'runner-dog', specialty: 'plan', trait: { key: 'bonus', amount: 0.1 } },
-  ghost: { name: '꼬마 유령', look: 'runner-ghost', specialty: 'code', trait: { key: 'income', amount: 0.1 } },
-  cat: { name: '고양이', look: null, texture: 'card-cat', specialty: 'art', trait: { key: 'workSpeed', amount: 0.1 } },
-  bear: { name: '곰', look: null, texture: 'sc-staff-bear', specialty: 'test', trait: { key: 'income', amount: 0.1 } },
-  rabbit: { name: '토끼', look: null, texture: 'sc-staff-rabbit', specialty: 'plan', trait: { key: 'workSpeed', amount: 0.1 } },
-  frog: { name: '개구리', look: null, texture: 'sc-staff-frog', specialty: 'art', trait: { key: 'bonus', amount: 0.1 } },
-  penguin: { name: '펭귄', look: null, texture: 'sc-staff-penguin', specialty: 'code', trait: { key: 'workSpeed', amount: 0.1 } },
-  fox: { name: '여우', look: null, texture: 'sc-staff-fox', specialty: 'test', trait: { key: 'bonus', amount: 0.1 } },
+  sprout: { name: '새싹이', look: 'runner-sprout', specialty: 'plan', trait: { key: 'bonus', amount: 0.1 }, skill: 'leader' },
+  drop: { name: '물방울', look: 'runner-drop', specialty: 'art', trait: { key: 'workSpeed', amount: 0.1 }, skill: 'neat' },
+  duck: { name: '오리', look: 'runner-duck', specialty: 'code', trait: { key: 'workSpeed', amount: 0.1 }, skill: 'hunter' },
+  chick: { name: '병아리', look: 'runner-chick', specialty: 'test', trait: { key: 'income', amount: 0.1 }, skill: 'peppy' },
+  dog: { name: '강아지', look: 'runner-dog', specialty: 'plan', trait: { key: 'bonus', amount: 0.1 }, skill: 'aura' },
+  ghost: { name: '꼬마 유령', look: 'runner-ghost', specialty: 'code', trait: { key: 'income', amount: 0.1 }, skill: 'lucky' },
+  cat: { name: '고양이', look: null, texture: 'card-cat', specialty: 'art', trait: { key: 'workSpeed', amount: 0.1 }, skill: 'focus' },
+  bear: { name: '곰', look: null, texture: 'sc-staff-bear', specialty: 'test', trait: { key: 'income', amount: 0.1 }, skill: 'fixer' },
+  rabbit: { name: '토끼', look: null, texture: 'sc-staff-rabbit', specialty: 'plan', trait: { key: 'workSpeed', amount: 0.1 }, skill: 'dash' },
+  frog: { name: '개구리', look: null, texture: 'sc-staff-frog', specialty: 'art', trait: { key: 'bonus', amount: 0.1 }, skill: 'handy' },
+  penguin: { name: '펭귄', look: null, texture: 'sc-staff-penguin', specialty: 'code', trait: { key: 'workSpeed', amount: 0.1 }, skill: 'team' },
+  fox: { name: '여우', look: null, texture: 'sc-staff-fox', specialty: 'test', trait: { key: 'bonus', amount: 0.1 }, skill: 'trader' },
 } as const satisfies Record<string, StaffDef>;
 
 export type StaffId = keyof typeof STAFF;
@@ -214,6 +265,7 @@ export const TIPS = {
   goals: '목표 버튼에서 오늘의 목표를 볼 수 있어요',
   play: '수익을 누르면 낸 게임을 할 수 있어요',
   train: '직원 창에서 교육하면 그 친구가 빨라져요',
+  skill: '레벨 3이 되면 친구의 기술이 열려요',
   lead: '팀장을 두면 카드를 알아서 맡겨 줘요',
   buddy: '단짝을 옆자리에 앉히면 더 빨라져요',
   energy: '기운이 남은 친구는 일이 더 빨라요',

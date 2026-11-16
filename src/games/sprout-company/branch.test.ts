@@ -347,10 +347,11 @@ describe('자회사를 세운 뒤의 진행 속도', () => {
     return { top, ripe: -1 };
   }
 
-  it('첫 회사는 예닐곱 시간을 넘겨야 자회사가 되고, 둘째와 셋째 회사는 갈수록 빨리 큰다', () => {
+  it('첫 회사는 대여섯 시간을 넘겨야 자회사가 되고, 둘째와 셋째 회사는 갈수록 빨리 큰다', () => {
     const state = createCompany('sprout');
     const first = untilRipe(state, 24 * HOUR);
-    expect(first.ripe).toBeGreaterThan(6 * HOUR);
+    // 부지런히 응원하고 기술까지 다 쓰면 다섯 시간 반쯤이다. 응원 없이 두면 여덟 시간이 넘는다.
+    expect(first.ripe).toBeGreaterThan(5 * HOUR);
     expect(first.ripe).toBeLessThan(10 * HOUR);
     // 사옥에 와서 자회사를 세우기까지도 한 시간은 넘게 걸린다.
     expect(first.ripe - first.top).toBeGreaterThan(HOUR);

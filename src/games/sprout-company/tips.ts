@@ -40,6 +40,7 @@ const WHEN: Readonly<Record<TipId, (state: CompanyState) => boolean>> = {
   hit: (state) => PROJECT_ORDER.some((id) => bestFlowers(state, id) >= HIT_FLOWERS),
   goals: (state) => state.releases >= 3 && state.goals.list.length > 0,
   train: (state) => state.office >= TRAINING.unlockOffice && state.desks.some((_, index) => trainBlock(state, index) === null),
+  skill: (state) => state.office >= TRAINING.unlockOffice && state.desks.some((_, index) => trainBlock(state, index) === null),
   lead: (state) => state.lead === 0 && leadBlock(state) === null,
   buddy: (state) => hasLonelyBuddy(state),
   energy: (state) => state.office >= BREAK.unlockOffice,

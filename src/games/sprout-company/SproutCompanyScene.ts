@@ -51,6 +51,8 @@ import {
   QUEUE,
   RATING,
   RUSH,
+  SKILL_LEVEL,
+  SKILLS,
   SPECIALS,
   SPECIALTY_BOOST,
   STAFF,
@@ -78,6 +80,8 @@ import {
   assign,
   availableProjects,
   bestFlowers,
+  cardBoost,
+  cheerReach,
   awayRate,
   bossFor,
   breakOpen,
@@ -143,7 +147,8 @@ import {
   release,
   seedLeaves,
   setStars,
-  pairBoost,
+  skillAt,
+  skillOpen,
   skill,
   specialtyOf,
   squash,
@@ -1415,8 +1420,8 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
     const card = state.inbox[this.selected];
     const calling = !task && !resting && card !== undefined;
     // 고른 카드의 업무를 남보다 잘하는 친구(특기이거나 그 부서에 든 친구)는 얼마나 빠른지를 달아 둔다.
-    // 협업 카드는 지금 옆자리가 일하고 있는 만큼을 더 쳐서 보여 준다.
-    const fit = calling ? skill(state, view.index, card.kind) * pairBoost(state, view.index, card) : 1;
+    // 협업 카드나 협동하는 친구는 지금 옆자리가 일하고 있는 만큼을 더 쳐서 보여 준다.
+    const fit = calling ? skill(state, view.index, card.kind) * cardBoost(state, view.index, card) : 1;
     const match = fit > 1;
     const rush = task?.rush === true;
     const special = task?.special ?? '';
@@ -1525,6 +1530,11 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
       }
       this.play('cheer');
       this.burst(view.x + view.width / 3, view.deskTop - 22, 3, 18);
+      // 응원단장을 응원하면 옆자리에도 반짝이가 튄다.
+      for (const at of cheerReach(state, index)) {
+        const near = this.desks[at];
+        if (near) this.burst(near.x + near.width / 3, near.deskTop - 22, 3, 18);
+      }
       return;
     }
     if (state.inbox.length > 0) {
@@ -1532,6 +1542,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
       if (assign(state, card, index)) {
         this.play('assign');
         vibrate(8);
+        if (skillAt(state, index) === 'dash') this.say(view, '재빨리!', THEME_CSS.accent);
         this.selected = 0;
         this.save();
         this.refreshNow();
@@ -1578,6 +1589,18 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
     } else if (event.type === 'bugGone') {
       const view = this.desks[event.desk];
       if (view) floatText(this, view.x + view.width / 2, view.y + 22, '놓쳤어요', THEME_CSS.sub, bounds, DEPTH.fx);
+    } else if (event.type === 'bugCaught') {
+      // 버그 사냥을 하는 친구가 스스로 잡았다.
+      this.play('squash');
+      const view = this.desks[event.desk];
+      if (view) {
+        this.say(view, `잡았다 +${formatLeaves(event.reward)}`, THEME_CSS.good);
+        this.burst(view.bubbleX, view.y + 13, 6, 24);
+      }
+    } else if (event.type === 'trade') {
+      // 장사꾼이 받은 잎사귀는 "끝" 글자 아래에 작게 띄운다.
+      const view = this.desks[event.desk];
+      if (view) floatText(this, view.x + view.width / 2, view.y + 36, `+${formatLeaves(event.reward)}`, THEME_CSS.good, bounds, DEPTH.fx);
     } else if (event.type === 'rushOffer') {
       this.play('rushIn');
       vibrate(10);
@@ -1594,6 +1617,12 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
     this.selected = Math.min(this.selected, Math.max(0, this.state.inbox.length - 1));
     this.save();
     this.refreshNow();
+  }
+
+  /** 책상 위에 짧은 말을 띄운다. */
+  private say(view: DeskView, text: string, color: string): void {
+    const bounds = new Phaser.Geom.Rectangle(0, 0, W, this.scale.height);
+    floatText(this, view.x + view.width / 2, view.y + 22, text, color, bounds, DEPTH.fx);
   }
 
   /** 반짝이가 사방으로 튄다. */
@@ -2091,8 +2120,16 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
    * 줄의 아랫줄. pal이 있으면 끝에 하트와 그 단짝의 이름을 단다.
    * 자리가 모자라면 글자를 줄이고, 하트는 그대로 둔다.
    */
-  private rowDetail(panel: Container, x: number, middle: number, right: number, text: string, pal: string | null = null): void {
-    const line = addText(this, x, middle + 2, text, { size: FONT_SIZE.small, color: THEME_CSS.sub });
+  private rowDetail(
+    panel: Container,
+    x: number,
+    middle: number,
+    right: number,
+    text: string,
+    pal: string | null = null,
+    color: string = THEME_CSS.sub,
+  ): void {
+    const line = addText(this, x, middle + 2, text, { size: FONT_SIZE.small, color });
     panel.add(line);
     if (pal === null) {
       line.setScale(Math.min(1, (right - x) / line.width));
@@ -2295,12 +2332,12 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
         panel.add(this.portrait(left + 24, middle, row.id, 28));
         const name = addText(this, left + 42, middle - 15, def.name, { color: THEME_CSS.inkDeep });
         panel.add(name);
-        // 잘하는 일은 이름 옆에, 덤으로 주는 효과는 아랫줄에 적는다. 한 줄에 몰아 적으면 글자가 너무 작아진다.
+        // 잘하는 일은 그림으로, 덤으로 주는 효과는 이름 옆에, 교육하면 열리는 기술은 아랫줄에 적는다.
         panel.add(this.add.image(name.x + name.width + 9, middle - 8, taskTexture(def.specialty)).setDisplaySize(11, 11));
-        this.rowNote(panel, name.x + name.width + 18, middle, right, `${TASKS[def.specialty].name} 2배`);
+        this.rowNote(panel, name.x + name.width + 18, middle, right, effectText(def.trait));
         // 단짝이 이미 회사에 있으면 아랫줄 끝에 하트와 그 친구의 이름을 단다.
         const buddy = buddyOf(row.id);
-        this.rowDetail(panel, left + 42, middle, right, effectText(def.trait), buddy && inCompany(buddy) ? staffDef(buddy).name : null);
+        this.rowDetail(panel, left + 42, middle, right, SKILLS[def.skill].description, buddy && inCompany(buddy) ? staffDef(buddy).name : null);
         this.costButton(panel, left + width - 66, middle - 13, cost, hireBlock(state, row.id) === null, () => {
           if (hire(state, row.id) < 0) return;
           this.play('hire');
@@ -2356,20 +2393,37 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
       if (paired) panel.add(this.add.image(name.x + name.width + 21, middle - 8, SC.heart));
       this.rowNote(panel, name.x + name.width + (paired ? 29 : 18), middle, right, effectText(def.trait));
       const block = trainBlock(state, row.desk);
+      // 아랫줄: 기술이 열렸으면 그 기술이 하는 일을, 아직이면 교육으로 얻는 것과 기술이 열리는 레벨을 적는다.
+      const skillName = SKILLS[def.skill].name;
       const detail =
         block === 'locked'
           ? `${OFFICES[TRAINING.unlockOffice].name}부터 교육할 수 있어요`
-          : desk.level > 0
-            ? `레벨 ${desk.level}  일 속도 +${step * desk.level}%`
-            : `교육하면 일 속도 +${step}%`;
-      // 사장은 잘하는 일 대신 별을 달았으니, 사장이라는 것을 아랫줄에 적는다.
-      this.rowDetail(panel, left + 42, middle, right, specialty ? detail : `사장  ${detail}`);
+          : skillOpen(state, row.desk)
+            ? `레벨 ${desk.level}  ${SKILLS[def.skill].description}`
+            : desk.level > 0
+              ? `레벨 ${desk.level}  레벨 ${SKILL_LEVEL}에 ${skillName}`
+              : `일 속도 +${step}%  레벨 ${SKILL_LEVEL}에 ${skillName}`;
+      // 사장은 잘하는 일 대신 별을 달았으니, 사장이라는 것을 아랫줄에 적는다. 기술을 적을 때는 자리가 모자라서 뺀다.
+      const open = block !== 'locked' && skillOpen(state, row.desk);
+      // 열린 기술은 눈에 띄게 다른 색으로 적는다.
+      this.rowDetail(panel, left + 42, middle, right, specialty || open ? detail : `사장  ${detail}`, null, open ? THEME_CSS.good : THEME_CSS.sub);
       if (block === 'locked' || block === 'max') {
         this.rowState(panel, left, width, middle, block === 'locked' ? '잠김' : '최고');
         return;
       }
       this.costButton(panel, left + width - 66, middle - 13, trainCost(desk.level), block === null, () => {
         if (!train(state, row.desk)) return;
+        // 기술이 열리는 레벨에 닿았으면 크게 알린다.
+        if (desk.level === SKILL_LEVEL) {
+          this.closePanel();
+          this.play('hire');
+          const centerY = (ROOM_TOP + this.roomBottom) / 2;
+          showBanner(this, centerY, `${skillName}!`, THEME_CSS.good, 1800, DEPTH.banner);
+          showBanner(this, centerY + 22, `${def.name}: ${SKILLS[def.skill].description}`, THEME_CSS.sub, 1800, DEPTH.banner, FONT_SIZE.normal);
+          this.save();
+          this.refreshNow();
+          return;
+        }
         this.play('upgrade');
         this.save();
         this.refreshNow();
@@ -2378,7 +2432,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
 
     const message =
       candidates.length > 0
-        ? '새 친구를 뽑거나, 교육으로 레벨을 올려요'
+        ? `새 친구를 뽑거나 교육해요. 레벨 ${SKILL_LEVEL}에 기술이 열려요`
         : pool.length === 0
           ? '모든 친구가 회사에 들어왔어요'
           : state.office + 1 < OFFICES.length

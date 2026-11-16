@@ -38,6 +38,8 @@ import {
   QUEUE,
   RATING,
   RUSH,
+  SKILL,
+  SKILL_LEVEL,
   SPECIAL,
   SPECIAL_KINDS,
   SPECIALTY_BOOST,
@@ -60,6 +62,7 @@ import {
   type PerkId,
   type ProjectDef,
   type ProjectId,
+  type SkillId,
   type SpecialKind,
   type StaffDef,
   type StaffId,
@@ -414,6 +417,28 @@ export function swapDesks(state: CompanyState, a: number, b: number): boolean {
   return true;
 }
 
+/** 이 책상의 친구가 기술을 쓸 만큼 교육을 받았는가 */
+export function skillOpen(state: CompanyState, index: number): boolean {
+  const desk = state.desks[index];
+  return desk?.staff != null && desk.level >= SKILL_LEVEL;
+}
+
+/** 이 책상에 앉은 친구가 지금 쓰는 기술. 빈 자리이거나 아직 열리지 않았으면 null */
+export function skillAt(state: CompanyState, index: number): SkillId | null {
+  const staff = state.desks[index]?.staff;
+  return staff && skillOpen(state, index) ? (STAFF[staff] as StaffDef).skill : null;
+}
+
+/** 이 책상에 앉은 친구가 그 기술을 쓰고 있는가 */
+export function hasSkill(state: CompanyState, index: number, id: SkillId): boolean {
+  return skillAt(state, index) === id;
+}
+
+/** 그 기술을 쓰는 친구가 회사에 있는가 */
+export function companyHas(state: CompanyState, id: SkillId): boolean {
+  return state.desks.some((_, index) => hasSkill(state, index, id));
+}
+
 /** 사장은 특기 없이 모든 업무를 고르게 한다. */
 export function specialtyOf(state: CompanyState, staff: StaffId): TaskKind | null {
   return staff === state.boss ? null : STAFF[staff].specialty;
@@ -434,6 +459,7 @@ function plainSpeed(state: CompanyState, index: number): number {
     gearBonus(desk.gear, 'desk', 'workSpeed') +
     gearBonus(state.gear, 'company', 'workSpeed') +
     (trait.key === 'workSpeed' ? trait.amount : 0) +
+    (neighbors(state, index).some((at) => hasSkill(state, at, 'aura')) ? SKILL.aura.speed : 0) +
     desk.level * LEVEL_SPEED +
     (hasBuddy(state, index) ? BUDDY.speed : 0);
   return own * (1 + legacyBonus(state, 'workSpeed'));
@@ -446,7 +472,7 @@ function plainSpeed(state: CompanyState, index: number): number {
 export function skill(state: CompanyState, index: number, kind: TaskKind): number {
   const desk = state.desks[index];
   if (!desk?.staff) return 0;
-  const special = specialtyOf(state, desk.staff) === kind ? SPECIALTY_BOOST : 1;
+  const special = specialtyOf(state, desk.staff) === kind ? SPECIALTY_BOOST : hasSkill(state, index, 'handy') ? SKILL.handy.boost : 1;
   const dept = desk.dept;
   const team = dept && DEPARTMENTS[dept].kind === kind ? 1 + departmentBoost(departmentLevel(state, dept)) : 1;
   return special * team;
@@ -633,7 +659,10 @@ export function fits(state: CompanyState, index: number, kind: TaskKind): boolea
 export function careFor(state: CompanyState, index: number, task: Task): number {
   if (task.special === 'bug' && task.fixed && !task.caught) return 0;
   return (
-    (fits(state, index, task.kind) ? RATING.fit : 0) + (task.cheered ? RATING.cheer : 0) + (task.caught ? RATING.catch : 0)
+    (fits(state, index, task.kind) ? RATING.fit : 0) +
+    (task.cheered ? RATING.cheer : 0) +
+    (task.caught ? RATING.catch : 0) +
+    (hasSkill(state, index, 'neat') ? SKILL.neat.care : 0)
   );
 }
 
@@ -669,6 +698,12 @@ export function ratedBonus(state: CompanyState): number {
   return Math.round(projectBonus(state, project.id) * flowersBonus(flowersNow(state)));
 }
 
+/** 꽃이 이만큼일 때 대박이 날 확률. 행운이 있는 친구가 회사에 있으면 더 잘 난다. */
+export function hitChance(state: CompanyState, flowers: number): number {
+  const base = RATING.hitChance[Math.min(MAX_FLOWERS, Math.max(1, Math.round(flowers))) - 1];
+  return Math.min(1, base * (companyHas(state, 'lucky') ? SKILL.lucky.chance : 1));
+}
+
 /**
  * 다 만든 프로젝트를 출시한다. 아직 덜 됐으면 null. 예약해 둔 게임이 있으면 맨 앞의 것을 바로 시작한다.
  * 카드마다 쌓인 정성으로 평가(꽃)를 받고, 꽃이 많으면 보너스가 커진다(RATING).
@@ -679,7 +714,7 @@ export function release(state: CompanyState, random?: () => number): Release | n
   if (!state.project || !isReady(state)) return null;
   const id = state.project.id;
   const flowers = flowersNow(state);
-  const chance = RATING.hitChance[flowers - 1];
+  const chance = hitChance(state, flowers);
   const hit = random !== undefined && chance > 0 && random() < chance;
   const bonus = ratedBonus(state) * (hit ? RATING.hit.bonus : 1);
   const reputation = projectReputation(state, id) * (hit ? RATING.hit.reputation : 1);
@@ -748,6 +783,8 @@ export function assign(state: CompanyState, card: number, index: number): boolea
   if (!desk?.staff || desk.task || desk.resting || !task) return false;
   state.inbox.splice(card, 1);
   desk.task = task;
+  // 재빠른 친구는 카드를 받는 순간 얼마쯤을 해 둔다.
+  if (hasSkill(state, index, 'dash')) task.left = Math.min(task.left, task.total * (1 - SKILL.dash.share));
   refill(state);
   return true;
 }
@@ -801,19 +838,63 @@ export function pairBoost(state: CompanyState, index: number, task: Task): numbe
   return task.special === 'pair' ? 1 + SPECIAL.pair.boost * busyNeighbors(state, index) : 1;
 }
 
+/**
+ * 이 책상이 이 카드를 할 때, 업무의 종류와 상관없이 그 카드라서 붙는 배수:
+ * 협업 카드의 덤, 협동하는 친구가 옆자리 덕에 받는 덤, 해결사가 급한 의뢰에서 내는 힘을 곱한 것이다.
+ */
+export function cardBoost(state: CompanyState, index: number, task: Task): number {
+  let boost = pairBoost(state, index, task);
+  if (hasSkill(state, index, 'team')) boost *= 1 + SKILL.team.boost * busyNeighbors(state, index);
+  if (task.rush && hasSkill(state, index, 'fixer')) {
+    // 무슨 업무든 적어도 정해진 배수만큼은 한다. 특기라서 이미 빠른 만큼은 빼고 곱한다.
+    boost *= Math.max(1, SKILL.fixer.boost / skill(state, index, task.kind));
+  }
+  return boost;
+}
+
 /** 응원 한 번이 이어지는 시간(초) */
 export function cheerSeconds(state: CompanyState): number {
   return CHEER_SECONDS * (1 + companyBonus(state, 'cheer'));
 }
 
-/** 일하는 책상을 응원한다. 잠깐 빨라진다. */
+/** 이 책상의 친구가 받는 응원이 이어지는 시간(초). 집중하는 친구는 더 오래간다. */
+export function cheerSecondsAt(state: CompanyState, index: number): number {
+  return cheerSeconds(state) * (hasSkill(state, index, 'focus') ? SKILL.focus.seconds : 1);
+}
+
+/** 이 책상의 친구가 응원받는 동안 빨라지는 배수 */
+export function cheerBoostAt(state: CompanyState, index: number): number {
+  return hasSkill(state, index, 'peppy') ? SKILL.peppy.boost : CHEER_BOOST;
+}
+
+/** 이 책상을 응원하면 함께 응원받는 옆자리들: 응원단장의 옆자리에서 일하고 있는 친구 */
+export function cheerReach(state: CompanyState, index: number): number[] {
+  if (!hasSkill(state, index, 'leader')) return [];
+  return neighbors(state, index).filter((at) => state.desks[at].task !== null);
+}
+
+/** 책상 하나가 times번의 응원만큼 응원을 받는다. 남은 응원이 더 길면 그대로 둔다. */
+function giveCheer(state: CompanyState, index: number, times = 1): void {
+  const desk = state.desks[index];
+  if (!desk.task) return;
+  desk.cheer = Math.max(desk.cheer, cheerSecondsAt(state, index) * times);
+  desk.task.cheered = true;
+}
+
+/** 일하는 책상을 응원한다. 잠깐 빨라진다. 응원단장을 응원하면 일하는 옆자리 친구도 함께 받는다. */
 export function cheer(state: CompanyState, index: number): boolean {
   const desk = state.desks[index];
   if (!desk?.task) return false;
-  desk.cheer = cheerSeconds(state);
-  desk.task.cheered = true;
+  giveCheer(state, index);
+  for (const at of cheerReach(state, index)) giveCheer(state, at);
   bumpGoals(state.goals, 'cheer');
   return true;
+}
+
+/** 장사꾼이 카드 하나를 끝낼 때 받는 잎사귀 */
+export function tradeReward(state: CompanyState): number {
+  const least = SKILL.trader.least * 4 ** state.office;
+  return Math.round(Math.max(least, incomePerSecond(state) * SKILL.trader.seconds));
 }
 
 /** 시간이 흐르는 동안 일어난 일 */
@@ -826,6 +907,10 @@ export type CompanyEvent =
   | { type: 'bug'; desk: number }
   /** 잡지 않은 버그가 저절로 사라졌다. */
   | { type: 'bugGone'; desk: number }
+  /** 버그 사냥을 하는 친구가 제 자리의 버그를 스스로 잡았다. */
+  | { type: 'bugCaught'; desk: number; reward: number }
+  /** 장사꾼이 카드를 끝내면서 잎사귀를 받았다. */
+  | { type: 'trade'; desk: number; reward: number }
   | { type: 'release'; release: Release }
   | { type: 'rushOffer' }
   | { type: 'rushWon'; reward: number }
@@ -883,7 +968,8 @@ function work(state: CompanyState, dt: number, random: () => number): CompanyEve
       }
       continue;
     }
-    const speed = plainSpeed(state, index) * skill(state, index, task.kind) * pairBoost(state, index, task);
+    const speed = plainSpeed(state, index) * skill(state, index, task.kind) * cardBoost(state, index, task);
+    const lift = cheerBoostAt(state, index);
     // 응원과 기운은 남은 동안만 빠르다. 한 번에 긴 시간을 흘려도 끝난 뒤는 보통 속도로 센다.
     const cheered = Math.min(desk.cheer, dt);
     const peppy = open ? Math.min(desk.energy * stamina, dt) : 0;
@@ -891,13 +977,20 @@ function work(state: CompanyState, dt: number, random: () => number): CompanyEve
     const pep = 1 + BREAK.boost;
     task.left -=
       speed *
-      (both * CHEER_BOOST * pep + (cheered - both) * CHEER_BOOST + (peppy - both) * pep + (dt - Math.max(cheered, peppy)));
+      (both * lift * pep + (cheered - both) * lift + (peppy - both) * pep + (dt - Math.max(cheered, peppy)));
     desk.cheer = Math.max(0, desk.cheer - dt);
     if (open) desk.energy = Math.max(0, desk.energy - dt / stamina);
     if (task.special === 'bug' && !task.fixed) {
       // 버그 카드는 정해진 만큼 하면 버그가 나와서 멈춘다.
       const mark = task.total * (1 - SPECIAL.bug.at);
-      if (task.left <= mark) {
+      if (task.left <= mark && hasSkill(state, index, 'hunter')) {
+        // 버그 사냥을 하는 친구는 멈추지 않고 그 자리에서 잡는다.
+        task.fixed = true;
+        task.caught = true;
+        const reward = bugReward(state);
+        state.leaves += reward;
+        done.push({ type: 'bugCaught', desk: index, reward });
+      } else if (task.left <= mark) {
         task.left = mark;
         task.stuck = SPECIAL.bug.wait;
         done.push({ type: 'bug', desk: index });
@@ -912,13 +1005,13 @@ function work(state: CompanyState, dt: number, random: () => number): CompanyEve
       bumpGoals(state.goals, 'task');
       if (task.special === 'idea') {
         // 아이디어가 번뜩이면 그때 일하고 있는 친구 모두가 응원을 받는다.
-        const seconds = cheerSeconds(state) * SPECIAL.idea.cheer;
-        for (const other of state.desks) {
-          if (!other.task) continue;
-          other.cheer = Math.max(other.cheer, seconds);
-          other.task.cheered = true;
-        }
+        state.desks.forEach((_, at) => giveCheer(state, at, SPECIAL.idea.cheer));
         done.push({ type: 'idea', desk: index });
+      }
+      if (hasSkill(state, index, 'trader')) {
+        const reward = tradeReward(state);
+        state.leaves += reward;
+        done.push({ type: 'trade', desk: index, reward });
       }
       if (task.rush) {
         const rush = state.rush;
@@ -1764,7 +1857,9 @@ export function normalizeCompany(raw: unknown): CompanyState | null {
         desk.level = toCount(entry.level, TRAINING.maxLevel);
         desk.gear = normalizeLevels(entry.gear, 'desk');
         desk.task = normalizeTask(entry.task);
-        desk.cheer = desk.task ? toNumber(entry.cheer, 0, cheerSeconds(state)) : 0;
+        // 응원은 아이디어 카드로 받을 수 있는 만큼까지(집중하는 친구는 그 배까지) 읽는다.
+        const longest = cheerSeconds(state) * SPECIAL.idea.cheer * ((STAFF[desk.staff] as StaffDef).skill === 'focus' ? SKILL.focus.seconds : 1);
+        desk.cheer = desk.task ? toNumber(entry.cheer, 0, longest) : 0;
         // 기운이 생기기 전의 세이브는 가득 찬 것으로 읽는다.
         desk.energy = typeof entry.energy === 'number' ? toNumber(entry.energy, 0, 1) : 1;
         desk.resting = entry.resting === true && !desk.task && desk.energy < 1 && breakOpen(state);

@@ -23,6 +23,7 @@ import {
   RATING,
   QUEUE,
   RUSH,
+  SPECIAL,
   SPECIALTY_BOOST,
   STAFF,
   STAFF_ORDER,
@@ -1252,7 +1253,8 @@ describe('세이브 읽기', () => {
     // 사장이 빠져 있으면 빈 자리에 앉힌다. 같은 친구는 한 번만 앉는다.
     expect(state.desks.map((desk) => desk.staff)).toEqual(['duck', 'sprout', ...state.desks.slice(2).map(() => null)]);
     expect(state.desks[0].gear).toEqual({ computer: EQUIPMENT.computer.maxLevel });
-    expect(state.desks[0].cheer).toBe(CHEER_SECONDS);
+    // 응원은 아이디어 카드로 받을 수 있는 만큼까지만 읽는다.
+    expect(state.desks[0].cheer).toBe(CHEER_SECONDS * SPECIAL.idea.cheer);
     expect(state.gear).toEqual({ coffee: 2 });
     expect(state.released).toEqual({ 'lightning-tap': 2 });
     expect(state.releases).toBe(2);
