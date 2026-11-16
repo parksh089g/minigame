@@ -657,6 +657,26 @@ const ICONS: Record<string, Art> = {
       roundRect(c, 10.500, 21.500, 8, 2.600, 1.300, '#7a6170');
     },
   },
+  /** 네모 로직: 위와 왼쪽의 숫자를 따라 칸을 칠해서 나온 하트 */
+  'icon-nemo': {
+    width: 32,
+    height: 32,
+    draw(c) {
+      roundRect(c, 2, 4, 28, 27, 6, '#7dbef2');
+      roundRect(c, 2, 2, 28, 27, 6, '#9dd6ff');
+      for (let at = 0; at < 5; at += 1) {
+        oval(c, 10.900 + at * 3.900, 5.500, 0.900, 0.900, '#4a3545');
+        oval(c, 5.500, 10.700 + at * 3.800, 0.900, 0.900, '#4a3545');
+      }
+      roundRect(c, 8.200, 8.100, 20.300, 19.800, 3, '#fffaf0');
+      const heart = ['.#.#.', '#####', '#####', '.###.', '..#..'];
+      heart.forEach((row, y) => {
+        [...row].forEach((cell, x) => {
+          if (cell === '#') roundRect(c, 9.200 + x * 3.900, 9 + y * 3.800, 3.300, 3.200, 0.900, '#e97f99');
+        });
+      });
+    },
+  },
   /** 숫자 퍼즐: 아홉 칸 가운데 몇 칸이 채워진 판 */
   'icon-number': {
     width: 32,

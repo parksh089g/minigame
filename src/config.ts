@@ -187,6 +187,7 @@ export const SCENE = {
   mergeTiles: 'MergeTiles',
   tailChase: 'TailChase',
   logicTiles: 'LogicTiles',
+  nemoLogic: 'NemoLogic',
   numberPuzzle: 'NumberPuzzle',
   duel: 'Duel',
   pathLink: 'PathLink',

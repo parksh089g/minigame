@@ -21,6 +21,7 @@ export const RANKED_GAMES = [
   'merge-tiles',
   'tail-chase',
   'logic-tiles',
+  'nemo-logic',
   'number-puzzle',
   'path-link',
   'block-fill',
