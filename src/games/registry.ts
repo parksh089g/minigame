@@ -14,7 +14,7 @@ import {
 } from '../core/weekly';
 import type { SpriteKey } from '../art/sprites';
 import { GARDEN_GAME_ID, GARDEN_SCENE } from './garden-guard/data';
-import { coinsFor as gardenCoins } from './garden-guard/rules';
+import { coinsFor as gardenCoins, recordLabel as gardenRecord } from './garden-guard/rules';
 import { LANTERN_GAME_ID, LANTERN_SCENE } from './lantern-keeper/data';
 import { coinsFor as lanternCoins } from './lantern-keeper/rules';
 import { COMPANY_GAME_ID, COMPANY_SCENE } from './sprout-company/data';
@@ -58,6 +58,8 @@ export interface MiniGameInfo {
    * 큰 게임은 "이번 주의 게임"에 나오지 않는 대신 이 미션으로 나온다.
    */
   bigMission?: BigMission;
+  /** 허브 카드에서 최고 기록 자리에 쓸 말. 없으면 "최고 123"이다. 점수보다 알기 쉬운 말이 있는 게임(지킨 날 같은)이 쓴다. */
+  recordLabel?: (best: number) => string;
 }
 
 export const GAMES: readonly MiniGameInfo[] = [
@@ -291,6 +293,18 @@ export const GAMES: readonly MiniGameInfo[] = [
     // 영구 강화를 얼마나 했느냐에 따라 점수가 크게 달라서 오늘의 도전에는 넣지 않는다.
     dailyTargets: [],
     genre: 'action',
+    // 점수(지킨 날마다 100점)보다 지킨 날이 알기 쉽다.
+    recordLabel: gardenRecord,
+    // 판이 끝나도 강화가 남는 큰 게임이라 몇 주에 한 번 큰 게임 미션으로 나온다. 한 판이 등불지기보다 짧아서 판 수를 조금 더 묻는다.
+    bigMission: {
+      title: (goal) => `텃밭 지키기 ${goal}판`,
+      description: '이번 주의 큰 게임이에요',
+      tiers: [
+        [3, 50],
+        [4, 55],
+        [5, 60],
+      ],
+    },
   },
   {
     id: COMPANY_GAME_ID,

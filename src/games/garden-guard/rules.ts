@@ -37,12 +37,20 @@ export function nextRandom(state: number): { value: number; state: number } {
 
 // ------------------------------------------------------------ 날마다의 난이도
 
-/** 벌레의 체력이 하루에 불어나는 배율 */
+/**
+ * 벌레의 체력이 하루에 불어나는 배율. LATE_FROM일째 뒤로는 HP_GROWTH_LATE로 늦춘다.
+ * 강화 값은 단계마다 곱으로 오르는데 한 판에 버는 씨앗은 날 수만큼만 늘어서, 뒤로 갈수록 같은 판을 되풀이해야 넘는
+ * 벽이 생긴다. 자동 플레이로 재 보니 늘 1.115배면 40일째 근처에서 같은 판을 30번쯤 되풀이해야 했다.
+ */
 export const HP_GROWTH = 1.115;
+export const HP_GROWTH_LATE = 1.075;
+export const LATE_FROM = 20;
 
 /** 그날 벌레의 체력에 곱하는 배율. 날마다 불어나서 강화 없이는 어느 날엔가 막힌다. */
 export function hpScale(day: number): number {
-  return HP_GROWTH ** (Math.max(1, day) - 1);
+  const d = Math.max(1, day);
+  if (d <= LATE_FROM) return HP_GROWTH ** (d - 1);
+  return HP_GROWTH ** (LATE_FROM - 1) * HP_GROWTH_LATE ** (d - LATE_FROM);
 }
 
 /** 그날 벌레가 울타리를 갉는 피해에 곱하는 배율 */
@@ -59,9 +67,12 @@ export function isBossDay(day: number): boolean {
   return day > 0 && day % BOSS_EVERY === 0;
 }
 
-/** 그날 나오는 대장의 수. 30일째부터 하나씩 는다. */
+/**
+ * 그날 나오는 대장의 수. 대장의 날마다 하나다.
+ * 대장을 둘, 셋으로 늘리면 그날만 갑자기 두 배가 되어서 그 앞에서 오래 막혔다. 세지는 것은 체력의 배율에 맡긴다.
+ */
 export function bossCount(day: number): number {
-  return isBossDay(day) ? 1 + Math.floor(day / 30) : 0;
+  return isBossDay(day) ? 1 : 0;
 }
 
 /** 그날 나오는 여느 벌레의 수(대장과 대장이 부르는 부하 빼고) */
@@ -255,6 +266,12 @@ export function scoreFor(lastCleared: number, dayKilled: number, dayTotal: numbe
   return Math.max(0, lastCleared) * 100 + partial;
 }
 
+/** 허브 카드의 기록 줄. 점수에서 지킨 날을 꺼내 "최고 9일째"로 적고, 하루도 못 지켰으면 점수를 적는다. */
+export function recordLabel(best: number): string {
+  const days = Math.floor(Math.max(0, best) / 100);
+  return days > 0 ? `최고 ${days}일째` : `최고 ${Math.max(0, Math.floor(best))}`;
+}
+
 /** 점수에 따라 주는 허브 코인. 지킨 날 하나에 하나씩, 한 판에 30개까지 */
 export function coinsFor(score: number): number {
   return Math.min(30, Math.floor(score / 100));
@@ -272,7 +289,8 @@ export function recordBonus(day: number): number {
 
 // ------------------------------------------------------------ 판 밖 진행
 
-export const META_VERSION = 1;
+/** 2: 새 출발점이 열리면 시작하는 날을 저절로 그리로 옮긴다. 1의 저장은 읽을 때 가장 늦은 출발점으로 맞춘다. */
+export const META_VERSION = 2;
 
 export interface GardenMeta {
   version: number;
@@ -331,8 +349,33 @@ export function normalizeMeta(raw: unknown): GardenMeta {
     const level = Math.min(count(levels[id]), UPGRADES[id].maxLevel);
     if (level > 0) meta.levels[id] = level;
   }
-  meta.startDay = clampStartDay(count(data.startDay) || 1, meta.best);
+  // 버전 1에서는 출발점이 열려도 시작하는 날이 그대로여서, 고르지 않은 사람은 늘 1일째부터 했다. 가장 늦은 출발점으로 옮긴다.
+  const fromV1 = count(data.version) < 2;
+  meta.startDay = fromV1 ? latestStart(meta.best) : clampStartDay(count(data.startDay) || 1, meta.best);
   return meta;
+}
+
+/** 지금 시작할 수 있는 가장 늦은 날 */
+export function latestStart(best: number): number {
+  const days = startDays(best);
+  return days[days.length - 1];
+}
+
+/**
+ * 가장 멀리 지킨 날을 올린다. 그래서 새 출발점(물리친 대장의 다음 날)이 열렸으면 시작하는 날도 그리로 옮긴다.
+ * 더 앞에서 하고 싶은 사람은 준비 화면에서 다시 고르면 된다. 올라가지 않았으면 그대로 돌려준다.
+ */
+export function raiseBest(meta: GardenMeta, day: number): GardenMeta {
+  const cleared = count(day);
+  if (cleared <= meta.best) return meta;
+  const opened = latestStart(cleared) > latestStart(meta.best);
+  return { ...meta, best: cleared, startDay: opened ? latestStart(cleared) : meta.startDay };
+}
+
+/** 앞의 저장(before)과 견주어 새 출발점이 열렸으면 그 날을, 아니면 null을 준다. */
+export function openedStart(before: GardenMeta, after: GardenMeta): number | null {
+  const day = latestStart(after.best);
+  return day > latestStart(before.best) ? day : null;
 }
 
 /** 강화를 한 단계 산다. 씨앗이 모자라거나 다 올렸으면 그대로 돌려준다. */
@@ -359,10 +402,5 @@ export function bankSeeds(meta: GardenMeta, seeds: number): GardenMeta {
 
 /** 한 판을 마친 기록을 넣는다. lastCleared는 그 판에서 마지막으로 지킨 날(없으면 0)이다. */
 export function applyRun(meta: GardenMeta, lastCleared: number, kills: number): GardenMeta {
-  return {
-    ...meta,
-    runs: meta.runs + 1,
-    kills: meta.kills + count(kills),
-    best: Math.max(meta.best, count(lastCleared)),
-  };
+  return raiseBest({ ...meta, runs: meta.runs + 1, kills: meta.kills + count(kills) }, lastCleared);
 }

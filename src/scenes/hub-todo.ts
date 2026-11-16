@@ -1,10 +1,10 @@
 /**
- * 허브 카드의 아랫줄에 띄우는 "오늘 할 일". 두 큰 게임은 하던 것이 이어지는 게임이라, 최고 기록보다
+ * 허브 카드의 아랫줄에 띄우는 "오늘 할 일". 큰 게임은 하던 것이 이어지는 게임이라, 최고 기록보다
  * 지금 들어가 볼 까닭을 보여 주는 편이 쓸모 있다: 등불지기는 멈춰 둔 판과 오늘의 판,
- * 새싹 컴퍼니는 다 찬 수익과 오늘의 목표, 그리고 둘 다 이번 주의 큰 게임 미션이다.
+ * 새싹 컴퍼니는 다 찬 수익과 오늘의 목표, 텃밭 지키기는 씨앗으로 살 수 있는 강화, 그리고 모두 이번 주의 큰 게임 미션이다.
  * 할 일이 없으면 null이고, 카드에는 원래의 기록 줄이 남는다. 할 일이 있는 카드를 누르면 그 일이 있는 곳을 바로 연다(start).
  *
- * 두 게임의 저장은 허브 세이브와 따로 기기에 있다. 처음 한 번은 허브를 그린 뒤에 읽어 와서(loadTodos) 아랫줄을 바꾸고,
+ * 큰 게임의 저장은 허브 세이브와 따로 기기에 있다. 처음 한 번은 허브를 그린 뒤에 읽어 와서(loadTodos) 아랫줄을 바꾸고,
  * 그 뒤로는 이 곳의 저장소가 들고 있는 것으로 바로 셈한다(todosNow). 그래서 기록 초기화나 가져오기로 저장이 바뀌면
  * 다음에 그리는 허브에 바로 맞게 나온다. 등불지기의 파일은 고치지 않고, 그 게임이 내놓은 저장과 함수만 읽어서 쓴다.
  */
@@ -15,6 +15,9 @@ import { LANTERN_GAME_ID } from '../games/lantern-keeper/data';
 import type { LobbyPage } from '../games/lantern-keeper/lobby';
 import { metaStore } from '../games/lantern-keeper/meta';
 import { formatClock } from '../games/lantern-keeper/rules';
+import { GARDEN_GAME_ID } from '../games/garden-guard/data';
+import { canBuyAny, type GardenMeta } from '../games/garden-guard/rules';
+import { gardenStore } from '../games/garden-guard/store';
 import { thisWeek } from '../games/registry';
 import type { CompanyStart } from '../games/sprout-company/SproutCompanyScene';
 import { AWAY, COMPANY_GAME_ID } from '../games/sprout-company/data';
@@ -64,6 +67,11 @@ export function companyTodo(state: CompanyState | null, now: number, today: stri
   return { text: `목표 ${done}/${count}`, start: COMPANY_GOALS };
 }
 
+/** 텃밭 지키기의 할 일. 해 본 사람이 가진 씨앗으로 살 수 있는 강화가 있으면 알린다. */
+export function gardenTodo(meta: GardenMeta): Todo | null {
+  return meta.runs > 0 && canBuyAny(meta) ? { text: '강화 가능' } : null;
+}
+
 /**
  * 이번 주의 큰 게임 미션(네 주에 한 번 오는 "등불지기 3판", "새싹 컴퍼니 7번 출시")이 그 게임의 것이고
  * 아직 채우지 않았으면, 그 게임 카드에도 얼마나 했는지 보인다. 다른 할 일이 없을 때만 쓴다.
@@ -89,6 +97,7 @@ export interface HubRecords {
 /** 두 게임의 저장을 한 번이라도 읽었는지. 읽기 전에는 저장소가 빈 값을 들고 있어서 할 일을 셈하지 않는다. */
 let lanternRead = false;
 let companyRead = false;
+let gardenRead = false;
 
 /** 지금 이 곳의 저장소가 들고 있는 것으로 할 일을 바로 셈한다. 읽은 적이 없는 게임은 빠진다. */
 export function todosNow(records: HubRecords, now: Date = new Date()): Todos {
@@ -104,17 +113,23 @@ export function todosNow(records: HubRecords, now: Date = new Date()): Todos {
     pick(LANTERN_GAME_ID, lanternTodo(metaStore.run, playedToday, records.playedBefore(LANTERN_GAME_ID)));
   }
   if (companyRead) pick(COMPANY_GAME_ID, companyTodo(companyStore.data, now.getTime(), dateKeyOf(now)));
+  if (gardenRead) pick(GARDEN_GAME_ID, gardenTodo(gardenStore.data));
   return todos;
 }
 
 /**
- * 두 큰 게임의 저장을 기기에서 다시 읽고 할 일을 셈한다. 같은 기기의 다른 곳(설치한 앱과 브라우저 탭 같은)에서
+ * 큰 게임의 저장을 기기에서 다시 읽고 할 일을 셈한다. 같은 기기의 다른 곳(설치한 앱과 브라우저 탭 같은)에서
  * 그사이 저장한 것이 더 새것이면 그것을 읽는다. 읽지 못한 게임은 빠진다.
  */
 export async function loadTodos(records: HubRecords, now: Date = new Date()): Promise<Todos> {
-  const [lantern, company] = await Promise.allSettled([metaStore.refresh(), companyStore.refresh()]);
+  const [lantern, company, garden] = await Promise.allSettled([
+    metaStore.refresh(),
+    companyStore.refresh(),
+    gardenStore.refresh(),
+  ]);
   if (lantern.status === 'fulfilled') lanternRead = true;
   if (company.status === 'fulfilled') companyRead = true;
+  if (garden.status === 'fulfilled') gardenRead = true;
   return todosNow(records, now);
 }
 

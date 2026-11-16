@@ -1151,7 +1151,7 @@ it('텃밭 지키기: 준비 화면의 강화 줄(모든 쪽)과 판 화면이 �
   // 대장을 둘 넘겨서 시작하는 날을 고를 수 있고, 강화의 값과 효과가 길게 적히는 저장.
   const levels = Object.fromEntries(UPGRADE_ORDER.map((id) => [id, Math.min(UPGRADES[id].maxLevel - 1, 9)]));
   await seedGardenMeta(page, {
-    version: 1,
+    version: 2,
     seeds: 98765,
     levels,
     best: 13,

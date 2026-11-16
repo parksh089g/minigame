@@ -15,13 +15,20 @@ import {
   dayWindow,
   effectLine,
   hpScale,
+  HP_GROWTH,
+  HP_GROWTH_LATE,
   isBossDay,
   kindWeight,
+  LATE_FROM,
+  latestStart,
   levelOf,
   nextRandom,
   normalizeMeta,
+  openedStart,
   planDay,
+  raiseBest,
   recordBonus,
+  recordLabel,
   scoreFor,
   seedScale,
   startDays,
@@ -65,14 +72,18 @@ describe('날마다의 난이도', () => {
     }
   });
 
-  it('닷새마다 대장의 날이고, 30일째부터 대장이 는다', () => {
+  it('닷새마다 대장의 날이고, 대장은 늘 하나다', () => {
     expect(BOSS_EVERY).toBe(5);
     expect([1, 4, 5, 6, 10, 15].map(isBossDay)).toEqual([false, false, true, false, true, true]);
     expect(bossCount(4)).toBe(0);
-    expect(bossCount(5)).toBe(1);
-    expect(bossCount(25)).toBe(1);
-    expect(bossCount(30)).toBe(2);
-    expect(bossCount(60)).toBe(3);
+    for (const day of [5, 25, 30, 60, 95]) expect(bossCount(day), `${day}`).toBe(1);
+  });
+
+  it('체력은 LATE_FROM일째까지 빠르게, 그 뒤로는 천천히 불어나고 이어진다', () => {
+    expect(hpScale(LATE_FROM)).toBeCloseTo(HP_GROWTH ** (LATE_FROM - 1), 9);
+    expect(hpScale(LATE_FROM + 1) / hpScale(LATE_FROM)).toBeCloseTo(HP_GROWTH_LATE, 9);
+    expect(hpScale(LATE_FROM) / hpScale(LATE_FROM - 1)).toBeCloseTo(HP_GROWTH, 9);
+    expect(HP_GROWTH_LATE).toBeLessThan(HP_GROWTH);
   });
 
   it('벌레의 수와 나오는 시간은 늘다가 멈춘다', () => {
@@ -215,6 +226,14 @@ describe('점수와 씨앗', () => {
     expect(scoreFor(4, 0, 0)).toBe(400);
   });
 
+  it('허브 카드에는 점수 대신 지킨 날을 적는다', () => {
+    expect(recordLabel(950)).toBe('최고 9일째');
+    expect(recordLabel(100)).toBe('최고 1일째');
+    expect(recordLabel(4499)).toBe('최고 44일째');
+    expect(recordLabel(57)).toBe('최고 57');
+    expect(recordLabel(0)).toBe('최고 0');
+  });
+
   it('코인은 지킨 날 하나에 하나씩, 한 판에 30개까지다', () => {
     expect(coinsFor(0)).toBe(0);
     expect(coinsFor(99)).toBe(0);
@@ -268,6 +287,38 @@ describe('판 밖 진행', () => {
     const after = applyRun({ ...meta, best: 7, runs: 2, kills: 40 }, 4, 31);
     expect(after).toMatchObject({ best: 7, runs: 3, kills: 71 });
     expect(applyRun(after, 9, 0).best).toBe(9);
+  });
+
+  it('가장 멀리 지킨 날이 대장의 날을 넘으면 시작하는 날을 새 출발점으로 옮긴다', () => {
+    const meta = { ...createMeta(), best: 4 };
+    expect(raiseBest(meta, 3)).toBe(meta);
+    expect(raiseBest(meta, 4)).toBe(meta);
+    // 대장을 넘지 못했으면 출발점은 그대로다.
+    const four = raiseBest({ ...createMeta(), best: 2 }, 4);
+    expect(four).toMatchObject({ best: 4, startDay: 1 });
+    expect(openedStart({ ...createMeta(), best: 2 }, four)).toBeNull();
+    // 5일째(대장)를 넘으면 6일째가 열리고 그리로 옮긴다.
+    const five = raiseBest(meta, 5);
+    expect(five).toMatchObject({ best: 5, startDay: 6 });
+    expect(openedStart(meta, five)).toBe(6);
+    // 앞쪽 날을 골라 둔 사람도 새 출발점이 열리면 옮기지만, 새로 열린 것이 없으면 고른 날을 둔다.
+    const picked = { ...createMeta(), best: 13, startDay: 6 };
+    expect(raiseBest(picked, 14).startDay).toBe(6);
+    expect(raiseBest(picked, 15)).toMatchObject({ best: 15, startDay: 16 });
+    // 한 번에 여러 출발점을 넘어도 가장 늦은 곳으로 간다.
+    expect(raiseBest(meta, 17)).toMatchObject({ best: 17, startDay: 16 });
+    expect(latestStart(0)).toBe(1);
+    expect(latestStart(29)).toBe(26);
+    // 판을 마칠 때도 같다.
+    expect(applyRun(meta, 10, 3)).toMatchObject({ best: 10, startDay: 11, runs: 1, kills: 3 });
+  });
+
+  it('버전 1의 저장은 가장 늦은 출발점에서 시작하게 맞추고, 버전 2에서 고른 날은 그대로 둔다', () => {
+    expect(normalizeMeta({ version: 1, best: 13, startDay: 1 }).startDay).toBe(11);
+    expect(normalizeMeta({ version: 1, best: 3, startDay: 1 }).startDay).toBe(1);
+    expect(normalizeMeta({ version: 2, best: 13, startDay: 1 }).startDay).toBe(1);
+    expect(normalizeMeta({ version: 2, best: 13, startDay: 6 }).startDay).toBe(6);
+    expect(normalizeMeta({ version: 1, best: 13 }).version).toBe(2);
   });
 
   it('저장된 값이 이상해도 쓸 수 있는 모양으로 맞춘다', () => {

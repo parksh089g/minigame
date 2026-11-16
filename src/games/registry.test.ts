@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SPRITES } from '../art/sprites';
 import { dateKeyOf } from '../core/daily';
 import { createWeekly, GENRES, recordWeeklyPlay } from '../core/weekly';
+import { GARDEN_GAME_ID } from './garden-guard/data';
 import { LANTERN_GAME_ID } from './lantern-keeper/data';
 import {
   GAMES,
@@ -193,18 +194,19 @@ describe('주간 미션', () => {
     }
   });
 
-  it('두 큰 게임은 "이번 주의 게임" 대신 큰 게임 미션으로 여덟 주 안에 한 번씩 나온다', () => {
+  it('세 큰 게임은 "이번 주의 게임" 대신 큰 게임 미션으로 열두 주 안에 한 번씩 나온다', () => {
+    const bigGames = [COMPANY_GAME_ID, GARDEN_GAME_ID, LANTERN_GAME_ID].sort();
     const big = weeklyGames().filter((game) => game.big);
-    expect(big.map((game) => game.id).sort()).toEqual([COMPANY_GAME_ID, LANTERN_GAME_ID].sort());
+    expect(big.map((game) => game.id).sort()).toEqual(bigGames);
     for (const game of big) expect(game.quick, game.id).toBe(false);
     const counted = new Set<string>();
-    for (let week = 0; week < 8; week += 1) {
+    for (let week = 0; week < 12; week += 1) {
       const context = thisWeek(createWeekly(), new Date(2026, 10, 16 + week * 7, 12));
       for (const mission of context?.missions ?? []) {
         if (mission.kind === 'big') counted.add(mission.counts?.[0] ?? '');
       }
     }
-    expect([...counted].sort()).toEqual([COMPANY_GAME_ID, LANTERN_GAME_ID].sort());
+    expect([...counted].sort()).toEqual(bigGames);
   });
 
   it('미션의 글은 업적 화면의 한 줄에 들어가는 길이다', () => {

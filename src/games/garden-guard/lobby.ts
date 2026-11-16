@@ -12,6 +12,8 @@ import { UPGRADE_ORDER, UPGRADES, type UpgradeId } from './data';
 import { buyUpgrade, effectLine, levelOf, startDays, upgradeCost, type GardenMeta } from './rules';
 
 export interface LobbyHooks {
+  /** 처음 열 때 설명 칸에 적을 알림(새 출발점이 열린 것 같은). 없으면 null */
+  notice: string | null;
   getMeta: () => GardenMeta;
   setMeta: (meta: GardenMeta) => void;
   onStart: () => void;
@@ -137,7 +139,7 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
 
   const infoPanel = scene.add.graphics();
   drawPanel(infoPanel, MARGIN, infoTop, WIDTH, INFO_HEIGHT - 3, { fill: THEME.butterSoft, shadow: null, radius: 9 });
-  const info = addText(scene, GAME_WIDTH / 2, infoTop + (INFO_HEIGHT - 3) / 2, INFO_HINT, {
+  const info = addText(scene, GAME_WIDTH / 2, infoTop + (INFO_HEIGHT - 3) / 2, hooks.notice ?? INFO_HINT, {
     size: 10,
     color: THEME_CSS.ink,
     originX: 0.5,

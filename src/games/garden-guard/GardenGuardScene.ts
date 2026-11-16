@@ -9,10 +9,16 @@ import { MiniGameScene, type ResultStat } from '../../scenes/MiniGameScene';
 import { LOOK, registerGardenTextures, TEX } from './art';
 import { ENEMIES, GARDEN_GAME_ID, GARDEN_SCENE } from './data';
 import { buildLobby } from './lobby';
-import { applyRun, bankSeeds, clampStartDay, isBossDay } from './rules';
+import { applyRun, bankSeeds, clampStartDay, isBossDay, openedStart, raiseBest, type GardenMeta } from './rules';
 import { createRun, runScore, step, stormReady, type Input, type RunState, type SimEvent } from './sim';
 import { gardenStore } from './store';
 import { FieldView, layoutField, toSim, type FieldLayout } from './view';
+
+/**
+ * 이 판에서 새로 열린 출발점(물리친 대장의 다음 날). 다음에 준비 화면을 열 때 한 번 알려 주고 지운다.
+ * 판이 끝나면 결과 화면을 거쳐 씬이 새로 시작되므로 씬 밖에 둔다.
+ */
+let freshStart: number | null = null;
 
 /** 씬을 시작할 때 넘기는 값. 없으면 준비 화면부터 연다. */
 interface StartData {
@@ -53,7 +59,14 @@ export const TEXT = {
   over: '울타리가 무너졌어요',
   fence: '울타리',
   backToLobby: '준비 화면으로',
+  /** 대장을 처음 물리친 날에 띄운다. 다음 판은 그다음 날부터 시작한다. */
+  nextStart: (day: number) => `다음 판은 ${day}일째부터!`,
 } as const;
+
+/** 새 출발점이 열린 뒤 처음 여는 준비 화면의 설명 칸에 적는다. */
+export function lobbyNotice(day: number): string {
+  return `${day}일째가 열려서 거기부터 시작해요.\n더 앞에서 하려면 왼쪽 칸에서 골라요.`;
+}
 
 /**
  * 텃밭 지키기: 몰려오는 벌레 떼가 울타리를 넘지 못하게 물총으로 쫓아내는 방어 게임.
@@ -131,7 +144,10 @@ export class GardenGuardScene extends MiniGameScene {
 
   private openLobby(): void {
     this.phase = 'lobby';
+    const opened = freshStart;
+    freshStart = null;
     buildLobby(this, {
+      notice: opened !== null ? lobbyNotice(opened) : null,
       getMeta: () => gardenStore.data,
       setMeta: (meta) => gardenStore.set(meta),
       onStart: () => this.scene.restart({ mode: 'run' } satisfies StartData),
@@ -412,6 +428,10 @@ export class GardenGuardScene extends MiniGameScene {
           showBanner(this, fieldMiddle - 30, `${event.day}일째 지킴!`, THEME_CSS.good, 1600, DEPTH.banner, FONT_SIZE.large);
           const bonus = `씨앗 +${Math.floor(event.seeds)}${event.record ? ` · ${TEXT.record}` : ''}`;
           showBanner(this, fieldMiddle - 4, bonus, THEME_CSS.accent, 1600, DEPTH.banner, FONT_SIZE.normal);
+          // 대장을 처음 물리쳤으면 다음 판은 그다음 날부터라는 것을 알린다.
+          if (event.record && isBossDay(event.day)) {
+            showBanner(this, fieldMiddle + 16, TEXT.nextStart(event.day + 1), THEME_CSS.good, 2200, DEPTH.banner, FONT_SIZE.normal);
+          }
           this.bounce(this.seedText);
           this.bankSoFar(event.day);
           break;
@@ -483,10 +503,9 @@ export class GardenGuardScene extends MiniGameScene {
     const state = this.run;
     if (!state) return;
     const whole = Math.floor(state.seeds);
-    let meta = bankSeeds(gardenStore.data, whole - this.banked);
-    if (clearedDay > meta.best) meta = { ...meta, best: clearedDay };
+    const meta = raiseBest(bankSeeds(gardenStore.data, whole - this.banked), clearedDay);
     this.banked = whole;
-    if (meta !== gardenStore.data) gardenStore.set(meta);
+    this.save(meta);
   }
 
   /** 판의 기록(판 수, 쫓아낸 벌레, 남은 씨앗)을 넣는다. 판이 끝났을 때와 판을 하다가 나갈 때 한 번만 넣는다. */
@@ -495,7 +514,15 @@ export class GardenGuardScene extends MiniGameScene {
     if (!state || this.settled || (this.phase !== 'run' && this.phase !== 'over')) return;
     this.settled = true;
     this.bankSoFar();
-    gardenStore.set(applyRun(gardenStore.data, state.lastCleared, state.kills));
+    this.save(applyRun(gardenStore.data, state.lastCleared, state.kills));
+  }
+
+  /** 판 밖 진행을 저장한다. 새 출발점이 열렸으면 다음 준비 화면에서 알려 주도록 적어 둔다. */
+  private save(meta: GardenMeta): void {
+    if (meta === gardenStore.data) return;
+    const opened = openedStart(gardenStore.data, meta);
+    if (opened !== null) freshStart = opened;
+    gardenStore.set(meta);
   }
 
   private endRun(): void {
