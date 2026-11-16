@@ -6,11 +6,17 @@ import { GARDEN_GAME_ID } from './garden-guard/data';
 import { LANTERN_GAME_ID } from './lantern-keeper/data';
 import {
   GAMES,
+  gamesInGroup,
   getGame,
   HUB_GAMES,
+  HUB_GROUP_LABEL,
+  HUB_GROUPS,
+  hubGroupOf,
   lastPlayedGame,
   orderForHub,
   personalHubOrder,
+  startingHubGroup,
+  STEADY_LINE_CHARS,
   thisWeek,
   todaysChallenge,
   weeklyGames,
@@ -116,6 +122,57 @@ describe('게임 목록', () => {
   it('허브 목록은 게임 목록과 같은 게임들이다', () => {
     expect(HUB_GAMES).toHaveLength(GAMES.length);
     expect(new Set(HUB_GAMES)).toEqual(new Set(GAMES));
+  });
+
+  it('허브의 두 갈래는 게임을 빠짐없이, 겹치지 않게 나눈다', () => {
+    const steady = gamesInGroup(GAMES, 'steady');
+    const quick = gamesInGroup(GAMES, 'quick');
+    expect(steady.length).toBeGreaterThan(0);
+    expect(quick.length).toBeGreaterThan(0);
+    expect(steady.length + quick.length).toBe(GAMES.length);
+    expect(new Set([...steady, ...quick])).toEqual(new Set(GAMES));
+    for (const group of HUB_GROUPS) expect(HUB_GROUP_LABEL[group].length).toBeGreaterThan(0);
+  });
+
+  it('꾸준히 하는 게임은 키운 것이 남는 큰 게임들과 행운 슬롯이고, 나머지는 짧게 즐기는 게임이다', () => {
+    const ids = gamesInGroup(GAMES, 'steady').map((game) => game.id);
+    expect([...ids].sort()).toEqual([LANTERN_GAME_ID, GARDEN_GAME_ID, COMPANY_GAME_ID, 'candy-slot'].sort());
+    // 큰 게임 미션으로 나오는 게임과 판이 끝나지 않는 게임은 모두 꾸준히 하는 게임이다.
+    for (const game of GAMES) {
+      if (game.bigMission || game.ongoing) expect(hubGroupOf(game), game.id).toBe('steady');
+    }
+    expect(hubGroupOf(getGame('lightning-tap')!)).toBe('quick');
+    // 둘이서 겨루는 게임과 퍼즐 단계 모드의 게임은 한 판이 짧다.
+    for (const game of GAMES) {
+      if (game.versus || game.stageMode) expect(hubGroupOf(game), game.id).toBe('quick');
+    }
+  });
+
+  it('꾸준히 하는 게임의 소개는 허브 카드의 한 줄에 들어가는 길이다', () => {
+    for (const game of gamesInGroup(GAMES, 'steady')) {
+      expect(game.steady?.trim(), game.id).toBe(game.steady);
+      expect(game.steady!.length, game.id).toBeGreaterThan(0);
+      expect(game.steady!.length, game.id).toBeLessThanOrEqual(STEADY_LINE_CHARS);
+    }
+  });
+
+  it('대표 게임은 꾸준히 하는 게임이라, 처음 여는 허브의 첫 카드가 된다', () => {
+    const featured = GAMES.filter((game) => game.featured);
+    expect(featured.length).toBeGreaterThan(0);
+    for (const game of featured) expect(hubGroupOf(game), game.id).toBe('steady');
+    expect(personalHubOrder(gamesInGroup(GAMES, 'steady'), [], () => null)[0].id).toBe(LANTERN_GAME_ID);
+  });
+
+  it('허브를 처음 열 때는 가장 최근에 한 게임이 있는 갈래를 열고, 해 본 게임이 없으면 꾸준히 하는 게임을 연다', () => {
+    const games = [{ id: 'a' }, { id: 'b', steady: '소개' }, { id: 'c' }];
+    const at = (times: Record<string, number>) => (id: string): number | null => times[id] ?? null;
+    expect(startingHubGroup(games, at({}))).toBe('steady');
+    expect(startingHubGroup(games, at({ a: 100 }))).toBe('quick');
+    expect(startingHubGroup(games, at({ a: 100, b: 200 }))).toBe('steady');
+    expect(startingHubGroup(games, at({ a: 100, b: 200, c: 300 }))).toBe('quick');
+    // 목록에 없는 게임의 기록은 보지 않는다.
+    expect(startingHubGroup(games, at({ 없는: 900, b: 1 }))).toBe('steady');
+    expect(startingHubGroup(GAMES, at({ 'candy-slot': 5 }))).toBe('steady');
   });
 
   it('id로 게임을 찾는다', () => {

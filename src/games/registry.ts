@@ -60,7 +60,16 @@ export interface MiniGameInfo {
   bigMission?: BigMission;
   /** 허브 카드에서 최고 기록 자리에 쓸 말. 없으면 "최고 123"이다. 점수보다 알기 쉬운 말이 있는 게임(지킨 날 같은)이 쓴다. */
   recordLabel?: (best: number) => string;
+  /**
+   * 며칠에 걸쳐 꾸준히 하는 게임(키운 것이 남거나, 한 판이 길어서 차근차근 쌓아 가는 게임)이면 그 게임을 한 줄로 소개하는 말.
+   * 적어 두면 허브에서 "꾸준히 하는 게임" 쪽에 놓이고, 그 카드에 이 말이 보인다. 없으면 "짧게 즐기는 게임" 쪽이다.
+   * 카드 한 줄에 들어가도록 STEADY_LINE_CHARS자 안쪽으로 쓴다.
+   */
+  steady?: string;
 }
+
+/** 꾸준히 하는 게임의 소개(steady)에 쓰는 가장 긴 글자 수. 허브 카드의 한 줄에 줄이지 않고 들어가는 길이다. */
+export const STEADY_LINE_CHARS = 16;
 
 export const GAMES: readonly MiniGameInfo[] = [
   {
@@ -262,6 +271,8 @@ export const GAMES: readonly MiniGameInfo[] = [
     coinsFor: (score) => Math.floor(score / 50),
     dailyTargets: [100, 300, 700],
     genre: 'puzzle',
+    // 한 판이 여러 라운드에 걸쳐 부적을 모아 가는 긴 판이라, 꾸준히 하는 게임 쪽에 둔다.
+    steady: '부적을 모아 큰 상금을 노려요',
   },
   {
     id: 'duel',
@@ -283,6 +294,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     dailyTargets: [],
     // 이 앱의 대표 게임이라 허브 목록의 맨 앞에 놓는다.
     featured: true,
+    steady: '밤을 버티며 등불을 키워요',
     // 한 판이 길어서 몇 판만 묻는다.
     bigMission: {
       title: (goal) => `등불지기 ${goal}판`,
@@ -305,6 +317,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     genre: 'action',
     // 점수(지킨 날마다 100점)보다 지킨 날이 알기 쉽다.
     recordLabel: gardenRecord,
+    steady: '벌레를 막고 텃밭을 가꿔요',
     // 판이 끝나도 강화가 남는 큰 게임이라 몇 주에 한 번 큰 게임 미션으로 나온다. 한 판이 등불지기보다 짧아서 판 수를 조금 더 묻는다.
     bigMission: {
       title: (goal) => `텃밭 지키기 ${goal}판`,
@@ -325,6 +338,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     coinsFor: () => 1,
     dailyTargets: [],
     ongoing: true,
+    steady: '게임 회사를 차근차근 키워요',
     // 출시 한 번이 한 판이다. 예약해 둔 게임이 닫아 둔 동안 나온 것도 센다.
     bigMission: {
       title: (goal) => `새싹 컴퍼니 ${goal}번 출시`,
@@ -373,6 +387,45 @@ export function personalHubOrder<T extends { id: string; featured?: boolean }>(
     .map((entry) => entry.game);
   const fresh = others.filter((game) => lastPlayedAt(game.id) === null);
   return [...featured, ...favorite, ...played, ...fresh];
+}
+
+/**
+ * 허브가 게임을 나눠 보여 주는 두 갈래: 며칠에 걸쳐 꾸준히 하는 게임('steady')과 한 판을 짧게 즐기는 게임('quick').
+ * 적힌 순서가 허브의 탭 순서다.
+ */
+export const HUB_GROUPS = ['steady', 'quick'] as const;
+export type HubGroup = (typeof HUB_GROUPS)[number];
+
+/** 허브의 탭에 적는 갈래의 이름 */
+export const HUB_GROUP_LABEL: Readonly<Record<HubGroup, string>> = {
+  steady: '꾸준히 하는 게임',
+  quick: '짧게 즐기는 게임',
+};
+
+/** 그 게임이 허브의 어느 갈래에 놓이는지. 소개(steady)를 적어 둔 게임이 꾸준히 하는 게임이다. */
+export function hubGroupOf(game: { steady?: string }): HubGroup {
+  return game.steady === undefined ? 'quick' : 'steady';
+}
+
+/** 그 갈래의 게임들. 적힌 순서 그대로다. */
+export function gamesInGroup<T extends { steady?: string }>(games: readonly T[], group: HubGroup): T[] {
+  return games.filter((game) => hubGroupOf(game) === group);
+}
+
+/**
+ * 허브를 처음 열 때 보여 줄 갈래: 가장 최근에 한 게임이 있는 쪽이다. 하던 게임을 바로 이어 하게 하려는 것이다.
+ * 해 본 게임이 하나도 없으면 대표 게임이 있는 꾸준히 하는 게임 쪽을 연다.
+ */
+export function startingHubGroup(
+  games: readonly { id: string; steady?: string }[],
+  lastPlayedAt: (gameId: string) => number | null,
+): HubGroup {
+  const latest = lastPlayedGame(
+    games.map((game) => game.id),
+    lastPlayedAt,
+  );
+  const game = games.find((item) => item.id === latest);
+  return game ? hubGroupOf(game) : HUB_GROUPS[0];
 }
 
 /**

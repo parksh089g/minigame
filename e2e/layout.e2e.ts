@@ -24,6 +24,7 @@ import { iconKey } from '../src/games/lantern-keeper/icons';
 import { NEWS_GAP, newsLine, normalizeMeta, unknownNews } from '../src/games/lantern-keeper/meta';
 import { echoText, upgradeDescription, upgradeTitle, type Upgrade } from '../src/games/lantern-keeper/rules';
 import { levelPuzzle as pathLinkPuzzle } from '../src/games/path-link/rules';
+import { GAMES, gamesInGroup, HUB_GROUP_LABEL } from '../src/games/registry';
 import { levelPuzzle } from '../src/games/pin-pull/levels';
 import {
   MAX_STACK,
@@ -137,6 +138,157 @@ const levelUpOf = (page: Page): Promise<{ options: Upgrade[]; rerolls: number; b
     const sim = (window.__pocketArcade?.scene.getScene(key) as unknown as LanternView).sim!;
     return { options: sim.options(), rerolls: sim.rerolls, banishes: sim.banishes };
   }, LANTERN_SCENE);
+
+/** 허브 세이브를 앱이 읽기 전에 넣어 둔다. 저장하는 곳과 이름은 core/store.ts와 같고, 빠진 값은 normalizeSave가 채워 읽는다. */
+async function seedSave(page: Page, save: object): Promise<void> {
+  await page.evaluate(
+    (value) =>
+      new Promise<void>((resolve, reject) => {
+        const open = indexedDB.open('pocket-arcade');
+        open.onupgradeneeded = () => open.result.createObjectStore('kv');
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const tx = open.result.transaction('kv', 'readwrite');
+          tx.objectStore('kv').put(value, 'save');
+          tx.oncomplete = () => {
+            open.result.close();
+            resolve();
+          };
+          tx.onerror = () => reject(tx.error);
+        };
+      }),
+    save,
+  );
+}
+
+/** 허브에 보이는 글자들. 카드(컨테이너) 안에 든 것까지 모으고, 줄인 글자는 얼마나 줄였는지도 함께 준다. */
+const hubTexts = (page: Page): Promise<Array<{ text: string; scale: number }>> =>
+  page.evaluate((key) => {
+    const scene = window.__pocketArcade?.scene.getScene(key);
+    if (!scene) return [];
+    const all = (list: Phaser.GameObjects.GameObject[]): Phaser.GameObjects.GameObject[] =>
+      list.flatMap((item) => (item.type === 'Container' ? all((item as Phaser.GameObjects.Container).list) : [item]));
+    return all(scene.children.list).flatMap((item) => {
+      const text = item as Phaser.GameObjects.Text;
+      return item.type === 'Text' && text.visible && text.alpha > 0 ? [{ text: text.text, scale: text.scaleX }] : [];
+    });
+  }, SCENE.hub);
+
+/** 허브의 쪽 넘김 줄에서 "다음 쪽" 버튼의 자리. 쪽이 하나뿐이거나 마지막 쪽이면 null이다. */
+const hubNextPage = (page: Page): Promise<{ x: number; y: number } | null> =>
+  page.evaluate((key) => {
+    const scene = window.__pocketArcade?.scene.getScene(key);
+    if (!scene) return null;
+    const arrow = scene.children.list.find((item): item is Phaser.GameObjects.Image => {
+      const image = item as Phaser.GameObjects.Image;
+      return item.type === 'Image' && image.texture.key === 'icon-play' && image.visible && image.alpha === 1;
+    });
+    return arrow ? { x: arrow.x, y: arrow.y } : null;
+  }, SCENE.hub);
+
+/** 허브의 게임 목록을 옆으로 민다. 왼쪽으로 밀면(direction 1) 다음 쪽이나 다음 갈래로 넘어간다. */
+async function swipeHub(page: Page, direction: 1 | -1): Promise<void> {
+  const box = await page.locator('canvas').boundingBox();
+  if (!box) throw new Error('캔버스가 보이지 않는다');
+  const scale = box.width / GAME_WIDTH;
+  const y = box.y + 240 * scale;
+  const from = box.x + (GAME_WIDTH / 2 + direction * 60) * scale;
+  const to = box.x + (GAME_WIDTH / 2 - direction * 60) * scale;
+  await page.mouse.move(from, y);
+  await page.mouse.down();
+  await page.mouse.move(to, y, { steps: 6 });
+  await page.mouse.up();
+}
+
+it('허브: 꾸준히 하는 게임과 짧게 즐기는 게임이 탭으로 나뉘고, 두 탭의 모든 쪽에서 카드의 글이 가려지거나 줄어들지 않는다', async ({
+  page,
+}) => {
+  const steady = gamesInGroup(GAMES, 'steady');
+  const quick = gamesInGroup(GAMES, 'quick');
+  const titles = (games: readonly { title: string }[]): string[] => games.map((game) => game.title).sort();
+  /** 지금 허브에 카드로 보이는 게임의 이름 */
+  const shownTitles = async (games: readonly { title: string }[]): Promise<string[]> => {
+    const texts = new Set((await hubTexts(page)).map((item) => item.text));
+    return games.map((game) => game.title).filter((title) => texts.has(title));
+  };
+  /** 탭의 이름과 한 줄 소개처럼 줄여 적으면 안 되는 글 가운데 줄어든 것 */
+  const shrunk = async (labels: readonly string[]): Promise<string[]> =>
+    (await hubTexts(page)).filter((item) => labels.includes(item.text) && item.scale < 0.999).map((item) => item.text);
+  const tabLabels = Object.values(HUB_GROUP_LABEL);
+
+  // 처음 여는 허브(해 본 게임이 없다)는 꾸준히 하는 게임을 보여 준다.
+  await openApp(page);
+  await expect.poll(async () => (await shownTitles(steady)).sort(), WAIT).toEqual(titles(steady));
+  expect(await shownTitles(quick), '짧게 즐기는 게임은 다른 탭에 있다').toEqual([]);
+  expect(await hiddenTexts(page, SCENE.hub), '처음 여는 허브').toEqual([]);
+
+  // 기록과 오늘 할 일이 있는 저장: 등불지기는 "오늘의 판 아직", 텃밭 지키기는 "강화 가능"이 기록 자리에 뜬다.
+  // 가장 최근에 한 게임이 짧게 즐기는 게임이라, 다시 열면 그쪽 탭이 열린다.
+  const now = Date.now();
+  const played = (best: number, minutesAgo: number): object => ({ best, plays: 3, lastPlayedAt: now - minutesAgo * 60_000 });
+  await seedSave(page, {
+    coins: 98765,
+    favorites: [quick[3].id],
+    games: {
+      ...Object.fromEntries(steady.map((game, index) => [game.id, played(123456, 30 + index)])),
+      ...Object.fromEntries(quick.slice(0, 8).map((game, index) => [game.id, played(98765, 5 + index)])),
+    },
+  });
+  await seedLanternMeta(page, { clears: 1, runs: 3, bestSeconds: 600 });
+  await seedGardenMeta(page, { version: 2, seeds: 98765, levels: {}, best: 13, runs: 21, kills: 2890, startDay: 1, savedAt: now + 60_000 });
+  await page.reload();
+  await waitForScene(page, SCENE.hub);
+  await expect.poll(() => textPoint(page, SCENE.hub, '퍼즐 단계'), { ...WAIT, message: '최근에 한 게임이 있는 탭이 열려야 한다' }).not.toBeNull();
+  expect(await shownTitles(steady), '꾸준히 하는 게임은 다른 탭에 있다').toEqual([]);
+
+  // 짧게 즐기는 게임: 쪽을 끝까지 넘겨 가며 본다. 게임마다 한 번씩, 그리고 퍼즐 단계 카드가 나와야 한다.
+  const walkQuick = async (where: string): Promise<void> => {
+    const seen: string[] = [];
+    for (let turn = 0; turn < quick.length; turn += 1) {
+      expect(await hiddenTexts(page, SCENE.hub), `${where}: 짧게 즐기는 게임 ${turn + 1}쪽`).toEqual([]);
+      expect(await shrunk(tabLabels), `${where}: 탭의 이름은 줄여 적지 않는다`).toEqual([]);
+      const shown = await shownTitles(quick);
+      expect(shown.length, `${where}: ${turn + 1}쪽에 카드가 있어야 한다`).toBeGreaterThan(0);
+      seen.push(...shown);
+      const next = await hubNextPage(page);
+      if (!next) break;
+      await tapAt(page, next.x, next.y);
+      await expect.poll(() => shownTitles(quick), WAIT).not.toEqual(shown);
+      await page.waitForTimeout(200);
+    }
+    expect([...seen].sort(), `${where}: 짧게 즐기는 게임이 모두 한 번씩 나와야 한다`).toEqual(titles(quick));
+  };
+  // 꾸준히 하는 게임: 한 쪽에 모두 보이고, 한 줄 소개와 기록 자리의 글(오늘 할 일 포함)이 서로 가리지 않는다.
+  const intros = steady.map((game) => game.steady ?? '');
+  const checkSteady = async (where: string): Promise<void> => {
+    await tapText(page, SCENE.hub, HUB_GROUP_LABEL.steady);
+    await expect.poll(async () => (await shownTitles(steady)).sort(), WAIT).toEqual(titles(steady));
+    expect(await shownTitles(quick)).toEqual([]);
+    await expect.poll(() => textPoint(page, SCENE.hub, '강화 가능'), { ...WAIT, message: '텃밭 지키기의 할 일' }).not.toBeNull();
+    await expect.poll(() => textPoint(page, SCENE.hub, '오늘의 판 아직'), { ...WAIT, message: '등불지기의 할 일' }).not.toBeNull();
+    await page.waitForTimeout(200);
+    expect(await hiddenTexts(page, SCENE.hub), `${where}: 꾸준히 하는 게임`).toEqual([]);
+    expect((await hubTexts(page)).map((item) => item.text), '게임마다 한 줄 소개가 보여야 한다').toEqual(expect.arrayContaining(intros));
+    expect(await shrunk([...intros, ...tabLabels]), `${where}: 한 줄 소개와 탭의 이름은 줄여 적지 않는다`).toEqual([]);
+  };
+  await walkQuick('휴대폰');
+  await checkSteady('휴대폰');
+
+  // 옆으로 밀면 갈래를 넘나든다: 꾸준히 하는 게임에서 왼쪽으로 밀면 짧게 즐기는 게임의 첫 쪽, 거기서 오른쪽으로 밀면 되돌아온다.
+  await swipeHub(page, 1);
+  await expect.poll(() => textPoint(page, SCENE.hub, '퍼즐 단계'), { ...WAIT, message: '밀어서 짧게 즐기는 게임으로' }).not.toBeNull();
+  await page.waitForTimeout(200);
+  await swipeHub(page, -1);
+  await expect.poll(async () => (await shownTitles(steady)).sort(), { ...WAIT, message: '밀어서 꾸준히 하는 게임으로' }).toEqual(titles(steady));
+
+  // 태블릿처럼 가로로 넓은 화면은 논리 높이가 가장 짧다(400). 카드를 조금 낮춰 놓는 그 화면에서도 두 탭을 다시 본다.
+  await page.setViewportSize({ width: 768, height: 1024 });
+  await page.reload();
+  await waitForScene(page, SCENE.hub);
+  await expect.poll(() => textPoint(page, SCENE.hub, '퍼즐 단계'), WAIT).not.toBeNull();
+  await walkQuick('가장 짧은 화면');
+  await checkSteady('가장 짧은 화면');
+});
 
 it('등불지기 잔치의 밤: 고르는 창, 강화권 카드 넷~여섯 장(진화 카드 포함), 일시정지 빌드, 레벨업 창, 골라내기 화면이 가려지지 않는다', async ({ page }) => {
   // 판을 하나 끝까지 하는 셈이라 화면 점검 하나보다 오래 걸린다.
