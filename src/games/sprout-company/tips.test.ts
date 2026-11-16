@@ -69,7 +69,8 @@ describe('처음 안내', () => {
     expect(drain(state)).toEqual(['update', 'goals', 'play']);
 
     state.leaves = 1_000_000;
-    expect(drain(state)).toEqual(['train', 'lead']);
+    // 교육할 수 있게 되면 교육과, 레벨이 오르면 열리는 기술을 차례로 알려 준다.
+    expect(drain(state)).toEqual(['train', 'skill', 'lead']);
 
     // 사장인 새싹이의 단짝이 들어왔는데 옆자리가 아니면 자리 바꾸기를 알려 준다.
     state.desks[3].staff = 'drop';
