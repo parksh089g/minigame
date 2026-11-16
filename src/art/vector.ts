@@ -778,6 +778,29 @@ const ICONS: Record<string, Art> = {
       roundRect(c, 4.500, 12, 4, 1.400, 0.700, 'rgba(255, 255, 255, 0.7)');
     },
   },
+  /** 벽돌 깨기: 벽돌 두 줄과, 깨져서 난 틈으로 올라가는 공, 아래의 막대 */
+  'icon-brick': {
+    width: 32,
+    height: 32,
+    draw(c) {
+      roundRect(c, 2, 4, 28, 27, 6, '#e6cfc6');
+      roundRect(c, 2, 2, 28, 27, 6, '#ffffff');
+      const brick = (x: number, y: number, face: string, dark: string): void => {
+        roundRect(c, x, y + 1.200, 7.400, 4.200, 1.600, dark);
+        roundRect(c, x, y, 7.400, 4.200, 1.600, face);
+      };
+      brick(4.300, 5, '#ff9fb5', '#e97f99');
+      brick(12.300, 5, '#9dd6ff', '#7dbef2');
+      brick(20.300, 5, '#9be3c9', '#7fd3ae');
+      brick(4.300, 11.400, '#ffe9a8', '#f2cf73');
+      brick(20.300, 11.400, '#c9bcf8', '#9684e0');
+      oval(c, 17.200, 17.600, 2.700, 2.700, '#e06d75');
+      oval(c, 17.200, 17.100, 2.500, 2.500, '#ff8f8f');
+      oval(c, 16.300, 16.200, 1, 0.700, 'rgba(255, 255, 255, 0.8)', -0.6);
+      roundRect(c, 8.500, 23.900, 15, 3.600, 1.800, '#9684e0');
+      roundRect(c, 8.500, 22.700, 15, 3.600, 1.800, '#c9bcf8');
+    },
+  },
   /** 초성 퀴즈: 글자 조각 두 개에 적힌 초성 ㅊ과 ㅅ. 글꼴이 준비되기 전에도 그릴 수 있게 획으로 긋는다. */
   'icon-chosung': {
     width: 32,
