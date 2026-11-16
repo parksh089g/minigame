@@ -67,7 +67,10 @@ export const ENEMY_TINT: Readonly<Record<EnemyKind, number>> = {
   bee: 0xffd866,
   hopper: 0xa8e6a1,
   beetle: 0x8fa3e8,
+  mosquito: 0xb9b0d9,
+  digger: 0xd1ab84,
   mole: 0xb79f93,
+  rhino: 0x9b87d6,
 };
 
 export const enemyTexture = (kind: EnemyKind): string => `gg-${kind}`;
@@ -80,6 +83,8 @@ export const TEX = {
   sunflower: 'gg-sunflower',
   gun: 'gg-gun',
   storm: 'gg-storm',
+  /** 땅강아지가 땅속에 숨어 지나가는 동안 보이는 흙더미 */
+  mound: 'gg-mound',
 } as const;
 
 // ───────── 그리기 도구 ─────────
@@ -289,6 +294,48 @@ const ENEMY_ART: Readonly<Record<EnemyKind, Art>> = {
       oval(c, 23.2, 31.6, 1.1, 1.1, INK);
     },
   },
+  mosquito: {
+    width: 18,
+    height: 18,
+    view: BUG_VIEW,
+    draw(c) {
+      // 가늘고 긴 다리
+      stroke(c, 'M15 18L5 13L2 16M15 22L4 25M25 18L35 13L38 16M25 22L36 25', '#8f84b8', 1.6);
+      // 날개
+      oval(c, 11, 10, 9, 5, 'rgba(207, 233, 255, 0.92)', -0.7);
+      oval(c, 29, 10, 9, 5, 'rgba(207, 233, 255, 0.92)', 0.7);
+      // 줄무늬 배
+      oval(c, 20, 12, 5.5, 9.5, '#b9b0d9');
+      box(c, 15, 7, 10, 2.2, 1.1, '#8f84b8');
+      box(c, 15, 12, 10, 2.2, 1.1, '#8f84b8');
+      // 머리와 울타리를 노리는 뾰족한 침
+      stroke(c, 'M20 30L20 39', '#6b5263', 1.8);
+      oval(c, 20, 25, 8.5, 7.5, '#cfc7ec');
+      face(c, 20, 24.5, 7.5, 1.8, 'none');
+    },
+  },
+  digger: {
+    width: 24,
+    height: 24,
+    view: BUG_VIEW,
+    draw(c) {
+      stroke(c, 'M11 14L4 11M11 20L4 22M29 14L36 11M29 20L36 22', '#a0764f', 2.2);
+      // 보송한 배
+      oval(c, 20, 13, 10, 10.5, '#d1ab84');
+      stroke(c, 'M13 10Q20 13 27 10M12.500 15.500Q20 19 27.500 15.500', '#bd9469', 1.4);
+      // 앞쪽 몸통과 얼굴
+      oval(c, 20, 27, 11.5, 9, '#b98d62');
+      oval(c, 20, 26, 10.5, 8, '#c99f75');
+      face(c, 20, 26, 9, 2);
+      // 흙을 파는 큰 앞발(삽 같은 발톱)
+      for (const side of [-1, 1]) {
+        const x = 20 + side * 12.5;
+        oval(c, x, 33, 5, 4, '#a0764f', side * 0.5);
+        stroke(c, `M${x - 3} 36L${x - 3.5} 39M${x} 36.500L${x} 39.500M${x + 3} 36L${x + 3.5} 39`, '#8a6342', 1.4);
+      }
+      stroke(c, 'M16 21Q12 14 9 4M24 21Q28 14 31 4', '#a0764f', 1.3);
+    },
+  },
   mole: {
     width: 46,
     height: 46,
@@ -308,6 +355,32 @@ const ENEMY_ART: Readonly<Record<EnemyKind, Art>> = {
       face(c, 23, 21, 13, 2, 'grumpy');
       oval(c, 23, 27.500, 3.6, 2.8, '#ff9fb5');
       oval(c, 22, 26.800, 1.1, 0.8, 'rgba(255, 255, 255, 0.8)');
+    },
+  },
+  rhino: {
+    width: 46,
+    height: 46,
+    view: [46, 46],
+    draw(c) {
+      // 다리
+      stroke(c, 'M8 15L2 11M7 23L1 25M9 30L4 35M38 15L44 11M39 23L45 25M37 30L42 35', '#6d5bb0', 2.6);
+      // 반짝이는 등딱지
+      oval(c, 23, 19, 17.5, 16, '#7f6bc2');
+      oval(c, 23, 18, 16.5, 14.5, '#9b87d6');
+      stroke(c, 'M23 4V31', '#7f6bc2', 1.8);
+      stroke(c, 'M12 11Q15 7 19 6.500', 'rgba(255, 255, 255, 0.75)', 2.2);
+      // 갈라진 큰 뿔이 아래(울타리 쪽)를 향한다. 머리 뒤에서 나와 머리 아래로 길게 뻗는다.
+      fill(c, 'M17.500 33Q23 49 28.500 33Z', '#e9b54a');
+      fill(c, 'M18.500 33Q23 47 27.500 33Z', '#ffd77a');
+      stroke(c, 'M23 41.500L18.500 45.500M23 41.500L27.500 45.500', '#ffd77a', 2.4);
+      // 머리
+      oval(c, 23, 31, 11.5, 6.5, '#6d5bb0');
+      // 왕관
+      fill(c, 'M15 6L16.500 0.500L20 4L23 0L26 4L29.500 0.500L31 6Z', '#ffcf5c');
+      box(c, 14.500, 5, 17, 2.6, 1.3, '#f2b53a');
+      face(c, 23, 29.500, 11, 1.8, 'none');
+      // 찌푸린 눈썹
+      stroke(c, 'M14.500 26L19 27.300M31.500 26L27 27.300', INK, 1.1);
     },
   },
 };
@@ -364,6 +437,27 @@ const ITEM_ART: Readonly<Record<string, Art>> = {
       oval(c, 9.5, 29, 5.5, 2.8, LEAF, 0.5);
       oval(c, 20.5, 31, 5.5, 2.8, LEAF, -0.5);
       sunflowerHead(c, 15, 13, 12.5, true);
+    },
+  },
+  [TEX.mound]: {
+    width: 26,
+    height: 20,
+    view: [40, 30],
+    draw(c) {
+      oval(c, 20, 19, 18, 10, '#d9b48f');
+      oval(c, 20, 17, 15, 8, '#e6c6a3');
+      for (const [x, y, r] of [
+        [9, 25, 1.8],
+        [31, 24, 2],
+        [14, 13, 1.4],
+        [26, 12.500, 1.6],
+        [20, 21, 1.5],
+      ] as const) {
+        oval(c, x, y, r, r * 0.8, '#c49a73');
+      }
+      // 흙 위로 살짝 나온 발톱 끝
+      oval(c, 15.500, 9.500, 2.4, 1.8, '#a0764f');
+      oval(c, 24.500, 9.500, 2.4, 1.8, '#a0764f');
     },
   },
   /** 물총. 오른쪽(0도)을 보고 있고, 손잡이 쪽이 원점에 가깝다. */

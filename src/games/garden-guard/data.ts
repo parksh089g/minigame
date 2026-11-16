@@ -30,10 +30,23 @@ export const HELPER_SPOTS = [
 
 // ------------------------------------------------------------ 벌레
 
-export type EnemyKind = 'ant' | 'ladybug' | 'snail' | 'bee' | 'hopper' | 'beetle' | 'mole';
+export type EnemyKind =
+  | 'ant'
+  | 'ladybug'
+  | 'snail'
+  | 'bee'
+  | 'hopper'
+  | 'beetle'
+  | 'mosquito'
+  | 'digger'
+  | 'mole'
+  | 'rhino';
 
-/** 벌레가 다가오는 방식. walk는 곧장 걷고, weave는 좌우로 흔들며 날고, hop은 쉬었다가 폴짝 뛴다. */
-export type Gait = 'walk' | 'weave' | 'hop';
+/**
+ * 벌레가 다가오는 방식. walk는 곧장 걷고, weave는 좌우로 흔들며 날고, hop은 쉬었다가 폴짝 뛰고,
+ * dig는 판의 가운데쯤에서 땅속으로 들어가 숨어서 지나간다(DIG).
+ */
+export type Gait = 'walk' | 'weave' | 'hop' | 'dig';
 
 export interface EnemyDef {
   name: string;
@@ -55,7 +68,11 @@ export interface EnemyDef {
   fromDay: number;
   /** 섞이는 비중: 나오기 시작한 날의 값(first)에서 하루에 step씩 늘어 max까지 */
   weight: { first: number; step: number; max: number };
+  /** 한 번 뽑히면 이만큼이 한 무리로 붙어서 나온다(모기). 그날 나올 벌레 수에서 그만큼을 쓴다. */
+  swarm?: number;
   boss?: boolean;
+  /** 대장의 솜씨: summon은 부하를 부르고(SUMMON), charge는 웅크렸다가 돌진한다(CHARGE). */
+  skill?: 'summon' | 'charge';
 }
 
 export const ENEMIES: Readonly<Record<EnemyKind, EnemyDef>> = {
@@ -132,6 +149,31 @@ export const ENEMIES: Readonly<Record<EnemyKind, EnemyDef>> = {
     fromDay: 8,
     weight: { first: 1.5, step: 0.5, max: 5 },
   },
+  mosquito: {
+    name: '모기',
+    hp: 9,
+    speed: 40,
+    bite: 3,
+    biteEvery: 0.7,
+    radius: 6,
+    seeds: 1,
+    gait: 'walk',
+    swarm: 4,
+    fromDay: 14,
+    weight: { first: 1.2, step: 0.15, max: 2.4 },
+  },
+  digger: {
+    name: '땅강아지',
+    hp: 64,
+    speed: 25,
+    bite: 9,
+    biteEvery: 1.1,
+    radius: 9,
+    seeds: 3,
+    gait: 'dig',
+    fromDay: 24,
+    weight: { first: 1.5, step: 0.3, max: 4 },
+  },
   mole: {
     name: '대장 두더지',
     hp: 700,
@@ -144,21 +186,60 @@ export const ENEMIES: Readonly<Record<EnemyKind, EnemyDef>> = {
     fromDay: 5,
     weight: { first: 0, step: 0, max: 0 },
     boss: true,
+    skill: 'summon',
+  },
+  rhino: {
+    name: '대장 장수풍뎅이',
+    hp: 840,
+    speed: 5.5,
+    bite: 24,
+    biteEvery: 1.6,
+    radius: 18,
+    seeds: 12,
+    gait: 'walk',
+    fromDay: 10,
+    weight: { first: 0, step: 0, max: 0 },
+    boss: true,
+    skill: 'charge',
   },
 };
 
 /** 여느 날에 섞여 나오는 벌레(대장 빼고)를 나오기 시작하는 날 순서로 */
-export const COMMON_KINDS: readonly EnemyKind[] = ['ant', 'ladybug', 'snail', 'bee', 'hopper', 'beetle'];
+export const COMMON_KINDS: readonly EnemyKind[] = [
+  'ant',
+  'ladybug',
+  'snail',
+  'bee',
+  'hopper',
+  'beetle',
+  'mosquito',
+  'digger',
+];
 
 /** 꿀벌이 좌우로 흔들리는 폭(한쪽)과 한 번 오가는 시간(초) */
 export const WEAVE = { reach: 34, period: 2.4 } as const;
 /** 메뚜기가 쉬는 시간과 뛰는 시간(초). 뛰는 동안에만 움직인다. */
 export const HOP = { rest: 0.85, leap: 0.25 } as const;
 
+/** 모기 떼가 나올 때 한 마리씩 벌어지는 거리(x)와 나오는 때의 어긋남(초) */
+export const SWARM = { spread: 11, stagger: 0.12 } as const;
+/**
+ * 땅강아지가 땅속에 숨어 지나가는 높이(시뮬레이션 y). 이 사이에서는 물방울도 물벼락도 닿지 않고,
+ * 물총과 해바라기도 겨누지 않는다. 울타리(FIELD.depth)에 닿기 전에 다시 나온다.
+ */
+export const DIG = { from: 70, to: 225 } as const;
+
 /** 대장이 나오는 날의 간격. 이 날을 지키면 그다음 날부터 시작할 수 있다. */
 export const BOSS_EVERY = 5;
-/** 대장이 부하를 부르는 간격(초)과 한 번에 부르는 수 */
+/** 대장의 날마다 차례로 나오는 대장: 5일째 두더지, 10일째 장수풍뎅이, 15일째 두더지, ... */
+export const BOSS_ROTATION: readonly EnemyKind[] = ['mole', 'rhino'];
+/** 대장 두더지가 부하를 부르는 간격(초)과 한 번에 부르는 수 */
 export const SUMMON = { every: 7, count: 2, kind: 'ant' as EnemyKind } as const;
+/**
+ * 대장 장수풍뎅이의 돌진. every초마다 windup초 동안 멈춰 웅크렸다가 rush초 동안 speed배로 내달린다.
+ * 찬물과 물벼락에 젖어 느려지면 이 박자도 같이 느려진다.
+ */
+export const CHARGE = { every: 6, windup: 0.9, rush: 1.1, speed: 5 } as const;
 
 // ------------------------------------------------------------ 하루
 
