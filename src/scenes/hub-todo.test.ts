@@ -80,6 +80,13 @@ describe('텃밭 지키기의 오늘 할 일', () => {
   it('아직 해 보지 않았으면 씨앗이 있어도 "새 게임"을 둔다', () => {
     expect(gardenTodo({ ...createMeta(), seeds: 500 })).toBeNull();
   });
+
+  it('두고 간 판이 있으면 강화보다 먼저 그 판의 날과 함께 이어 하라고 한다', () => {
+    const rich = { ...createMeta(), runs: 3, seeds: 5000 };
+    expect(gardenTodo(rich, { day: 17 })).toEqual({ text: '이어하기 17일째' });
+    expect(gardenTodo(createMeta(), { day: 1 })).toEqual({ text: '이어하기 1일째' });
+    expect(gardenTodo(rich, null)).toEqual({ text: '강화 가능' });
+  });
 });
 
 describe('큰 게임 주간 미션', () => {

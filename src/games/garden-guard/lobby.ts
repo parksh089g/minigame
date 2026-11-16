@@ -1,6 +1,7 @@
 /**
  * 준비 화면: 가진 씨앗과 가장 멀리 지킨 날, 영구 강화를 사는 목록, 시작하는 날을 고르는 줄, 출발 버튼.
  * 목록이 화면보다 길면 쪽을 넘긴다. 강화를 누르면 목록 아래에 그 강화의 설명이 보인다.
+ * 두고 간 판이 있으면 맨 아래 줄이 "새 판"과 "이어하기"로 바뀐다.
  */
 import Phaser from 'phaser';
 import { GAME_WIDTH, THEME, THEME_CSS } from '../../config';
@@ -14,9 +15,15 @@ import { buyUpgrade, effectLine, levelOf, startDays, upgradeCost, type GardenMet
 export interface LobbyHooks {
   /** 처음 열 때 설명 칸에 적을 알림(새 출발점이 열린 것 같은). 없으면 null */
   notice: string | null;
+  /** 두고 간 판(이어 할 수 있는 판). 없으면 null */
+  saved: { day: number } | null;
   getMeta: () => GardenMeta;
   setMeta: (meta: GardenMeta) => void;
   onStart: () => void;
+  /** 두고 간 판을 이어 한다. */
+  onResume: () => void;
+  /** 두고 간 판을 마치고 새 판을 고를 수 있게 한다. */
+  onAbandon: () => void;
   onBack: () => void;
 }
 
@@ -40,6 +47,15 @@ export const INFO_HINT = '강화를 누르면 설명이 보여요';
 export const START_LABEL = '출발!';
 /** 시작하는 날을 바꿨을 때 설명 칸에 적는 말 */
 export const START_DAY_INFO = '고른 날부터 시작해요.\n대장을 물리치면 그다음 날이 열려요.';
+/** 두고 간 판이 있을 때 맨 아래 줄의 두 버튼 */
+export const ABANDON_LABEL = '새 판';
+export const resumeLabel = (day: number): string => `이어하기 · ${day}일째`;
+/** 두고 간 판이 있을 때 설명 칸에 적는 말 */
+export function resumeInfo(day: number): string {
+  return `${day}일째에서 멈춘 판이 있어요.\n새로 산 강화는 새 판부터 들어가요.`;
+}
+/** "새 판"을 처음 눌렀을 때 설명 칸에 적는 말. 한 번 더 눌러야 멈춘 판을 마친다. */
+export const ABANDON_CONFIRM = '멈춘 판을 여기서 마치고 새 판을 해요.\n한 번 더 누르면 그렇게 해요.';
 
 interface RowView {
   id: UpgradeId;
@@ -90,6 +106,8 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
   let page = 0;
   let picked: UpgradeId | null = null;
   let rows: RowView[] = [];
+  /** "새 판"을 한 번 눌러서, 한 번 더 누르면 멈춘 판을 마치는 때인지 */
+  let abandonArmed = false;
 
   addBackdrop(scene);
   new PixelButton(scene, {
@@ -139,7 +157,9 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
 
   const infoPanel = scene.add.graphics();
   drawPanel(infoPanel, MARGIN, infoTop, WIDTH, INFO_HEIGHT - 3, { fill: THEME.butterSoft, shadow: null, radius: 9 });
-  const info = addText(scene, GAME_WIDTH / 2, infoTop + (INFO_HEIGHT - 3) / 2, hooks.notice ?? INFO_HINT, {
+  // 아무 강화도 고르지 않았을 때 설명 칸에 적는 말
+  const idle = hooks.saved ? resumeInfo(hooks.saved.day) : INFO_HINT;
+  const info = addText(scene, GAME_WIDTH / 2, infoTop + (INFO_HEIGHT - 3) / 2, hooks.notice ?? idle, {
     size: 10,
     color: THEME_CSS.ink,
     originX: 0.5,
@@ -149,8 +169,10 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
     lineSpacing: 1,
   });
   const showInfo = (id: UpgradeId | null): void => {
+    // 다른 것을 눌렀으면 "새 판"은 처음부터 다시 묻는다.
+    abandonArmed = false;
     picked = id;
-    info.setText(id ? UPGRADES[id].blurb : INFO_HINT);
+    info.setText(id ? UPGRADES[id].blurb : idle);
     for (const row of rows) drawRow(row);
   };
 
@@ -266,6 +288,39 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
     });
   };
   drawList();
+
+  // 두고 간 판이 있으면: 왼쪽은 그 판을 마치고 새 판을 고르는 버튼, 오른쪽은 이어 하는 버튼이다.
+  if (hooks.saved) {
+    new PixelButton(scene, {
+      x: MARGIN,
+      y: footTop,
+      width: STEPPER_WIDTH,
+      height: FOOT.height,
+      label: ABANDON_LABEL,
+      style: 'neutral',
+      onTap: () => {
+        // 멈춘 판은 되돌릴 수 없으니 한 번 더 묻는다.
+        if (abandonArmed) {
+          hooks.onAbandon();
+          return;
+        }
+        showInfo(null);
+        abandonArmed = true;
+        info.setText(ABANDON_CONFIRM);
+      },
+    });
+    const resumeX = MARGIN + STEPPER_WIDTH + 6;
+    new PixelButton(scene, {
+      x: resumeX,
+      y: footTop,
+      width: GAME_WIDTH - MARGIN - resumeX,
+      height: FOOT.height,
+      label: resumeLabel(hooks.saved.day),
+      style: 'pink',
+      onTap: hooks.onResume,
+    });
+    return;
+  }
 
   // 시작 줄: 대장을 물리쳐서 뒤쪽 날이 열렸으면 시작하는 날을 고르는 칸이 왼쪽에 생긴다.
   const days = startDays(meta.best);

@@ -67,8 +67,12 @@ export function companyTodo(state: CompanyState | null, now: number, today: stri
   return { text: `목표 ${done}/${count}`, start: COMPANY_GOALS };
 }
 
-/** 텃밭 지키기의 할 일. 해 본 사람이 가진 씨앗으로 살 수 있는 강화가 있으면 알린다. */
-export function gardenTodo(meta: GardenMeta): Todo | null {
+/**
+ * 텃밭 지키기의 할 일. 두고 간 판이 있으면 그 판의 날과 함께 이어 하라고 하고(이어하기 버튼은 준비 화면에 있다),
+ * 없으면 해 본 사람이 가진 씨앗으로 살 수 있는 강화가 있을 때 알린다.
+ */
+export function gardenTodo(meta: GardenMeta, run: { day: number } | null = null): Todo | null {
+  if (run) return { text: `이어하기 ${run.day}일째` };
   return meta.runs > 0 && canBuyAny(meta) ? { text: '강화 가능' } : null;
 }
 
@@ -113,7 +117,10 @@ export function todosNow(records: HubRecords, now: Date = new Date()): Todos {
     pick(LANTERN_GAME_ID, lanternTodo(metaStore.run, playedToday, records.playedBefore(LANTERN_GAME_ID)));
   }
   if (companyRead) pick(COMPANY_GAME_ID, companyTodo(companyStore.data, now.getTime(), dateKeyOf(now)));
-  if (gardenRead) pick(GARDEN_GAME_ID, gardenTodo(gardenStore.data));
+  if (gardenRead) {
+    const run = gardenStore.run;
+    pick(GARDEN_GAME_ID, gardenTodo(gardenStore.data, run ? { day: run.state.day } : null));
+  }
   return todos;
 }
 
