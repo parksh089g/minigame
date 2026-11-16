@@ -13,9 +13,18 @@ export const LOOK = {
   /** 방과 구덩이의 안쪽. shade는 천장 쪽에 지는 그늘이다. */
   cave: { face: THEME.lilacSoft, shade: THEME.lilacDeep },
   pin: { face: THEME.mint, lip: THEME.mintDeep, shine: THEME.mintSoft },
+  /** 자물쇠가 달린 핀: 잿빛 막대와 손잡이 위의 금빛 자물쇠 */
+  lockedPin: { face: THEME.faint, lip: THEME.sub, shine: THEME.dim },
+  padlock: { face: THEME.gold, lip: THEME.accent, hole: THEME.inkDeep },
+  /** 사슬로 묶인 핀: 분홍 막대와 손잡이 위의 맞물린 고리 */
+  chainedPin: { face: THEME.pink, lip: THEME.pinkDeep, shine: THEME.pinkSoft },
+  chainLink: THEME.inkDeep,
   lava: { face: THEME.coral, deep: THEME.coralDeep, glow: THEME.butter },
   water: { face: THEME.sky, deep: THEME.skyDeep, light: THEME.skySoft },
   treasure: { face: THEME.gold, lip: THEME.butterDeep, shine: THEME.butterSoft },
+  key: { face: THEME.gold, lip: THEME.accent, shine: THEME.butterSoft },
+  /** 자물쇠가 풀릴 때의 반짝임 */
+  unlock: THEME.gold,
   stone: { face: THEME.faint, lip: THEME.sub, light: THEME.dim },
   hero: { body: THEME.pink, deep: THEME.pinkDeep, light: THEME.pinkSoft, crown: THEME.gold },
   monster: { body: THEME.coralDeep, horn: THEME.coral, eye: THEME.white },
@@ -111,33 +120,63 @@ export function drawHollows(g: Graphics, hollows: readonly Hollow[]): void {
 
 // ───────── 핀 ─────────
 
-function drawHandle(g: Graphics, x: number, y: number): void {
-  g.fillStyle(LOOK.pin.lip, 1);
+/** 핀의 겉모습: 보통 핀, 자물쇠가 달린 핀, 사슬로 묶인 핀 */
+export type PinLook = 'plain' | 'locked' | 'chained';
+
+const PIN_COLORS = { plain: LOOK.pin, locked: LOOK.lockedPin, chained: LOOK.chainedPin } as const;
+
+/** 손잡이. 자물쇠가 달린 핀은 자물쇠를, 사슬로 묶인 핀은 맞물린 고리 둘을 얹어서 색이 아니어도 구별된다. */
+function drawHandle(g: Graphics, x: number, y: number, look: PinLook): void {
+  const colors = PIN_COLORS[look];
+  g.fillStyle(colors.lip, 1);
   g.fillCircle(x, y + 1.5, HANDLE_RADIUS);
-  g.fillStyle(LOOK.pin.face, 1);
+  g.fillStyle(colors.face, 1);
   g.fillCircle(x, y, HANDLE_RADIUS);
-  g.fillStyle(LOOK.pin.shine, 1);
-  g.fillCircle(x, y, HANDLE_RADIUS * 0.42);
+
+  if (look === 'locked') {
+    // 고리가 위로 솟은 자물쇠
+    g.lineStyle(1.6, LOOK.padlock.hole, 1);
+    g.beginPath();
+    g.arc(x, y - 1.6, 2.5, Math.PI, Math.PI * 2);
+    g.strokePath();
+    g.fillStyle(LOOK.padlock.lip, 1);
+    g.fillRoundedRect(x - 4.2, y - 1.4, 8.4, 6.6, 1.6);
+    g.fillStyle(LOOK.padlock.face, 1);
+    g.fillRoundedRect(x - 4.2, y - 1.8, 8.4, 6, 1.6);
+    g.fillStyle(LOOK.padlock.hole, 1);
+    g.fillCircle(x, y + 0.8, 1.1);
+  } else if (look === 'chained') {
+    g.lineStyle(1.5, LOOK.chainLink, 1);
+    g.strokeCircle(x - 1.9, y, 2.5);
+    g.strokeCircle(x + 1.9, y, 2.5);
+  } else {
+    g.fillStyle(colors.shine, 1);
+    g.fillCircle(x, y, HANDLE_RADIUS * 0.42);
+  }
 }
 
-/** 가로 핀. (0, 0)이 막대의 왼쪽 끝 가운데이고, 오른쪽 끝에 둥근 손잡이가 달린다. */
-export function drawPin(g: Graphics, length: number): void {
+/** 가로 핀. (0, 0)이 막대의 왼쪽 끝 가운데이고, 오른쪽 끝에 둥근 손잡이가 달린다. 그리기 전에 지우므로 다시 그려도 된다. */
+export function drawPin(g: Graphics, length: number, look: PinLook = 'plain'): void {
   const half = PIN_THICKNESS / 2;
-  g.fillStyle(LOOK.pin.lip, 1);
+  const colors = PIN_COLORS[look];
+  g.clear();
+  g.fillStyle(colors.lip, 1);
   g.fillRoundedRect(0, -half, length, PIN_THICKNESS, half);
-  g.fillStyle(LOOK.pin.face, 1);
+  g.fillStyle(colors.face, 1);
   g.fillRoundedRect(0, -half, length, PIN_THICKNESS - 2, half - 1);
-  drawHandle(g, length, 0);
+  drawHandle(g, length, 0, look);
 }
 
-/** 세로로 선 문 핀. (0, 0)이 막대의 아래쪽 끝 가운데이고, 위쪽 끝에 손잡이가 달린다. */
-export function drawDoorPin(g: Graphics, length: number): void {
+/** 세로로 선 문 핀. (0, 0)이 막대의 아래쪽 끝 가운데이고, 위쪽 끝에 손잡이가 달린다. 그리기 전에 지우므로 다시 그려도 된다. */
+export function drawDoorPin(g: Graphics, length: number, look: PinLook = 'plain'): void {
   const half = PIN_THICKNESS / 2;
-  g.fillStyle(LOOK.pin.lip, 1);
+  const colors = PIN_COLORS[look];
+  g.clear();
+  g.fillStyle(colors.lip, 1);
   g.fillRoundedRect(-half, -length, PIN_THICKNESS, length, half);
-  g.fillStyle(LOOK.pin.face, 1);
+  g.fillStyle(colors.face, 1);
   g.fillRoundedRect(-half, -length, PIN_THICKNESS - 2, length, half - 1);
-  drawHandle(g, 0, -length);
+  drawHandle(g, 0, -length, look);
 }
 
 // ───────── 방과 구덩이에 드는 것 ─────────
@@ -210,6 +249,28 @@ export function drawTreasure(g: Graphics, x: number, y: number): void {
   drawCoin(g, x, y - 13);
   drawCoin(g, x - 5.2, y - 6.5);
   drawCoin(g, x + 5.2, y - 6.5);
+}
+
+/** 열쇠의 키. 위에 다른 것을 얹을 때 쓴다. */
+export const KEY_HEIGHT = 18;
+/** 열쇠: 둥근 고리가 위에 있고 아래로 이가 난 금빛 열쇠가 서 있다. (x, y)가 바닥의 가운데다. */
+export function drawKey(g: Graphics, x: number, y: number): void {
+  // 고리
+  g.fillStyle(LOOK.key.lip, 1);
+  g.fillCircle(x, y - 12.6, 4.6);
+  g.fillStyle(LOOK.key.face, 1);
+  g.fillCircle(x, y - 13.4, 4.6);
+  g.fillStyle(LOOK.cave.face, 1);
+  g.fillCircle(x, y - 13.4, 1.8);
+  // 대와 이
+  g.fillStyle(LOOK.key.lip, 1);
+  g.fillRoundedRect(x - 1.3, y - 9.6, 3.2, 9.6, 1.2);
+  g.fillRoundedRect(x + 0.8, y - 3.2, 4, 2.6, 1);
+  g.fillRoundedRect(x + 0.8, y - 6.8, 3, 2.4, 1);
+  g.fillStyle(LOOK.key.face, 1);
+  g.fillRoundedRect(x - 1.6, y - 9.8, 2.6, 9.4, 1.2);
+  g.fillStyle(LOOK.key.shine, 1);
+  g.fillCircle(x - 1.6, y - 15, 1.1);
 }
 
 export const STONE_HEIGHT = 12;

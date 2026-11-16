@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   BASE_POINTS,
+  canPull,
   canWinWithin,
   EXTRA_PULL_POINTS,
   EXTRA_PULL_SECONDS,
@@ -8,12 +9,15 @@ import {
   FIRST_SECONDS,
   fitsStage,
   generatePuzzle,
+  isLocked,
   isPinned,
   MAX_PINS,
   MAX_SHAFTS,
   MAX_STACK,
   MIN_SECONDS,
   MIN_SHAFTS,
+  movesOf,
+  partnerOf,
   pinsOf,
   PLAIN_PULLS,
   pull,
@@ -53,11 +57,11 @@ function seeded(seed: number): () => number {
   };
 }
 
-const ITEMS: Record<string, Item> = { T: 'treasure', L: 'lava', W: 'water' };
+const ITEMS: Record<string, Item> = { T: 'treasure', L: 'lava', W: 'water', K: 'key' };
 
 /**
  * 판을 짧게 적는다. 통로는 빈칸으로 나누고, 한 통로 안에서는 위의 방부터 '/'로 잇는다.
- * T는 보물, L은 용암, W는 물이고 끝에 '+M'을 붙이면 구덩이에 괴물이 있다.
+ * T는 보물, L은 용암, W는 물, K는 열쇠이고 끝에 '+M'을 붙이면 구덩이에 괴물이 있다.
  */
 function puzzleOf(text: string): Puzzle {
   const words = text.split(' ');
@@ -112,12 +116,12 @@ describe('판의 모양', () => {
   it('처음에는 방마다 하나씩 들어 있고, 구덩이는 비었고, 용사는 옆방에 있다', () => {
     const state = startPuzzle(puzzleOf('T/L W +M'));
     expect(state.shafts[0][0]).toEqual({
-      contents: { treasure: 1, lava: 0, water: 0, stone: 0 },
+      contents: { treasure: 1, lava: 0, water: 0, stone: 0, key: 0 },
       pinned: true,
     });
     expect(state.shafts[0][1].contents).toMatchObject({ lava: 1, treasure: 0 });
     expect(state.shafts[1][0].contents).toMatchObject({ water: 1 });
-    expect(state.pit).toEqual({ treasure: 0, lava: 0, water: 0, stone: 0 });
+    expect(state.pit).toEqual({ treasure: 0, lava: 0, water: 0, stone: 0, key: 0 });
     expect(state).toMatchObject({ monster: true, hero: 'room', status: 'playing', lossCause: null });
     expect(remainingPins(state)).toEqual(pinsOf(puzzleOf('T/L W')));
   });
@@ -135,13 +139,14 @@ describe('핀 뽑기', () => {
     const start = startPuzzle(puzzleOf('T L'));
     const result = pull(start, pin(1));
     expect(result).toMatchObject({ pulled: true, cooled: 0, slain: false });
-    expect(result.fall).toEqual({
-      contents: { treasure: 0, lava: 1, water: 0, stone: 0 },
-      to: { kind: 'pit' },
-    });
+    expect(result.pins).toEqual([pin(1)]);
+    expect(result.falls).toEqual([
+      { shaft: 1, level: 0, contents: { treasure: 0, lava: 1, water: 0, stone: 0, key: 0 }, to: { kind: 'pit' } },
+    ]);
+    expect(result.landings).toEqual([{ to: { kind: 'pit' }, cooled: 0, burnt: false, melted: false }]);
     expect(result.state.pit).toMatchObject({ lava: 1 });
     expect(result.state.shafts[1][0]).toEqual({
-      contents: { treasure: 0, lava: 0, water: 0, stone: 0 },
+      contents: { treasure: 0, lava: 0, water: 0, stone: 0, key: 0 },
       pinned: false,
     });
     expect(isPinned(result.state, pin(1))).toBe(false);
@@ -153,15 +158,15 @@ describe('핀 뽑기', () => {
 
   it('아래 방의 핀이 꽂혀 있으면 그 방에 떨어져 함께 담긴다', () => {
     const result = pull(startPuzzle(puzzleOf('W/W T')), pin(0, 0));
-    expect(result.fall?.to).toEqual({ kind: 'chamber', shaft: 0, level: 1 });
+    expect(result.falls[0]?.to).toEqual({ kind: 'chamber', shaft: 0, level: 1 });
     expect(result.state.shafts[0][1]).toEqual({
-      contents: { treasure: 0, lava: 0, water: 2, stone: 0 },
+      contents: { treasure: 0, lava: 0, water: 2, stone: 0, key: 0 },
       pinned: true,
     });
     expect(result.state.pit.water).toBe(0);
     // 아래 핀을 마저 뽑으면 모인 것이 한꺼번에 구덩이로 간다.
     const next = pull(result.state, pin(0, 1));
-    expect(next.fall?.contents.water).toBe(2);
+    expect(next.falls[0]?.contents.water).toBe(2);
     expect(next.state.pit.water).toBe(2);
   });
 
@@ -169,25 +174,25 @@ describe('핀 뽑기', () => {
     const state = play('W/L T', pin(0, 1));
     expect(state.pit.lava).toBe(1);
     const result = pull(state, pin(0, 0));
-    expect(result.fall?.to).toEqual({ kind: 'pit' });
+    expect(result.falls[0]?.to).toEqual({ kind: 'pit' });
     expect(result.cooled).toBe(1);
-    expect(result.state.pit).toEqual({ treasure: 0, lava: 0, water: 0, stone: 1 });
+    expect(result.state.pit).toEqual({ treasure: 0, lava: 0, water: 0, stone: 1, key: 0 });
   });
 
   it('용암과 물은 방에서 만나도 하나씩 짝지어 돌이 된다', () => {
     for (const text of ['W/L T', 'L/W T']) {
       const result = pull(startPuzzle(puzzleOf(text)), pin(0, 0));
       expect(result.cooled).toBe(1);
-      expect(result.state.shafts[0][1].contents).toEqual({ treasure: 0, lava: 0, water: 0, stone: 1 });
+      expect(result.state.shafts[0][1].contents).toEqual({ treasure: 0, lava: 0, water: 0, stone: 1, key: 0 });
       expect(result.state.status).toBe('playing');
     }
   });
 
   it('짝이 맞지 않으면 남은 쪽은 그대로 남는다', () => {
     const lavaLeft = play('L/L W T', pin(0, 0), pin(0, 1), pin(1));
-    expect(lavaLeft.pit).toEqual({ treasure: 0, lava: 1, water: 0, stone: 1 });
+    expect(lavaLeft.pit).toEqual({ treasure: 0, lava: 1, water: 0, stone: 1, key: 0 });
     const waterLeft = play('W/W L T', pin(0, 0), pin(0, 1), pin(1));
-    expect(waterLeft.pit).toEqual({ treasure: 0, lava: 0, water: 1, stone: 1 });
+    expect(waterLeft.pit).toEqual({ treasure: 0, lava: 0, water: 1, stone: 1, key: 0 });
   });
 
   it('용암이 보물에 닿으면 보물이 타고 판을 진다', () => {
@@ -205,7 +210,7 @@ describe('핀 뽑기', () => {
   it('물이 먼저 용암을 식히므로, 물과 함께 있는 보물은 용암 한 덩이에 타지 않는다', () => {
     const cooled = play('T W L', pin(1), pin(0), pin(2));
     expect(cooled.status).toBe('playing');
-    expect(cooled.pit).toEqual({ treasure: 1, lava: 0, water: 0, stone: 1 });
+    expect(cooled.pit).toEqual({ treasure: 1, lava: 0, water: 0, stone: 1, key: 0 });
     // 용암이 물보다 많으면 남은 용암에 탄다.
     const burnt = play('T W L/L', pin(1), pin(0), pin(2, 0), pin(2, 1));
     expect(burnt).toMatchObject({ status: 'lost', lossCause: 'burnt' });
@@ -224,7 +229,7 @@ describe('핀 뽑기', () => {
     const result = pull(state, pin(0));
     expect(result).toMatchObject({ cooled: 1, slain: false });
     expect(result.state.monster).toBe(true);
-    expect(result.state.pit).toMatchObject({ lava: 0, water: 0, stone: 1 });
+    expect(result.state.pit).toMatchObject({ lava: 0, water: 0, stone: 1, key: 0 });
   });
 
   it('물은 보물에게도 괴물에게도 아무 일을 하지 않는다', () => {
@@ -266,7 +271,16 @@ describe('핀 뽑기', () => {
   it('이미 뽑은 핀이나 끝난 판에서는 아무 일도 일어나지 않는다', () => {
     const state = play('T L', pin(1));
     const again = pull(state, pin(1));
-    expect(again).toEqual({ state, pulled: false, fall: null, cooled: 0, slain: false });
+    expect(again).toEqual({
+      state,
+      pulled: false,
+      pins: [],
+      falls: [],
+      landings: [],
+      cooled: 0,
+      slain: false,
+      unlocked: false,
+    });
     expect(again.state).toBe(state);
 
     const won = play('T L', pin(0), DOOR);
@@ -291,9 +305,8 @@ describe('핀 뽑기', () => {
 describe('풀이', () => {
   it('보물 하나와 용암 하나: 여섯 순서 가운데 둘만 이긴다', () => {
     const solution = solve(puzzleOf('T L'));
-    expect(solution.orders).toBe(6);
-    expect(solution.winning).toBe(2);
-    expect(winShare(solution)).toBeCloseTo(1 / 3);
+    expect(solution.chance).toBeCloseTo(2 / 6);
+    expect(winShare(solution)).toBe(solution.chance);
     expect(solution.shortest).toHaveLength(2);
   });
 
@@ -317,8 +330,8 @@ describe('풀이', () => {
       const wins = ends.filter((end) => end.status === 'won');
       const losses = ends.filter((end) => end.status === 'lost');
       const solution = solve(puzzle);
-      expect(solution.orders, text).toBe(orders.length);
-      expect(solution.winning, text).toBe(wins.length);
+      // 아무 핀이나 고르기를 되풀이하는 것은 순서 하나를 고르게 뽑는 것과 같아서, 확률이 이기는 순서의 비율과 같다.
+      expect(solution.chance, text).toBeCloseTo(wins.length / orders.length, 10);
       // 핀을 다 뽑으면 반드시 이기거나 진 것으로 끝난다.
       expect(wins.length + losses.length, text).toBe(orders.length);
       // 가장 짧은 순서도 같다. 그런 순서가 여럿이면 핀 순서로 가장 앞선 것을 낸다.
@@ -380,10 +393,10 @@ describe('풀이', () => {
 
   it('이길 수 없는 판과 질 수 없는 판을 가려낸다', () => {
     const hopeless = solve(puzzleOf('T W +M'));
-    expect(hopeless.winning).toBe(0);
+    expect(hopeless.chance).toBe(0);
     expect(hopeless.shortest).toBeNull();
     const safe = solve(puzzleOf('T W'));
-    expect(safe.winning).toBe(safe.orders);
+    expect(safe.chance).toBe(1);
   });
 
   it('3층으로 쌓인 통로가 있으면 여섯 번, 여덟 번을 뽑아야 하는 판이 나온다', () => {
@@ -399,10 +412,10 @@ describe('풀이', () => {
   });
 
   it('이미 끝난 상태에서는 더 따질 것이 없다', () => {
-    // 이긴 상태는 남은 핀(여기서는 하나)을 어떻게 뽑든 이긴 것으로 세고, 진 상태는 이길 길이 없다.
-    expect(solveFrom(play('T L', pin(0), DOOR))).toEqual({ orders: 1, winning: 1, shortest: [] });
-    expect(solveFrom(play('T L', pin(1), DOOR))).toEqual({ orders: 1, winning: 0, shortest: null });
-    expect(solveFrom(play('T L W W', pin(0), DOOR))).toEqual({ orders: 6, winning: 6, shortest: [] });
+    // 이긴 상태는 남은 핀을 어떻게 뽑든 이긴 것이고, 진 상태는 이길 길이 없다.
+    expect(solveFrom(play('T L', pin(0), DOOR))).toEqual({ chance: 1, shortest: [] });
+    expect(solveFrom(play('T L', pin(1), DOOR))).toEqual({ chance: 0, shortest: null });
+    expect(solveFrom(play('T L W W', pin(0), DOOR))).toEqual({ chance: 1, shortest: [] });
   });
 
   it('몇 번 안에 이길 수 있는지는 가장 짧은 풀이의 길이와 맞아떨어진다', () => {
@@ -436,12 +449,235 @@ describe('풀이', () => {
     // 물을 먼저 흘려 버리면 괴물을 없앨 용암이 식어 버려서 이길 길이 없다.
     const wasted = play('T L W +M', pin(2), pin(1));
     expect(wasted.status).toBe('playing');
-    expect(solveFrom(wasted).winning).toBe(0);
+    expect(solveFrom(wasted).chance).toBe(0);
     // 용암으로 괴물을 없앤 뒤에는 물, 보물, 문 차례가 남는다.
     const onTrack = solveFrom(play('T L W +M', pin(1)));
-    expect(onTrack.orders).toBe(6);
-    expect(onTrack.winning).toBe(2);
+    expect(onTrack.chance).toBeCloseTo(2 / 6);
     expect(onTrack.shortest?.[0]).toEqual(pin(2));
+  });
+});
+
+describe('열쇠와 자물쇠', () => {
+  const locked = (text: string, ...locks: Pin[]): Puzzle => ({ ...puzzleOf(text), locks });
+
+  it('자물쇠가 달린 핀은 열쇠가 구덩이에 닿기 전에는 뽑히지 않는다', () => {
+    const start = startPuzzle(locked('T K W', pin(0)));
+    expect(isLocked(start, pin(0))).toBe(true);
+    expect(isLocked(start, pin(1))).toBe(false);
+    expect(canPull(start, pin(0))).toBe(false);
+    expect(movesOf(start)).toEqual([pin(1), pin(2), DOOR]);
+    // 꽂혀 있기는 하다.
+    expect(remainingPins(start)).toEqual([pin(0), pin(1), pin(2), DOOR]);
+    const refused = pull(start, pin(0));
+    expect(refused.pulled).toBe(false);
+    expect(refused.state).toBe(start);
+
+    const opened = pull(start, pin(1));
+    expect(opened).toMatchObject({ pulled: true, unlocked: true });
+    expect(opened.state.locks).toEqual([]);
+    // 열쇠는 자물쇠를 풀고 사라진다.
+    expect(opened.state.pit.key).toBe(0);
+    expect(canPull(opened.state, pin(0))).toBe(true);
+    expect(pull(opened.state, pin(0)).state.pit.treasure).toBe(1);
+  });
+
+  it('열쇠가 아래 방에 얹혀 있는 동안에는 풀리지 않는다', () => {
+    const start = startPuzzle(locked('T K/W', pin(0)));
+    const resting = pull(start, pin(1, 0));
+    expect(resting.unlocked).toBe(false);
+    expect(resting.state.shafts[1][1].contents).toMatchObject({ key: 1, water: 1 });
+    expect(canPull(resting.state, pin(0))).toBe(false);
+    const opened = pull(resting.state, pin(1, 1));
+    expect(opened.unlocked).toBe(true);
+    expect(opened.state.pit).toMatchObject({ key: 0, water: 1 });
+    expect(canPull(opened.state, pin(0))).toBe(true);
+  });
+
+  it('문 핀에도 자물쇠가 달릴 수 있다', () => {
+    const start = startPuzzle(locked('T K', DOOR));
+    expect(canPull(start, DOOR)).toBe(false);
+    expect(pull(start, DOOR).pulled).toBe(false);
+    const state = [pin(0), pin(1), DOOR].reduce((now, next) => pull(now, next).state, start);
+    expect(state.status).toBe('won');
+  });
+
+  it('용암이 열쇠에 닿으면 열쇠가 녹고 판을 진다', () => {
+    // 용암이 고인 구덩이에 열쇠가 떨어진다.
+    const sunk = pull(play('T K L', pin(2)), pin(1));
+    expect(sunk.state).toMatchObject({ status: 'lost', lossCause: 'melted' });
+    expect(sunk.landings).toEqual([{ to: { kind: 'pit' }, cooled: 0, burnt: false, melted: true }]);
+    expect(sunk.unlocked).toBe(false);
+    // 방에 든 열쇠 위로 용암이 떨어진다.
+    expect(play('T L/K', pin(1, 0))).toMatchObject({ status: 'lost', lossCause: 'melted' });
+    // 보물과 열쇠가 함께 있다가 용암에 닿으면 보물이 탄 것으로 친다.
+    const both = pull(play('T/K L', pin(0, 0), pin(1)), pin(0, 1));
+    expect(both.state).toMatchObject({ status: 'lost', lossCause: 'burnt' });
+    expect(both.landings).toEqual([{ to: { kind: 'pit' }, cooled: 0, burnt: true, melted: true }]);
+  });
+
+  it('물과 함께 떨어진 열쇠는 용암 한 덩이에 녹지 않는다', () => {
+    const state = play('T K/W L', pin(2), pin(1, 0));
+    const landed = pull(state, pin(1, 1));
+    expect(landed).toMatchObject({ cooled: 1, unlocked: true });
+    expect(landed.state.status).toBe('playing');
+    expect(landed.state.pit).toMatchObject({ lava: 0, water: 0, stone: 1, key: 0 });
+  });
+
+  it('풀이는 자물쇠를 지킨다: 잠긴 핀은 열쇠 다음에야 나온다', () => {
+    const puzzle = locked('T K W', pin(0));
+    const { shortest, chance } = solve(puzzle);
+    expect(shortest).toEqual([pin(1), pin(0), DOOR]);
+    // 열쇠, 물, 문 가운데 처음에 무엇을 뽑든 지지는 않는다.
+    expect(chance).toBe(1);
+    // 자물쇠가 없으면 두 번이면 되던 판이다.
+    expect(solve(puzzleOf('T K W')).shortest).toHaveLength(2);
+  });
+
+  it('열쇠가 내려올 길이 없어서 더 뽑을 핀이 없어지면 이길 수 없는 것으로 친다', () => {
+    const stuck = solve(locked('T K', pin(0), pin(1)));
+    expect(stuck).toEqual({ chance: 0, shortest: null });
+    expect(canWinWithin(startPuzzle(locked('T K', pin(0), pin(1))), 9)).toBe(false);
+  });
+});
+
+describe('사슬로 묶인 핀', () => {
+  const linked = (text: string, one: Pin, other: Pin): Puzzle => ({ ...puzzleOf(text), links: [[one, other]] });
+
+  it('하나를 뽑으면 짝도 함께 뽑히고, 든 것이 한꺼번에 떨어져 함께 섞인다', () => {
+    const start = startPuzzle(linked('T L W +M', pin(1), pin(2)));
+    expect(partnerOf(start.links, pin(1))).toEqual(pin(2));
+    expect(partnerOf(start.links, pin(2))).toEqual(pin(1));
+    expect(partnerOf(start.links, pin(0))).toBeNull();
+    // 둘 중 무엇을 눌러도 같으므로 둘 수 있는 수에는 앞선 것만 나온다.
+    expect(movesOf(start)).toEqual([pin(0), pin(1), DOOR]);
+
+    const result = pull(start, pin(2));
+    expect(result.pins).toEqual([pin(2), pin(1)]);
+    expect(result.falls).toHaveLength(2);
+    expect(result.landings).toEqual([{ to: { kind: 'pit' }, cooled: 1, burnt: false, melted: false }]);
+    // 용암과 물이 한꺼번에 닿아 바로 식으므로 괴물은 살아남는다. 따로 뽑았다면 용암이 먼저 괴물을 없앴을 것이다.
+    expect(result).toMatchObject({ cooled: 1, slain: false });
+    expect(result.state.pit).toMatchObject({ lava: 0, water: 0, stone: 1 });
+    expect(remainingPins(result.state)).toEqual([pin(0), DOOR]);
+    expect(pull(start, pin(1)).state).toEqual(result.state);
+    expect(play('T L W +M', pin(1), pin(2)).monster).toBe(false);
+  });
+
+  it('위아래로 묶인 핀은 둘 다 그 아래 칸으로 떨어진다', () => {
+    const result = pull(startPuzzle(linked('W/L/T W', pin(0, 0), pin(0, 1))), pin(0, 1));
+    expect(result.falls.map((fall) => fall.to)).toEqual([
+      { kind: 'chamber', shaft: 0, level: 2 },
+      { kind: 'chamber', shaft: 0, level: 2 },
+    ]);
+    // 물이 함께 내려와서 보물이 타지 않는다.
+    expect(result.landings).toEqual([{ to: { kind: 'chamber', shaft: 0, level: 2 }, cooled: 1, burnt: false, melted: false }]);
+    expect(result.state.status).toBe('playing');
+    expect(result.state.shafts[0][2].contents).toMatchObject({ treasure: 1, stone: 1, lava: 0 });
+    // 묶이지 않았다면 용암만 먼저 내려와 보물이 탄다.
+    expect(play('W/L/T W', pin(0, 1)).lossCause).toBe('burnt');
+  });
+
+  it('서로 다른 칸에 닿으면 칸마다 따로 섞인다', () => {
+    const result = pull(startPuzzle(linked('W/L T L', pin(0, 0), pin(2))), pin(0, 0));
+    expect(result.landings).toEqual([
+      { to: { kind: 'chamber', shaft: 0, level: 1 }, cooled: 1, burnt: false, melted: false },
+      { to: { kind: 'pit' }, cooled: 0, burnt: false, melted: false },
+    ]);
+    expect(result.cooled).toBe(1);
+    expect(result.state.pit.lava).toBe(1);
+    expect(result.state.shafts[0][1].contents).toMatchObject({ stone: 1, lava: 0, water: 0 });
+    // 방에서 보물이 타면, 구덩이에서 아무 일이 없었어도 진 판이다.
+    const burnt = pull(startPuzzle(linked('L/T W W', pin(0, 0), pin(1))), pin(1));
+    expect(burnt.state).toMatchObject({ status: 'lost', lossCause: 'burnt' });
+    expect(burnt.landings.map((landing) => landing.burnt)).toEqual([true, false]);
+  });
+
+  it('짝에 자물쇠가 잠겨 있으면 함께 묶인 핀도 뽑히지 않는다', () => {
+    const puzzle: Puzzle = { ...puzzleOf('T L W K'), links: [[pin(1), pin(2)]], locks: [pin(2)] };
+    const start = startPuzzle(puzzle);
+    expect(canPull(start, pin(1))).toBe(false);
+    expect(pull(start, pin(1)).pulled).toBe(false);
+    expect(canPull(pull(start, pin(3)).state, pin(1))).toBe(true);
+  });
+
+  it('같은 판인지 가릴 때 자물쇠와 사슬도 본다', () => {
+    const plain = puzzleOf('T L W K');
+    const one: Puzzle = { ...plain, links: [[pin(1), pin(2)]], locks: [pin(0), DOOR] };
+    const same: Puzzle = { ...plain, links: [[pin(2), pin(1)]], locks: [DOOR, pin(0)] };
+    expect(samePuzzle(one, same)).toBe(true);
+    expect(samePuzzle(one, plain)).toBe(false);
+    expect(samePuzzle(one, { ...one, locks: [pin(0)] })).toBe(false);
+    expect(samePuzzle(one, { ...one, links: [[pin(1), pin(3)]] })).toBe(false);
+  });
+});
+
+describe('장치가 든 판의 풀이', () => {
+  const puzzles: Puzzle[] = [
+    { ...puzzleOf('T K W'), locks: [pin(0)] },
+    { ...puzzleOf('T/L K/W L W +M'), locks: [pin(0, 1), DOOR] },
+    { ...puzzleOf('W/L T L W +M'), links: [[pin(0, 0), pin(2)]] },
+    { ...puzzleOf('L/W T/L K W +M'), locks: [pin(1, 1)], links: [[pin(0, 0), pin(3)]] },
+    { ...puzzleOf('L/W/L L K L/W/T +M'), locks: [pin(1), pin(3, 1)], links: [[pin(0, 2), pin(3, 2)]] },
+  ];
+
+  /** 둘 수 있는 수를 하나하나 따라가며 센 것: 아무거나 골라 이길 확률과 가장 짧게 이기는 횟수 */
+  function bruteForce(state: PuzzleState): { chance: number; fewest: number } {
+    if (state.status === 'won') return { chance: 1, fewest: 0 };
+    if (state.status === 'lost') return { chance: 0, fewest: Infinity };
+    const moves = movesOf(state);
+    if (moves.length === 0) return { chance: 0, fewest: Infinity };
+    const ends = moves.map((move) => bruteForce(pull(state, move).state));
+    return {
+      chance: ends.reduce((sum, end) => sum + end.chance, 0) / moves.length,
+      fewest: 1 + Math.min(...ends.map((end) => end.fewest)),
+    };
+  }
+
+  it('하나하나 따라가며 센 것과 같다', () => {
+    for (const puzzle of puzzles) {
+      const label = JSON.stringify(puzzle);
+      const brute = bruteForce(startPuzzle(puzzle));
+      const solution = solve(puzzle);
+      expect(solution.chance, label).toBeCloseTo(brute.chance, 10);
+      expect(solution.shortest?.length ?? Infinity, label).toBe(brute.fewest);
+      for (let limit = 0; limit <= 9; limit += 1) {
+        expect(canWinWithin(startPuzzle(puzzle), limit), `${label} ${limit}번`).toBe(brute.fewest <= limit);
+      }
+    }
+  });
+
+  it('풀이대로 누르면 이기고, 잠긴 핀을 누르는 일은 없다', () => {
+    for (const puzzle of puzzles) {
+      const { shortest } = solve(puzzle);
+      expect(shortest, JSON.stringify(puzzle)).not.toBeNull();
+      let state = startPuzzle(puzzle);
+      for (const next of shortest ?? []) {
+        const result = pull(state, next);
+        expect(result.pulled).toBe(true);
+        state = result.state;
+      }
+      expect(state.status).toBe('won');
+    }
+  });
+
+  it('지지 않은 상태는 여전히 뽑힌 핀과 괴물의 생사만으로 정해진다', () => {
+    for (const puzzle of puzzles) {
+      const seen = new Map<string, string>();
+      const walk = (state: PuzzleState): void => {
+        if (state.status !== 'playing') return;
+        const key = `${remainingPins(state).map((each) => JSON.stringify(each)).join()}|${state.monster}`;
+        const whole = JSON.stringify(state);
+        const before = seen.get(key);
+        if (before !== undefined) {
+          expect(whole).toBe(before);
+          return;
+        }
+        seen.set(key, whole);
+        for (const move of movesOf(state)) walk(pull(state, move).state);
+      };
+      walk(startPuzzle(puzzle));
+      expect(seen.size).toBeGreaterThan(1);
+    }
   });
 });
 
@@ -548,8 +784,8 @@ describe('판 만들기', () => {
       for (let seed = 1; seed <= seedsOf(stage, SEEDS); seed += 1) {
         const puzzle = generatePuzzle(stage, seeded(stage * 10007 + seed));
         const solution = solve(puzzle);
-        expect(solution.winning).toBeGreaterThan(0);
-        expect(solution.winning).toBeLessThan(solution.orders);
+        expect(solution.chance).toBeGreaterThan(0);
+        expect(solution.chance).toBeLessThan(1);
         expect(fitsStage(spec, solution)).toBe(true);
 
         // 겉모양도 조건대로다.
@@ -653,8 +889,8 @@ describe('판 만들기', () => {
 
   it('끝내 못 만들었을 때 내는 판도 이길 수 있고 질 수도 있다', () => {
     const solution = solve(FALLBACK_PUZZLE);
-    expect(solution.winning).toBeGreaterThan(0);
-    expect(solution.winning).toBeLessThan(solution.orders);
+    expect(solution.chance).toBeGreaterThan(0);
+    expect(solution.chance).toBeLessThan(1);
     // 난수가 한 값만 내놓아서 맞는 판이 영영 나오지 않아도 멈추고 이 판을 낸다.
     expect(generatePuzzle(4, () => 0)).toBe(FALLBACK_PUZZLE);
   });
