@@ -572,8 +572,9 @@ export function buyBlock(run: RunState, offer: number): BuyBlock | null {
   const charm = id ? charmOf(id) : undefined;
   if (!charm) return 'sold';
   if (run.charms.includes(charm.id)) return 'sold';
-  if (run.charms.length >= SLOTS) return 'full';
+  // 금화부터 따진다. 자리부터 따지면 부적을 떼고 나서야 금화가 모자란 줄 알게 된다.
   if (run.coin < charm.price) return 'coin';
+  if (run.charms.length >= SLOTS) return 'full';
   return null;
 }
 

@@ -26,6 +26,7 @@ import {
   symbolColor,
   symbolTexture,
 } from './art';
+import { wholePercents } from './percent';
 import {
   buy,
   buyBlock,
@@ -103,6 +104,8 @@ const MISS_MS = 260;
 const SETTLE_DELAY_MS = 420;
 /** 목표를 채웠다고 알린 뒤 가게가 열릴 때까지(ms) */
 const SHOP_DELAY_MS = 900;
+/** 가게가 열리고 이만큼은 아래 버튼(다시 뽑기, 다음 라운드)의 누름을 받지 않는다(ms). */
+const SHOP_GUARD_MS = 400;
 /** 판이 끝난 뒤 결과 화면이 뜰 때까지(ms) */
 const OVER_RESULT_MS = 1600;
 /** 한 번에 이만큼 넘게 받으면 크게 축하한다(그 라운드의 목표에 견준 비율). */
@@ -366,6 +369,7 @@ export class CandySlotScene extends MiniGameScene {
   private shopViews: Disposable[] = [];
   private offerRows: Array<OfferRow | null> = [];
   private rerollButton: SoftButton | null = null;
+  private shopGuardUntil = 0;
   /** 붙인 부적을 눌렀을 때 뜨는 설명 */
   private bubble: { views: Disposable[]; zones: Phaser.GameObjects.GameObject[] } | null = null;
 
@@ -460,6 +464,7 @@ export class CandySlotScene extends MiniGameScene {
     this.shopViews = [];
     this.offerRows = [];
     this.rerollButton = null;
+    this.shopGuardUntil = 0;
     this.bubble = null;
   }
 
@@ -616,7 +621,7 @@ export class CandySlotScene extends MiniGameScene {
 
   /** 그림마다의 상금과 확률을 적는다. bounce면 바뀐 칸이 톡 튄다(부적을 붙이거나 뗐을 때). */
   private refreshOdds(bounce: boolean): void {
-    const odds = oddsOf(this.run.charms).map((chance) => Math.round(chance * 100));
+    const odds = wholePercents(oddsOf(this.run.charms));
     const values = valuesOf(this.run.charms);
     this.oddsTexts.forEach((texts, symbol) => {
       const changed = [
@@ -1268,6 +1273,11 @@ export class CandySlotScene extends MiniGameScene {
     this.hideBubble();
     this.spinButton.setEnabled(false);
     this.rerollButton?.setEnabled(false);
+    // 가게에서 끝내면 알림이 가게의 글 위에 겹치므로, 가게를 걷고 기계 위에 알린다.
+    for (const view of this.shopViews) view.destroy();
+    this.shopViews = [];
+    this.offerRows = [];
+    this.rerollButton = null;
     vibrate([20, 40, 20]);
 
     const banner = addText(this, GAME_WIDTH / 2, this.machineMiddle, notice, {
@@ -1321,6 +1331,7 @@ export class CandySlotScene extends MiniGameScene {
     this.clearWins();
     this.hideHints(true);
     this.busy = false;
+    this.shopGuardUntil = this.time.now + SHOP_GUARD_MS;
     this.spinButton.setVisible(false);
     this.refreshNumbers();
 
@@ -1488,8 +1499,16 @@ export class CandySlotScene extends MiniGameScene {
     this.tweens.add({ targets: image, scale: { from: 1.4, to: 1 }, duration: 260, ease: 'Back.Out' });
   }
 
+  /**
+   * 가게가 막 열렸는가. 돌리기를 잇달아 누르던 손이 같은 자리에 놓인 "다시 뽑기"나
+   * "다음 라운드"에 그대로 닿으므로, 열리고 잠깐은 아래 두 버튼의 누름을 받지 않는다.
+   */
+  private shopGuarded(): boolean {
+    return this.time.now < this.shopGuardUntil;
+  }
+
   private tryReroll(): void {
-    if (!this.playing || this.busy || this.run.phase !== 'shop') return;
+    if (!this.playing || this.busy || this.run.phase !== 'shop' || this.shopGuarded()) return;
     this.hideBubble();
     const next = reroll(this.run, randomOf(this.run, 'shop', Math.random));
     if (next === this.run) {
@@ -1507,7 +1526,7 @@ export class CandySlotScene extends MiniGameScene {
   }
 
   private closeShop(): void {
-    if (!this.playing || this.busy || this.run.phase !== 'shop') return;
+    if (!this.playing || this.busy || this.run.phase !== 'shop' || this.shopGuarded()) return;
     this.hideBubble();
     for (const view of this.shopViews) view.destroy();
     this.shopViews = [];
