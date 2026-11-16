@@ -63,6 +63,7 @@ export function stepStart(step: number, steps: number): number {
  * 단계 번호를 그 게임의 난이도 번호(first부터 steps칸)로 바꾼다.
  * 점수 도전에서는 판마다 어려워지지만, 단계 모드는 같은 난이도의 판을 여러 개 풀고 나서 넘어가고,
  * 마지막 단계 무렵에야 가장 어려운 칸에 닿는다.
+ * 칸은 판 크기 같은 굵은 설정만 정한다. 같은 칸 안에서 조금씩 어려워지게 하는 것은 게임마다 stepProgress나 pickBest로 한다.
  */
 export function difficultyOf(level: number, steps: number, first = 1): number {
   const count = Math.max(1, Math.floor(steps));
@@ -70,6 +71,44 @@ export function difficultyOf(level: number, steps: number, first = 1): number {
   let step = 0;
   while (step + 1 < count && stepStart(step + 1, count) <= at) step += 1;
   return first + step;
+}
+
+/**
+ * 그 단계가 자기 난이도 칸 안에서 얼마나 뒤쪽인지: 칸의 첫 단계가 0, 마지막 단계가 1.
+ * 같은 칸 안에서도 뒤로 갈수록 조금씩 어려워지게 할 때 쓴다. 단계가 하나뿐인 칸은 0이다.
+ */
+export function stepProgress(level: number, steps: number): number {
+  const count = Math.max(1, Math.floor(steps));
+  const at = toLevel(level);
+  const step = difficultyOf(at, count, 0);
+  const from = stepStart(step, count);
+  const to = step + 1 < count ? stepStart(step + 1, count) - 1 : STAGE_LEVELS;
+  return to > from ? (at - from) / (to - from) : 0;
+}
+
+/** 첫 단계가 0, 마지막 단계가 1인, 100단계 전체에서의 자리 */
+export function levelProgress(level: number): number {
+  return (toLevel(level) - 1) / (STAGE_LEVELS - 1);
+}
+
+/**
+ * 판을 count개 만들어 보고 점수가 가장 높은 것을 고른다. 점수가 같으면 먼저 만든 것을 쓴다.
+ * 난이도 칸의 설정(판 크기 같은 것)은 몇 단계에 한 번씩만 바뀌므로, 그 사이의 단계들은
+ * 여러 판 가운데 그 단계에 맞는 어려움의 판을 골라서 조금씩 어려워지게 한다.
+ * make와 score가 같은 난수를 이어 쓰면 같은 단계에서는 언제나 같은 판이 골라진다.
+ */
+export function pickBest<T>(count: number, make: () => T, score: (item: T) => number): T {
+  let best = make();
+  let top = score(best);
+  for (let made = 1; made < Math.floor(count); made += 1) {
+    const item = make();
+    const points = score(item);
+    if (points > top) {
+      best = item;
+      top = points;
+    }
+  }
+  return best;
 }
 
 /** 저장소에서 읽은 값을 안전한 기록으로 바꾼다. */

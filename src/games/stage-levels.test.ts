@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { STAGE_HEARTS, STAGE_LEVELS, stageRandom } from '../core/stages';
+import { seededRandom, STAGE_HEARTS, STAGE_LEVELS, stageRandom } from '../core/stages';
 import * as colorSort from './color-sort/rules';
 import * as logicTiles from './logic-tiles/rules';
 import * as matchThree from './match-three/rules';
@@ -19,6 +19,11 @@ import * as screwSort from './screw-sort/rules';
 const ALL_LEVELS = Array.from({ length: STAGE_LEVELS }, (_, index) => index + 1);
 /** 만드는 데 시간이 드는 게임은 이 단계들만 본다: 처음, 난이도가 바뀌는 언저리, 끝 */
 const SAMPLE_LEVELS = [1, 2, 3, 5, 8, 13, 21, 34, 50, 67, 84, 99, STAGE_LEVELS];
+/** 앞쪽 열 단계와 뒤쪽 열 단계: 뒤로 갈수록 어려워지는지 견줄 때 쓴다. */
+const FIRST_TEN = ALL_LEVELS.slice(0, 10);
+const LAST_TEN = ALL_LEVELS.slice(-10);
+/** 마지막 난이도 칸의 앞쪽과 뒤쪽: 설정이 같은 단계들 안에서도 어려워지는지 견줄 때 쓴다. */
+const average = (values: readonly number[]): number => values.reduce((sum, value) => sum + value, 0) / values.length;
 
 describe('단계 모드를 하는 게임', () => {
   it('여덟 게임이고 모두 플레이할 수 있다', () => {
@@ -47,7 +52,7 @@ describe('단계 모드를 하는 게임', () => {
 
 describe('색깔 물 나누기의 단계', () => {
   const deal = (level: number): colorSort.Stage =>
-    colorSort.dealStage(colorSort.levelStage(level), stageRandom('color-sort', level));
+    colorSort.dealLevel(level, stageRandom('color-sort', level));
 
   it('세 색에서 시작해 마지막에는 가장 많은 색이 나온다', () => {
     expect(colorSort.colorsFor(colorSort.levelStage(1))).toBe(colorSort.MIN_COLORS);
@@ -60,7 +65,7 @@ describe('색깔 물 나누기의 단계', () => {
   it('같은 단계는 언제나 같은 판이다', () => {
     for (const level of SAMPLE_LEVELS) expect(deal(level)).toEqual(deal(level));
     expect(deal(1).tubes).not.toEqual(deal(2).tubes);
-  });
+  }, 60_000);
 
   it('어느 단계든 적어 둔 풀이대로 부으면 풀리고, 부을 수 있는 횟수는 그보다 넉넉하다', () => {
     for (const level of ALL_LEVELS) {
@@ -72,17 +77,51 @@ describe('색깔 물 나누기의 단계', () => {
         tubes = poured!.tubes;
       }
       expect(colorSort.isSolved(tubes), `${level}단계`).toBe(true);
-      expect(colorSort.levelPourBudget(stage.par)).toBeGreaterThanOrEqual(stage.par + 6);
+      expect(colorSort.colorsFor(colorSort.levelStage(level)), `${level}단계`).toBe(stage.colors);
+      expect(colorSort.levelPourBudget(stage.par, level)).toBeGreaterThanOrEqual(stage.par + 4);
+    }
+  }, 60_000);
+
+  it('부을 수 있는 횟수의 여유는 풀이가 길수록 커지고, 단계가 오를수록 줄어든다', () => {
+    expect(colorSort.levelPourBudget(6, 1)).toBe(12);
+    expect(colorSort.levelPourBudget(12, 1)).toBe(18);
+    expect(colorSort.levelPourBudget(20, 1)).toBe(30);
+    expect(colorSort.levelPourBudget(25, 1)).toBe(38);
+    expect(colorSort.levelPourBudget(-3, 1)).toBe(6);
+    expect(colorSort.levelPourBudget(6, STAGE_LEVELS)).toBe(10);
+    expect(colorSort.levelPourBudget(12, STAGE_LEVELS)).toBe(16);
+    expect(colorSort.levelPourBudget(20, STAGE_LEVELS)).toBe(25);
+    expect(colorSort.levelPourBudget(24, STAGE_LEVELS)).toBe(30);
+    for (const level of ALL_LEVELS.slice(1)) {
+      expect(colorSort.levelPourBudget(20, level)).toBeLessThanOrEqual(colorSort.levelPourBudget(20, level - 1));
+      expect(colorSort.levelEase(level)).toBeLessThan(colorSort.levelEase(level - 1));
     }
   });
 
-  it('부을 수 있는 횟수의 여유는 풀이가 길수록 커진다', () => {
-    expect(colorSort.levelPourBudget(6)).toBe(12);
-    expect(colorSort.levelPourBudget(12)).toBe(18);
-    expect(colorSort.levelPourBudget(20)).toBe(30);
-    expect(colorSort.levelPourBudget(25)).toBe(38);
-    expect(colorSort.levelPourBudget(-3)).toBe(6);
+  it('대충 부어서 풀리는 비율은 풀린 판에서 1이고, 한 번도 못 붓는 판에서 0이다', () => {
+    const done = [[0, 0, 0, 0], [1, 1, 1, 1], [], []];
+    expect(colorSort.carelessEase(done, 5, seededRandom('ease'))).toBe(1);
+    const open = colorSort.fallbackTubes(3);
+    expect(colorSort.carelessEase(open, 0, seededRandom('ease'))).toBe(0);
+    const ease = colorSort.carelessEase(open, 30, seededRandom('ease'));
+    expect(ease).toBeGreaterThan(0);
+    expect(ease).toBeLessThanOrEqual(1);
+    expect(colorSort.carelessEase(open, 30, seededRandom('ease'))).toBe(ease);
   });
+
+  it('뒤로 갈수록 대충 부어서는 풀기 어렵다: 색 수가 같은 단계들 안에서도 그렇다', () => {
+    const ease = (level: number): number => {
+      const stage = deal(level);
+      return colorSort.carelessEase(stage.tubes, colorSort.levelPourBudget(stage.par, level), seededRandom(`ease:${level}`), 200);
+    };
+    const first = average(FIRST_TEN.map(ease));
+    const last = average(LAST_TEN.map(ease));
+    expect(first).toBeGreaterThan(0.9);
+    expect(last).toBeLessThan(0.4);
+    // 51~82단계는 모두 여섯 색이다. 그 앞쪽 열 단계보다 뒤쪽 열 단계가 어렵다.
+    expect(new Set(ALL_LEVELS.slice(50, 82).map((level) => deal(level).colors))).toEqual(new Set([6]));
+    expect(average(ALL_LEVELS.slice(72, 82).map(ease))).toBeLessThan(average(ALL_LEVELS.slice(50, 60).map(ease)) - 0.05);
+  }, 60_000);
 });
 
 describe('주차장 빼기의 단계', () => {
@@ -109,6 +148,56 @@ describe('주차장 빼기의 단계', () => {
       expect(parkingOut.chancesLeft(run)).toBe(STAGE_HEARTS);
       expect(run).toMatchObject({ score: 0, carsOut: 0, bumps: 0 });
     }
+  });
+
+  it('흘끗 보고 비울 수 있는 비율과 빼는 순서의 깊이를 잰다', () => {
+    const empty: parkingOut.Lot = { cols: 5, rows: 5, cars: [] };
+    expect(parkingOut.lotDepth(empty)).toBe(0);
+    expect(parkingOut.glanceEase(empty, seededRandom('glance'))).toBe(1);
+    // 뒤차가 한 칸 띄우고 앞차에 막혀 있다: 막은 차가 바로 보이므로 흘끗 봐도 틀리지 않는다.
+    const near: parkingOut.Lot = {
+      cols: 5,
+      rows: 5,
+      cars: [
+        { id: 0, col: 2, row: 2, length: 1, facing: 'right' },
+        { id: 1, col: 4, row: 2, length: 1, facing: 'right' },
+      ],
+    };
+    expect(parkingOut.lotDepth(near)).toBe(2);
+    expect(parkingOut.glanceEase(near, seededRandom('glance'))).toBe(1);
+    // 세 칸 띄우고 막혀 있으면 막은 차가 보이지 않아서, 뒤차를 먼저 눌러 기회를 잃기도 한다.
+    const far: parkingOut.Lot = { ...near, cars: [{ ...near.cars[0], col: 0 }, near.cars[1]] };
+    expect(parkingOut.lotDepth(far)).toBe(2);
+    const farEase = parkingOut.glanceEase(far, seededRandom('glance'), 400);
+    expect(farEase).toBeGreaterThan(0.7);
+    expect(farEase).toBeLessThan(1);
+    // 서로 마주 보고 막은 두 차는 뺄 수 없다.
+    const stuck: parkingOut.Lot = { ...near, cars: [near.cars[0], { ...near.cars[1], facing: 'left' }] };
+    expect(parkingOut.lotDepth(stuck)).toBe(Infinity);
+    for (const level of SAMPLE_LEVELS) {
+      const { lot } = start(level);
+      const depth = parkingOut.lotDepth(lot);
+      expect(depth, `${level}단계`).toBeGreaterThanOrEqual(1);
+      expect(depth, `${level}단계`).toBeLessThanOrEqual(lot.cars.length);
+      const ease = parkingOut.glanceEase(lot, seededRandom(`glance:${level}`));
+      expect(ease).toBeGreaterThanOrEqual(0);
+      expect(ease).toBeLessThanOrEqual(1);
+      expect(parkingOut.glanceEase(lot, seededRandom(`glance:${level}`))).toBe(ease);
+    }
+  });
+
+  it('뒤로 갈수록 흘끗 봐서는 비우기 어렵다: 차의 수가 같은 단계들 안에서도 그렇다', () => {
+    const ease = (level: number): number =>
+      parkingOut.glanceEase(start(level).lot, seededRandom(`glance:${level}`), 200);
+    for (const level of ALL_LEVELS.slice(1)) {
+      expect(parkingOut.levelEase(level)).toBeLessThan(parkingOut.levelEase(level - 1));
+    }
+    expect(average(FIRST_TEN.map(ease))).toBeGreaterThan(0.7);
+    expect(average(LAST_TEN.map(ease))).toBeLessThan(0.1);
+    // 80~100단계는 모두 가장 붐비는 주차장이다. 그 안에서도 앞쪽보다 뒤쪽이 깊다.
+    expect(new Set(ALL_LEVELS.slice(79).map((level) => start(level).lot.cars.length)).size).toBe(1);
+    const depth = (level: number): number => parkingOut.lotDepth(start(level).lot);
+    expect(average(LAST_TEN.map(depth))).toBeGreaterThanOrEqual(average(ALL_LEVELS.slice(79, 89).map(depth)));
   });
 
   it('막힌 차를 누를 때마다 기회가 하나씩 줄고 0 아래로는 내려가지 않는다', () => {
@@ -158,9 +247,32 @@ describe('논리 타일의 단계', () => {
       const spec = logicTiles.stageSpec(logicTiles.levelStage(level));
       expect(run.stage).toBe(logicTiles.levelStage(level));
       expect(run.hearts).toBe(logicTiles.START_HEARTS);
-      expect(run.board).toMatchObject({ cols: spec.cols, rows: spec.rows, trapCount: spec.traps, traps: null });
+      expect(run.board).toMatchObject({
+        cols: spec.cols,
+        rows: spec.rows,
+        trapCount: logicTiles.levelTraps(level),
+        traps: null,
+      });
       expect(run.board.tiles.every((tile) => tile === 'covered')).toBe(true);
     }
+  });
+
+  it('함정은 단계가 오를수록 줄지 않고, 같은 크기의 판 안에서도 늘어난다', () => {
+    expect(logicTiles.levelTraps(1)).toBe(logicTiles.stageSpec(1).traps);
+    expect(logicTiles.levelTraps(STAGE_LEVELS)).toBe(logicTiles.LAST_LEVEL_TRAPS);
+    for (const level of ALL_LEVELS.slice(1)) {
+      const traps = logicTiles.levelTraps(level);
+      expect(traps, `${level}단계`).toBeGreaterThanOrEqual(logicTiles.levelTraps(level - 1));
+      // 그 칸의 함정 수에서 시작해 다음 칸의 함정 수는 넘지 않는다.
+      const stage = logicTiles.levelStage(level);
+      expect(traps).toBeGreaterThanOrEqual(logicTiles.stageSpec(stage).traps);
+      if (stage < logicTiles.LEVEL_STEPS) expect(traps).toBeLessThan(logicTiles.stageSpec(stage + 1).traps);
+    }
+    // 마지막 칸(83~100단계)은 판의 크기가 같지만 함정이 더 늘어난다.
+    expect(logicTiles.levelStage(83)).toBe(logicTiles.LEVEL_STEPS);
+    expect(logicTiles.levelTraps(STAGE_LEVELS)).toBeGreaterThan(logicTiles.levelTraps(83));
+    // 점수 도전의 판은 그대로다.
+    expect(logicTiles.newRun().board.trapCount).toBe(logicTiles.stageSpec(1).traps);
   });
 
   it('같은 단계에서 같은 칸을 처음 누르면 같은 판이 된다', () => {
@@ -251,6 +363,24 @@ describe('길 잇기의 단계', () => {
     expect(start(1).board.puzzle.dots).not.toEqual(start(2).board.puzzle.dots);
   });
 
+  it('길이 돌아가는 정도를 잰다: 곧은 길뿐이면 0이다', () => {
+    expect(pathLink.detourShare(pathLink.puzzleFrom(5, pathLink.fallbackPartition(5)))).toBe(0);
+    // 5칸짜리 길이 ㄷ자로 돌아가면 두 점은 한 칸 떨어져 있어도 길은 네 칸을 간다.
+    const bent = pathLink.puzzleFrom(2, [[0, 1, 3, 2]]);
+    expect(pathLink.detourShare(bent)).toBe((3 - 1) / 4);
+  });
+
+  it('뒤로 갈수록 길이 더 돌아간다: 판 크기와 쌍의 수가 같은 단계들 안에서도 그렇다', () => {
+    const detour = (level: number): number => pathLink.detourShare(start(level).board.puzzle);
+    for (const level of ALL_LEVELS.slice(1)) {
+      expect(pathLink.levelDetour(level)).toBeGreaterThan(pathLink.levelDetour(level - 1));
+    }
+    expect(average(LAST_TEN.map(detour))).toBeGreaterThan(average(FIRST_TEN.map(detour)) + 0.2);
+    // 84~100단계는 판 크기와 쌍의 수가 같다. 그 안에서도 앞쪽보다 뒤쪽이 더 돌아간다.
+    expect(new Set(ALL_LEVELS.slice(83).map((level) => pathLink.levelPlan(level))).size).toBe(1);
+    expect(average(ALL_LEVELS.slice(92).map(detour))).toBeGreaterThan(average(ALL_LEVELS.slice(83, 91).map(detour)));
+  }, 60_000);
+
   it('어느 단계든 정해 둔 판이 아니라 새로 만든 판이고, 그 난이도의 크기와 쌍의 수를 지킨다', () => {
     for (const level of ALL_LEVELS) {
       const { puzzle } = start(level).board;
@@ -277,6 +407,14 @@ describe('길 잇기의 단계', () => {
 });
 
 describe('세 개 맞추기의 단계', () => {
+  it('난이도 칸의 첫 단계는 그 칸의 횟수로 시작하고 마지막 단계는 가장 빠듯한 횟수가 된다', () => {
+    expect(matchThree.levelMoves(1)).toBe(matchThree.LEVEL_SPECS[0].moves);
+    expect(matchThree.levelMoves(STAGE_LEVELS)).toBe(matchThree.LEVEL_SPECS[matchThree.LEVEL_SPECS.length - 1].tight);
+    // 마지막 칸(86~100단계)은 목표가 같지만 횟수가 줄어든다.
+    expect(matchThree.levelStage(86)).toBe(matchThree.LEVEL_STEPS);
+    expect(matchThree.levelMoves(86)).toBeGreaterThan(matchThree.levelMoves(STAGE_LEVELS));
+  });
+
   it('조각이 적고 목표가 하나인 판에서 시작해, 조각이 가장 많고 목표가 셋인 판으로 끝난다', () => {
     const first = matchThree.levelSpec(1);
     const last = matchThree.levelSpec(STAGE_LEVELS);
@@ -288,7 +426,9 @@ describe('세 개 맞추기의 단계', () => {
     expect(last.goals).toBe(3);
     for (const [index, spec] of matchThree.LEVEL_SPECS.entries()) {
       expect(spec.goals).toBeLessThanOrEqual(spec.kinds);
-      expect(spec.moves).toBeGreaterThan(0);
+      expect(spec.tight).toBeGreaterThan(0);
+      // 같은 칸 안에서는 횟수가 줄어든다.
+      expect(spec.tight).toBeLessThan(spec.moves);
       if (index === 0) continue;
       // 조각의 갈래와 한 번에 모아야 하는 양(횟수 하나에 모을 조각)은 줄지 않는다.
       const before = matchThree.LEVEL_SPECS[index - 1];
@@ -318,7 +458,13 @@ describe('세 개 맞추기의 단계', () => {
       const spec = matchThree.levelSpec(level);
       expect(plan.level).toBe(level);
       expect(plan.kinds, `${level}단계`).toBe(spec.kinds);
-      expect(plan.moves, `${level}단계`).toBe(spec.moves);
+      expect(plan.moves, `${level}단계`).toBe(matchThree.levelMoves(level));
+      expect(plan.moves).toBeLessThanOrEqual(spec.moves);
+      expect(plan.moves).toBeGreaterThanOrEqual(spec.tight);
+      // 같은 칸 안에서는 뒤로 갈수록 횟수가 줄기만 한다.
+      if (level > 1 && matchThree.levelStage(level - 1) === matchThree.levelStage(level)) {
+        expect(plan.moves).toBeLessThanOrEqual(matchThree.levelMoves(level - 1));
+      }
       expect(plan.goals, `${level}단계`).toHaveLength(spec.goals);
       expect(new Set(plan.goals.map((goal) => goal.kind)).size, `${level}단계`).toBe(spec.goals);
       for (const goal of plan.goals) {

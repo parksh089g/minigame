@@ -5,7 +5,7 @@
  * 위의 조각이 떨어져 내려오고, 빈 자리에는 새 조각이 들어온다. 그래서 또 맞으면 이어서 사라진다(연쇄).
  * 무작위가 필요한 곳은 random(0 이상 1 미만의 수를 돌려주는 함수)을 받아서 쓴다.
  */
-import { difficultyOf, seededRandom, STAGE_LEVELS } from '../../core/stages';
+import { difficultyOf, seededRandom, STAGE_LEVELS, stepProgress } from '../../core/stages';
 
 // ───────── 판 ─────────
 
@@ -514,8 +514,10 @@ export function clockRuns(phase: BoardPhase): boolean {
 /** 단계 모드의 난이도 한 칸 */
 export interface LevelSpec {
   kinds: number;
-  /** 맞바꿀 수 있는 횟수 */
+  /** 맞바꿀 수 있는 횟수. 그 칸의 첫 단계의 값이다. */
   moves: number;
+  /** 그 칸의 마지막 단계에서 맞바꿀 수 있는 횟수. 칸 안에서 뒤로 갈수록 moves에서 여기까지 줄어든다. */
+  tight: number;
   /** 모아야 하는 조각의 갈래 수 */
   goals: number;
   /** 갈래마다 모아야 하는 수 */
@@ -524,18 +526,19 @@ export interface LevelSpec {
 
 /**
  * 단계 모드가 거치는 난이도. 조각의 갈래가 늘고, 모을 갈래와 수가 늘고, 횟수는 빠듯해진다.
+ * 같은 칸 안에서도 뒤로 갈수록 횟수가 줄어서(moves → tight), 칸이 바뀌지 않는 동안에도 조금씩 어려워진다.
  */
 export const LEVEL_SPECS: readonly LevelSpec[] = [
-  { kinds: 5, moves: 16, goals: 1, count: 10 },
-  { kinds: 5, moves: 14, goals: 1, count: 14 },
-  { kinds: 5, moves: 16, goals: 2, count: 12 },
-  { kinds: 5, moves: 14, goals: 2, count: 14 },
-  { kinds: 6, moves: 18, goals: 2, count: 10 },
-  { kinds: 6, moves: 20, goals: 3, count: 10 },
-  { kinds: 6, moves: 16, goals: 2, count: 12 },
-  { kinds: 6, moves: 18, goals: 3, count: 12 },
-  { kinds: 6, moves: 18, goals: 3, count: 14 },
-  { kinds: 6, moves: 16, goals: 3, count: 14 },
+  { kinds: 5, moves: 18, tight: 16, goals: 1, count: 10 },
+  { kinds: 5, moves: 16, tight: 14, goals: 1, count: 14 },
+  { kinds: 5, moves: 15, tight: 14, goals: 2, count: 12 },
+  { kinds: 5, moves: 16, tight: 14, goals: 2, count: 14 },
+  { kinds: 6, moves: 19, tight: 17, goals: 2, count: 10 },
+  { kinds: 6, moves: 18, tight: 16, goals: 2, count: 12 },
+  { kinds: 6, moves: 20, tight: 18, goals: 3, count: 10 },
+  { kinds: 6, moves: 19, tight: 17, goals: 3, count: 12 },
+  { kinds: 6, moves: 19, tight: 17, goals: 3, count: 14 },
+  { kinds: 6, moves: 17, tight: 15, goals: 3, count: 14 },
 ];
 
 /** 단계 모드가 거치는 난이도의 수 */
@@ -544,6 +547,12 @@ export const LEVEL_STEPS = LEVEL_SPECS.length;
 /** 단계 모드의 level(1부터)번째 단계가 쓰는 난이도 번호(1부터) */
 export function levelStage(level: number): number {
   return difficultyOf(level, LEVEL_STEPS);
+}
+
+/** 단계 모드의 level번째 단계에서 맞바꿀 수 있는 횟수: 그 칸의 moves에서 tight까지, 칸 안의 자리에 따라 줄어든다. */
+export function levelMoves(level: number): number {
+  const spec = levelSpec(level);
+  return spec.moves - Math.round(stepProgress(level, LEVEL_STEPS) * (spec.moves - spec.tight));
 }
 
 export function levelSpec(level: number): LevelSpec {
@@ -675,7 +684,7 @@ function planFrom(level: number, attempt: number): LevelPlan {
     goals.push({ kind, count: spec.count });
   }
   goals.sort((a, b) => a.kind - b.kind);
-  return { level, kinds: spec.kinds, moves: spec.moves, goals, board, seed };
+  return { level, kinds: spec.kinds, moves: levelMoves(level), goals, board, seed };
 }
 
 /**

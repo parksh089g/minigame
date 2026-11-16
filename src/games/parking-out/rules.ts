@@ -4,7 +4,7 @@
  * 차는 폭이 한 칸, 길이가 두세 칸이고, 가로나 세로로 서서 앞머리 쪽으로만 나간다.
  * 무작위가 필요한 곳은 random(0 이상 1 미만의 수를 돌려주는 함수)을 받아서 쓴다.
  */
-import { difficultyOf, STAGE_HEARTS } from '../../core/stages';
+import { difficultyOf, levelProgress, pickBest, STAGE_HEARTS } from '../../core/stages';
 
 export type Facing = 'up' | 'down' | 'left' | 'right';
 
@@ -536,15 +536,81 @@ export function levelStage(level: number): number {
   return difficultyOf(level, LEVEL_STEPS);
 }
 
+/** 한 번에 나갈 수 있는 차를 모두 빼내는 것을 몇 번 되풀이해야 주차장이 비는지. 비울 수 없으면 Infinity */
+export function lotDepth(lot: Lot): number {
+  let rest = lot;
+  let rounds = 0;
+  while (rest.cars.length > 0) {
+    const now = rest;
+    const staying = now.cars.filter((car) => !canLeave(now, car));
+    if (staying.length === now.cars.length) return Infinity;
+    rest = { ...now, cars: staying };
+    rounds += 1;
+  }
+  return rounds;
+}
+
+/** 흘끗 보는 사람이 차 앞으로 내다보는 칸 수. 이보다 멀리서 막은 차는 못 본다. */
+export const GLANCE_REACH = 2;
+/** 흘끗 보는 사람을 흉내 내어 한 주차장을 비워 보는 횟수 */
+export const GLANCE_TRIES = 40;
+
+/**
+ * 차 바로 앞 GLANCE_REACH칸만 보고 누르는 사람이 기회(STAGE_HEARTS)를 다 쓰기 전에 주차장을 비우는 비율(0~1).
+ * 낮을수록 멀리서 막고 있는 차가 많아서, 끝까지 살펴봐야 하는 주차장이다.
+ */
+export function glanceEase(lot: Lot, random: () => number, tries = GLANCE_TRIES): number {
+  const count = Math.max(1, Math.floor(tries));
+  let cleared = 0;
+  for (let attempt = 0; attempt < count; attempt += 1) {
+    let rest = lot;
+    let bumps = 0;
+    while (rest.cars.length > 0 && bumps < STAGE_HEARTS) {
+      const now = rest;
+      const tempting = now.cars.filter((car) => {
+        const blockage = blockageOf(now, car);
+        return blockage === null || blockage.gap >= GLANCE_REACH;
+      });
+      if (tempting.length === 0) break;
+      const car = tempting[Math.min(tempting.length - 1, Math.floor(random() * tempting.length))];
+      if (canLeave(now, car)) rest = { ...now, cars: now.cars.filter((other) => other !== car) };
+      else bumps += 1;
+    }
+    if (rest.cars.length === 0) cleared += 1;
+  }
+  return cleared / count;
+}
+
+/** 단계 모드의 한 단계가 만들어 보는 주차장의 수. 이 가운데 그 단계에 맞는 것 하나를 쓴다. */
+export const LEVEL_LOTS = 6;
+/** 첫 단계가 노리는 glanceEase. 마지막 단계는 0을 노린다. */
+export const FIRST_LEVEL_EASE = 0.95;
+
+/**
+ * 단계 모드의 level번째 단계가 노리는 glanceEase. 첫 단계에서 마지막 단계까지 끊기지 않고 내려간다.
+ * 차의 수와 주차장 크기는 난이도 칸마다 한 번씩만 바뀌므로, 그 사이의 단계들은 이것으로 조금씩 어려워진다.
+ */
+export function levelEase(level: number): number {
+  return FIRST_LEVEL_EASE * (1 - levelProgress(level)) ** 1.5;
+}
+
 /**
  * 단계 모드의 한 단계. 시간은 흐르지 않고(elapse를 부르지 않는다), 주차장 하나를 비우면 깬 것이다.
  * 막힌 차를 누를 수 있는 횟수가 정해져 있어서, 아무 차나 눌러 보는 것으로는 깰 수 없다.
+ * 그 칸의 주차장을 LEVEL_LOTS개 만들어서, 흘끗 보고 비울 수 있는 정도가 그 단계가 노리는 값에 가장 가까운 것을 쓴다.
+ * 비슷하면 빼는 순서가 더 깊은 쪽을 쓴다.
  */
 export function levelRun(level: number, random: () => number): RunState {
   const stage = levelStage(level);
+  const target = levelEase(level);
+  const lot = pickBest(
+    LEVEL_LOTS,
+    () => generateLot(stage, random),
+    (made) => Math.min(99, lotDepth(made)) / 10000 - Math.abs(glanceEase(made, random) - target),
+  );
   return {
     stage,
-    lot: generateLot(stage, random),
+    lot,
     timeLeft: TIME_BANK_SECONDS,
     score: 0,
     streak: 0,
