@@ -29,6 +29,8 @@ interface SlotView {
   busy: boolean;
   /** 일시정지 화면의 "기록하고 끝내기"가 부르는 것 */
   finishFromPause(): void;
+  /** 돌고 있는 스핀을 결과까지 건너뛴다(도는 중에 기계를 누른 것과 같다). */
+  skipSpin(): boolean;
 }
 
 function view(page: Page): Promise<{ run: RunState; busy: boolean }> {
@@ -52,10 +54,21 @@ async function switchToDaily(page: Page): Promise<string> {
   return seed;
 }
 
-/** 돌리기를 한 번 누르고, 결과를 다 보여 줄 때까지 기다린 뒤 나온 판을 돌려준다. */
+/**
+ * 돌리기를 한 번 누르고, 결과를 다 보여 줄 때까지 기다린 뒤 나온 판을 돌려준다.
+ * 릴이 도는 것과 맞은 줄을 보여 주는 것은 건너뛴다. 끝까지 지켜보면 느린 기계에서는 스핀 여섯 번이 점검의 제한 시간을 넘긴다.
+ * 건너뛰어도 같은 판이 된다는 것은 candy-slot-feel.e2e.ts가 본다.
+ */
 async function spinOnce(page: Page): Promise<number[]> {
   const before = (await view(page)).run.spinCount;
   await tapText(page, SCENE.candySlot, SPIN);
+  await expect
+    .poll(async () => (await view(page)).run.spinCount, { ...WAIT, message: '돌리기가 눌려야 한다' })
+    .toBe(before + 1);
+  await page.evaluate(
+    (key) => (window.__pocketArcade?.scene.getScene(key) as unknown as SlotView).skipSpin(),
+    SCENE.candySlot,
+  );
   await expect
     .poll(async () => {
       const { run, busy } = await view(page);
@@ -90,6 +103,8 @@ async function finishRun(page: Page): Promise<void> {
 }
 
 it('행운 슬롯 오늘의 판: 새로 열 때마다 같은 판이 나온다', async ({ page }) => {
+  // 앱을 두 번 열고 판을 세 번 시작하는 긴 점검이라, 느린 기계에서도 끝나도록 제한 시간을 늘린다.
+  it.slow();
   const dayBefore = dayIndexOf(new Date());
   await openApp(page);
   await startScene(page, SCENE.candySlot);
