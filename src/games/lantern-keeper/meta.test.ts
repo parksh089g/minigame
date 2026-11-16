@@ -6,9 +6,11 @@ import {
   MAX_DEPTH,
   META,
   META_ORDER,
+  PASSIVES,
   STAGE_ORDER,
   STAGES,
   WEAPON_ORDER,
+  type PassiveId,
   type StageId,
 } from './data';
 import {
@@ -377,14 +379,20 @@ describe('캐릭터와 스테이지 고르기', () => {
         ...WEAPON_ORDER.filter((id) => !['beam', 'torch', 'lamp'].includes(id)),
         ...STAGE_ORDER.filter((id) => id !== 'grove'),
         ...META_ORDER.filter((id) => !META[id].needsDawn),
+        ...OLD_PASSIVES,
       ],
     });
   });
 });
 
-describe('새로 들어온 캐릭터와 무기와 스테이지와 영구 강화', () => {
-  /** 새벽을 맞아야 열리는 영구 강화 다섯 가지. 영구 강화를 알리게 되면서 함께 들어왔다. */
+/** 손거울이 들어오기 전의 패시브 아홉. 패시브를 알리기 전의 저장은 이것을 아는 것으로 친다. */
+const OLD_PASSIVES = (Object.keys(PASSIVES) as PassiveId[]).filter((id) => id !== 'mirror');
+
+describe('새로 들어온 캐릭터와 무기와 패시브와 스테이지와 영구 강화', () => {
+  /** 새벽을 맞아야 열리는 영구 강화 일곱 가지. 처음부터 있던 열한 가지 뒤에 들어온 것이 모두 여기에 든다. */
   const DAWN_UPGRADES = META_ORDER.filter((id) => META[id].needsDawn);
+  /** 그 가운데 영구 강화를 알리게 되면서 함께 들어온 다섯 가지. 나머지 둘(큼직한 불씨, 곁불)은 그 뒤에 들어왔다. */
+  const FIRST_DAWN_UPGRADES = DAWN_UPGRADES.filter((id) => id !== 'hefty' && id !== 'echo');
 
   /** 달잡이와 등대빛이 들어오기 전부터 하던 사람의 저장 */
   const oldHand = (): LanternMeta => normalizeMeta({ embers: 40, runs: 3, bestSeconds: 200, unread: ['bat'] });
@@ -397,21 +405,24 @@ describe('새로 들어온 캐릭터와 무기와 스테이지와 영구 강화'
     expect(hasNews(unknownNews(normalizeMeta({ embers: 5 })))).toBe(false);
   });
 
-  it('그 전부터 하던 사람에게는 그 뒤에 들어온 캐릭터와 무기와 스테이지와 영구 강화를 알린다', () => {
+  it('그 전부터 하던 사람에게는 그 뒤에 들어온 캐릭터와 무기와 패시브와 스테이지와 영구 강화를 알린다', () => {
     const news = unknownNews(oldHand());
     expect(news).toEqual({
       heroes: ['mooner', 'bearer'],
       weapons: ['beam', 'torch', 'lamp'],
+      passives: ['mirror'],
       stages: ['grove'],
-      upgrades: ['sift', 'kindle', 'trove', 'bounty', 'vigil'],
+      upgrades: ['sift', 'kindle', 'trove', 'bounty', 'vigil', 'hefty', 'echo'],
     });
     expect(news.upgrades).toEqual(DAWN_UPGRADES);
     expect(newsLine(news)).toBe(
-      '새 캐릭터 달잡이, 횃불잡이 · 새 무기 등대빛, 횃불, 풍등 · 새 스테이지 빛버섯 숲 · 새 영구 강화 5가지',
+      '새 캐릭터 달잡이, 횃불잡이 · 새 무기 등대빛, 횃불, 풍등 · 새 패시브 손거울 · 새 스테이지 빛버섯 숲 · 새 영구 강화 7가지',
     );
-    const none = { heroes: [], weapons: [], stages: [], upgrades: [] };
+    const none = { heroes: [], weapons: [], passives: [], stages: [], upgrades: [] };
     expect(newsLine({ ...none, heroes: ['mooner'] })).toBe('새 캐릭터 달잡이');
     expect(newsLine({ ...none, weapons: ['beam', 'moon'] })).toBe('새 무기 등대빛, 초승달');
+    expect(newsLine({ ...none, passives: ['mirror'] })).toBe('새 패시브 손거울');
+    expect(hasNews({ ...none, passives: ['mirror'] })).toBe(true);
     expect(newsLine({ ...none, stages: ['grove'] })).toBe('새 스테이지 빛버섯 숲');
     // 영구 강화는 하나면 이름을, 여럿이면 몇 가지인지를 적는다.
     expect(newsLine({ ...none, upgrades: ['sift'] })).toBe('새 영구 강화 골라내기');
@@ -424,17 +435,44 @@ describe('새로 들어온 캐릭터와 무기와 스테이지와 영구 강화'
     // 캐릭터와 무기와 스테이지는 모두 알린 저장. known에 영구 강화가 하나도 없다.
     const before = [...HERO_ORDER, ...WEAPON_ORDER, ...STAGE_ORDER];
     const told = normalizeMeta({ runs: 9, clears: 2, bestSeconds: 600, known: before });
-    expect(told.known).toEqual([...before, ...META_ORDER.filter((id) => !DAWN_UPGRADES.includes(id))]);
+    expect(told.known).toEqual([...before, ...META_ORDER.filter((id) => !DAWN_UPGRADES.includes(id)), ...OLD_PASSIVES]);
     const news = unknownNews(told);
-    expect(news).toEqual({ heroes: [], weapons: [], stages: [], upgrades: DAWN_UPGRADES });
-    expect(newsLine(news)).toBe('새 영구 강화 5가지');
+    expect(news).toEqual({ heroes: [], weapons: [], passives: ['mirror'], stages: [], upgrades: DAWN_UPGRADES });
+    expect(newsLine(news)).toBe('새 패시브 손거울 · 새 영구 강화 7가지');
     const after = announceNews(told);
-    // 영구 강화는 한 줄로만 알린다. 카드나 도감에 붙는 것은 없다.
+    // 영구 강화는 한 줄로만 알린다. 카드에 붙는 것은 없고, 도감에는 새 패시브만 새 항목으로 뜬다.
     expect(after.fresh).toEqual([]);
-    expect(after.unread).toEqual(told.unread);
+    expect(told.unread).toEqual([]);
+    expect(after.unread).toEqual(['mirror']);
     expect(hasNews(unknownNews(after))).toBe(false);
     expect(announceNews(after)).toBe(after);
     expect(normalizeMeta(JSON.parse(JSON.stringify(after)))).toEqual(after);
+  });
+
+  it('새벽 뒤의 다섯 가지를 이미 알린 사람에게는 그 뒤에 들어온 손거울과 큼직한 불씨, 곁불만 알린다', () => {
+    const before = [
+      ...HERO_ORDER,
+      ...WEAPON_ORDER,
+      ...STAGE_ORDER,
+      ...META_ORDER.filter((id) => !DAWN_UPGRADES.includes(id)),
+      ...FIRST_DAWN_UPGRADES,
+    ];
+    expect(FIRST_DAWN_UPGRADES).toHaveLength(5);
+    const told = normalizeMeta({ runs: 20, clears: 4, bestSeconds: 600, known: before });
+    // 패시브를 알리기 전의 저장이라 known에 패시브가 없다. 그때 있던 아홉을 아는 것으로 친다.
+    expect(told.known).toEqual([...before, ...OLD_PASSIVES]);
+    const news = unknownNews(told);
+    expect(news).toEqual({ heroes: [], weapons: [], passives: ['mirror'], stages: [], upgrades: ['hefty', 'echo'] });
+    expect(newsLine(news)).toBe('새 패시브 손거울 · 새 영구 강화 2가지');
+    const after = announceNews(told);
+    // 새 패시브는 새 무기처럼 도감에서 들여다볼 때까지 새 항목으로 뜬다.
+    expect(after.unread).toEqual(['mirror']);
+    expect(hasNews(unknownNews(after))).toBe(false);
+    expect(announceNews(after)).toBe(after);
+    expect(normalizeMeta(JSON.parse(JSON.stringify(after)))).toEqual(after);
+    // 패시브가 적혀 있는 저장은 적힌 것만 안다.
+    const listed = normalizeMeta({ runs: 20, bestSeconds: 600, known: [...before, 'wick', 'mirror'] });
+    expect(unknownNews(listed).passives).toEqual(OLD_PASSIVES.filter((id) => id !== 'wick'));
   });
 
   it('달잡이와 등대빛을 이미 알린 사람에게는 그 뒤에 들어온 것만 알린다', () => {
@@ -445,11 +483,17 @@ describe('새로 들어온 캐릭터와 무기와 스테이지와 영구 강화'
     ];
     const told = normalizeMeta({ runs: 9, bestSeconds: 600, known: before });
     const news = unknownNews(told);
-    expect(news).toEqual({ heroes: ['bearer'], weapons: ['torch', 'lamp'], stages: ['grove'], upgrades: DAWN_UPGRADES });
+    expect(news).toEqual({
+      heroes: ['bearer'],
+      weapons: ['torch', 'lamp'],
+      passives: ['mirror'],
+      stages: ['grove'],
+      upgrades: DAWN_UPGRADES,
+    });
     const after = announceNews(told);
-    // 스테이지는 카드에 "새"를 붙이지 않고 한 줄로만 알린다. 새 무기는 도감에 새 항목으로 뜬다.
+    // 스테이지는 카드에 "새"를 붙이지 않고 한 줄로만 알린다. 새 무기와 새 패시브는 도감에 새 항목으로 뜬다.
     expect(after.fresh).toEqual(['bearer']);
-    expect(after.unread).toEqual(['torch', 'lamp']);
+    expect(after.unread).toEqual(['torch', 'lamp', 'mirror']);
     expect(hasNews(unknownNews(after))).toBe(false);
     expect(normalizeMeta(JSON.parse(JSON.stringify(after)))).toEqual(after);
   });
@@ -479,14 +523,21 @@ describe('새로 들어온 캐릭터와 무기와 스테이지와 영구 강화'
 
   it('저장된 값에서 모르는 이름은 버린다', () => {
     const meta = normalizeMeta({ runs: 2, known: ['keeper', 'nobody', 'beam', 7, 'grove'], fresh: ['mooner', 'x', 'beam'] });
-    // 영구 강화가 하나도 적혀 있지 않으면 예전의 열한 가지를 아는 것으로 친다.
-    expect(meta.known).toEqual(['keeper', 'beam', 'grove', ...META_ORDER.filter((id) => !META[id].needsDawn)]);
+    // 영구 강화가 하나도 적혀 있지 않으면 예전의 열한 가지를, 패시브가 하나도 적혀 있지 않으면 예전의 아홉을 아는 것으로 친다.
+    expect(meta.known).toEqual([
+      'keeper',
+      'beam',
+      'grove',
+      ...META_ORDER.filter((id) => !META[id].needsDawn),
+      ...OLD_PASSIVES,
+    ]);
     // 적혀 있으면 적힌 것만 안다.
-    expect(normalizeMeta({ runs: 2, known: ['keeper', 'grove', 'sift', 'nothing', 'vigor'] }).known).toEqual([
+    expect(normalizeMeta({ runs: 2, known: ['keeper', 'grove', 'sift', 'nothing', 'vigor', 'lens'] }).known).toEqual([
       'keeper',
       'grove',
       'vigor',
       'sift',
+      'lens',
     ]);
     expect(meta.fresh).toEqual(['mooner']);
   });
@@ -519,8 +570,8 @@ describe('공유받은 친구 기록', () => {
 });
 
 describe('늘어난 영구 강화', () => {
-  it('열여섯 가지이고 모두 살 수 있는 값이 있다', () => {
-    expect(META_ORDER).toHaveLength(16);
+  it('열여덟 가지이고 모두 살 수 있는 값이 있다', () => {
+    expect(META_ORDER).toHaveLength(18);
     for (const id of META_ORDER) {
       expect(metaCost(id, 0)).toBeGreaterThan(0);
       expect(metaCost(id, META[id].maxLevel)).toBeNull();

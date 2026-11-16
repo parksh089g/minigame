@@ -4,6 +4,7 @@ import {
   BOON_ORDER,
   BOON_VALUES,
   BOONS,
+  ECHO,
   ENDLESS,
   ENEMIES,
   EVOLVE_LEVEL,
@@ -18,6 +19,7 @@ import {
   MAX_WEAPONS,
   META,
   META_ORDER,
+  META_STEP,
   MID_BOSS_COUNT,
   MID_BOSS_EVERY,
   MID_BOSS_TIERS,
@@ -47,11 +49,14 @@ import {
   damageScale,
   depthName,
   depthRules,
+  echoPower,
   embersFor,
   endlessBossKind,
   endlessScale,
   emberStats,
   enemyHp,
+  faintSlow,
+  fanAngles,
   fireflyStats,
   formatClock,
   formatTimes,
@@ -71,8 +76,10 @@ import {
   ownedPassives,
   ownedWeapons,
   pickSpawnKind,
+  ringSpots,
   scoreFor,
   seededRandom,
+  sideTurn,
   sparkChance,
   spawnPerSecond,
   speedScale,
@@ -82,6 +89,7 @@ import {
   upgradeDescription,
   upgradeOptions,
   upgradeTitle,
+  volley,
   weaponName,
   weaponSlotCount,
   feastNote,
@@ -410,6 +418,106 @@ describe('성장', () => {
     expect(upgradeDescription({ type: 'passive', id: 'hood', level: 1 })).toContain(`${GUARD.seconds}초`);
     expect(upgradeDescription({ type: 'passive', id: 'hood', level: 3 })).toContain(`${waits[2]}초`);
   });
+
+  it('손거울은 무기마다 한 개를 더 내고, 그 한 개는 레벨마다 세져서 다 올리면 온전한 한 개가 된다', () => {
+    expect(base.echo).toBe(0);
+    expect(volley(2, base.echo)).toEqual([1, 1]);
+    for (let level = 1; level < MAX_LEVEL; level += 1) {
+      const powers = volley(2, modifiers({ mirror: level }, {}).echo);
+      expect(powers).toHaveLength(3);
+      expect(powers.slice(0, 2)).toEqual([1, 1]);
+      expect(powers[2]).toBeCloseTo(ECHO.perLevel * level);
+    }
+    expect(volley(2, modifiers({ mirror: MAX_LEVEL }, {}).echo)).toEqual([1, 1, 1]);
+    // 선택 카드에는 덤으로 나가는 하나가 그 레벨에서 얼마나 아픈지를 적는다. 도감과 목록에는 레벨마다 붙는 힘을 적는다.
+    expect(upgradeDescription({ type: 'passive', id: 'mirror', level: 1 })).toBe('무기마다 하나 더, 그 하나의 피해 20%');
+    expect(upgradeDescription({ type: 'passive', id: 'mirror', level: MAX_LEVEL })).toBe('무기마다 하나 더, 그 하나의 피해 100%');
+    expect(PASSIVES.mirror.perLevel).toContain(`+${ECHO.perLevel * 100}%`);
+  });
+
+  it('곁불(영구 강화)은 손거울과 더해지고, 한 개를 넘는 만큼은 또 한 개가 된다', () => {
+    expect(echoPower(0, 0)).toBe(0);
+    const most = META.echo.maxLevel;
+    // 백분율로 본 곁불 한 단계의 힘. 설명에 적힌 숫자와 같다.
+    const step = Math.round(META_STEP.echo * 100);
+    expect(META.echo.perLevel).toContain(`+${step}%`);
+    expect(modifiers({}, { echo: 1 }).echo).toBe(step / 100);
+    // 곁불만 다 올려서는 온전한 한 개가 되지 않고, 손거울 한 레벨보다 크게 얹지도 않는다.
+    expect(step * most).toBeLessThanOrEqual(Math.round(ECHO.perLevel * 100));
+    expect(volley(1, modifiers({}, { echo: most }).echo)).toEqual([1, (step * most) / 100]);
+    // 손거울을 다 올리면 온전한 한 개가 되고, 곁불만큼이 또 한 개로 붙는다.
+    expect(volley(3, modifiers({ mirror: MAX_LEVEL }, { echo: most }).echo)).toEqual([1, 1, 1, 1, (step * most) / 100]);
+    // 어떤 짝이든 소수가 어긋나서 쓸모없는 조각이 붙거나 온전한 한 개가 모자라게 나오는 일은 없다.
+    for (let mirror = 0; mirror <= MAX_LEVEL; mirror += 1) {
+      for (let meta = 0; meta <= most; meta += 1) {
+        const percent = Math.round(ECHO.perLevel * 100) * mirror + step * meta;
+        const powers = volley(1, modifiers({ mirror }, { echo: meta }).echo);
+        expect(powers).toHaveLength(1 + Math.ceil(percent / 100));
+        expect(powers.slice(0, 1 + Math.floor(percent / 100)).every((power) => power === 1)).toBe(true);
+        if (percent % 100 > 0) expect(powers[powers.length - 1]).toBe((percent % 100) / 100);
+      }
+    }
+  });
+
+  it('약한 덤은 온전한 것들이 서는 자리와 겨누는 쪽을 바꾸지 않는다', () => {
+    // 부채꼴: 온전한 것은 가운데를 중심으로 벌어지고, 약한 덤은 그 바깥의 다음 자리에 선다.
+    expect(fanAngles([1], 0.2)).toEqual([0]);
+    expect(fanAngles([1, 0.4], 0.2)).toEqual([0, 0.2]);
+    expect(fanAngles([1, 1], 0.2)).toEqual([-0.1, 0.1]);
+    const three = fanAngles([1, 1, 0.6], 0.2);
+    expect(three.slice(0, 2)).toEqual(fanAngles([1, 1], 0.2));
+    expect(three[2]).toBeCloseTo(0.3);
+    // 덤이 온전해지면 처음부터 그만큼 내는 무기처럼 고르게 벌어진다.
+    expect(fanAngles([1, 1, 1], 0.2).map((angle) => Math.round(angle * 10) / 10)).toEqual([-0.2, 0, 0.2]);
+    // 둘레: 온전한 것은 고르게 서고, 약한 덤은 첫 두 개의 한가운데에 끼어 선다.
+    expect(ringSpots([1, 1, 1])).toEqual([0, 1 / 3, 2 / 3]);
+    expect(ringSpots([1, 1, 0.2])).toEqual([0, 0.5, 0.25]);
+    expect(ringSpots([1, 0.2])).toEqual([0, 0.5]);
+    // 한쪽을 겨누는 것: 겨눈 쪽, 맞은편, 그리고 양옆
+    expect([0, 1, 2, 3].map(sideTurn)).toEqual([0, Math.PI, Math.PI / 2, -Math.PI / 2]);
+  });
+
+  it('약한 덤은 덜 아픈 만큼 덜 늦춘다', () => {
+    // 0.6배로 늦추는 것의 덤이 힘 0.25면 늦추는 몫(0.4)의 4분의 1만 늦춘다.
+    expect(faintSlow(0.6, 0.25)).toBeCloseTo(0.9, 9);
+    expect(faintSlow(0.35, 0.2)).toBeCloseTo(0.87, 9);
+    // 온전한 덤은 온전한 것과 같고, 늦추지 않는 것(1)의 덤은 늦추지 않는다.
+    expect(faintSlow(0.6, 1)).toBe(0.6);
+    expect(faintSlow(0.35, 1.3)).toBe(0.35);
+    expect(faintSlow(1, 0.4)).toBe(1);
+    // 힘이 클수록 더 늦춘다.
+    const slows = [0.2, 0.4, 0.6, 0.8].map((power) => faintSlow(0.6, power));
+    expect([...slows].sort((a, b) => b - a)).toEqual(slows);
+  });
+
+  it('공격 범위가 넓어지면 불씨탄의 탄환과 반딧불도 그만큼 커진다', () => {
+    const wide = modifiers({ lens: MAX_LEVEL }, {});
+    expect(emberStats(1, wide).radius).toBeCloseTo(emberStats(1, base).radius * 1.5);
+    expect(fireflyStats(1, wide).size).toBeCloseTo(fireflyStats(1, base).size * 1.5);
+  });
+
+  it('큼직한 불씨(영구 강화)는 날아가는 것의 몸집만 키우고, 공격 범위는 넓히지 않는다', () => {
+    const most = META.hefty.maxLevel;
+    const big = modifiers({}, { hefty: most });
+    const grow = 1 + META_STEP.hefty * most;
+    expect(base.heft).toBe(1);
+    expect(big.heft).toBeCloseTo(grow);
+    expect(big.area).toBe(1);
+    // 날아가는 것: 불씨탄의 탄환, 빛화살, 초승달, 반딧불
+    expect(emberStats(1, big).radius).toBeCloseTo(emberStats(1, base).radius * grow);
+    expect(lanceStats(1, big).radius).toBeCloseTo(lanceStats(1, base).radius * grow);
+    expect(moonStats(1, big).radius).toBeCloseTo(moonStats(1, base).radius * grow);
+    expect(fireflyStats(1, big).size).toBeCloseTo(fireflyStats(1, base).size * grow);
+    // 둘레를 태우거나 터지는 것, 닿는 거리와 도는 길은 그대로다.
+    expect(auraStats(1, big)).toEqual(auraStats(1, base));
+    expect(starStats(1, big)).toEqual(starStats(1, base));
+    expect(fireflyStats(1, big).orbit).toBe(fireflyStats(1, base).orbit);
+    expect(moonStats(1, big).reach).toBe(moonStats(1, base).reach);
+    // 유리 렌즈와는 곱해진다.
+    expect(emberStats(1, modifiers({ lens: 1 }, { hefty: 1 })).radius).toBeCloseTo(3 * 1.1 * (1 + META_STEP.hefty));
+    // 설명에 적힌 숫자가 한 단계에 커지는 몫과 맞는다.
+    expect(META.hefty.perLevel).toContain(`+${Math.round(META_STEP.hefty * 100)}%`);
+  });
 });
 
 describe('레벨업 선택지', () => {
@@ -518,8 +626,9 @@ describe('레벨업 선택지', () => {
     }
     // 오늘의 판은 씨앗으로 선택지를 뽑으므로, 골라내기를 넣으면서 뽑는 차례가 바뀌면 안 된다.
     expect(upgradeOptions(fresh, seededRandom(3))).toEqual(upgradeOptions({ ...fresh, banned: [] }, seededRandom(3)));
-    // 골라내기가 들어오기 전의 규칙으로 뽑아 둔 값이다.
-    expect(upgradeOptions(fresh, seededRandom(3))).toEqual([
+    // 골라내기가 들어오기 전의 규칙으로 뽑아 둔 값이다. 그 뒤에 들어온 손거울을 빼면 그때와 똑같이 뽑힌다.
+    // 손거울이 아직 나오지 않는 날의 오늘의 판은 이렇게 손거울을 처음부터 골라낸 것으로 친다.
+    expect(upgradeOptions({ ...fresh, banned: ['mirror'] }, seededRandom(3))).toEqual([
       { type: 'passive', id: 'hourglass', level: 1 },
       { type: 'weapon', id: 'ember', level: 2 },
       { type: 'weapon', id: 'moon', level: 1 },
@@ -766,7 +875,7 @@ describe('결과와 보상', () => {
 
   it('새벽을 맞아야 열리는 영구 강화는 그때까지 잠겨 있다', () => {
     const late = META_ORDER.filter((id) => META[id].needsDawn);
-    expect(late).toEqual(['sift', 'kindle', 'trove', 'bounty', 'vigil']);
+    expect(late).toEqual(['sift', 'kindle', 'trove', 'bounty', 'vigil', 'hefty', 'echo']);
     // 잠기는 것은 목록의 끝에 모여 있어서, 처음 하는 사람에게는 늘 보던 열한 가지가 먼저 보인다.
     expect(META_ORDER.slice(-late.length)).toEqual(late);
     for (const id of META_ORDER) {

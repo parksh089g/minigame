@@ -6,6 +6,7 @@
  */
 import {
   CHEST,
+  ECHO,
   ELITE,
   ENEMIES,
   FLINT,
@@ -155,6 +156,10 @@ function passiveText(id: PassiveId): string {
   }
   if (id === 'flint') {
     return `쓰러진 그림자가 가끔 터져서 둘레의 그림자를 다치게 한다. 튼튼한 그림자일수록 세게 터진다. 레벨마다 터질 확률 +${Math.round(FLINT.chance * 100)}%. 이렇게 쓰러진 그림자는 다시 터지지 않는다`;
+  }
+  if (id === 'mirror') {
+    const step = Math.round(ECHO.perLevel * 100);
+    return `무기마다 한 번에 내는 것이 하나 더 붙는다. 그 하나의 피해는 레벨마다 +${step}%여서 ${Math.ceil(100 / step)}레벨에 온전해진다. 등불 고리에는 붙지 않는다`;
   }
   return `레벨마다 ${PASSIVES[id].perLevel}`;
 }

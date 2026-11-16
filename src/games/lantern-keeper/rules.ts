@@ -7,6 +7,7 @@ import {
   BOON_ORDER,
   BOON_VALUES,
   BOONS,
+  ECHO,
   ENDLESS,
   ENEMIES,
   EVOLVE_LEVEL,
@@ -21,6 +22,7 @@ import {
   MAX_PASSIVES,
   MAX_WEAPONS,
   META,
+  META_STEP,
   MID_BOSS_TIERS,
   PASSIVES,
   PLAYER_BASE,
@@ -231,6 +233,15 @@ export interface Modifiers {
   guard: number;
   /** 쓰러진 보통 그림자가 터질 확률(0~1). 부싯돌이 없으면 0 */
   spark: number;
+  /** 덤의 힘(data.ts의 ECHO): 무기가 더 내는 한 개가 주는 피해의 몫. 0이면 덤이 없다. */
+  echo: number;
+  /** 영구 강화 "큼직한 불씨"가 날아가는 것(불씨탄의 탄환, 빛화살, 초승달, 반딧불)의 몸집에 곱하는 값. 없으면 1 */
+  heft: number;
+  /**
+   * 불씨탄의 탄환과 반딧불의 몸집에 곱하는 값. 보통은 area × heft다.
+   * 손거울이 들어오기 전의 오늘의 판에서만 1이다(sim.ts의 beforeMirror).
+   */
+  bulk: number;
 }
 
 /** 이 축복을 몇 번 받았는지. 저장된 값이 엉뚱하면 0으로 본다. */
@@ -253,12 +264,14 @@ export function modifiers(
   const p = (id: PassiveId): number => passives[id] ?? 0;
   const m = (id: MetaId): number => meta[id] ?? 0;
   const b = (id: BoonId): number => boonLevel(boons, id);
+  const area = (1 + 0.1 * p('lens')) * (trait.area ?? 1) * (1 + BOON_VALUES.bloom * b('bloom'));
+  const heft = 1 + META_STEP.hefty * m('hefty');
   return {
     damage: (1 + 0.1 * p('wick')) * (1 + 0.05 * m('might')) * (trait.damage ?? 1) * (1 + BOON_VALUES.blaze * b('blaze')),
     cooldown: 0.93 ** p('hourglass') * (trait.cooldown ?? 1) * BOON_VALUES.haste ** b('haste'),
     speed: (1 + 0.08 * p('boots')) * (1 + 0.04 * m('swift')) * (trait.speed ?? 1),
     magnet: (1 + 0.3 * p('magnet')) * (1 + 0.15 * m('reach')),
-    area: (1 + 0.1 * p('lens')) * (trait.area ?? 1) * (1 + BOON_VALUES.bloom * b('bloom')),
+    area,
     xp: (1 + 0.08 * m('greed')) * (trait.xp ?? 1),
     maxHp:
       Math.max(MIN_MAX_HP, PLAYER_BASE.maxHp + 20 * p('coat') + 10 * m('vigor') + (trait.maxHp ?? 0)) +
@@ -267,7 +280,64 @@ export function modifiers(
     taken: (1 - 0.04 * m('armor')) * (trait.taken ?? 1) * BOON_VALUES.ward ** b('ward'),
     guard: guardSeconds(p('hood')),
     spark: sparkChance(p('flint')),
+    echo: echoPower(p('mirror'), m('echo')),
+    heft,
+    bulk: area * heft,
   };
+}
+
+/** 손거울(판 안)과 곁불(영구 강화)이 이 레벨일 때의 덤의 힘. 소수가 어긋나지 않게 백분율로 더한다. */
+export function echoPower(mirror: number, meta = 0): number {
+  const percent = Math.round(ECHO.perLevel * 100) * Math.max(0, mirror) + Math.round(META_STEP.echo * 100) * Math.max(0, meta);
+  return percent / 100;
+}
+
+/**
+ * 무기가 한 번에 내는 것 하나하나의 힘(주는 피해의 몫). 앞의 count개는 온전한 것(1)이고 그 뒤에 덤이 붙는다.
+ * 덤의 힘이 1을 넘으면 넘는 만큼은 온전한 한 개가 되고, 남은 조각이 약한 한 개가 된다.
+ * 예: count 2에 덤 0.6이면 [1, 1, 0.6], 덤 1.3이면 [1, 1, 1, 0.3]. 덤이 없으면 1이 count개.
+ */
+export function volley(count: number, echo: number): number[] {
+  const percent = Math.max(0, Math.round(echo * 100));
+  const powers = new Array<number>(Math.max(0, count) + Math.floor(percent / 100)).fill(1);
+  if (percent % 100 > 0) powers.push((percent % 100) / 100);
+  return powers;
+}
+
+/**
+ * 부채꼴로 나가는 것들의 각도(가운데에서 벗어난 값, 라디안). 온전한 것들은 가운데를 중심으로 고르게 벌어지고,
+ * 약한 덤은 그 바깥의 다음 자리에 선다. 그래서 약한 덤이 붙어도 온전한 것들이 겨누는 곳은 달라지지 않는다.
+ */
+export function fanAngles(powers: readonly number[], spread: number): number[] {
+  const whole = powers.filter((power) => power >= 1).length;
+  return powers.map((_, i) => (i - (whole - 1) / 2) * spread);
+}
+
+/**
+ * 둘레에 고르게 서는 것들(반딧불, 등대빛)의 자리. 한 바퀴를 1로 본 값이다.
+ * 온전한 것들은 고르게 벌려 서고, 약한 덤은 첫 두 개의 한가운데에 끼어 선다(온전한 것들의 자리는 그대로다).
+ */
+export function ringSpots(powers: readonly number[]): number[] {
+  const whole = Math.max(1, powers.filter((power) => power >= 1).length);
+  return powers.map((power, i) => (power >= 1 ? i / whole : 0.5 / whole));
+}
+
+/**
+ * 약한 덤이 그림자를 느리게 하는 배율. 온전한 것이 slow배로 느리게 할 때, 힘이 power인 덤은 그 몫만큼만 느리게 한다
+ * (0.6배로 늦추는 불길의 덤이 힘 0.25면 0.9배). 온전한 덤은 온전한 것과 같다.
+ */
+export function faintSlow(slow: number, power: number): number {
+  return power < 1 ? 1 - (1 - slow) * Math.max(0, power) : slow;
+}
+
+/**
+ * 한쪽을 겨누는 것(횃불이 휘두르는 쪽, 덤으로 남기는 불길)이 여럿일 때의 차례:
+ * 겨눈 쪽, 맞은편, 그리고 양옆. k번째가 겨눈 쪽에서 돌아선 각도(라디안)
+ */
+export function sideTurn(k: number): number {
+  if (k <= 0) return 0;
+  if (k === 1) return Math.PI;
+  return k % 2 === 0 ? Math.PI / 2 : -Math.PI / 2;
 }
 
 export interface EmberStats {
@@ -276,6 +346,8 @@ export interface EmberStats {
   count: number;
   pierce: number;
   speed: number;
+  /** 탄환의 판정 반지름(px) */
+  radius: number;
 }
 export interface AuraStats {
   radius: number;
@@ -294,6 +366,8 @@ export interface FireflyStats {
   spin: number;
   /** 같은 적을 다시 때리기까지(초) */
   rehit: number;
+  /** 반딧불 한 마리의 판정 반지름(px) */
+  size: number;
 }
 export interface StarStats {
   damage: number;
@@ -419,6 +493,7 @@ export function emberStats(level: number, mods: Modifiers): EmberStats {
     count: 1 + atLeast(level, 3) + atLeast(level, 5) + evo,
     pierce: atLeast(level, 5) + 2 * evo,
     speed: evo ? 190 : 170,
+    radius: 3 * mods.bulk,
   };
 }
 
@@ -440,6 +515,7 @@ export function fireflyStats(level: number, mods: Modifiers): FireflyStats {
     orbit: (evo ? 38 : 30) * mods.area,
     spin: evo ? 4.6 : level >= 5 ? 4.2 : 3,
     rehit: evo ? 0.35 : 0.5,
+    size: 4 * mods.bulk,
   };
 }
 
@@ -459,7 +535,7 @@ export function lanceStats(level: number, mods: Modifiers): LanceStats {
     damage: (14 + 6 * atLeast(level, 2) + 8 * atLeast(level, 5) + 12 * evo) * mods.damage,
     cooldown: 1.6 * (level >= 3 ? 0.8 : 1) * mods.cooldown,
     count: 1 + atLeast(level, 4) + evo,
-    radius: (4 + atLeast(level, 5) + 2 * evo) * mods.area,
+    radius: (4 + atLeast(level, 5) + 2 * evo) * mods.area * mods.heft,
     speed: 210,
     life: 0.8,
   };
@@ -509,7 +585,7 @@ export function moonStats(level: number, mods: Modifiers): MoonStats {
     cooldown: 2 * (level >= 5 ? 0.8 : 1) * mods.cooldown,
     count: 1 + atLeast(level, 4) + evo,
     reach: 66 + 18 * atLeast(level, 3) + 6 * evo,
-    radius: (7 + 3 * evo) * mods.area,
+    radius: (7 + 3 * evo) * mods.area * mods.heft,
     speed: evo ? 120 : 150,
     rehit: evo ? 0.3 : 0,
   };
@@ -787,6 +863,10 @@ export function upgradeDescription(upgrade: Upgrade): string {
       // 부싯돌도 그 레벨에서의 확률을 바로 적어 준다.
       if (upgrade.id === 'flint') {
         return `쓰러진 그림자가 ${Math.round(sparkChance(upgrade.level) * 100)}% 확률로 터진다`;
+      }
+      // 손거울은 덤으로 나가는 하나가 이 레벨에서 얼마나 아픈지를 적는다. "+20%"라고만 적으면 더 센 하나로 읽힌다.
+      if (upgrade.id === 'mirror') {
+        return `무기마다 하나 더, 그 하나의 피해 ${Math.round(echoPower(upgrade.level) * 100)}%`;
       }
       return PASSIVES[upgrade.id].perLevel;
     case 'boon':

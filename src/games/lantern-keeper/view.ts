@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { darknessTexture, flashOf, FLOOR_OF, HERO_FRAMES, LK, LOOK } from './art';
 import { ENEMIES, GLIDE, POSTS, QUAKE, STAGES } from './data';
 import { HUD_HEIGHT } from './hud';
-import { auraStats, beamStats, fireflyStats, isEvolved } from './rules';
+import { auraStats, beamStats, fireflyStats, isEvolved, ringSpots, sideTurn, volley } from './rules';
 import {
   AIM_LOCK_SECONDS,
   CHARGE_SECONDS,
@@ -52,6 +52,8 @@ interface Flash {
   points: number[];
   evolved: boolean;
   life: number;
+  /** 약한 덤으로 붙은 줄기면 그 힘 */
+  power?: number;
 }
 
 /** 횃불을 휘두른 자국. 플레이어가 들고 휘두르므로 플레이어를 따라 그린다. */
@@ -62,6 +64,16 @@ interface Swing {
   count: number;
   evolved: boolean;
   life: number;
+  /** 마지막 쪽이 약한 덤이면 그 힘 */
+  faint?: number;
+}
+
+/**
+ * 약한 덤(손거울과 곁불이 더 내 주는 한 개)을 그리는 진하기. 약할수록 흐리고, 온전한 것(힘이 없거나 1)은 또렷하다.
+ * 덤이 온전해지기 전에는 눈으로도 덜 여문 것이 보이게 한다.
+ */
+function dim(power: number | undefined): number {
+  return power === undefined || power >= 1 ? 1 : 0.25 + 0.5 * power;
 }
 
 const RING_SECONDS = 0.22;
@@ -277,13 +289,14 @@ export class RunView {
   }
 
   /** 횃불을 휘두른 자국을 잠깐 그린다. */
-  swing(angle: number, arc: number, reach: number, count: number, evolved: boolean): void {
-    this.swings.push({ angle, arc, reach, count, evolved, life: SWING_SECONDS });
+  swing(angle: number, arc: number, reach: number, count: number, evolved: boolean, faint?: number): void {
+    this.swings.push({ angle, arc, reach, count, evolved, life: SWING_SECONDS, faint });
   }
 
   /**
    * 횃불을 휘두른 자국: 부채꼴을 한쪽 끝에서 다른 쪽 끝으로 쓸고 지나가며 옅어진다.
    * 쓸고 지나가는 끝에는 밝은 줄을 긋는다. 맞은편도 베면 맞은편에도 같은 자국을 그린다.
+   * 덤으로 붙은 쪽이 약하면 그만큼 흐리게 그린다.
    */
   private drawSwings(dt: number, g: Phaser.GameObjects.Graphics): void {
     let kept = 0;
@@ -294,13 +307,14 @@ export class RunView {
       const swept = Math.min(1, progress * 2);
       const fade = 1 - progress;
       for (let k = 0; k < swing.count; k += 1) {
-        const from = swing.angle + k * Math.PI - swing.arc / 2;
+        const from = swing.angle + sideTurn(k) - swing.arc / 2;
         const to = from + swing.arc * swept;
-        g.fillStyle(swing.evolved ? LOOK.torchEvo : LOOK.torch, 0.5 * fade);
+        const solid = fade * (k === swing.count - 1 ? dim(swing.faint) : 1);
+        g.fillStyle(swing.evolved ? LOOK.torchEvo : LOOK.torch, 0.5 * solid);
         g.beginPath();
         g.slice(this.centerX, this.centerY, swing.reach, from, to, false);
         g.fillPath();
-        g.lineStyle(2, LOOK.torchEdge, 0.9 * fade);
+        g.lineStyle(2, LOOK.torchEdge, 0.9 * solid);
         g.lineBetween(
           this.centerX + Math.cos(to) * 6,
           this.centerY + Math.sin(to) * 6,
@@ -315,8 +329,8 @@ export class RunView {
   }
 
   /** 번갯불이 지나간 길을 잠깐 그린다. points는 세상 좌표의 x, y가 번갈아 들어 있다. */
-  bolt(points: number[], evolved: boolean): void {
-    this.flashes.push({ points, evolved, life: FLASH_SECONDS });
+  bolt(points: number[], evolved: boolean, power?: number): void {
+    this.flashes.push({ points, evolved, life: FLASH_SECONDS, power });
   }
 
   /**
@@ -879,35 +893,46 @@ export class RunView {
     }
     this.enemies.end();
 
-    // 불씨탄, 빛화살, 반딧불, 떨어지는 별. 돌려쓰는 그림이라 방향을 매번 다시 정한다.
+    // 불씨탄, 빛화살, 반딧불, 떨어지는 별. 돌려쓰는 그림이라 방향과 크기, 진하기를 매번 다시 정한다.
+    // 날아가는 것들은 공격 범위와 큼직한 불씨만큼 커 보인다(판정도 그만큼 크다). 약한 덤은 흐리게 그린다.
+    // 불씨탄과 반딧불의 몸집은 따로 센다(Modifiers.bulk).
+    const grown = sim.mods.area * sim.mods.heft;
+    const bulk = sim.mods.bulk;
     this.shots.begin();
     for (const shot of s.shots) {
-      const image = this.shots.put(SHOT_KEY[shot.look], shot.x + offsetX, shot.y + offsetY).setScale(1);
       const turned = shot.look === 'lance' || shot.look === 'lanceEvo';
+      const image = this.shots
+        .put(SHOT_KEY[shot.look], shot.x + offsetX, shot.y + offsetY)
+        .setScale(turned ? grown : bulk)
+        .setAlpha(dim(shot.power));
       image.setRotation(turned ? Math.atan2(shot.vy, shot.vx) : 0);
     }
     if (s.weapons.firefly) {
       const stats = fireflyStats(s.weapons.firefly, sim.mods);
       const key = isEvolved(s.weapons.firefly) ? LK.fireflyEvo : LK.firefly;
-      for (let k = 0; k < stats.count; k += 1) {
-        const angle = s.fireflyAngle + (k / stats.count) * Math.PI * 2;
+      const powers = volley(stats.count, sim.mods.echo);
+      const spots = ringSpots(powers);
+      for (let k = 0; k < powers.length; k += 1) {
+        const angle = s.fireflyAngle + spots[k] * Math.PI * 2;
         this.shots
           .put(key, this.centerX + Math.cos(angle) * stats.orbit, this.centerY + Math.sin(angle) * stats.orbit)
           .setRotation(0)
-          .setScale(1);
+          .setScale(bulk)
+          .setAlpha(dim(powers[k]));
       }
     }
     // 보스가 쏜 빛덩이는 숨 쉬듯 커졌다 작아져서 우리 편 공격과 헷갈리지 않는다.
     const throb = 1 + 0.18 * Math.sin(seconds * 14);
     for (const hazard of s.hazards) {
-      this.shots.put(LK.orb, hazard.x + offsetX, hazard.y + offsetY).setRotation(0).setScale(throb);
+      this.shots.put(LK.orb, hazard.x + offsetX, hazard.y + offsetY).setRotation(0).setScale(throb).setAlpha(1);
     }
     // 초승달은 빙글빙글 돌면서 날고, 보름달은 천천히 돈다.
     for (const moon of s.moons) {
       this.shots
         .put(moon.evolved ? LK.moonEvo : LK.moon, moon.x + offsetX, moon.y + offsetY)
         .setRotation(seconds * (moon.evolved ? 5 : 16))
-        .setScale(1);
+        .setScale(grown)
+        .setAlpha(dim(moon.power));
     }
     for (const strike of s.strikes) {
       // 비스듬히 떨어져 내려온다.
@@ -915,7 +940,8 @@ export class RunView {
       this.shots
         .put(strike.evolved ? LK.starEvo : LK.star, strike.x + offsetX + fall * 0.35, strike.y + offsetY - fall)
         .setRotation(0)
-        .setScale(1);
+        .setScale(1)
+        .setAlpha(dim(strike.power));
     }
     this.shots.end();
 
@@ -926,7 +952,7 @@ export class RunView {
       const x = Math.round(fire.x + offsetX);
       const y = Math.round(fire.y + offsetY);
       // 꺼지기 직전에는 흐려지고, 타는 동안에는 일렁인다.
-      const fade = Math.min(1, fire.life / 0.5);
+      const fade = Math.min(1, fire.life / 0.5) * dim(fire.power);
       const flicker = 0.5 + 0.5 * Math.sin(seconds * 11 + fire.x * 0.3);
       g.fillStyle(fire.evolved ? LOOK.fireEvo : LOOK.fire, (0.2 + 0.08 * flicker) * fade);
       g.fillCircle(x, y, fire.radius);
@@ -949,24 +975,29 @@ export class RunView {
       const stats = beamStats(s.weapons.beam, sim.mods);
       const evolved = isEvolved(s.weapons.beam);
       const turn = s.beamAngle ?? 0;
-      for (let k = 0; k < stats.count; k += 1) {
-        const angle = turn + (k / stats.count) * Math.PI * 2;
+      const powers = volley(stats.count, sim.mods.echo);
+      const spots = ringSpots(powers);
+      for (let k = 0; k < powers.length; k += 1) {
+        const angle = turn + spots[k] * Math.PI * 2;
         const ax = Math.cos(angle);
         const ay = Math.sin(angle);
         const tipX = this.centerX + ax * stats.length;
         const tipY = this.centerY + ay * stats.length;
+        // 약한 덤은 흐리고 가늘게 그린다(맞는지는 줄기의 가운데로 가리므로 굵기는 보이는 것뿐이다).
+        const solid = dim(powers[k]);
+        const thin = powers[k] < 1 ? 0.6 : 1;
         for (const [half, color, alpha] of [
-          [stats.width + 3, LOOK.beam, evolved ? 0.4 : 0.32],
-          [stats.width * 0.5 + 0.5, LOOK.beamCore, evolved ? 0.7 : 0.55],
+          [(stats.width + 3) * thin, LOOK.beam, evolved ? 0.4 : 0.32],
+          [(stats.width * 0.5 + 0.5) * thin, LOOK.beamCore, evolved ? 0.7 : 0.55],
         ] as const) {
-          g.fillStyle(color, alpha);
+          g.fillStyle(color, alpha * solid);
           g.fillTriangle(this.centerX, this.centerY, tipX + ay * half, tipY - ax * half, tipX - ay * half, tipY + ax * half);
         }
       }
     }
     // 풍등이 불티를 떨구는 둘레: 옅게 칠하고, 떨굴 때마다 테두리가 밝아진다.
     for (const lamp of s.lamps) {
-      const fade = Math.min(1, lamp.life / 0.4);
+      const fade = Math.min(1, lamp.life / 0.4) * dim(lamp.power);
       const flare = Math.max(0, 1 - (lamp.every - lamp.tick) / 0.15);
       const x = Math.round(lamp.x + offsetX);
       const y = Math.round(lamp.y + offsetY);
@@ -980,18 +1011,19 @@ export class RunView {
     this.drawGuard(sim, seconds, g);
     if (this.shrooms) this.drawGrove(sim, seconds, offsetX, offsetY, g);
     for (const strike of s.strikes) {
-      g.lineStyle(1, LOOK.strike, 0.5);
+      g.lineStyle(1, LOOK.strike, 0.5 * dim(strike.power));
       g.strokeCircle(Math.round(strike.x + offsetX), Math.round(strike.y + offsetY), strike.radius);
     }
     // 종소리: 퍼져 나가면서 옅어지는 고리
     for (const wave of s.waves) {
       if (wave.delay > 0 || wave.radius <= 0) continue;
       const fade = 1 - wave.radius / wave.max;
+      const solid = dim(wave.power);
       const x = Math.round(wave.x + offsetX);
       const y = Math.round(wave.y + offsetY);
-      g.lineStyle(3, wave.evolved ? LOOK.bellEvo : LOOK.bell, 0.25 + 0.5 * fade);
+      g.lineStyle(3, wave.evolved ? LOOK.bellEvo : LOOK.bell, (0.25 + 0.5 * fade) * solid);
       g.strokeCircle(x, y, wave.radius);
-      g.lineStyle(1, LOOK.bolt, 0.3 + 0.6 * fade);
+      g.lineStyle(1, LOOK.bolt, (0.3 + 0.6 * fade) * solid);
       g.strokeCircle(x, y, wave.radius);
     }
     let kept = 0;
@@ -1022,7 +1054,7 @@ export class RunView {
       flash.life -= dt;
       if (flash.life <= 0) continue;
       // 처음 절반은 또렷하게 보이다가 빠르게 사라진다.
-      const alpha = Math.min(1, (flash.life / FLASH_SECONDS) * 2);
+      const alpha = Math.min(1, (flash.life / FLASH_SECONDS) * 2) * dim(flash.power);
       const { points } = flash;
       const trace = (): void => {
         air.beginPath();
@@ -1048,7 +1080,7 @@ export class RunView {
 
     // 풍등: 무리 위에 떠서 천천히 오르내리는 종이 등. 둥근 머리에 아래로 좁아지고, 아래 구멍의 불이 등 전체를 밝힌다.
     for (const lamp of s.lamps) {
-      const fade = Math.min(1, lamp.life / 0.4);
+      const fade = Math.min(1, lamp.life / 0.4) * dim(lamp.power);
       const bob = Math.sin(seconds * 3 + lamp.x * 0.11 + lamp.y * 0.07);
       const x = Math.round(lamp.x + offsetX);
       const y = Math.round(lamp.y + offsetY - LAMP_LIFT + bob * 1.5);
