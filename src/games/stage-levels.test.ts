@@ -28,7 +28,7 @@ const LAST_TEN = ALL_LEVELS.slice(-10);
 const average = (values: readonly number[]): number => values.reduce((sum, value) => sum + value, 0) / values.length;
 
 describe('단계 모드를 하는 게임', () => {
-  it('아홉 게임이고 모두 플레이할 수 있다', () => {
+  it('열 게임이고 모두 플레이할 수 있다', () => {
     expect(stageGames().map((game) => game.id)).toEqual([
       'color-sort',
       'pin-pull',
@@ -39,6 +39,7 @@ describe('단계 모드를 하는 게임', () => {
       'number-puzzle',
       'path-link',
       'match-three',
+      'box-push',
     ]);
     expect(stageGames().every((game) => game.sceneKey !== null && !game.versus)).toBe(true);
   });

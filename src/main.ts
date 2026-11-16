@@ -10,6 +10,7 @@ import { initPwa, isStandalone } from './core/pwa';
 import { initAudioUnlock } from './core/sfx';
 import { store } from './core/store';
 import { BlockFillScene } from './games/block-fill/BlockFillScene';
+import { BoxPushScene } from './games/box-push/BoxPushScene';
 import { ChosungQuizScene } from './games/chosung-quiz/ChosungQuizScene';
 import { ColorSortScene } from './games/color-sort/ColorSortScene';
 import { DuelScene } from './games/duel/DuelScene';
@@ -116,6 +117,7 @@ async function boot(): Promise<void> {
       NumberPuzzleScene,
       PathLinkScene,
       MatchThreeScene,
+      BoxPushScene,
       BlockFillScene,
       ChosungQuizScene,
       DuelScene,

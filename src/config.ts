@@ -194,4 +194,5 @@ export const SCENE = {
   blockFill: 'BlockFill',
   chosungQuiz: 'ChosungQuiz',
   matchThree: 'MatchThree',
+  boxPush: 'BoxPush',
 } as const;
