@@ -251,6 +251,13 @@ function drawCork(graphics: Phaser.GameObjects.Graphics): void {
 }
 
 /**
+ * 단계 모드에서 가장 최근에 만든 판. 단계 모드의 판은 단계 번호로 정해져서 다시 만들어도 똑같은 판이 나오는데,
+ * 만드는 데 시간이 걸린다(판 여럿을 만들어 저마다 아무렇게나 여러 번 부어 보느라, 느린 기기에서는 반 초쯤 화면이 멈춘다).
+ * 그래서 같은 단계를 다시 할 때는 만들어 둔 것을 그대로 쓴다. 판은 바뀌지 않는 값이라(부을 때마다 새 병들을 만든다) 다시 써도 된다.
+ */
+let lastLevelDeal: { level: number; stage: Stage } | null = null;
+
+/**
  * 색깔 물 나누기: 병을 누르고 다른 병을 누르면 맨 위의 물이 건너간다.
  * 같은 색끼리 한 병에 모으면 단계를 깨고, 단계마다 부을 수 있는 횟수가 정해져 있다.
  * 횟수가 다 떨어지거나 더 부을 곳이 없으면 끝난다.
@@ -368,8 +375,7 @@ export class ColorSortScene extends MiniGameScene {
   private dealNext(first: boolean): void {
     // 단계 모드에서는 단계 번호로 정해진 판 하나만 나오고, 부을 수 있는 횟수는 단계가 오를수록 빠듯해진다.
     const level = this.stageLevel;
-    const dealt =
-      level === null ? dealStage(this.stage, Math.random) : dealLevel(level, this.levelRandom());
+    const dealt = level === null ? dealStage(this.stage, Math.random) : this.levelDeal(level);
     this.stageData = dealt;
     this.tubes = dealt.tubes;
     this.budget = level === null ? pourBudget(dealt.par, this.stage) : levelPourBudget(dealt.par, level);
@@ -391,6 +397,12 @@ export class ColorSortScene extends MiniGameScene {
       }
       this.playing = true;
     });
+  }
+
+  /** 단계 모드의 그 단계의 판. 방금 한 단계를 다시 하는 것이면 만들어 둔 판을 그대로 준다. */
+  private levelDeal(level: number): Stage {
+    if (lastLevelDeal?.level !== level) lastLevelDeal = { level, stage: dealLevel(level, this.levelRandom()) };
+    return lastLevelDeal.stage;
   }
 
   /** 병들의 자리를 정해서 그린다. 병이 많으면 두 줄로 나눈다. */

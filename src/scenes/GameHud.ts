@@ -43,8 +43,13 @@ export class GameHud {
    * 그 뒤의 setScore와 setTime은 아무 일도 하지 않으므로, 게임은 여느 때처럼 불러도 된다.
    */
   showStage(level: number): void {
+    this.showTitle(`${level}단계`);
+  }
+
+  /** 점수와 시간이 없는 판의 HUD로 바꾼다: 가운데에 점수 대신 글자를 적고, 시간 막대는 그리지 않는다. */
+  showTitle(title: string): void {
     this.staged = true;
-    this.scoreText.setText(`${level}단계`);
+    this.scoreText.setText(title);
     this.timeBar.clear();
   }
 

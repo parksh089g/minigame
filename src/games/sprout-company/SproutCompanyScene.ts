@@ -2128,34 +2128,18 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
     );
   }
 
-  /** 줄의 둘째 줄에 작은 글씨로 설명을 적는다. 길면 줄여서 넣는다. */
-  /**
-   * 줄의 아랫줄. pal이 있으면 끝에 하트와 그 단짝의 이름을 단다.
-   * 자리가 모자라면 글자를 줄이고, 하트는 그대로 둔다.
-   */
+  /** 줄의 아랫줄에 작은 글씨로 설명을 적는다. 자리가 모자라면 줄여서 넣는다. */
   private rowDetail(
     panel: Container,
     x: number,
     middle: number,
     right: number,
     text: string,
-    pal: string | null = null,
     color: string = THEME_CSS.sub,
   ): void {
     const line = addText(this, x, middle + 2, text, { size: FONT_SIZE.small, color });
+    line.setScale(Math.min(1, (right - x) / line.width));
     panel.add(line);
-    if (pal === null) {
-      line.setScale(Math.min(1, (right - x) / line.width));
-      return;
-    }
-    const heart = this.add.image(0, middle + 8, SC.heart);
-    const name = addText(this, 0, middle + 2, pal, { size: FONT_SIZE.small, color: THEME_CSS.sub });
-    const gap = 6;
-    const scale = Math.min(1, (right - x - gap - heart.displayWidth - 2) / (line.width + name.width));
-    line.setScale(scale);
-    heart.setX(line.x + line.displayWidth + gap + heart.displayWidth / 2);
-    name.setScale(scale).setX(heart.x + heart.displayWidth / 2 + 2);
-    panel.add([heart, name]);
   }
 
   /** 이름 옆에 붙이는 작은 말(예: 잘하는 일, 덤으로 주는 효과). 자리가 모자라면 줄인다. */
@@ -2323,6 +2307,35 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
     });
   }
 
+  /**
+   * 직원 창의 얼굴 그림 왼쪽 위에 다는 하트: 뽑을 친구라면 단짝이 이미 회사에 있다는 뜻이고,
+   * 우리 친구라면 단짝과 나란히 앉아 있다는 뜻이다. 글 옆에 두면 그만큼 글씨가 줄어들어서 그림에 단다.
+   */
+  private faceHeart(panel: Container, left: number, middle: number): void {
+    panel.add(this.add.image(left + 12, middle - 10, SC.heart));
+  }
+
+  /**
+   * 직원 창의 얼굴 그림 아래에 이름표처럼 다는 교육 레벨. 기술이 열리기 전에는 "2/3"처럼 열리는 레벨까지 얼마나 왔는지를 적고,
+   * 열린 뒤에는 레벨만 초록 바탕에 적는다. 아랫줄에 "레벨 10"을 함께 적으면 기술의 설명이 줄어들어서 그림으로 옮겼다.
+   */
+  private levelBadge(panel: Container, left: number, middle: number, level: number, open: boolean): void {
+    const label = addText(this, 0, 0, open ? `${level}` : `${level}/${SKILL_LEVEL}`, {
+      size: FONT_SIZE.small,
+      color: THEME_CSS.inkDeep,
+      originX: 0.5,
+      originY: 0.5,
+    });
+    const height = 11;
+    const width = Math.max(height + 3, Math.ceil(label.width) + 4);
+    const x = Math.round(left + 24 - width / 2);
+    const y = middle + 7;
+    // 얼굴 그림 위에서도 또렷하게 흰 테를 두른다.
+    panel.add(addRoundRect(this, x - 1, y - 1, width + 2, height + 2, height / 2 + 1, THEME.white));
+    panel.add(addRoundRect(this, x, y, width, height, height / 2, open ? THEME.mint : THEME.butter));
+    panel.add(label.setPosition(Math.round(x + width / 2), y + height / 2));
+  }
+
   private buildStaffPanel(panel: Container): void {
     const state = this.state;
     const free = hasFreeDesk(state);
@@ -2338,7 +2351,9 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
     const step = Math.round(LEVEL_SPEED * 100);
 
     const inCompany = (id: StaffId | null): boolean => id !== null && state.desks.some((desk) => desk.staff === id);
-    const bottom = this.listPanel(panel, 'staff', '직원', rows, 38, 50, (row, middle, left, width) => {
+    // 목록 아래에 안내 두 줄과 자리 버튼의 줄이 놓인다. 가장 작은 화면(높이 426)에서 여덟 줄(뽑을 친구 셋, 팀장, 직원 넷)까지
+    // 쪽을 나누지 않고 들어가는 높이다. 여기서 2만 높아져도 그 여덟 줄이 두 쪽으로 나뉜다.
+    const bottom = this.listPanel(panel, 'staff', '직원', rows, 38, 62, (row, middle, left, width) => {
       const right = left + width - 70;
       if (row.kind === 'candidate') {
         const def = staffDef(row.id);
@@ -2348,9 +2363,9 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
         // 잘하는 일은 그림으로, 덤으로 주는 효과는 이름 옆에, 교육하면 열리는 기술은 아랫줄에 적는다.
         panel.add(this.add.image(name.x + name.width + 9, middle - 8, taskTexture(def.specialty)).setDisplaySize(11, 11));
         this.rowNote(panel, name.x + name.width + 18, middle, right, effectText(def.trait));
-        // 단짝이 이미 회사에 있으면 아랫줄 끝에 하트와 그 친구의 이름을 단다.
-        const buddy = buddyOf(row.id);
-        this.rowDetail(panel, left + 42, middle, right, SKILLS[def.skill].description, buddy && inCompany(buddy) ? staffDef(buddy).name : null);
+        // 아랫줄에는 기술 하나만 적는다. 단짝이 이미 회사에 있으면 얼굴 그림에 하트를 단다.
+        this.rowDetail(panel, left + 42, middle, right, SKILLS[def.skill].description);
+        if (inCompany(buddyOf(row.id))) this.faceHeart(panel, left, middle);
         this.costButton(panel, left + width - 66, middle - 13, cost, hireBlock(state, row.id) === null, () => {
           if (hire(state, row.id) < 0) return;
           this.play('hire');
@@ -2376,11 +2391,13 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
           block === 'locked'
             ? `${OFFICES[LEAD.unlockOffice].name}부터 둘 수 있어요`
             : (next?.description ?? leadLevel(state)?.description ?? '');
-        this.rowDetail(panel, left + 42, middle, right, detail);
+        // 버튼 대신 "잠김"이나 "최고"만 적는 줄은 오른쪽이 비므로, 그만큼 글을 더 길게 쓴다.
         if (block === 'locked' || block === 'max' || !next) {
+          this.rowDetail(panel, left + 42, middle, left + width - 52, detail);
           this.rowState(panel, left, width, middle, block === 'locked' ? '잠김' : '최고');
           return;
         }
+        this.rowDetail(panel, left + 42, middle, right, detail);
         this.costButton(panel, left + width - 66, middle - 13, next.cost, block === null, () => {
           if (!promoteLead(state)) return;
           this.play('hire');
@@ -2396,30 +2413,26 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
       const id = desk.staff as StaffId;
       const def = staffDef(id);
       const specialty = specialtyOf(state, id);
-      panel.add(this.portrait(left + 24, middle, id, 28));
+      const block = trainBlock(state, row.desk);
+      const open = skillOpen(state, row.desk);
+      // 교육할 수 있는 사무실이면 얼굴 그림 아래에 레벨을 단다. 그 자리를 내려고 얼굴을 조금 작게, 위로 올려 그린다.
+      if (block === 'locked' && desk.level === 0) {
+        panel.add(this.portrait(left + 24, middle, id, 28));
+      } else {
+        panel.add(this.portrait(left + 24, middle - 3, id, 26));
+        this.levelBadge(panel, left, middle, desk.level, open);
+      }
+      // 단짝과 나란히 앉았으면 얼굴 그림에 하트를 단다.
+      if (hasBuddy(state, row.desk)) this.faceHeart(panel, left, middle);
       const name = addText(this, left + 42, middle - 15, def.name, { color: THEME_CSS.inkDeep });
       panel.add(name);
       panel.add(
         this.add.image(name.x + name.width + 9, middle - 8, specialty ? taskTexture(specialty) : 'icon-star').setDisplaySize(11, 11),
       );
-      const paired = hasBuddy(state, row.desk);
-      if (paired) panel.add(this.add.image(name.x + name.width + 21, middle - 8, SC.heart));
-      this.rowNote(panel, name.x + name.width + (paired ? 29 : 18), middle, right, effectText(def.trait));
-      const block = trainBlock(state, row.desk);
-      // 아랫줄: 기술이 열렸으면 그 기술이 하는 일을, 아직이면 교육으로 얻는 것과 기술이 열리는 레벨을 적는다.
-      const skillName = SKILLS[def.skill].name;
-      const detail =
-        block === 'locked'
-          ? `${OFFICES[TRAINING.unlockOffice].name}부터 교육할 수 있어요`
-          : skillOpen(state, row.desk)
-            ? `레벨 ${desk.level}  ${SKILLS[def.skill].description}`
-            : desk.level > 0
-              ? `레벨 ${desk.level}  레벨 ${SKILL_LEVEL}에 ${skillName}`
-              : `일 속도 +${step}%  레벨 ${SKILL_LEVEL}에 ${skillName}`;
-      // 사장은 잘하는 일 대신 별을 달았으니, 사장이라는 것을 아랫줄에 적는다. 기술을 적을 때는 자리가 모자라서 뺀다.
-      const open = block !== 'locked' && skillOpen(state, row.desk);
-      // 열린 기술은 눈에 띄게 다른 색으로 적는다.
-      this.rowDetail(panel, left + 42, middle, right, specialty || open ? detail : `사장  ${detail}`, null, open ? THEME_CSS.good : THEME_CSS.sub);
+      this.rowNote(panel, name.x + name.width + 18, middle, right, effectText(def.trait));
+      // 아랫줄에는 그 친구의 기술이 하는 일 하나만 적는다. 열렸으면 눈에 띄는 색으로 바꾼다.
+      // 레벨이나 교육으로 얻는 것을 함께 적으면 줄마다 다른 크기로 줄어들어서, 레벨은 그림에, 얻는 것은 창 아래에 적는다.
+      this.rowDetail(panel, left + 42, middle, right, SKILLS[def.skill].description, open ? THEME_CSS.good : THEME_CSS.sub);
       if (block === 'locked' || block === 'max') {
         this.rowState(panel, left, width, middle, block === 'locked' ? '잠김' : '최고');
         return;
@@ -2430,9 +2443,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
         if (desk.level === SKILL_LEVEL) {
           this.closePanel();
           this.play('hire');
-          const centerY = (ROOM_TOP + this.roomBottom) / 2;
-          showBanner(this, centerY, `${skillName}!`, THEME_CSS.good, 1800, DEPTH.banner);
-          showBanner(this, centerY + 22, `${def.name}: ${SKILLS[def.skill].description}`, THEME_CSS.sub, 1800, DEPTH.banner, FONT_SIZE.normal);
+          this.announceSkill(id);
           this.save();
           this.refreshNow();
           return;
@@ -2443,36 +2454,84 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
       });
     });
 
+    // 뽑을 친구의 얼굴에 하트가 붙었으면 그 뜻부터 알려 준다.
     const message =
       candidates.length > 0
-        ? `새 친구를 뽑거나 교육해요. 레벨 ${SKILL_LEVEL}에 기술이 열려요`
+        ? candidates.some((id) => inCompany(buddyOf(id)))
+          ? '하트가 붙은 친구는 단짝이 회사에 있어요'
+          : '새 친구를 뽑거나 교육해요'
         : pool.length === 0
           ? '모든 친구가 회사에 들어왔어요'
           : state.office + 1 < OFFICES.length
             ? '빈 자리가 없어요. 이사하면 더 뽑을 수 있어요'
             : '빈 자리가 없어요';
     panel.add(
-      addText(this, W / 2, bottom + 3, message, {
+      addText(this, W / 2, bottom + 2, message, {
         size: FONT_SIZE.small,
         color: candidates.length > 0 ? THEME_CSS.faint : THEME_CSS.accent,
+        originX: 0.5,
+      }),
+    );
+    // 교육으로 얻는 것과 교육이 열리는 사무실은 누구나 같아서, 줄마다 적지 않고 여기에 한 번 적는다.
+    const training =
+      state.office < TRAINING.unlockOffice
+        ? `${OFFICES[TRAINING.unlockOffice].name}부터 교육해서 기술을 열 수 있어요`
+        : `교육 한 번에 일 속도 +${step}%, 레벨 ${SKILL_LEVEL}에 기술이 열려요`;
+    panel.add(
+      addText(this, W / 2, bottom + 15, training, {
+        size: FONT_SIZE.small,
+        color: THEME_CSS.sub,
         originX: 0.5,
       }),
     );
     // 단짝끼리 옆자리에 앉히려면 자리를 바꾼다.
     const frameLeft = 10;
     const frameWidth = W - 20;
-    this.rowLine(panel, frameLeft, bottom + 20, frameWidth);
-    panel.add(this.add.image(frameLeft + 19, bottom + 37, SC.heart));
+    this.rowLine(panel, frameLeft, bottom + 32, frameWidth);
+    panel.add(this.add.image(frameLeft + 19, bottom + 49, SC.heart));
     panel.add(
-      addText(this, frameLeft + 28, bottom + 37, `단짝과 옆자리면 일 속도 +${Math.round(BUDDY.speed * 100)}%`, {
+      addText(this, frameLeft + 28, bottom + 49, `단짝과 옆자리면 일 속도 +${Math.round(BUDDY.speed * 100)}%`, {
         size: FONT_SIZE.small,
         color: THEME_CSS.sub,
         originY: 0.5,
       }),
     );
-    this.button(panel, frameLeft + frameWidth - 66, bottom + 25, 56, 24, '자리', 'yellow', () => {
+    this.button(panel, frameLeft + frameWidth - 66, bottom + 37, 56, 24, '자리', 'yellow', () => {
       this.seatPicked = -1;
       this.openPanel('seats');
+    });
+  }
+
+  /**
+   * 기술이 열렸음을 방 한가운데에 알린다: 기술의 이름을 크게 띄우고, 그 아래에 누구의 무슨 기술인지를 적는다.
+   * 설명은 그 기술이 하는 일을 처음 알려 주는 글이라, 책상과 이름표 위에서도 읽히게 흰 바탕을 깔고 이름과 닿지 않게 띄운다.
+   */
+  private announceSkill(id: StaffId): void {
+    const def = staffDef(id);
+    const skill = SKILLS[def.skill];
+    const centerY = (ROOM_TOP + this.roomBottom) / 2;
+    const life = 1800;
+    showBanner(this, centerY - 12, `${skill.name}!`, THEME_CSS.good, life, DEPTH.banner);
+    const line = addText(this, W / 2, centerY + 22, `${def.name}: ${skill.description}`, {
+      color: THEME_CSS.inkDeep,
+      originX: 0.5,
+      originY: 0.5,
+    }).setDepth(DEPTH.banner);
+    const width = Math.ceil(line.width) + 14;
+    const height = 20;
+    const plate = addRoundRect(this, Math.round(W / 2 - width / 2), line.y - height / 2, width, height, height / 2, THEME.white, 0.92)
+      .setDepth(DEPTH.banner);
+    // 글이 바탕 위에 오게, 바탕을 먼저 만든 글 아래로 내린다.
+    this.children.moveBelow(plate, line);
+    this.tweens.add({
+      targets: [plate, line],
+      alpha: 0,
+      delay: life * 0.6,
+      duration: life * 0.4,
+      onComplete: () => {
+        plate.destroy();
+        line.destroy();
+      },
     });
   }
 

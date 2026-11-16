@@ -50,6 +50,7 @@ import {
   depthName,
   depthRules,
   echoPower,
+  echoText,
   embersFor,
   endlessBossKind,
   endlessScale,
@@ -457,6 +458,50 @@ describe('성장', () => {
         if (percent % 100 > 0) expect(powers[powers.length - 1]).toBe((percent % 100) / 100);
       }
     }
+  });
+
+  it('손거울 카드는 곁불을 들고 온 판에서는 그만큼을 더한 값을 적고, 한 개를 넘으면 둘이 더 나간다고 적는다', () => {
+    const card = (level: number, echo?: number): string =>
+      upgradeDescription({ type: 'passive', id: 'mirror', level }, echo === undefined ? undefined : { echo });
+    // 영구 강화가 없는 판(오늘의 판도 그렇다)은 손거울만의 값이다.
+    expect(card(1)).toBe('무기마다 하나 더, 그 하나의 피해 20%');
+    expect(card(1, 0)).toBe(card(1));
+    expect(card(MAX_LEVEL, 0)).toBe('무기마다 하나 더, 그 하나의 피해 100%');
+    // 곁불을 다 올린 판: 첫 카드부터 그만큼이 더 붙고, 손거울을 다 올리면 온전한 하나에 약한 하나가 더 붙는다.
+    const most = META.echo.maxLevel;
+    expect(most).toBe(3);
+    expect(card(1, most)).toBe('무기마다 하나 더, 그 하나의 피해 35%');
+    expect(card(MAX_LEVEL - 1, most)).toBe('무기마다 하나 더, 그 하나의 피해 95%');
+    expect(card(MAX_LEVEL, 1)).toBe('무기마다 둘 더, 그중 하나의 피해 5%');
+    expect(card(MAX_LEVEL, most)).toBe('무기마다 둘 더, 그중 하나의 피해 15%');
+    // 어떤 짝이든 카드에 적힌 것이 그 카드를 고른 뒤에 실제로 나가는 덤과 같다.
+    for (let level = 1; level <= MAX_LEVEL; level += 1) {
+      for (let echo = 0; echo <= most; echo += 1) {
+        const extras = volley(0, modifiers({ mirror: level }, { echo }).echo);
+        const weak = Math.round(extras[extras.length - 1] * 100);
+        expect(extras.length === 1 || (extras.length === 2 && extras[0] === 1)).toBe(true);
+        expect(card(level, echo)).toBe(
+          extras.length === 1 ? `무기마다 하나 더, 그 하나의 피해 ${weak}%` : `무기마다 둘 더, 그중 하나의 피해 ${weak}%`,
+        );
+      }
+    }
+    // 다른 패시브와 무기의 카드는 들고 온 영구 강화에 따라 달라지지 않는다.
+    for (const id of Object.keys(PASSIVES) as PassiveId[]) {
+      if (id === 'mirror') continue;
+      expect(upgradeDescription({ type: 'passive', id, level: 1 }, { echo: most })).toBe(
+        upgradeDescription({ type: 'passive', id, level: 1 }),
+      );
+    }
+    for (const id of WEAPON_ORDER) {
+      expect(upgradeDescription({ type: 'weapon', id, level: 1 }, { echo: most })).toBe(
+        upgradeDescription({ type: 'weapon', id, level: 1 }),
+      );
+    }
+    // 덤이 없으면 레벨마다 붙는 힘을 적은 글을, 덤이 꼭 두 개면 약한 것 없이 둘이라고만 적는다.
+    expect(echoText(0)).toBe(PASSIVES.mirror.perLevel);
+    expect(echoText(1)).toBe('무기마다 하나 더, 그 하나의 피해 100%');
+    expect(echoText(2)).toBe('무기마다 둘 더');
+    expect(echoText(2.5)).toBe('무기마다 3개 더, 그중 하나의 피해 50%');
   });
 
   it('약한 덤은 온전한 것들이 서는 자리와 겨누는 쪽을 바꾸지 않는다', () => {

@@ -133,6 +133,8 @@ export function showChoices(
   extras: readonly ChoiceExtra[] = [],
   /** 고를 수 있는 카드인지. 고를 수 없는 카드는 흐리게 보이고 눌리지 않는다(골라내기에서 뺄 수 없는 것). */
   pickable: (upgrade: Upgrade) => boolean = () => true,
+  /** 카드에 적을 설명. 판에 따라 달라지는 것(곁불을 들고 온 판의 손거울)이 있으면 장면이 그 판의 값으로 적어 준다. */
+  describe: (upgrade: Upgrade) => string = upgradeDescription,
 ): void {
   const { width, height } = scene.scale;
   const parts: Phaser.GameObjects.GameObject[] = [];
@@ -168,7 +170,7 @@ export function showChoices(
         }),
       ),
       description: keep(
-        addText(scene, left + TEXT_LEFT, 0, upgradeDescription(upgrade), {
+        addText(scene, left + TEXT_LEFT, 0, describe(upgrade), {
           color: CSS.silver,
           wrapWidth: CARD_WIDTH - TEXT_LEFT - 8,
           lineSpacing: 1,

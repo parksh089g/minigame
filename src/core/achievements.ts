@@ -147,6 +147,8 @@ export const ACHIEVEMENTS: readonly Achievement[] = [
   { id: 'tail-450', group: 'score', title: '꼬리의 달인', description: '꼬리 잡기 450점 이상', goal: 450, reward: 50, measure: bestOf('tail-chase') },
   { id: 'logic-400', group: 'score', title: '조심조심', description: '논리 타일 400점 이상', goal: 400, reward: 20, measure: bestOf('logic-tiles') },
   { id: 'logic-800', group: 'score', title: '논리의 달인', description: '논리 타일 800점 이상', goal: 800, reward: 50, measure: bestOf('logic-tiles') },
+  { id: 'nemo-150', group: 'score', title: '쓱쓱 색칠', description: '네모 로직 150점 이상', goal: 150, reward: 20, measure: bestOf('nemo-logic') },
+  { id: 'nemo-300', group: 'score', title: '네모의 달인', description: '네모 로직 300점 이상', goal: 300, reward: 50, measure: bestOf('nemo-logic') },
   { id: 'number-350', group: 'score', title: '숫자 탐정', description: '숫자 퍼즐 350점 이상', goal: 350, reward: 20, measure: bestOf('number-puzzle') },
   { id: 'number-700', group: 'score', title: '숫자의 달인', description: '숫자 퍼즐 700점 이상', goal: 700, reward: 50, measure: bestOf('number-puzzle') },
   { id: 'path-200', group: 'score', title: '술술 잇기', description: '길 잇기 200점 이상', goal: 200, reward: 20, measure: bestOf('path-link') },

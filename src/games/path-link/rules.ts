@@ -807,18 +807,25 @@ export function levelDetour(level: number): number {
 }
 
 /**
- * 단계 모드의 한 단계. 시간은 흐르지 않고(elapse를 부르지 않는다), 판 하나를 깨면 끝난다.
- * 같은 random이면 같은 판이 나온다.
+ * 단계 모드의 level번째 단계에 나오는 문제. 같은 random이면 같은 문제가 나온다.
  * 그 칸의 판을 LEVEL_PUZZLES개 만들어서, 길이 돌아가는 정도가 그 단계가 노리는 값에 가장 가까운 판을 쓴다.
+ * 만드는 데 시간이 걸리므로(느린 기기에서는 반 초쯤), 같은 단계를 다시 할 때는 만들어 둔 문제를 puzzleRun에 넘겨서 쓴다.
  */
-export function levelRun(level: number, random: () => number): RunState {
+export function levelPuzzle(level: number, random: () => number): Puzzle {
   const plan = levelPlan(level);
   const target = levelDetour(level);
-  const puzzle = pickBest(
+  return pickBest(
     LEVEL_PUZZLES,
     () => generatePuzzle(plan.size, random, plan.pairs),
     (made) => -Math.abs(detourShare(made) - target),
   );
+}
+
+/**
+ * 문제 하나를 푸는 단계 모드의 한 판. 시간은 흐르지 않고(elapse를 부르지 않는다), 판 하나를 깨면 끝난다.
+ * 문제는 바뀌지 않는 값이라(길을 그릴 때마다 새 판을 만든다), 같은 문제로 몇 번이든 새 판을 열 수 있다.
+ */
+export function puzzleRun(puzzle: Puzzle): RunState {
   return {
     stage: 1,
     board: newBoard(puzzle),
@@ -827,4 +834,9 @@ export function levelRun(level: number, random: () => number): RunState {
     boardsCleared: 0,
     pairsLinked: 0,
   };
+}
+
+/** 단계 모드의 한 단계: 그 단계의 문제(levelPuzzle)를 푸는 판. 같은 random이면 같은 판이 나온다. */
+export function levelRun(level: number, random: () => number): RunState {
+  return puzzleRun(levelPuzzle(level, random));
 }

@@ -246,6 +246,26 @@ export const SPRITES = {
     '................',
   ],
 
+  // 네모 로직: 줄마다의 숫자를 따라 칠해서 나온 하트
+  'icon-nemo': [
+    '................',
+    '.aaaaaaaaaaaaaa.',
+    '.aaeaeaeaeaeaaa.',
+    '.aaccccccccccaa.',
+    '.aecc22cc22ccaa.',
+    '.aac22222222caa.',
+    '.aec22222222caa.',
+    '.aac22222222caa.',
+    '.aecc222222ccaa.',
+    '.aaccc2222cccaa.',
+    '.aecccc22ccccaa.',
+    '.aaccccccccccaa.',
+    '.aaaaaaaaaaaaaa.',
+    '.aaaaaaaaaaaaaa.',
+    '................',
+    '................',
+  ],
+
   'icon-number': [
     '................',
     '.cccc.cccc.cccc.',
