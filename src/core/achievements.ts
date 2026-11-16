@@ -163,6 +163,8 @@ export const ACHIEVEMENTS: readonly Achievement[] = [
   { id: 'brick-450', group: 'score', title: '벽돌의 달인', description: '벽돌 깨기 450점 이상', goal: 450, reward: 50, measure: bestOf('brick-break') },
   { id: 'slot-500', group: 'score', title: '달콤한 행운', description: '사탕 슬롯 500점 이상', goal: 500, reward: 20, measure: bestOf('candy-slot') },
   { id: 'slot-1500', group: 'score', title: '사탕 부자', description: '사탕 슬롯 1500점 이상', goal: 1500, reward: 50, measure: bestOf('candy-slot') },
+  { id: 'garden-1000', group: 'score', title: '든든한 울타리', description: '텃밭 1000점 이상', goal: 1000, reward: 20, measure: bestOf('garden-guard') },
+  { id: 'garden-3000', group: 'score', title: '텃밭의 달인', description: '텃밭 3000점 이상', goal: 3000, reward: 50, measure: bestOf('garden-guard') },
   { id: 'lantern-3000', group: 'score', title: '꺼지지 않는 불', description: '등불지기 3000점 이상', goal: 3000, reward: 20, measure: bestOf('lantern-keeper') },
   { id: 'lantern-8000', group: 'score', title: '새벽을 본 등불', description: '등불지기 8000점 이상', goal: 8000, reward: 50, measure: bestOf('lantern-keeper') },
   { id: 'company-200', group: 'score', title: '소문난 회사', description: '새싹 컴퍼니 평판 200', goal: 200, reward: 20, measure: bestOf('sprout-company') },

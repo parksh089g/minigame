@@ -196,4 +196,5 @@ export const SCENE = {
   boxPush: 'BoxPush',
   brickBreak: 'BrickBreak',
   candySlot: 'CandySlot',
+  gardenGuard: 'GardenGuard',
 } as const;

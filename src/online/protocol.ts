@@ -31,6 +31,7 @@ export const RANKED_GAMES = [
   'box-push',
   'brick-break',
   'candy-slot',
+  'garden-guard',
 ] as const;
 
 export type RankedGame = (typeof RANKED_GAMES)[number];
