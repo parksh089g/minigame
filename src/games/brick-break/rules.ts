@@ -72,7 +72,7 @@ export function ballSpeed(elapsed: number): number {
 /** 공이 옆으로 누워도 세로 빠르기는 전체의 이만큼은 남긴다. 공이 좌우 벽 사이만 오가며 시간을 끌지 않는다. */
 export const MIN_VERTICAL_RATIO = 0.3;
 
-/** 벽돌이 내려오는 속도(px/s): 처음에는 한 줄에 10초쯤, CREEP_FULL_SECONDS 뒤에는 3초쯤 걸린다. */
+/** 벽돌이 내려오는 속도(px/s): 처음에는 한 줄에 9초쯤, CREEP_FULL_SECONDS 뒤에는 3초쯤 걸린다. */
 export const CREEP_START = 1.6;
 export const CREEP_MAX = 5;
 export const CREEP_FULL_SECONDS = 120;
