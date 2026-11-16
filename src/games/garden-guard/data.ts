@@ -238,7 +238,7 @@ export const UPGRADES: Readonly<Record<UpgradeId, UpgradeDef>> = {
   crit: { name: '콕 찌르기', blurb: '가끔 크게 맞혀요. 풍뎅이 껍데기도 뚫어요', maxLevel: 10, cost: 25, growth: 1.7 },
   splash: { name: '물보라', blurb: '맞은 자리 둘레의 벌레도 함께 젖어요', maxLevel: 6, cost: 50, growth: 2 },
   chill: { name: '찬물', blurb: '맞은 벌레가 잠깐 느려져요', maxLevel: 5, cost: 40, growth: 2 },
-  thorn: { name: '가시 울타리', blurb: '갉은 벌레에게 그 피해를 되갚아요', maxLevel: 10, cost: 20, growth: 1.6 },
+  thorn: { name: '가시 울타리', blurb: '울타리를 갉는 벌레가 가시에 찔려요', maxLevel: 10, cost: 20, growth: 1.6 },
   harvest: { name: '풍년', blurb: '씨앗을 더 많이 받아요', maxLevel: 10, cost: 30, growth: 1.7 },
   helper: { name: '해바라기', blurb: '해바라기가 옆에서 알아서 씨를 쏴요', maxLevel: 2, cost: 150, growth: 10 },
   compost: { name: '해바라기 거름', blurb: '해바라기가 쏘는 씨가 세져요', maxLevel: 6, cost: 80, growth: 2 },

@@ -207,7 +207,7 @@ function effectParts(id: UpgradeId, level: number): readonly [label: string, val
     case 'chill':
       return ['느리게', none ? '없음' : percent(stats.chill)];
     case 'thorn':
-      return ['되갚기', none ? '없음' : percent(STEP.thorn * level)];
+      return ['물총의', percent(STEP.thorn * level)];
     case 'harvest':
       return ['씨앗', percent(stats.seedMult)];
     case 'helper':
