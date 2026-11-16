@@ -15,7 +15,7 @@
 export const SIZE = 3;
 export const CELLS = SIZE * SIZE;
 
-export type SymbolKey = 'sprout' | 'drop' | 'heart' | 'star' | 'moon' | 'rainbow';
+export type SymbolKey = 'cherry' | 'clover' | 'bell' | 'horseshoe' | 'diamond' | 'seven';
 
 export interface SymbolInfo {
   key: SymbolKey;
@@ -28,18 +28,18 @@ export interface SymbolInfo {
 
 /**
  * 그림의 번호 순서대로. 흔한 그림일수록 상금이 적다.
- * 무지개는 어떤 그림으로도 쳐 주는 그림이고, 무지개 셋이 한 줄에 놓이면 무지개의 상금을 준다.
+ * 7은 어떤 그림으로도 쳐 주는 그림이고, 7 셋이 한 줄에 놓이면 7의 상금을 준다.
  */
 export const SYMBOLS: readonly SymbolInfo[] = [
-  { key: 'sprout', name: '새싹', value: 2, weight: 30 },
-  { key: 'drop', name: '물방울', value: 3, weight: 25 },
-  { key: 'heart', name: '하트', value: 5, weight: 19 },
-  { key: 'star', name: '별', value: 8, weight: 13 },
-  { key: 'moon', name: '달', value: 12, weight: 8 },
-  { key: 'rainbow', name: '무지개', value: 20, weight: 5 },
+  { key: 'cherry', name: '체리', value: 2, weight: 30 },
+  { key: 'clover', name: '클로버', value: 3, weight: 25 },
+  { key: 'bell', name: '종', value: 5, weight: 19 },
+  { key: 'horseshoe', name: '말굽', value: 8, weight: 13 },
+  { key: 'diamond', name: '다이아', value: 12, weight: 8 },
+  { key: 'seven', name: '7', value: 20, weight: 5 },
 ];
 
-/** 무지개의 그림 번호 */
+/** 7의 그림 번호 */
 export const WILD = 5;
 /** 부적으로 줄여도 그림의 무게는 이 밑으로 내려가지 않는다. 어떤 그림도 아예 안 나오게 되지는 않는다. */
 export const MIN_WEIGHT = 3;
@@ -70,7 +70,7 @@ export const LINES: readonly Line[] = [
 
 /**
  * 한 줄의 세 칸이 어떤 그림으로 맞았는지. 맞지 않았으면 null.
- * 무지개는 다른 그림으로 쳐 주고, 셋이 다 무지개면 무지개로 맞은 것이다.
+ * 7은 다른 그림으로 쳐 주고, 셋이 다 7이면 7로 맞은 것이다.
  */
 export function lineSymbol(grid: Grid, line: Line): number | null {
   let symbol: number | null = null;
@@ -109,7 +109,7 @@ export interface CharmEffect {
   lastTimes?: number;
   /** 한 줄도 맞지 않은 스핀의 바로 다음 스핀의 상금에 곱하는 값 */
   reboundTimes?: number;
-  /** 가운데 칸이 다른 그림 대신 무지개로 나올 확률(0~1). 그림을 뽑기 전에 먼저 따진다. */
+  /** 가운데 칸이 다른 그림 대신 7로 나올 확률(0~1). 그림을 뽑기 전에 먼저 따진다. */
   centerWild?: number;
   /** 라운드를 넘길 때, 남은 사탕 SAVINGS_PER개마다 한 개씩 받는 덤의 한도 */
   savingsCap?: number;
@@ -125,11 +125,11 @@ export interface CharmInfo {
   effect: CharmEffect;
 }
 
-const SPROUT = 0;
-const DROP = 1;
-const HEART = 2;
-const STAR = 3;
-const MOON = 4;
+const CHERRY = 0;
+const CLOVER = 1;
+const BELL = 2;
+const HORSESHOE = 3;
+const DIAMOND = 4;
 
 /** 저금통: 남은 사탕 이만큼마다 한 개를 덤으로 받는다. */
 export const SAVINGS_PER = 5;
@@ -140,20 +140,20 @@ export const SAVINGS_PER = 5;
  */
 export const CHARMS: readonly CharmInfo[] = [
   // 확률: 그림이 나올 확률을 바꾼다.
-  { id: 'more-sprout', name: '새싹 듬뿍', description: '새싹이 더 자주 나와요', kind: 'odds', price: 5, effect: { weight: [SPROUT, 36] } },
-  { id: 'more-drop', name: '물방울 듬뿍', description: '물방울이 더 자주 나와요', kind: 'odds', price: 5, effect: { weight: [DROP, 30] } },
-  { id: 'more-heart', name: '하트 듬뿍', description: '하트가 더 자주 나와요', kind: 'odds', price: 6, effect: { weight: [HEART, 26] } },
-  { id: 'more-star', name: '별 듬뿍', description: '별이 더 자주 나와요', kind: 'odds', price: 7, effect: { weight: [STAR, 22] } },
-  { id: 'more-moon', name: '달 듬뿍', description: '달이 더 자주 나와요', kind: 'odds', price: 8, effect: { weight: [MOON, 20] } },
-  { id: 'more-rainbow', name: '무지개 듬뿍', description: '무지개가 더 자주 나와요', kind: 'odds', price: 8, effect: { weight: [WILD, 4] } },
-  { id: 'less-sprout', name: '새싹 덜기', description: '새싹이 덜 나와요', kind: 'odds', price: 5, effect: { weight: [SPROUT, -18] } },
-  { id: 'less-drop', name: '물방울 덜기', description: '물방울이 덜 나와요', kind: 'odds', price: 5, effect: { weight: [DROP, -15] } },
+  { id: 'more-cherry', name: '체리 듬뿍', description: '체리가 더 자주 나와요', kind: 'odds', price: 5, effect: { weight: [CHERRY, 36] } },
+  { id: 'more-clover', name: '클로버 듬뿍', description: '클로버가 더 자주 나와요', kind: 'odds', price: 5, effect: { weight: [CLOVER, 30] } },
+  { id: 'more-bell', name: '종 듬뿍', description: '종이 더 자주 나와요', kind: 'odds', price: 6, effect: { weight: [BELL, 26] } },
+  { id: 'more-horseshoe', name: '말굽 듬뿍', description: '말굽이 더 자주 나와요', kind: 'odds', price: 7, effect: { weight: [HORSESHOE, 22] } },
+  { id: 'more-diamond', name: '다이아 듬뿍', description: '다이아가 더 자주 나와요', kind: 'odds', price: 8, effect: { weight: [DIAMOND, 20] } },
+  { id: 'more-seven', name: '7 듬뿍', description: '7이 더 자주 나와요', kind: 'odds', price: 8, effect: { weight: [WILD, 4] } },
+  { id: 'less-cherry', name: '체리 덜기', description: '체리가 덜 나와요', kind: 'odds', price: 5, effect: { weight: [CHERRY, -18] } },
+  { id: 'less-clover', name: '클로버 덜기', description: '클로버가 덜 나와요', kind: 'odds', price: 5, effect: { weight: [CLOVER, -15] } },
   // 상금: 그림의 상금을 올린다.
-  { id: 'sweet-sprout', name: '달콤 새싹', description: '새싹 줄의 상금 +3', kind: 'prize', price: 5, effect: { value: [SPROUT, 3] } },
-  { id: 'sweet-drop', name: '달콤 물방울', description: '물방울 줄의 상금 +4', kind: 'prize', price: 5, effect: { value: [DROP, 4] } },
-  { id: 'sweet-heart', name: '달콤 하트', description: '하트 줄의 상금 +6', kind: 'prize', price: 6, effect: { value: [HEART, 6] } },
-  { id: 'sweet-star', name: '달콤 별', description: '별 줄의 상금 +10', kind: 'prize', price: 7, effect: { value: [STAR, 10] } },
-  { id: 'sweet-moon', name: '달콤 달', description: '달 줄의 상금 +16', kind: 'prize', price: 8, effect: { value: [MOON, 16] } },
+  { id: 'gold-cherry', name: '황금 체리', description: '체리 줄의 상금 +3', kind: 'prize', price: 5, effect: { value: [CHERRY, 3] } },
+  { id: 'gold-clover', name: '황금 클로버', description: '클로버 줄의 상금 +4', kind: 'prize', price: 5, effect: { value: [CLOVER, 4] } },
+  { id: 'gold-bell', name: '황금 종', description: '종 줄의 상금 +6', kind: 'prize', price: 6, effect: { value: [BELL, 6] } },
+  { id: 'gold-horseshoe', name: '황금 말굽', description: '말굽 줄의 상금 +10', kind: 'prize', price: 7, effect: { value: [HORSESHOE, 10] } },
+  { id: 'gold-diamond', name: '황금 다이아', description: '다이아 줄의 상금 +16', kind: 'prize', price: 8, effect: { value: [DIAMOND, 16] } },
   // 줄: 줄의 갈래마다 상금을 곱한다.
   { id: 'wide', name: '가로 두 배', description: '가로줄의 상금이 두 배', kind: 'line', price: 8, effect: { lineTimes: ['row', 2] } },
   { id: 'tall', name: '세로 두 배', description: '세로줄의 상금이 두 배', kind: 'line', price: 8, effect: { lineTimes: ['col', 2] } },
@@ -164,7 +164,7 @@ export const CHARMS: readonly CharmInfo[] = [
   { id: 'comfort', name: '위로 사탕', description: '꽝이면 사탕을 2개 더 받아요', kind: 'trick', price: 5, effect: { consolation: 2 } },
   { id: 'twins', name: '쌍둥이 줄', description: '두 줄 넘게 맞으면 두 배', kind: 'trick', price: 9, effect: { combo: [2, 2] } },
   { id: 'crown', name: '왕관', description: '세 줄 넘게 맞으면 두 배', kind: 'trick', price: 6, effect: { combo: [3, 2] } },
-  { id: 'middle', name: '가운데 무지개', description: '가운데에 무지개가 자주 떠요', kind: 'trick', price: 9, effect: { centerWild: 0.25 } },
+  { id: 'middle', name: '가운데 7', description: '가운데에 7이 자주 떠요', kind: 'trick', price: 9, effect: { centerWild: 0.25 } },
   { id: 'finale', name: '막판 한 방', description: '마지막 스핀의 상금이 세 배', kind: 'trick', price: 6, effect: { lastTimes: 3 } },
   { id: 'rebound', name: '오뚝이', description: '꽝 다음 스핀의 상금이 두 배', kind: 'trick', price: 6, effect: { reboundTimes: 2 } },
 ];
@@ -223,8 +223,8 @@ export function lineTimesOf(charms: readonly string[]): Record<LineKind, number>
 }
 
 /**
- * 어느 한 줄이 그림마다 그 그림으로 맞을 확률(0~1). 세 칸이 그 그림이거나 무지개이면 맞는다
- * (셋이 다 무지개인 것은 무지개로 맞은 것으로 센다).
+ * 어느 한 줄이 그림마다 그 그림으로 맞을 확률(0~1). 세 칸이 그 그림이거나 7이면 맞는다
+ * (셋이 다 7인 것은 7로 맞은 것으로 센다).
  */
 export function lineOdds(charms: readonly string[]): number[] {
   const odds = oddsOf(charms);
@@ -246,9 +246,9 @@ export function drawSymbol(weights: readonly number[], random: () => number): nu
 /** 가운데 칸의 번호 */
 export const CENTER = 4;
 
-/** 가운데 칸이 다른 그림 대신 무지개로 나올 확률(0~1). 그런 부적이 없으면 0이다. */
+/** 가운데 칸이 다른 그림 대신 7로 나올 확률(0~1). 그런 부적이 없으면 0이다. */
 export function centerWildOf(charms: readonly string[]): number {
-  // 부적마다 따로 따지는 것과 같다: 하나라도 걸리면 무지개다.
+  // 부적마다 따로 따지는 것과 같다: 하나라도 걸리면 7이다.
   return 1 - effectsOf(charms).reduce((miss, effect) => miss * (1 - (effect.centerWild ?? 0)), 1);
 }
 

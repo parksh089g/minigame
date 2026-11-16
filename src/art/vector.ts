@@ -781,7 +781,7 @@ const ICONS: Record<string, Art> = {
       roundRect(c, 8.500, 22.700, 15, 3.600, 1.800, '#c9bcf8');
     },
   },
-  /** 사탕 슬롯: 별 셋이 나란히 뜬 기계와, 오른쪽의 손잡이 */
+  /** 사탕 슬롯: 7 셋이 나란히 뜬 기계와, 오른쪽의 손잡이 */
   'icon-slot': {
     width: 32,
     height: 32,
@@ -794,7 +794,10 @@ const ICONS: Record<string, Art> = {
       roundRect(c, 4.500, 8.300, 19.500, 17.600, 4.400, '#9684e0');
       roundRect(c, 4.500, 6.600, 19.500, 17.600, 4.400, '#c9bcf8');
       roundRect(c, 6.700, 9.600, 15.100, 8.800, 2.600, '#ffffff');
-      for (const x of [9.500, 14.250, 19]) fillPath(c, starPath(x, 14.100, 2.350), '#ffcf5c');
+      for (const x of [9.500, 14.250, 19]) {
+        const seven = `M${x - 1.8} 11.5L${x + 1.8} 11.5L${x + 1.8} 12.9L${x + 0.1} 16.7L${x - 1.4} 16.7L${x + 0.2} 13L${x - 1.8} 13Z`;
+        fillPath(c, seven, '#e8283c');
+      }
       roundRect(c, 10.250, 20.300, 8, 1.900, 0.950, '#9684e0');
     },
   },

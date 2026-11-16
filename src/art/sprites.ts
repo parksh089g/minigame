@@ -365,16 +365,16 @@ export const SPRITES = {
     '................',
   ],
 
-  // 사탕 슬롯: 별 셋이 나란히 뜬 기계와 오른쪽의 손잡이
+  // 사탕 슬롯: 7 셋이 나란히 뜬 기계와 오른쪽의 손잡이
   'icon-slot': [
     '................',
     '.............2..',
     '.aaaaaaaaaaa.2..',
     '.aaaaaaaaaaa.d..',
     '.acccccccccca.d.',
-    '.ac4cc4cc4cca.d.',
-    '.a444444444ca.d.',
-    '.ac4cc4cc4ccadd.',
+    '.a22c22c22cca.d.',
+    '.ac2cc2cc2cca.d.',
+    '.ac2cc2cc2ccadd.',
     '.acccccccccca...',
     '.aaaaaaaaaaa....',
     '.aaa99999aaa....',

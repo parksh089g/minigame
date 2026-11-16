@@ -66,11 +66,11 @@ function seeded(seed: number): () => number {
   };
 }
 
-const [SPROUT, DROP, HEART, STAR, MOON] = [0, 1, 2, 3, 4];
+const [CHERRY, CLOVER, BELL, HORSESHOE, DIAMOND] = [0, 1, 2, 3, 4];
 const PLAIN: SpinContext = { last: false, afterMiss: false };
 
 /** 한 줄도 맞지 않는 판 */
-const MISS_GRID = [SPROUT, DROP, HEART, DROP, HEART, SPROUT, STAR, SPROUT, DROP];
+const MISS_GRID = [CHERRY, CLOVER, BELL, CLOVER, BELL, CHERRY, HORSESHOE, CHERRY, CLOVER];
 
 /** 주아 글꼴에 들어 있는 한글: KS X 1001의 완성형 2,350자 */
 function fontSyllables(): Set<string> {
@@ -90,7 +90,7 @@ describe('그림', () => {
       expect(SYMBOLS[symbol].weight).toBeLessThan(SYMBOLS[symbol - 1].weight);
       expect(SYMBOLS[symbol].value).toBeGreaterThan(SYMBOLS[symbol - 1].value);
     }
-    expect(SYMBOLS[WILD].key).toBe('rainbow');
+    expect(SYMBOLS[WILD].key).toBe('seven');
   });
 
   it('부적이 없을 때의 무게는 모두 더해 100이라, 무게가 그대로 퍼센트다', () => {
@@ -112,16 +112,16 @@ describe('줄', () => {
   });
 
   it('같은 그림 셋이면 맞고, 하나라도 다르면 맞지 않는다', () => {
-    const grid = [HEART, HEART, HEART, SPROUT, DROP, STAR, MOON, SPROUT, DROP];
-    expect(lineSymbol(grid, LINES[0])).toBe(HEART);
+    const grid = [BELL, BELL, BELL, CHERRY, CLOVER, HORSESHOE, DIAMOND, CHERRY, CLOVER];
+    expect(lineSymbol(grid, LINES[0])).toBe(BELL);
     expect(lineSymbol(grid, LINES[1])).toBeNull();
     expect(lineSymbol(grid, LINES[3])).toBeNull();
   });
 
-  it('무지개는 다른 그림으로 쳐 주고, 셋이 다 무지개면 무지개로 맞는다', () => {
-    expect(lineSymbol([STAR, WILD, STAR, 0, 0, 0, 0, 0, 0], LINES[0])).toBe(STAR);
-    expect(lineSymbol([WILD, WILD, MOON, 0, 0, 0, 0, 0, 0], LINES[0])).toBe(MOON);
-    expect(lineSymbol([WILD, STAR, MOON, 0, 0, 0, 0, 0, 0], LINES[0])).toBeNull();
+  it('7은 다른 그림으로 쳐 주고, 셋이 다 7이면 7로 맞는다', () => {
+    expect(lineSymbol([HORSESHOE, WILD, HORSESHOE, 0, 0, 0, 0, 0, 0], LINES[0])).toBe(HORSESHOE);
+    expect(lineSymbol([WILD, WILD, DIAMOND, 0, 0, 0, 0, 0, 0], LINES[0])).toBe(DIAMOND);
+    expect(lineSymbol([WILD, HORSESHOE, DIAMOND, 0, 0, 0, 0, 0, 0], LINES[0])).toBeNull();
     expect(lineSymbol([WILD, WILD, WILD, 0, 0, 0, 0, 0, 0], LINES[0])).toBe(WILD);
   });
 });
@@ -176,17 +176,17 @@ describe('부적의 목록', () => {
 describe('확률', () => {
   it('듬뿍 부적은 그 그림의 확률을 올리고 나머지를 내린다', () => {
     const before = oddsOf([]);
-    const after = oddsOf(['more-star']);
-    expect(after[STAR]).toBeGreaterThan(before[STAR]);
-    for (const symbol of [SPROUT, DROP, HEART, MOON, WILD]) expect(after[symbol]).toBeLessThan(before[symbol]);
+    const after = oddsOf(['more-horseshoe']);
+    expect(after[HORSESHOE]).toBeGreaterThan(before[HORSESHOE]);
+    for (const symbol of [CHERRY, CLOVER, BELL, DIAMOND, WILD]) expect(after[symbol]).toBeLessThan(before[symbol]);
     expect(after.reduce((sum, chance) => sum + chance, 0)).toBeCloseTo(1, 10);
   });
 
   it('덜기 부적은 그 그림의 확률을 내리고 나머지를 올린다', () => {
     const before = oddsOf([]);
-    const after = oddsOf(['less-sprout']);
-    expect(after[SPROUT]).toBeLessThan(before[SPROUT]);
-    for (const symbol of [DROP, HEART, STAR, MOON, WILD]) expect(after[symbol]).toBeGreaterThan(before[symbol]);
+    const after = oddsOf(['less-cherry']);
+    expect(after[CHERRY]).toBeLessThan(before[CHERRY]);
+    for (const symbol of [CLOVER, BELL, HORSESHOE, DIAMOND, WILD]) expect(after[symbol]).toBeGreaterThan(before[symbol]);
   });
 
   it('어떤 부적을 붙여도 그림의 무게는 바닥 밑으로 내려가지 않는다', () => {
@@ -200,10 +200,10 @@ describe('확률', () => {
   it('무게대로 그림을 뽑는다', () => {
     const weights = weightsOf([]);
     // 0에 가까우면 첫 그림, 1에 가까우면 마지막 그림이다.
-    expect(drawSymbol(weights, () => 0)).toBe(SPROUT);
-    expect(drawSymbol(weights, () => 0.2999)).toBe(SPROUT);
-    expect(drawSymbol(weights, () => 0.3)).toBe(DROP);
-    expect(drawSymbol(weights, () => 0.9499)).toBe(MOON);
+    expect(drawSymbol(weights, () => 0)).toBe(CHERRY);
+    expect(drawSymbol(weights, () => 0.2999)).toBe(CHERRY);
+    expect(drawSymbol(weights, () => 0.3)).toBe(CLOVER);
+    expect(drawSymbol(weights, () => 0.9499)).toBe(DIAMOND);
     expect(drawSymbol(weights, () => 0.95)).toBe(WILD);
     expect(drawSymbol(weights, () => 0.999999)).toBe(WILD);
 
@@ -215,7 +215,7 @@ describe('확률', () => {
   });
 
   it('한 줄이 맞을 확률은 세 칸을 모두 따져 본 것과 같다', () => {
-    for (const charms of [[], ['more-moon'], ['less-sprout', 'more-rainbow'], ['more-sprout', 'less-drop']]) {
+    for (const charms of [[], ['more-diamond'], ['less-cherry', 'more-seven'], ['more-cherry', 'less-clover']]) {
       const odds = oddsOf(charms);
       const exact = new Array<number>(SYMBOLS.length).fill(0);
       for (let a = 0; a < odds.length; a += 1) {
@@ -239,13 +239,13 @@ describe('확률', () => {
     }
   });
 
-  it('가운데 무지개는 가운데 칸만, 정해진 확률로 무지개로 바꾼다', () => {
+  it('가운데 7은 가운데 칸만, 정해진 확률로 7로 바꾼다', () => {
     expect(centerWildOf([])).toBe(0);
     expect(centerWildOf(['middle'])).toBe(0.25);
-    // 가운데 칸에서만 수를 하나 더 뽑아 따진다: 0.1은 걸리고(무지개), 0.1로 뽑는 다른 칸은 새싹이다.
+    // 가운데 칸에서만 수를 하나 더 뽑아 따진다: 0.1은 걸리고(7), 0.1로 뽑는 다른 칸은 체리다.
     const lucky = rollGrid(['middle'], () => 0.1);
     expect(lucky[CENTER]).toBe(WILD);
-    expect(lucky.filter((_, cell) => cell !== CENTER)).toEqual(new Array<number>(CELLS - 1).fill(SPROUT));
+    expect(lucky.filter((_, cell) => cell !== CENTER)).toEqual(new Array<number>(CELLS - 1).fill(CHERRY));
     // 0.5는 걸리지 않아서 가운데도 여느 칸처럼 뽑는다.
     const plain = rollGrid(['middle'], () => 0.5);
     expect(plain[CENTER]).toBe(plain[0]);
@@ -261,9 +261,9 @@ describe('확률', () => {
 
 describe('한 번 돌린 결과', () => {
   it('맞은 줄마다 그 그림의 상금을 받는다', () => {
-    const grid = [HEART, HEART, HEART, SPROUT, DROP, STAR, MOON, SPROUT, DROP];
+    const grid = [BELL, BELL, BELL, CHERRY, CLOVER, HORSESHOE, DIAMOND, CHERRY, CLOVER];
     const outcome = scoreSpin(grid, [], PLAIN);
-    expect(outcome.wins).toEqual([{ line: 0, symbol: HEART, amount: 5 }]);
+    expect(outcome.wins).toEqual([{ line: 0, symbol: BELL, amount: 5 }]);
     expect(outcome.total).toBe(5);
     expect(outcome.boosts).toEqual([]);
     expect(outcome.consolation).toBe(0);
@@ -282,18 +282,18 @@ describe('한 번 돌린 결과', () => {
     );
   });
 
-  it('달콤 부적은 그 그림의 상금만 올린다', () => {
-    expect(valuesOf(['sweet-heart'])).toEqual([2, 3, 11, 8, 12, 20]);
-    const grid = [HEART, HEART, HEART, SPROUT, DROP, STAR, MOON, SPROUT, DROP];
-    expect(scoreSpin(grid, ['sweet-heart'], PLAIN).total).toBe(11);
-    expect(scoreSpin(grid, ['sweet-star'], PLAIN).total).toBe(5);
+  it('황금 부적은 그 그림의 상금만 올린다', () => {
+    expect(valuesOf(['gold-bell'])).toEqual([2, 3, 11, 8, 12, 20]);
+    const grid = [BELL, BELL, BELL, CHERRY, CLOVER, HORSESHOE, DIAMOND, CHERRY, CLOVER];
+    expect(scoreSpin(grid, ['gold-bell'], PLAIN).total).toBe(11);
+    expect(scoreSpin(grid, ['gold-horseshoe'], PLAIN).total).toBe(5);
   });
 
   it('줄 부적은 그 갈래의 줄에만 곱한다', () => {
     expect(lineTimesOf([])).toEqual({ row: 1, col: 1, diag: 1 });
     expect(lineTimesOf(['wide', 'slant'])).toEqual({ row: 2, col: 1, diag: 3 });
-    // 왼쪽 세로줄과 내리 대각선이 별로 맞는다.
-    const grid = [STAR, DROP, HEART, STAR, STAR, SPROUT, STAR, SPROUT, STAR];
+    // 왼쪽 세로줄과 내리 대각선이 말굽으로 맞는다.
+    const grid = [HORSESHOE, CLOVER, BELL, HORSESHOE, HORSESHOE, CHERRY, HORSESHOE, CHERRY, HORSESHOE];
     expect(scoreSpin(grid, [], PLAIN).wins.map((win) => LINES[win.line].kind)).toEqual(['col', 'diag']);
     expect(scoreSpin(grid, [], PLAIN).total).toBe(16);
     expect(scoreSpin(grid, ['tall'], PLAIN).total).toBe(16 + 8);
@@ -302,10 +302,10 @@ describe('한 번 돌린 결과', () => {
   });
 
   it('쌍둥이 줄은 두 줄부터, 왕관은 세 줄부터 듣고, 둘은 겹친다', () => {
-    const one = [HEART, HEART, HEART, SPROUT, DROP, STAR, MOON, SPROUT, DROP];
-    const two = [STAR, DROP, HEART, STAR, STAR, SPROUT, STAR, SPROUT, STAR];
-    // 가로 세 줄이 새싹, 물방울, 하트로 맞는다.
-    const three = [SPROUT, SPROUT, SPROUT, DROP, DROP, DROP, HEART, HEART, HEART];
+    const one = [BELL, BELL, BELL, CHERRY, CLOVER, HORSESHOE, DIAMOND, CHERRY, CLOVER];
+    const two = [HORSESHOE, CLOVER, BELL, HORSESHOE, HORSESHOE, CHERRY, HORSESHOE, CHERRY, HORSESHOE];
+    // 가로 세 줄이 체리, 클로버, 종으로 맞는다.
+    const three = [CHERRY, CHERRY, CHERRY, CLOVER, CLOVER, CLOVER, BELL, BELL, BELL];
     expect(scoreSpin(three, [], PLAIN).wins).toHaveLength(3);
     expect(scoreSpin(three, [], PLAIN).total).toBe(10);
 
@@ -319,7 +319,7 @@ describe('한 번 돌린 결과', () => {
   });
 
   it('막판 한 방은 마지막 스핀에만, 오뚝이는 꽝 다음 스핀에만 듣는다', () => {
-    const grid = [HEART, HEART, HEART, SPROUT, DROP, STAR, MOON, SPROUT, DROP];
+    const grid = [BELL, BELL, BELL, CHERRY, CLOVER, HORSESHOE, DIAMOND, CHERRY, CLOVER];
     expect(scoreSpin(grid, ['finale'], PLAIN).total).toBe(5);
     expect(scoreSpin(grid, ['finale'], { last: true, afterMiss: false }).total).toBe(15);
     expect(scoreSpin(grid, ['rebound'], PLAIN).total).toBe(5);
@@ -335,7 +335,7 @@ describe('한 번 돌린 결과', () => {
   });
 
   it('아홉 칸이 모두 맞으면 여덟 줄의 상금에 한 번 더 곱한다', () => {
-    const grid = [MOON, WILD, MOON, MOON, MOON, WILD, MOON, MOON, MOON];
+    const grid = [DIAMOND, WILD, DIAMOND, DIAMOND, DIAMOND, WILD, DIAMOND, DIAMOND, DIAMOND];
     const outcome = scoreSpin(grid, [], PLAIN);
     expect(outcome.jackpot).toBe(true);
     expect(outcome.wins).toHaveLength(LINES.length);
@@ -432,7 +432,7 @@ describe('한 판', () => {
   });
 
   it('마지막 스핀과 꽝 다음 스핀을 알아서 따진다', () => {
-    // 0.31은 언제나 물방울이라 아홉 칸이 다 맞는다.
+    // 0.31은 언제나 클로버라 아홉 칸이 다 맞는다.
     const allDrops = (): number => 0.31;
     const last = spin({ ...newRun(), spinsLeft: 1, charms: ['finale'] }, allDrops)!;
     expect(last.outcome.boosts).toContainEqual({ kind: 'last', times: 3 });
@@ -492,7 +492,7 @@ describe('가게', () => {
   it('서로 다른 부적 세 장이 나오고, 붙여 둔 부적은 나오지 않는다', () => {
     const random = seeded(9);
     const seen = new Set<string>();
-    const owned = ['twins', 'piggy', 'more-moon'];
+    const owned = ['twins', 'piggy', 'more-diamond'];
     for (let n = 0; n < 400; n += 1) {
       const offers = drawOffers(owned, random);
       expect(offers).toHaveLength(OFFERS);
@@ -716,10 +716,10 @@ describe('밸런스', () => {
   it('가장 센 조합으로도 판은 끝나고, 점수는 랭킹이 받는 범위 안이다', () => {
     // 자동 플레이로 찾은 가장 센 조합들을 처음부터 거저 붙여 준다.
     const strongest = [
-      ['more-sprout', 'less-drop', 'sweet-sprout', 'twins', 'crown'],
-      ['more-drop', 'less-sprout', 'sweet-drop', 'twins', 'crown'],
-      ['more-heart', 'less-sprout', 'less-drop', 'sweet-heart', 'twins'],
-      ['more-moon', 'less-sprout', 'less-drop', 'sweet-moon', 'twins'],
+      ['more-cherry', 'less-clover', 'gold-cherry', 'twins', 'crown'],
+      ['more-clover', 'less-cherry', 'gold-clover', 'twins', 'crown'],
+      ['more-bell', 'less-cherry', 'less-clover', 'gold-bell', 'twins'],
+      ['more-diamond', 'less-cherry', 'less-clover', 'gold-diamond', 'twins'],
     ];
     const random = seeded(105);
     for (const charms of strongest) {

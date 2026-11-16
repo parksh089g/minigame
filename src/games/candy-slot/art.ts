@@ -1,5 +1,6 @@
 /**
- * 사탕 슬롯의 그림. 색은 LOOK 한곳에 모아 두고, 모든 것을 둥근 도형으로 그린다.
+ * 사탕 슬롯의 그림. 색은 LOOK 한곳에 모아 둔다. 슬롯의 여섯 그림은 카지노 슬롯에서 보는 것들
+ * (체리, 클로버, 종, 말굽, 다이아, 7)이고, 이 앱의 다른 그림처럼 아래로 도톰한 두께를 넣어 그린다.
  * 그림과 부적은 한 번 구워 텍스처로 두고, 씬은 그것을 놓고 움직이기만 한다.
  *
  * 여섯 그림은 색과 함께 모양이 모두 달라서, 색을 가려 보기 어려워도 모양으로 줄을 알아볼 수 있다.
@@ -37,17 +38,23 @@ interface Tone {
 export const LOOK = {
   /** 기계: 몸통과 그 아래 두께, 그림이 놓이는 칸의 바닥 */
   machine: { body: THEME.lilac, lip: THEME.lilacDeep, shine: THEME.lilacSoft, slot: THEME.white, slotAlt: THEME.bg },
+  /** 그림마다의 색. 카지노 슬롯의 그림답게 짙고 또렷한 색을 쓴다. */
   symbols: {
-    sprout: { face: THEME.mintDeep, lip: 0x5fb892 },
-    drop: { face: THEME.skyDeep, lip: 0x5c9fd6 },
-    heart: { face: THEME.coral, lip: THEME.coralDeep },
-    star: { face: THEME.gold, lip: 0xe0ac3c },
-    moon: { face: THEME.lilacDeep, lip: 0x7765c4 },
-  } satisfies Record<Exclude<SymbolKey, 'rainbow'>, Tone>,
-  /** 무지개의 띠: 바깥부터 */
-  rainbow: [THEME.coral, THEME.gold, THEME.mintDeep, THEME.skyDeep],
-  cloud: THEME.white,
-  cloudLip: THEME.shadow,
+    cherry: { face: 0xdc2f45, lip: 0x8f1830 },
+    clover: { face: 0x33ad4f, lip: 0x1c7436 },
+    bell: { face: 0xf6c23c, lip: 0xb9801a },
+    horseshoe: { face: 0x97a3bd, lip: 0x5c6887 },
+    diamond: { face: 0x38a8ec, lip: 0x1b6cb8 },
+    seven: { face: 0xe8283c, lip: 0x8a1022 },
+  } satisfies Record<SymbolKey, Tone>,
+  /** 7을 두르는 금빛 테두리 */
+  sevenTrim: { face: 0xffd24a, lip: 0xb5810f },
+  /** 체리의 꼭지와 잎 */
+  stem: { face: 0x58b04a, lip: 0x2f7a33 },
+  /** 종 아래로 보이는 추 */
+  clapper: 0x8a5a14,
+  /** 다이아의 깎인 면: 밝은 면과 중간 면 */
+  gem: { light: 0xc8f0ff, mid: 0x7fd0fa },
   shine: THEME.white,
   /** 맞은 줄을 긋는 선: 겉과 속 */
   winLine: { edge: THEME.accent, core: THEME.gold },
@@ -141,120 +148,212 @@ function chunky(g: Graphics, points: readonly Point[], x: number, y: number, ton
 
 // ───────── 여섯 그림 ─────────
 
-/** 모양의 둘레. 원점이 모양의 한가운데이고 s가 반쯤 되는 크기다. */
-function outline(shape: 'drop' | 'heart' | 'star', s: number): Point[] {
-  switch (shape) {
-    case 'heart':
-      return Array.from({ length: 36 }, (_, index) => {
-        const t = (index / 36) * Math.PI * 2;
-        const x = 16 * Math.sin(t) ** 3;
-        const y = -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t));
-        return { x: (x / 16) * s, y: (y / 16) * s - s * 0.1 };
-      });
-    case 'drop': {
-      const radius = s * 0.72;
-      const centerY = s * 0.26;
-      const arc = Array.from({ length: 21 }, (_, index) => {
-        const angle = -Math.PI * 0.2 + (index / 20) * Math.PI * 1.4;
-        return { x: radius * Math.cos(angle), y: centerY + radius * Math.sin(angle) };
-      });
-      return [...arc, ...rounded([arc[20], { x: 0, y: -s * 1.05 }, arc[0]], s * 0.2).slice(1, -1)];
-    }
-    case 'star':
-      return rounded(
-        Array.from({ length: 10 }, (_, index) => {
-          const radius = index % 2 === 0 ? s * 1.1 : s * 0.56;
-          const angle = -Math.PI / 2 + (index * Math.PI) / 5;
-          return { x: radius * Math.cos(angle), y: radius * Math.sin(angle) + s * 0.05 };
-        }),
-        s * 0.16,
-        3,
-      );
-  }
+/** 둘레를 원점을 중심으로 돌린다. */
+function turned(points: readonly Point[], angle: number): Point[] {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return points.map((point) => ({ x: point.x * cos - point.y * sin, y: point.x * sin + point.y * cos }));
 }
 
-/** 초승달의 둘레: 큰 원에서 오른쪽 위로 비켜 놓은 원을 파낸 모양 */
-function crescent(s: number): Point[] {
-  const outer = s * 0.98;
-  const inner = s * 0.8;
-  const shift = { x: s * 0.46, y: -s * 0.3 };
-  const distance = Math.hypot(shift.x, shift.y);
-  const toward = Math.atan2(shift.y, shift.x);
-  // 두 원이 만나는 각도
-  const outerHalf = Math.acos((distance * distance + outer * outer - inner * inner) / (2 * distance * outer));
-  const innerHalf = Math.acos((distance * distance + inner * inner - outer * outer) / (2 * distance * inner));
-  const points: Point[] = [];
-  const steps = 26;
+/** 클로버의 잎 하나: 뾰족한 끝이 원점에 있고 위로 벌어지는 하트 모양. h가 반쯤 되는 너비다. */
+function leaf(h: number): Point[] {
+  return Array.from({ length: 30 }, (_, index) => {
+    const t = (index / 30) * Math.PI * 2;
+    const x = 16 * Math.sin(t) ** 3;
+    const y = -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t));
+    return { x: (x / 16) * h, y: ((y - 17) / 16) * h };
+  });
+}
+
+/** 종의 몸통: 둥근 머리에서 아래로 벌어진다. */
+function bellBody(s: number): Point[] {
+  return rounded(
+    [
+      { x: -s * 0.3, y: -s * 0.8 },
+      { x: s * 0.3, y: -s * 0.8 },
+      { x: s * 0.62, y: -s * 0.2 },
+      { x: s * 0.7, y: s * 0.42 },
+      { x: s * 0.98, y: s * 0.68 },
+      { x: -s * 0.98, y: s * 0.68 },
+      { x: -s * 0.7, y: s * 0.42 },
+      { x: -s * 0.62, y: -s * 0.2 },
+    ],
+    s * 0.26,
+  );
+}
+
+/** 말굽: 위가 트인 두꺼운 U 모양 */
+function horseshoe(s: number): Point[] {
+  const outer = s * 0.94;
+  const inner = s * 0.5;
+  const top = -s * 0.86;
+  const centerY = s * 0.04;
+  const steps = 18;
+  const points: Point[] = [{ x: -outer, y: top }];
   for (let step = 0; step <= steps; step += 1) {
-    const angle = toward + outerHalf + ((Math.PI * 2 - outerHalf * 2) * step) / steps;
-    points.push({ x: outer * Math.cos(angle), y: outer * Math.sin(angle) });
+    const angle = Math.PI - (Math.PI * step) / steps;
+    points.push({ x: outer * Math.cos(angle), y: centerY + outer * Math.sin(angle) });
   }
+  points.push({ x: outer, y: top }, { x: inner, y: top });
   for (let step = 0; step <= steps; step += 1) {
-    const angle = toward - innerHalf - ((Math.PI * 2 - innerHalf * 2) * step) / steps;
-    points.push({ x: shift.x + inner * Math.cos(angle), y: shift.y + inner * Math.sin(angle) });
+    const angle = (Math.PI * step) / steps;
+    points.push({ x: inner * Math.cos(angle), y: centerY + inner * Math.sin(angle) });
   }
+  points.push({ x: -inner, y: top });
   return points;
+}
+
+/** 다이아: 위가 평평하고 아래가 뾰족한 보석 */
+function gem(s: number): Point[] {
+  return rounded(
+    [
+      { x: -s * 0.56, y: -s * 0.72 },
+      { x: s * 0.56, y: -s * 0.72 },
+      { x: s, y: -s * 0.2 },
+      { x: 0, y: s * 0.94 },
+      { x: -s, y: -s * 0.2 },
+    ],
+    s * 0.1,
+    2,
+  );
+}
+
+/** 굵은 숫자 7: 위의 가로대와 왼쪽 아래로 내려가는 기둥, 가로대 왼쪽 끝의 짧은 턱 */
+function sevenShape(s: number): Point[] {
+  return [
+    { x: -s * 0.8, y: -s * 0.86 },
+    { x: s * 0.82, y: -s * 0.86 },
+    { x: s * 0.82, y: -s * 0.46 },
+    { x: s * 0.1, y: s * 0.9 },
+    { x: -s * 0.5, y: s * 0.9 },
+    { x: s * 0.2, y: -s * 0.4 },
+    { x: -s * 0.48, y: -s * 0.4 },
+    { x: -s * 0.48, y: -s * 0.14 },
+    { x: -s * 0.8, y: -s * 0.14 },
+  ];
+}
+
+/** 둘레를 여덟 방향으로 조금씩 밀어 찍어서 테두리를 두른다. */
+function rim(g: Graphics, points: readonly Point[], x: number, y: number, width: number, color: number): void {
+  for (let index = 0; index < 8; index += 1) {
+    const angle = (index * Math.PI) / 4;
+    fillShape(g, points, x + Math.cos(angle) * width, y + Math.sin(angle) * width, color);
+  }
 }
 
 /** 그림 하나를 (x, y)를 한가운데로, s를 반쯤 되는 크기로 그린다. */
 export function drawSymbol(g: Graphics, key: SymbolKey, x: number, y: number, s: number): void {
   const lip = Math.max(1, s * 0.14);
   switch (key) {
-    case 'sprout': {
-      const tone = LOOK.symbols.sprout;
-      // 줄기와 양쪽으로 벌어진 두 잎
-      const stem = rounded(
-        [
-          { x: -s * 0.13, y: s * 0.02 },
-          { x: s * 0.13, y: s * 0.02 },
-          { x: s * 0.13, y: s * 0.98 },
-          { x: -s * 0.13, y: s * 0.98 },
-        ],
-        s * 0.12,
-      );
-      const left = tilted(-s * 0.5, -s * 0.28, s * 0.58, s * 0.36, 0.5);
-      const right = tilted(s * 0.5, -s * 0.36, s * 0.58, s * 0.36, -0.6);
-      for (const part of [stem, left, right]) fillShape(g, part, x, y + lip, tone.lip);
-      for (const part of [stem, left, right]) fillShape(g, part, x, y, tone.face);
-      fillShape(g, tilted(-s * 0.56, -s * 0.36, s * 0.22, s * 0.09, 0.5), x, y, LOOK.shine, 0.7);
+    case 'cherry': {
+      const tone = LOOK.symbols.cherry;
+      const joint = { x: x + s * 0.16, y: y - s * 0.9 };
+      const fruits = [
+        { x: x - s * 0.44, y: y + s * 0.4, r: s * 0.46 },
+        { x: x + s * 0.5, y: y + s * 0.48, r: s * 0.42 },
+      ];
+      // 두 알을 잇는 꼭지와 잎
+      g.lineStyle(Math.max(1, s * 0.13), LOOK.stem.lip, 1);
+      for (const fruit of fruits) {
+        g.beginPath();
+        g.moveTo(fruit.x, fruit.y - fruit.r * 0.6);
+        g.lineTo(joint.x, joint.y);
+        g.strokePath();
+      }
+      fillShape(g, tilted(s * 0.56, -s * 0.78, s * 0.4, s * 0.2, -0.3), x, y + lip * 0.5, LOOK.stem.lip);
+      fillShape(g, tilted(s * 0.56, -s * 0.78, s * 0.4, s * 0.2, -0.3), x, y, LOOK.stem.face);
+      for (const fruit of fruits) {
+        g.fillStyle(tone.lip, 1);
+        g.fillCircle(fruit.x, fruit.y + lip * 0.6, fruit.r);
+        g.fillStyle(tone.face, 1);
+        g.fillCircle(fruit.x, fruit.y - lip * 0.2, fruit.r * 0.96);
+        fillShape(g, tilted(-fruit.r * 0.36, -fruit.r * 0.5, fruit.r * 0.3, fruit.r * 0.16, -0.6), fruit.x, fruit.y, LOOK.shine, 0.75);
+      }
       return;
     }
-    case 'drop':
-      chunky(g, outline('drop', s), x, y - lip / 2, LOOK.symbols.drop, lip);
-      fillShape(g, tilted(-s * 0.3, s * 0.12, s * 0.14, s * 0.26, 0.3), x, y - lip / 2, LOOK.shine, 0.75);
+    case 'clover': {
+      const tone = LOOK.symbols.clover;
+      const cy = y - s * 0.12;
+      // 줄기를 먼저 깔고, 네 잎을 비스듬히 벌려 얹는다.
+      g.lineStyle(Math.max(1, s * 0.16), tone.lip, 1);
+      g.beginPath();
+      g.moveTo(x, cy);
+      g.lineTo(x + s * 0.14, y + s * 0.98);
+      g.strokePath();
+      const leaves = [0, 1, 2, 3].map((index) => turned(leaf(s * 0.5), Math.PI / 4 + (index * Math.PI) / 2));
+      for (const part of leaves) fillShape(g, part, x, cy + lip, tone.lip);
+      for (const part of leaves) fillShape(g, part, x, cy, tone.face);
+      fillShape(g, tilted(-s * 0.56, -s * 0.5, s * 0.2, s * 0.1, -0.8), x, cy, LOOK.shine, 0.6);
       return;
-    case 'heart':
-      chunky(g, outline('heart', s), x, y - lip / 2, LOOK.symbols.heart, lip);
-      fillShape(g, tilted(-s * 0.46, -s * 0.42, s * 0.2, s * 0.12, -0.6), x, y - lip / 2, LOOK.shine, 0.75);
+    }
+    case 'bell': {
+      const tone = LOOK.symbols.bell;
+      const top = y - lip / 2;
+      // 추, 꼭지, 몸통, 아래 띠
+      g.fillStyle(LOOK.clapper, 1);
+      g.fillCircle(x, top + s * 0.84, s * 0.2);
+      g.fillStyle(tone.lip, 1);
+      g.fillCircle(x, top - s * 0.84 + lip * 0.4, s * 0.17);
+      g.fillStyle(tone.face, 1);
+      g.fillCircle(x, top - s * 0.84, s * 0.17);
+      chunky(g, bellBody(s), x, top, tone, lip);
+      g.fillStyle(tone.lip, 1);
+      g.fillRoundedRect(x - s * 0.72, top + s * 0.3, s * 1.44, s * 0.13, s * 0.06);
+      fillShape(g, tilted(-s * 0.3, -s * 0.3, s * 0.1, s * 0.3, 0.3), x, top, LOOK.shine, 0.75);
       return;
-    case 'star':
-      chunky(g, outline('star', s), x, y - lip / 2, LOOK.symbols.star, lip);
-      fillShape(g, tilted(-s * 0.2, -s * 0.3, s * 0.18, s * 0.1, -0.5), x, y - lip / 2, LOOK.shine, 0.8);
-      return;
-    case 'moon':
-      chunky(g, crescent(s), x - s * 0.1, y - lip / 2, LOOK.symbols.moon, lip);
-      fillShape(g, tilted(-s * 0.62, -s * 0.2, s * 0.1, s * 0.26, 0.25), x - s * 0.1, y - lip / 2, LOOK.shine, 0.6);
-      return;
-    case 'rainbow': {
-      // 네 띠의 반원과, 양 끝을 받치는 구름
-      const baseY = y + s * 0.46;
-      const band = s * 0.2;
-      LOOK.rainbow.forEach((color, index) => {
-        const radius = s * 0.94 - band * index - band / 2;
-        g.lineStyle(band + 0.4, color, 1);
-        g.beginPath();
-        g.arc(x, baseY, radius, Math.PI, Math.PI * 2);
-        g.strokePath();
-      });
-      for (const side of [-1, 1]) {
-        const cx = x + side * s * 0.62;
-        g.fillStyle(LOOK.cloudLip, 1);
-        g.fillEllipse(cx, baseY + s * 0.2 + lip * 0.6, s * 0.86, s * 0.42);
-        g.fillStyle(LOOK.cloud, 1);
-        g.fillEllipse(cx, baseY + s * 0.2, s * 0.86, s * 0.42);
-        g.fillCircle(cx - side * s * 0.08, baseY + s * 0.02, s * 0.22);
-        g.fillCircle(cx + side * s * 0.18, baseY + s * 0.1, s * 0.17);
+    }
+    case 'horseshoe': {
+      const tone = LOOK.symbols.horseshoe;
+      const top = y - lip / 2;
+      chunky(g, horseshoe(s), x, top, tone, lip);
+      // 못 구멍
+      g.fillStyle(tone.lip, 1);
+      for (const angle of [0.08, 0.3, 0.7, 0.92]) {
+        const at = Math.PI * angle;
+        g.fillCircle(x + s * 0.72 * Math.cos(at), top + s * 0.04 + s * 0.72 * Math.sin(at), Math.max(0.6, s * 0.08));
       }
+      for (const side of [-1, 1]) g.fillCircle(x + side * s * 0.72, top - s * 0.46, Math.max(0.6, s * 0.08));
+      fillShape(g, tilted(-s * 0.82, -s * 0.4, s * 0.06, s * 0.3, 0), x, top, LOOK.shine, 0.7);
+      return;
+    }
+    case 'diamond': {
+      const tone = LOOK.symbols.diamond;
+      const top = y - lip / 2;
+      chunky(g, gem(s), x, top, tone, lip);
+      // 깎인 면: 위의 평평한 면과 가운데로 내려가는 면
+      const table = [
+        { x: -s * 0.5, y: -s * 0.66 },
+        { x: s * 0.5, y: -s * 0.66 },
+        { x: s * 0.3, y: -s * 0.2 },
+        { x: -s * 0.3, y: -s * 0.2 },
+      ];
+      const heart = [
+        { x: -s * 0.3, y: -s * 0.2 },
+        { x: s * 0.3, y: -s * 0.2 },
+        { x: 0, y: s * 0.8 },
+      ];
+      const side = [
+        { x: -s * 0.5, y: -s * 0.66 },
+        { x: -s * 0.3, y: -s * 0.2 },
+        { x: -s * 0.88, y: -s * 0.2 },
+      ];
+      fillShape(g, heart, x, top, LOOK.gem.mid);
+      fillShape(g, table, x, top, LOOK.gem.light);
+      fillShape(g, side, x, top, LOOK.gem.mid);
+      return;
+    }
+    case 'seven': {
+      const tone = LOOK.symbols.seven;
+      const shape = sevenShape(s);
+      const top = y - lip / 2;
+      const width = Math.max(0.8, s * 0.11);
+      // 금빛 테두리와 그 아래 두께, 그 위에 빨간 숫자
+      rim(g, shape, x, top + lip, width, LOOK.sevenTrim.lip);
+      rim(g, shape, x, top, width, LOOK.sevenTrim.face);
+      fillShape(g, shape, x, top, tone.lip);
+      fillShape(g, shape, x, top - lip * 0.3, tone.face);
+      g.fillStyle(LOOK.shine, 0.55);
+      g.fillRoundedRect(x - s * 0.66, top - s * 0.78, s * 1.3, s * 0.1, s * 0.05);
       return;
     }
   }
@@ -403,17 +502,12 @@ const TRICKS: Readonly<Record<string, (g: Graphics) => void>> = {
     g.fillCircle(-5.2, 3.4, 1.3);
     g.fillCircle(5.2, 3.4, 1.3);
   },
-  /** 가운데 무지개: 작은 판의 가운데 칸에 뜬 무지개 */
+  /** 가운데 7: 작은 판의 가운데 칸에 뜬 7 */
   middle: (g) => {
     drawMiniGrid(g, []);
     g.fillStyle(LOOK.mark, 1);
-    g.fillCircle(0, 0, 5.6);
-    LOOK.rainbow.slice(0, 3).forEach((color, index) => {
-      g.lineStyle(1.7, color, 1);
-      g.beginPath();
-      g.arc(0, 2.6, 5 - index * 1.6, Math.PI, Math.PI * 2);
-      g.strokePath();
-    });
+    g.fillCircle(0, 0, 6.4);
+    drawSymbol(g, 'seven', 0, 0, 4.6);
   },
   /** 막판 한 방: 결승점의 깃발 */
   finale: (g) => {
@@ -538,9 +632,8 @@ export function drawMachine(g: Graphics, x: number, y: number, cell: number, fra
   g.fillCircle(x + frame + (center.col + 0.5) * cell, y + frame + (center.row + 1) * cell - 5, 1.6);
 }
 
-/** 무지개가 아닌 그림의 색. 맞은 줄에서 튀는 알갱이에 쓴다. */
+/** 그림의 색. 맞은 줄에서 튀는 알갱이에 쓴다. 7은 테두리의 금빛으로 튄다. */
 export function symbolColor(symbol: number): number {
-  if (symbol === WILD) return THEME.gold;
-  const key = SYMBOLS[symbol].key as Exclude<SymbolKey, 'rainbow'>;
-  return LOOK.symbols[key].face;
+  if (symbol === WILD) return LOOK.sevenTrim.face;
+  return LOOK.symbols[SYMBOLS[symbol].key].face;
 }
