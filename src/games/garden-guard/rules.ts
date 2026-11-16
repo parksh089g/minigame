@@ -455,7 +455,7 @@ export function applyRun(meta: GardenMeta, lastCleared: number, kills: number): 
 
 /**
  * 새 밭을 일굴 수 있게 되는 날. 지금 밭에서 이 날까지 지켜 냈으면 일굴 수 있다.
- * 자동 플레이로 재 보면 처음 밭은 65~70일째 근처에서 더 나아가지 못한다. 그 한참 앞에서 열어서 고를 틈을 준다.
+ * 자동 플레이로 재 보면 처음 밭은 70일째 근처부터 크게 느려진다. 그 한참 앞에서 열어서 고를 틈을 준다.
  */
 export const PLOW_FROM = 50;
 
