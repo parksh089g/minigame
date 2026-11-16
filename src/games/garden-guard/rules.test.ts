@@ -24,6 +24,7 @@ import {
   latestStart,
   levelOf,
   nextRandom,
+  META_VERSION,
   normalizeMeta,
   openedStart,
   planDay,
@@ -354,7 +355,7 @@ describe('판 밖 진행', () => {
     expect(normalizeMeta({ version: 1, best: 3, startDay: 1 }).startDay).toBe(1);
     expect(normalizeMeta({ version: 2, best: 13, startDay: 1 }).startDay).toBe(1);
     expect(normalizeMeta({ version: 2, best: 13, startDay: 6 }).startDay).toBe(6);
-    expect(normalizeMeta({ version: 1, best: 13 }).version).toBe(2);
+    expect(normalizeMeta({ version: 1, best: 13 }).version).toBe(META_VERSION);
   });
 
   it('저장된 값이 이상해도 쓸 수 있는 모양으로 맞춘다', () => {
@@ -376,6 +377,7 @@ describe('판 밖 진행', () => {
       ...createMeta(),
       seeds: 120,
       best: 12,
+      bestEver: 12,
       startDay: 11,
       savedAt: 55,
       levels: { power: 7, helper: UPGRADES.helper.maxLevel },
