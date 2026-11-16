@@ -17,6 +17,7 @@ import {
   type WeaponId,
 } from '../src/games/lantern-keeper/data';
 import { iconKey } from '../src/games/lantern-keeper/icons';
+import { NEWS_GAP, newsLine, normalizeMeta, unknownNews } from '../src/games/lantern-keeper/meta';
 import { upgradeTitle, type Upgrade } from '../src/games/lantern-keeper/rules';
 import { levelPuzzle } from '../src/games/pin-pull/levels';
 import {
@@ -218,6 +219,80 @@ it('등불지기 잔치의 밤: 고르는 창, 강화권 카드 넷~여섯 장(�
   await expectClear(LEVEL_UP_TITLE, '골라낸 뒤의 레벨업 창');
 });
 
+/** 등불지기 준비 화면에 잠깐 뜨는 알림 */
+interface NoticeView {
+  /** 화면에 적힌 그대로의 글. 줄을 나눴으면 줄바꿈이 들어 있다. */
+  text: string;
+  lines: number;
+  /** 줄인 것까지 넣은, 화면에 그려진 글씨의 크기(px) */
+  fontPx: number;
+  /** 글의 상자와, 그 뒤에 깔린 어두운 띠의 상자. 띠를 찾지 못하면 null이다. */
+  box: { left: number; right: number; top: number; bottom: number };
+  band: { left: number; right: number; top: number; bottom: number } | null;
+}
+
+it('등불지기 준비 화면: 업데이트를 여러 번 건너뛴 저장에 알리는 새 소식을 줄을 나눠 적어서, 글씨가 작아지지 않는다', async ({ page }) => {
+  await openApp(page);
+  // 들어온 줄 아는 것이 적혀 있지 않은 가장 오래된 저장. 캐릭터, 무기, 패시브, 스테이지, 영구 강화가 모두 새 소식이라 알림이 가장 길다.
+  const save = { runs: 3, clears: 0, bestSeconds: 300 };
+  const news = newsLine(unknownNews(normalizeMeta(save)));
+  expect(news.split(NEWS_GAP), '새 소식의 갈래').toHaveLength(5);
+  await seedLanternMeta(page, save);
+  await page.reload();
+  await waitForScene(page, 'Hub');
+  await startScene(page, LANTERN_SCENE);
+
+  // 알림은 몇 초 뒤에 흐려지며 사라진다. 찾으면 그 움직임을 멈춰 두어서, 보는 동안 사라지지 않게 한다.
+  const noticeOf = (): Promise<NoticeView | null> =>
+    page.evaluate(
+      ([key, line, gap]) => {
+        const scene = window.__pocketArcade?.scene.getScene(key);
+        if (!scene) return null;
+        const label = scene.children.list.find(
+          (item): item is Phaser.GameObjects.Text =>
+            item.type === 'Text' && (item as Phaser.GameObjects.Text).text.split('\n').join(gap) === line,
+        );
+        if (!label) return null;
+        for (const tween of scene.tweens.getTweensOf(label)) tween.pause();
+        const box = label.getBounds();
+        // 글의 한가운데를 덮는 네모 가운데 가장 작은 것이 알림의 띠다.
+        const bands = scene.children.list
+          .filter((item): item is Phaser.GameObjects.Rectangle => item.type === 'Rectangle')
+          .map((item) => item.getBounds())
+          .filter((bounds) => bounds.contains(box.centerX, box.centerY))
+          .sort((a, b) => a.width * a.height - b.width * b.height);
+        const sides = (bounds: Phaser.Geom.Rectangle): NoticeView['box'] => ({
+          left: bounds.left,
+          right: bounds.right,
+          top: bounds.top,
+          bottom: bounds.bottom,
+        });
+        return {
+          text: label.text,
+          lines: label.text.split('\n').length,
+          fontPx: parseFloat(String(label.style.fontSize)) * label.scaleY,
+          box: sides(box),
+          band: bands.length > 0 ? sides(bands[0]) : null,
+        };
+      },
+      [LANTERN_SCENE, news, NEWS_GAP] as const,
+    );
+  await expect.poll(noticeOf, { ...WAIT, message: '새 소식 알림이 떠야 한다' }).not.toBeNull();
+  const notice = (await noticeOf())!;
+  // 한 줄에 줄여 적으면 0.39배(4.7px)가 된다. 줄을 나눠서, 앱에서 가장 작게 쓰는 글씨(10px)보다 작아지지 않아야 한다.
+  expect(notice.lines, notice.text).toBeGreaterThan(1);
+  expect(notice.fontPx, notice.text).toBeGreaterThanOrEqual(10);
+  // 글은 어두운 띠 안에 들고, 화면 밖으로 나가거나 다른 것에 가리지 않는다.
+  expect(notice.band, '알림의 띠').not.toBeNull();
+  const { box } = notice;
+  const band = notice.band!;
+  expect(box.left, '띠의 왼쪽').toBeGreaterThanOrEqual(band.left);
+  expect(box.right, '띠의 오른쪽').toBeLessThanOrEqual(band.right);
+  expect(box.top, '띠의 위쪽').toBeGreaterThanOrEqual(band.top);
+  expect(box.bottom, '띠의 아래쪽').toBeLessThanOrEqual(band.bottom);
+  expect(await hiddenTexts(page, LANTERN_SCENE, { from: notice.text.replace(/\s+/g, ' ') }), '새 소식 알림').toEqual([]);
+});
+
 /**
  * 새싹 컴퍼니의 회사를 앱이 읽기 전에 넣어 둔다. 저장하는 곳과 이름은 sprout-company/store.ts(DB_NAME, STORE_NAME, KEY)와 같다.
  * 저장이 읽히지 않으면 회사를 새로 세우므로 출시하기 버튼이 없어서 점검이 바로 실패한다.
@@ -265,6 +340,55 @@ it('새싹 컴퍼니: 이름이 가장 긴 게임을 다 만들었을 때도 띠
   for (const label of strip) expect(await textPoint(page, COMPANY_SCENE, label), label).not.toBeNull();
   const hidden = await hiddenTexts(page, COMPANY_SCENE);
   expect(hidden.filter((line) => strip.some((label) => line.startsWith(`${label}:`))), '다 만든 게임의 띠').toEqual([]);
+});
+
+/** 새싹 컴퍼니 장면에서 이 점검이 들여다보는 것 */
+interface CompanyView {
+  state: CompanyState;
+  /** 만드는 게임의 띠에 놓인 것들 */
+  strip: { list: Array<{ type: string; text?: string }> };
+}
+
+it('새싹 컴퍼니: 만드는 게임의 띠에 끝낸 카드 수가 가려지지 않게 적히고, 카드를 끝내면 따라 오른다', async ({ page }) => {
+  await openApp(page);
+  // 카드가 가장 많은 게임을 스무 장 끝낸 회사. 남은 카드는 일감함과 그 뒤에 쌓여 있고, 맡은 친구는 없다.
+  const biggest = [...PROJECT_ORDER].sort((a, b) => PROJECTS[b].cards.length - PROJECTS[a].cards.length)[0];
+  const cards = PROJECTS[biggest].cards;
+  const done = 20;
+  const state = createCompany('sprout', Date.now());
+  state.office = OFFICES.length - 1;
+  state.guide = GUIDE_STEPS.length;
+  state.project = { id: biggest, done, total: cards.length, care: done * RATING.full };
+  state.backlog = cards.slice(done).map((kind) => ({ kind, left: 1000, total: 1000 }));
+  await seedCompany(page, state);
+  await page.reload();
+  await waitForScene(page, 'Hub');
+  await startScene(page, COMPANY_SCENE);
+
+  const count = (finished: number): string => `${finished}/${cards.length}`;
+  // 띠에 적힌 글자(이름, 몇 번째 출시인지, 끝낸 카드 수, 받을 잎사귀와 평판)가 서로나 꽃에 가리지 않는지 본다.
+  const expectStripClear = async (name: string): Promise<void> => {
+    const strip = await page.evaluate((key) => {
+      const scene = window.__pocketArcade?.scene.getScene(key) as unknown as CompanyView;
+      return scene.strip.list.flatMap((item) => (item.type === 'Text' && item.text ? [item.text] : []));
+    }, COMPANY_SCENE);
+    expect(strip, name).toContain(PROJECTS[biggest].title);
+    const hidden = await hiddenTexts(page, COMPANY_SCENE);
+    expect(hidden.filter((line) => strip.some((label) => line.startsWith(`${label}:`))), name).toEqual([]);
+  };
+  await expect.poll(() => textPoint(page, COMPANY_SCENE, count(done)), { ...WAIT, message: '끝낸 카드 수가 띠에 적혀야 한다' }).not.toBeNull();
+  await expectStripClear('스무 장을 끝낸 띠');
+
+  // 일감함의 카드 한 장을 사장의 책상에 올리고 일을 거의 끝내 둔다. 게임이 그 카드를 끝낸 것으로 세면 띠의 수도 한 장 오른다.
+  await page.evaluate((key) => {
+    const { state: company } = window.__pocketArcade?.scene.getScene(key) as unknown as CompanyView;
+    const card = company.inbox.shift();
+    if (!card) throw new Error('일감함에 카드가 없다');
+    company.desks[0].task = { ...card, left: 0.001 };
+  }, COMPANY_SCENE);
+  await expect.poll(() => textPoint(page, COMPANY_SCENE, count(done + 1)), { ...WAIT, message: '카드를 끝내면 수가 올라야 한다' }).not.toBeNull();
+  expect(await textPoint(page, COMPANY_SCENE, count(done)), '지난 수는 지워져야 한다').toBeNull();
+  await expectStripClear('한 장을 더 끝낸 띠');
 });
 
 it('결과 카드: 기록 일곱 줄과 랭킹 줄에 무기 여섯의 피해 줄까지 가려지지 않고 들어간다', async ({ page }) => {

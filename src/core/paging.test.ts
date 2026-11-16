@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { balancedRows, clampPage, fitStack, layoutPages, pagedCapacity, pageOfIndex, pageSlice, stackHeight } from './paging';
+import {
+  balancedRows,
+  clampPage,
+  fitStack,
+  layoutPages,
+  packLines,
+  pagedCapacity,
+  pageOfIndex,
+  pageSlice,
+  stackHeight,
+} from './paging';
 
 describe('layoutPages', () => {
   it('모두 들어가면 한 쪽이고 쪽 넘김 줄의 자리를 빼지 않는다', () => {
@@ -80,6 +90,82 @@ describe('balancedRows', () => {
     expect(balancedRows(0, 4)).toEqual([]);
     expect(balancedRows(-3, 4)).toEqual([]);
     expect(balancedRows(3, 0)).toEqual([1, 1, 1]);
+  });
+});
+
+describe('packLines', () => {
+  /** 조각의 너비들을 사이에 gap씩 두고 한 줄에 적었을 때의 너비 */
+  const widthOf =
+    (widths: readonly number[], gap: number) =>
+    (from: number, to: number): number =>
+      widths.slice(from, to).reduce((sum, value) => sum + value, 0) + gap * (to - from - 1);
+
+  it('한 줄에 들어가면 한 줄이고, 넘치면 가장 적은 줄에 가장 긴 줄이 가장 짧게 나눈다', () => {
+    const width = widthOf([80, 60, 70, 90], 10);
+    expect(packLines(4, width, 400)).toEqual([4]);
+    expect(packLines(4, width, 330)).toEqual([4]);
+    // 두 줄로 나누는 방법은 80 | 240, 150 | 170, 230 | 90이다.
+    expect(packLines(4, width, 329)).toEqual([2, 2]);
+    expect(packLines(4, width, 170)).toEqual([2, 2]);
+    // 세 줄이면 가장 긴 줄이 140이다(80 | 60, 70 | 90).
+    expect(packLines(4, width, 169)).toEqual([1, 2, 1]);
+    expect(packLines(4, width, 140)).toEqual([1, 2, 1]);
+    expect(packLines(4, width, 139)).toEqual([1, 1, 1, 1]);
+  });
+
+  it('조각마다 한 줄을 써도 넘치면 그렇게 나눈다', () => {
+    expect(packLines(3, widthOf([300, 50, 50], 10), 100)).toEqual([1, 1, 1]);
+    expect(packLines(1, widthOf([300], 10), 100)).toEqual([1]);
+  });
+
+  it('조금만 줄이면 들어가는 줄 수가 있으면 줄을 더 쓰지 않는다', () => {
+    const width = widthOf([80, 60, 70, 90], 10);
+    // 두 줄의 가장 긴 줄 170은 0.85배면 144.5다.
+    expect(packLines(4, width, 145, 0.85)).toEqual([2, 2]);
+    expect(packLines(4, width, 144, 0.85)).toEqual([1, 2, 1]);
+    // 한 줄 330은 0.85배면 280.5다.
+    expect(packLines(4, width, 281, 0.85)).toEqual([4]);
+    expect(packLines(4, width, 280, 0.85)).toEqual([2, 2]);
+    // 1보다 큰 값은 1로, 0보다 작은 값은 0으로 본다(0이면 얼마든지 줄여도 되므로 늘 한 줄이다).
+    expect(packLines(4, width, 329, 2)).toEqual([2, 2]);
+    expect(packLines(4, width, 10, -1)).toEqual([4]);
+  });
+
+  it('가장 긴 줄이 같으면 앞줄에 적게 담는다', () => {
+    // 100 | 50, 50과 100, 50 | 50은 가장 긴 줄이 각각 110과 160이다. 50, 50 | 100과 50 | 50, 100은 110과 160이다.
+    expect(packLines(3, widthOf([100, 50, 50], 10), 120)).toEqual([1, 2]);
+    expect(packLines(3, widthOf([50, 50, 100], 10), 120)).toEqual([2, 1]);
+    // 모두 같은 너비면 1 | 2와 2 | 1의 가장 긴 줄이 같다. 앞줄이 짧은 쪽을 쓴다.
+    expect(packLines(3, widthOf([50, 50, 50], 10), 120)).toEqual([1, 2]);
+  });
+
+  it('없거나 엉뚱한 개수는 빈 줄이고, 줄에 담은 수를 모두 더하면 조각의 수다', () => {
+    expect(packLines(0, () => 10, 100)).toEqual([]);
+    expect(packLines(-2, () => 10, 100)).toEqual([]);
+    for (let count = 1; count <= 12; count += 1) {
+      const widths = Array.from({ length: count }, (_, index) => 30 + ((index * 37) % 50));
+      for (const room of [40, 90, 150, 400, 2000]) {
+        const sizes = packLines(count, widthOf(widths, 8), room, 0.9);
+        expect(sizes.reduce((sum, value) => sum + value, 0)).toBe(count);
+        expect(sizes.every((size) => size >= 1)).toBe(true);
+      }
+    }
+  });
+
+  it('한 줄의 너비는 같은 범위를 두 번 재지 않는다', () => {
+    const asked = new Set<string>();
+    let calls = 0;
+    const width = (from: number, to: number): number => {
+      calls += 1;
+      asked.add(`${from}:${to}`);
+      return (to - from) * 100;
+    };
+    expect(packLines(6, width, 250)).toEqual([2, 2, 2]);
+    expect(calls).toBe(asked.size);
+    // 조각이 하나뿐이면 잴 것도 없다.
+    calls = 0;
+    expect(packLines(1, width, 50)).toEqual([1]);
+    expect(calls).toBe(0);
   });
 });
 

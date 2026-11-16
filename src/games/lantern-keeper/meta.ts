@@ -343,6 +343,9 @@ export const hasNews = (news: News): boolean =>
   news.stages.length > 0 ||
   news.upgrades.length > 0;
 
+/** 새로 들어온 것을 갈래마다 이어 적을 때 사이에 찍는 가운뎃점. 한 줄에 다 들어가지 않으면 준비 화면이 이 자리에서 줄을 나눈다. */
+export const NEWS_GAP = ' · ';
+
 /**
  * 새로 들어온 것을 알리는 한 줄. 예: "새 캐릭터 달잡이 · 새 무기 등대빛 · 새 패시브 손거울 · 새 스테이지 빛버섯 숲 · 새 영구 강화 5가지".
  * 영구 강화는 여럿이 한꺼번에 들어오면 이름을 늘어놓지 않고 몇 가지인지만 적는다(준비 화면의 한 줄에 다 들어가지 않는다).
@@ -355,7 +358,7 @@ export function newsLine(news: News): string {
   if (news.stages.length > 0) parts.push(`새 스테이지 ${news.stages.map((id) => STAGES[id].name).join(', ')}`);
   if (news.upgrades.length === 1) parts.push(`새 영구 강화 ${META[news.upgrades[0]].name}`);
   else if (news.upgrades.length > 1) parts.push(`새 영구 강화 ${news.upgrades.length}가지`);
-  return parts.join(' · ');
+  return parts.join(NEWS_GAP);
 }
 
 /**

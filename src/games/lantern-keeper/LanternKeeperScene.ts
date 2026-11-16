@@ -3,6 +3,7 @@ import { CSS, FONT_SIZE, GAME_WIDTH } from '../../config';
 import { vibrate } from '../../core/haptics';
 import { homeScene } from '../../core/home';
 import { music } from '../../core/music';
+import { packLines } from '../../core/paging';
 import { sfx, tone } from '../../core/sfx';
 import { addText, fadeToScene } from '../../core/ui';
 import { noteDayScore } from '../../online/online';
@@ -41,6 +42,7 @@ import {
   meetFriend,
   metaStore,
   newDepth,
+  NEWS_GAP,
   newsLine,
   newUnlocks,
   unknownNews,
@@ -98,8 +100,17 @@ const PLAYER_DROP = 18;
 const SAVE_EVERY = 20;
 /** 다른 곳이 판을 가져가서(이어 하거나, 새로 시작하거나, 마쳐서) 이 곳의 판을 놓았을 때 준비 화면에 띄우는 말 */
 const TAKEN_NOTICE = '다른 곳에서 이 판을 가져갔어요';
-/** 준비 화면에 잠깐 띄우는 한 줄의 위쪽 끝. 불씨와 기록이 적힌 칸(lobby.ts, 40~64) 바로 아래다. */
+/** 준비 화면에 잠깐 띄우는 알림의 위쪽 끝. 불씨와 기록이 적힌 칸(lobby.ts, 40~64) 바로 아래다. */
 const NOTICE_TOP = 67;
+/** 알림의 한 줄에 쓸 수 있는 너비. 띠는 화면 양옆에서 4씩 들어오고, 글은 띠 안에서 10씩 더 들어온다. */
+const NOTICE_ROOM = GAME_WIDTH - 8 - 20;
+/**
+ * 알림이 한 줄에 다 들어가지 않을 때 글자를 이만큼까지는 줄여서 줄 수를 아낀다. 더 줄여야 하면 줄을 하나 더 쓴다.
+ * 보통 글씨(12px)의 0.85배면 작은 글씨(10px)보다 조금 크다.
+ */
+const NOTICE_MIN_SCALE = 0.85;
+/** 알림이 떠 있는 시간(ms): 한 줄일 때와, 줄이 하나 늘 때마다 더 주는 읽을 시간 */
+const NOTICE_MS = { first: 2400, more: 800 } as const;
 /** 중간 보스가 쓰러지는 모습을 보여 준 뒤에 강화권 화면을 연다(ms). */
 const TICKET_DELAY_MS = 550;
 /** 마지막 보스를 쓰러뜨린 뒤 새벽의 선택이 뜨기까지(ms) */
@@ -270,17 +281,34 @@ export class LanternKeeperScene extends MiniGameScene {
     if (line) this.showLobbyNotice(line);
   }
 
-  /** 준비 화면 위에 한 줄을 잠깐 띄운다. 어두운 띠를 깔아서 뒤의 글자와 섞이지 않게 한다. */
+  /**
+   * 준비 화면 위에 알림을 잠깐 띄운다. 어두운 띠를 깔아서 뒤의 글자와 섞이지 않게 한다.
+   * 가운뎃점으로 이은 것이 여럿이라 한 줄에 들어가지 않으면(업데이트를 여러 번 건너뛴 저장에 알리는 새 소식)
+   * 가운뎃점 자리에서 줄을 나눈다. 한 줄로 줄여 적으면 글씨가 절반 아래로 작아져서 읽을 수 없었다.
+   */
   private showLobbyNotice(text: string): void {
-    const label = addText(this, GAME_WIDTH / 2, 0, text, { color: CSS.white, originX: 0.5, originY: 0.5 }).setDepth(
-      DEPTH.hud + 1,
-    );
-    // 띠보다 긴 줄(새로 들어온 것이 여럿일 때)은 띠에 맞춰 줄인다.
-    const room = GAME_WIDTH - 8 - 20;
-    if (label.width > room) label.setScale(room / label.width);
+    const label = addText(this, GAME_WIDTH / 2, 0, text, {
+      color: CSS.white,
+      originX: 0.5,
+      originY: 0.5,
+      align: 'center',
+    }).setDepth(DEPTH.hud + 1);
+    const parts = text.split(NEWS_GAP);
+    const lineOf = (from: number, to: number): string => parts.slice(from, to).join(NEWS_GAP);
+    const widthOf = (from: number, to: number): number => label.setText(lineOf(from, to)).width;
+    let from = 0;
+    const lines = packLines(parts.length, widthOf, NOTICE_ROOM, NOTICE_MIN_SCALE).map((size) => {
+      const line = lineOf(from, from + size);
+      from += size;
+      return line;
+    });
+    label.setText(lines.join('\n'));
+    // 그래도 띠보다 긴 줄은 띠에 맞춰 줄인다.
+    if (label.width > NOTICE_ROOM) label.setScale(NOTICE_ROOM / label.width);
     const width = Math.min(GAME_WIDTH - 8, label.displayWidth + 20);
-    const height = label.height + 12;
-    // 불씨와 기록이 적힌 칸 바로 아래에 띄운다. 짧은 화면에서도 캐릭터 카드(새로 왔다고 알리는 것)를 가리지 않는다.
+    const height = Math.round(label.displayHeight) + 12;
+    // 불씨와 기록이 적힌 칸 바로 아래에 띄운다. 한 줄이면 짧은 화면에서도 캐릭터 카드(새로 왔다고 알리는 것)를 가리지 않는다.
+    // 줄이 늘면 띠가 아래로 길어져서, 짧은 화면에서는 떠 있는 동안 카드의 윗부분을 가린다.
     const y = NOTICE_TOP + Math.round(height / 2);
     label.setY(y);
     const back = this.add
@@ -290,7 +318,7 @@ export class LanternKeeperScene extends MiniGameScene {
     this.tweens.add({
       targets: [label, back],
       alpha: 0,
-      delay: 2400,
+      delay: NOTICE_MS.first + NOTICE_MS.more * (lines.length - 1),
       duration: 500,
       onComplete: () => {
         label.destroy();
