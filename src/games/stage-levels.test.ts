@@ -474,7 +474,7 @@ describe('세 개 맞추기의 단계', () => {
         expect(goal.count).toBe(spec.count);
       }
       expect(plan.board).toHaveLength(matchThree.CELLS);
-      expect(plan.board.every((piece) => piece.kind < spec.kinds && !piece.burst), `${level}단계`).toBe(true);
+      expect(plan.board.every((piece) => piece.kind < spec.kinds && piece.power === null), `${level}단계`).toBe(true);
       expect(matchThree.hasMatch(plan.board), `${level}단계`).toBe(false);
       expect(matchThree.hasMove(plan.board), `${level}단계`).toBe(true);
     }

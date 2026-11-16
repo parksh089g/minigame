@@ -17,14 +17,22 @@ export const MIN_KINDS = 5;
 export const MAX_KINDS = 6;
 /** 나란히 놓여야 사라지는 조각의 수 */
 export const MATCH = 3;
-/** 한 번에 이만큼 이상 이어져 사라지면 그 자리에 폭죽이 생긴다. */
+/** 한 번에 이만큼 이어져 사라지면 그 자리에 폭죽이 생긴다. RAINBOW_MATCH개부터는 폭죽 대신 무지개다. */
 export const BURST_MATCH = 4;
+/** 한 번에 이만큼 이상 이어져 사라지면 폭죽 대신 무지개 조각이 생긴다. 한 줄로 다섯이어도, 꺾이거나 엇갈린 모양으로 다섯이어도 된다. */
+export const RAINBOW_MATCH = 5;
+
+/**
+ * 특수 조각의 갈래. 둘 다 제 갈래의 조각으로 맞추거나 다른 특수 조각에 휩쓸려서 사라질 때 일을 한다.
+ * 폭죽(burst)은 그 가로줄과 세로줄을 함께 터뜨리고, 무지개(rainbow)는 판에 있는 같은 갈래의 조각을 모두 함께 지운다.
+ */
+export type Power = 'burst' | 'rainbow';
 
 export interface Piece {
   /** 조각의 갈래: 0부터 */
   kind: number;
-  /** 폭죽인지. 폭죽은 사라질 때 그 가로줄과 세로줄을 함께 터뜨린다. */
-  burst: boolean;
+  /** 특수 조각이면 그 갈래, 여느 조각이면 null */
+  power: Power | null;
 }
 
 /** 칸마다 놓인 조각. 차례와 차례 사이에는 빈칸이 없다. */
@@ -164,7 +172,7 @@ export function newBoard(kinds: number, random: () => number): Piece[] {
       if (row >= 2 && board[cell - COLS].kind === board[cell - COLS * 2].kind) banned.add(board[cell - COLS].kind);
       let kind = randomKind(count, random);
       while (banned.has(kind)) kind = (kind + 1) % count;
-      board.push({ kind, burst: false });
+      board.push({ kind, power: null });
     }
     if (hasMove(board)) return board;
   }
@@ -181,7 +189,7 @@ export interface Shuffle {
 export const SHUFFLE_ATTEMPTS = 200;
 
 /**
- * 할 수 있는 맞바꾸기가 없을 때 조각을 섞는다. 조각의 수와 폭죽은 그대로이고 자리만 바뀐다.
+ * 할 수 있는 맞바꾸기가 없을 때 조각을 섞는다. 조각의 수와 특수 조각은 그대로이고 자리만 바뀐다.
  * 섞은 판에는 맞아 있는 줄이 없고 할 수 있는 맞바꾸기가 있다. 끝내 그런 판이 안 나오면 null.
  */
 export function shuffleBoard(board: Board, random: () => number): Shuffle | null {
@@ -203,12 +211,14 @@ export function shuffleBoard(board: Board, random: () => number): Shuffle | null
 export interface Clearing {
   /** 맞아서 사라지는 칸 */
   matched: number[];
-  /** 폭죽에 휩쓸려 사라지는 칸. matched와 겹치지 않는다. */
+  /** 폭죽이나 무지개에 휩쓸려 사라지는 칸. matched와 겹치지 않는다. */
   blasted: number[];
   /** 터지는 폭죽이 있던 칸 */
   detonated: number[];
-  /** 새로 생기는 폭죽: 그 칸의 조각이 사라진 자리에 놓인다. */
-  made: { cell: number; kind: number }[];
+  /** 터지는 무지개가 있던 칸과, 그 무지개가 지우는 갈래 */
+  swept: { cell: number; kind: number }[];
+  /** 새로 생기는 특수 조각: 그 칸의 조각이 사라진 자리에 놓인다. */
+  made: { cell: number; kind: number; power: Power }[];
 }
 
 /** 맞은 칸들을 붙어 있는 같은 조각끼리 묶는다. */
@@ -238,7 +248,8 @@ function groupsOf(board: readonly (Piece | null)[], matched: ReadonlySet<number>
 
 /**
  * 지금 판에서 사라질 것을 셈한다. 맞은 줄이 없으면 null.
- * prefer는 방금 맞바꾼 두 칸: 폭죽이 생길 때 그 칸에 놓인다. 없으면 가로줄과 세로줄이 만나는 칸,
+ * 붙어 있는 같은 조각의 묶음이 BURST_MATCH개 이상이면 폭죽이, RAINBOW_MATCH개 이상이면 폭죽 대신 무지개가 생긴다.
+ * prefer는 방금 맞바꾼 두 칸: 특수 조각이 생길 때 그 칸에 놓인다. 없으면 가로줄과 세로줄이 만나는 칸,
  * 그것도 없으면 묶음의 가운데 칸에 놓인다.
  */
 export function clearingOf(board: readonly (Piece | null)[], prefer: readonly number[] = []): Clearing | null {
@@ -255,34 +266,44 @@ export function clearingOf(board: readonly (Piece | null)[], prefer: readonly nu
     }
   }
 
-  const made: { cell: number; kind: number }[] = [];
+  const made: Clearing['made'] = [];
   for (const group of groupsOf(board, matched)) {
     if (group.length < BURST_MATCH) continue;
     const anchor =
       prefer.find((cell) => group.includes(cell)) ??
       group.find((cell) => across.has(cell) && down.has(cell)) ??
       group[Math.floor(group.length / 2)];
-    made.push({ cell: anchor, kind: (board[anchor] as Piece).kind });
+    const power: Power = group.length >= RAINBOW_MATCH ? 'rainbow' : 'burst';
+    made.push({ cell: anchor, kind: (board[anchor] as Piece).kind, power });
   }
 
-  // 사라지는 칸에 폭죽이 있으면 그 가로줄과 세로줄이 함께 사라지고, 거기 있던 폭죽도 이어서 터진다.
+  // 사라지는 칸에 특수 조각이 있으면 그것이 지우는 칸도 함께 사라지고, 거기 있던 특수 조각도 이어서 터진다.
+  // 폭죽은 그 가로줄과 세로줄을, 무지개는 판에 있는 같은 갈래의 조각을 모두 지운다.
   const cleared = new Set(matched);
   const detonated: number[] = [];
-  const queue = [...matched].filter((cell) => board[cell]?.burst);
+  const swept: Clearing['swept'] = [];
+  const queue = [...matched].filter((cell) => board[cell]?.power);
   const queued = new Set(queue);
   while (queue.length > 0) {
     const cell = queue.shift() as number;
-    detonated.push(cell);
-    const col = colOf(cell);
-    const row = rowOf(cell);
-    const line = [
-      ...Array.from({ length: COLS }, (_, c) => cellOf(c, row)),
-      ...Array.from({ length: ROWS }, (_, r) => cellOf(col, r)),
-    ];
-    for (const other of line) {
+    const piece = board[cell] as Piece;
+    let reach: number[];
+    if (piece.power === 'rainbow') {
+      swept.push({ cell, kind: piece.kind });
+      reach = Array.from({ length: CELLS }, (_, other) => other).filter((other) => board[other]?.kind === piece.kind);
+    } else {
+      detonated.push(cell);
+      const col = colOf(cell);
+      const row = rowOf(cell);
+      reach = [
+        ...Array.from({ length: COLS }, (_, c) => cellOf(c, row)),
+        ...Array.from({ length: ROWS }, (_, r) => cellOf(col, r)),
+      ];
+    }
+    for (const other of reach) {
       if (!board[other]) continue;
       cleared.add(other);
-      if (board[other]?.burst && !queued.has(other)) {
+      if (board[other]?.power && !queued.has(other)) {
         queued.add(other);
         queue.push(other);
       }
@@ -294,6 +315,7 @@ export function clearingOf(board: readonly (Piece | null)[], prefer: readonly nu
     matched: sorted(matched),
     blasted: sorted([...cleared].filter((cell) => !matched.has(cell))),
     detonated: sorted(detonated),
+    swept: swept.sort((a, b) => a.cell - b.cell),
     made,
   };
 }
@@ -343,7 +365,7 @@ export function settle(board: readonly (Piece | null)[], kinds: number, random: 
     }
     const empty = write + 1;
     for (let row = write; row >= 0; row -= 1) {
-      const piece: Piece = { kind: randomKind(count, random), burst: false };
+      const piece: Piece = { kind: randomKind(count, random), power: null };
       const cell = cellOf(col, row);
       next[cell] = piece;
       spawns.push({ cell, piece, above: empty });
@@ -387,7 +409,9 @@ export interface Turn {
   cleared: number[];
   /** 터진 폭죽의 수 */
   bursts: number;
-  /** 새로 생긴 폭죽의 수 */
+  /** 터진 무지개의 수 */
+  rainbows: number;
+  /** 새로 생긴 특수 조각(폭죽과 무지개)의 수 */
   made: number;
   /** 할 수 있는 맞바꾸기가 없어서 섞었으면 그 섞기. 조각은 steps가 끝난 뒤의 자리에서 옮겨 간다. */
   shuffle: Shuffle | null;
@@ -395,7 +419,7 @@ export interface Turn {
 
 /**
  * 맞아 있는 줄이 없어질 때까지 사라지고 떨어지기를 되풀이한다. 받은 판은 바꾸지 않는다.
- * prefer는 방금 맞바꾼 두 칸(첫 연쇄에서 폭죽이 놓일 자리)이다.
+ * prefer는 방금 맞바꾼 두 칸(첫 연쇄에서 특수 조각이 놓일 자리)이다.
  */
 export function resolve(
   start: readonly (Piece | null)[],
@@ -408,6 +432,7 @@ export function resolve(
   const cleared = Array<number>(MAX_KINDS).fill(0);
   let board: readonly (Piece | null)[] = start;
   let bursts = 0;
+  let rainbows = 0;
   let made = 0;
 
   for (let chain = 1; chain <= MAX_CHAIN; chain += 1) {
@@ -420,7 +445,7 @@ export function resolve(
       if (piece) cleared[piece.kind] += 1;
       holes[cell] = null;
     }
-    for (const burst of clearing.made) holes[burst.cell] = { kind: burst.kind, burst: true };
+    for (const special of clearing.made) holes[special.cell] = { kind: special.kind, power: special.power };
     const settled = settle(holes, count, random);
     steps.push({
       ...clearing,
@@ -431,6 +456,7 @@ export function resolve(
       board: settled.board,
     });
     bursts += clearing.detonated.length;
+    rainbows += clearing.swept.length;
     made += clearing.made.length;
     board = settled.board;
   }
@@ -454,6 +480,7 @@ export function resolve(
     points: steps.reduce((sum, step) => sum + step.points, 0),
     cleared,
     bursts,
+    rainbows,
     made,
     shuffle,
   };
@@ -481,16 +508,18 @@ export const ARCADE_KINDS = MAX_KINDS;
 export const START_SECONDS = 60;
 /** 폭죽을 하나 터뜨릴 때마다 돌려받는 시간(초) */
 export const BURST_SECONDS = 1;
-/** 한 차례에 돌려받는 시간의 끝(초). 폭죽이 줄줄이 터져도 시간이 한꺼번에 차지는 않는다. */
+/** 무지개를 하나 터뜨릴 때마다 돌려받는 시간(초) */
+export const RAINBOW_SECONDS = 1;
+/** 한 차례에 돌려받는 시간의 끝(초). 특수 조각이 줄줄이 터져도 시간이 한꺼번에 차지는 않는다. */
 export const MAX_TURN_SECONDS = 3;
 
 /**
- * 그 차례로 돌려받는 시간(초): 폭죽을 터뜨리면 받는다.
+ * 그 차례로 돌려받는 시간(초): 폭죽이나 무지개를 터뜨리면 받는다.
  * 시간은 조각이 사라지고 떨어지는 동안에는 흐르지 않으므로, 한 차례에 돌려받는 시간은
  * 다음 자리를 찾는 데 드는 시간보다 한참 적어야 판이 끝난다.
  */
 export function secondsBack(turn: Turn): number {
-  return Math.min(MAX_TURN_SECONDS, turn.bursts * BURST_SECONDS);
+  return Math.min(MAX_TURN_SECONDS, turn.bursts * BURST_SECONDS + turn.rainbows * RAINBOW_SECONDS);
 }
 
 /**
