@@ -16,10 +16,13 @@ import {
   OFFERS,
   ownsCharm,
   PERK_IDS,
+  RELIC_IDS,
+  RELIC_MAX,
   slotsOf,
   spinsOf,
   SYMBOLS,
   type PerkId,
+  type RelicLevels,
   type RunState,
   type Shop,
 } from './rules';
@@ -116,6 +119,22 @@ function readPerks(raw: unknown): PerkId[] | null {
   return perks;
 }
 
+/**
+ * 판을 시작할 때의 유물 단계: 있는 유물만, 1부터 RELIC_MAX까지의 정수만. 맞지 않으면 null.
+ * 유물이 생기기 전에 저장된 판에는 이 값이 없다. 그때는 유물 없이 시작한 판이다.
+ */
+function readRelics(raw: unknown): RelicLevels | null {
+  if (raw === undefined) return {};
+  if (!isObject(raw)) return null;
+  const relics: RelicLevels = {};
+  for (const [key, level] of Object.entries(raw)) {
+    const id = RELIC_IDS.find((known) => known === key);
+    if (!id || !isCount(level) || level < 1 || level > RELIC_MAX) return null;
+    relics[id] = level;
+  }
+  return relics;
+}
+
 /** 가게: 팔린 자리는 null이고, 남은 자리는 서로 다른 있는 부적이다. 맞지 않으면 null. */
 function readShop(raw: unknown): Shop | null {
   if (!isObject(raw) || !Array.isArray(raw.offers) || raw.offers.length > OFFERS || !isCount(raw.rerollCost)) {
@@ -155,8 +174,10 @@ export function readRun(raw: unknown): RunState | null {
   const { phase, seed } = from;
   if (phase !== 'spin' && phase !== 'shop') return null;
   const perks = readPerks(from.perks);
-  // 정해진 운의 판(오늘의 판)은 누구나 같은 조건이라 해금이 켜져 있을 수 없다.
+  // 정해진 운의 판(오늘의 판)은 누구나 같은 조건이라 해금도 유물도 켜져 있을 수 없다.
   if (!perks || (seed !== null && perks.length > 0)) return null;
+  const relics = readRelics(from.relics);
+  if (!relics || (seed !== null && Object.keys(relics).length > 0)) return null;
   const charms = readCharms(from.charms, slotsOf({ perks }));
   if (!charms) return null;
 
@@ -201,6 +222,7 @@ export function readRun(raw: unknown): RunState | null {
     spinCount,
     drawCount,
     perks,
+    relics,
   };
 }
 

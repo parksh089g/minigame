@@ -85,6 +85,7 @@ function shopRun(offers: readonly string[]): RunState {
     spinCount: 6,
     drawCount: 1,
     perks: [],
+    relics: {},
   };
 }
 

@@ -492,6 +492,8 @@ export interface RunState {
   drawCount: number;
   /** 이 판을 시작할 때 켜져 있던 영구 해금. 판 도중에는 바뀌지 않고, 정해진 운의 판(오늘의 판)은 늘 비어 있다. */
   perks: PerkId[];
+  /** 이 판을 시작할 때의 유물 단계. 판 도중에는 바뀌지 않고, 정해진 운의 판(오늘의 판)은 늘 비어 있다. */
+  relics: RelicLevels;
 }
 
 /** 라운드마다 열을 잠글 수 있는 횟수 */
@@ -525,10 +527,64 @@ export function firstRerollCost(run: Pick<RunState, 'perks'>): number {
 }
 
 /**
- * 새 판. seed를 주면 정해진 운으로 하는 판이 된다(randomOf를 보라).
- * perks는 켜 둔 영구 해금이다. 정해진 운의 판은 누구나 같은 조건이어야 해서 perks를 받지 않는다.
+ * 유물: 판이 끝나도 남고, 단계를 올릴수록 아주 조금씩 세지는 것. 단계마다의 값과 올리는 법은 relics.ts가 정하고,
+ * 여기서는 판에서 하는 일만 정한다. 판을 크게 바꾸지 않을 만큼만 듣고, 단계는 RELIC_MAX에서 멈춘다.
+ * 누구나 같은 조건으로 하는 오늘의 판에는 듣지 않는다.
+ * - scale(낡은 저울): 라운드의 목표가 단계마다 RELIC_STEP.scale(천분율)만큼 낮아진다.
+ * - seal(상인의 도장): 부적을 뗄 때 돌려받는 몫이 단계마다 RELIC_STEP.seal(백분율)만큼 는다.
+ * - hammer(대장장이 망치): 부적을 강화하는 값이 단계마다 RELIC_STEP.hammer(백분율)만큼 준다.
+ * - jar(금화 항아리): 라운드를 넘길 때 남은 금화의, 단계마다 RELIC_STEP.jar(천분율)만큼을 덤으로 받는다.
  */
-export function newRun(seed: string | null = null, perks: readonly PerkId[] = []): RunState {
+export const RELIC_IDS = ['scale', 'seal', 'hammer', 'jar'] as const;
+export type RelicId = (typeof RELIC_IDS)[number];
+/** 유물마다 올릴 수 있는 가장 높은 단계 */
+export const RELIC_MAX = 10;
+/** 유물의 단계. 적히지 않은 유물은 0단계다. */
+export type RelicLevels = Partial<Record<RelicId, number>>;
+/**
+ * 한 단계가 하는 일. scale과 jar는 천분율(5는 0.5%), seal과 hammer는 백분율(2는 2%)이다.
+ * 소수 대신 정수로 적어 두고 셈도 정수로 해서, 단계가 쌓여도 값이 어긋나지 않는다.
+ */
+export const RELIC_STEP: Readonly<Record<RelicId, number>> = { scale: 5, seal: 2, hammer: 2, jar: 5 };
+
+/** 이 판에서 그 유물의 단계(0~RELIC_MAX). 이상한 값은 0으로, 넘치는 값은 RELIC_MAX로 본다. */
+export function relicLevel(run: Pick<RunState, 'relics'> | undefined, id: RelicId): number {
+  const level = run?.relics[id];
+  if (typeof level !== 'number' || !Number.isFinite(level) || level <= 0) return 0;
+  return Math.min(RELIC_MAX, Math.floor(level));
+}
+
+/** 받은 단계에서 아는 유물의, 1단계 이상인 것만 남긴다. */
+export function cleanRelics(relics: RelicLevels): RelicLevels {
+  const clean: RelicLevels = {};
+  for (const id of RELIC_IDS) {
+    const level = relicLevel({ relics }, id);
+    if (level > 0) clean[id] = level;
+  }
+  return clean;
+}
+
+/** 이 판에서 그 라운드에 내야 하는 금화. 낡은 저울의 단계만큼 낮아지고, 1보다 작아지지는 않는다. */
+export function targetFor(run: Pick<RunState, 'relics'>, round: number): number {
+  const cut = RELIC_STEP.scale * relicLevel(run, 'scale');
+  return Math.max(1, Math.ceil((targetOf(round) * (1000 - cut)) / 1000));
+}
+
+/** 라운드를 넘길 때 금화 항아리로 받는 덤: 남은 금화의 얼마쯤, 내림한다. 항아리가 0단계면 0이다. */
+export function interestFor(coin: number, run: Pick<RunState, 'relics'>): number {
+  const rate = RELIC_STEP.jar * relicLevel(run, 'jar');
+  return Math.floor((Math.max(0, Math.floor(coin)) * rate) / 1000);
+}
+
+/**
+ * 새 판. seed를 주면 정해진 운으로 하는 판이 된다(randomOf를 보라).
+ * perks는 켜 둔 영구 해금이고 relics는 유물의 단계다. 정해진 운의 판은 누구나 같은 조건이어야 해서 둘 다 받지 않는다.
+ */
+export function newRun(
+  seed: string | null = null,
+  perks: readonly PerkId[] = [],
+  relics: RelicLevels = {},
+): RunState {
   const active = seed === null ? PERK_IDS.filter((id) => perks.includes(id)) : [];
   const holds = { perks: active };
   return {
@@ -547,6 +603,7 @@ export function newRun(seed: string | null = null, perks: readonly PerkId[] = []
     spinCount: 0,
     drawCount: 0,
     perks: active,
+    relics: seed === null ? cleanRelics(relics) : {},
   };
 }
 
@@ -617,6 +674,8 @@ export interface Settlement {
   paid: number;
   /** 저금통으로 받은 덤 */
   savings: number;
+  /** 금화 항아리(유물)로 받은 덤 */
+  interest: number;
 }
 
 /**
@@ -625,21 +684,24 @@ export interface Settlement {
  */
 export function settleRound(run: RunState, random: () => number): Settlement | null {
   if (run.phase !== 'spin' || run.spinsLeft > 0) return null;
-  const target = targetOf(run.round);
+  const target = targetFor(run, run.round);
   if (run.coin < target) {
-    return { run: { ...run, phase: 'over', shop: null }, cleared: false, paid: 0, savings: 0 };
+    return { run: { ...run, phase: 'over', shop: null }, cleared: false, paid: 0, savings: 0, interest: 0 };
   }
   const left = run.coin - target;
   const savings = savingsFor(left, run.charms);
+  // 두 덤은 낸 뒤에 남은 금화를 보고 따로 셈한다(덤에 덤이 붙지 않는다).
+  const interest = interestFor(left, run);
   return {
     cleared: true,
     paid: target,
     savings,
+    interest,
     run: {
       ...run,
       phase: 'shop',
-      coin: left + savings,
-      earned: run.earned + savings,
+      coin: left + savings + interest,
+      earned: run.earned + savings + interest,
       afterMiss: false,
       shop: { offers: drawOffers(run.charms, random), rerollCost: firstRerollCost(run) },
       drawCount: run.drawCount + 1,
@@ -696,18 +758,29 @@ export function reroll(run: RunState, random: () => number): RunState {
 export const REFUND_RATE = 0.5;
 export const UPGRADE_RATE = 1.5;
 
-/** 그 부적을 강화하는 값. 부적의 값에 UPGRADE_RATE를 곱해 올림한다. 없는 부적이면 0이다. */
-export function upgradeCostOf(id: string): number {
-  const charm = charmOf(baseOf(id));
-  return charm ? Math.ceil(charm.price * UPGRADE_RATE) : 0;
-}
-
-/** 그 부적을 뗄 때 돌려받는 금화: 치른 값(강화했으면 강화하는 값까지)의 REFUND_RATE만큼, 내림한다. */
-export function refundOf(id: string): number {
+/**
+ * 그 부적을 강화하는 값. 부적의 값에 UPGRADE_RATE를 곱해 올림한다. 없는 부적이면 0이다.
+ * run을 주면 그 판의 대장장이 망치(유물)만큼 싸진다(올림하고, 1보다 싸지지는 않는다).
+ */
+export function upgradeCostOf(id: string, run?: Pick<RunState, 'relics'>): number {
   const charm = charmOf(baseOf(id));
   if (!charm) return 0;
-  const paid = charm.price + (isUpgraded(id) ? upgradeCostOf(id) : 0);
-  return Math.floor(paid * REFUND_RATE);
+  const cost = Math.ceil(charm.price * UPGRADE_RATE);
+  const cut = RELIC_STEP.hammer * relicLevel(run, 'hammer');
+  return Math.max(1, Math.ceil((cost * (100 - cut)) / 100));
+}
+
+/**
+ * 그 부적을 뗄 때 돌려받는 금화: 치른 값(강화했으면 강화하는 값까지)의 REFUND_RATE만큼, 내림한다.
+ * run을 주면 그 판의 상인의 도장(유물)만큼 몫이 늘고, 강화하는 값도 그 판의 값으로 친다.
+ * 몫이 가장 클 때에도 치른 값보다는 적게 돌려받는다.
+ */
+export function refundOf(id: string, run?: Pick<RunState, 'relics'>): number {
+  const charm = charmOf(baseOf(id));
+  if (!charm) return 0;
+  const paid = charm.price + (isUpgraded(id) ? upgradeCostOf(id, run) : 0);
+  const percent = Math.round(REFUND_RATE * 100) + RELIC_STEP.seal * relicLevel(run, 'seal');
+  return Math.floor((paid * percent) / 100);
 }
 
 /** 붙여 둔 slot번째 부적을 뗀다. refundOf만큼 금화를 돌려받는다(점수에는 들지 않는다). 가게에서만 뗄 수 있다. */
@@ -715,7 +788,7 @@ export function discard(run: RunState, slot: number): RunState {
   if (run.phase !== 'shop' || slot < 0 || slot >= run.charms.length) return run;
   return {
     ...run,
-    coin: run.coin + refundOf(run.charms[slot]),
+    coin: run.coin + refundOf(run.charms[slot], run),
     charms: run.charms.filter((_, index) => index !== slot),
   };
 }
@@ -728,7 +801,7 @@ export function upgradeBlock(run: RunState, slot: number): UpgradeBlock | null {
   const id = run.charms[slot];
   if (id === undefined || !charmOf(id)) return 'none';
   if (isUpgraded(id)) return 'done';
-  if (run.coin < upgradeCostOf(id)) return 'coin';
+  if (run.coin < upgradeCostOf(id, run)) return 'coin';
   return null;
 }
 
@@ -741,7 +814,7 @@ export function upgrade(run: RunState, slot: number): RunState {
   const id = run.charms[slot];
   return {
     ...run,
-    coin: run.coin - upgradeCostOf(id),
+    coin: run.coin - upgradeCostOf(id, run),
     charms: run.charms.map((charm, index) => (index === slot ? upgradedOf(charm) : charm)),
   };
 }

@@ -70,7 +70,7 @@ import {
   spin,
   spinsOf,
   SYMBOLS,
-  targetOf,
+  targetFor,
   valuesOf,
   WILD,
   type Box,
@@ -671,7 +671,7 @@ export class CandySlotScene extends MiniGameScene {
     const { run } = this;
     const shopping = run.phase === 'shop';
     const coin = Math.max(0, run.coin - this.pending);
-    const target = targetOf(shopping ? run.round + 1 : run.round);
+    const target = targetFor(run, shopping ? run.round + 1 : run.round);
     const reached = coin >= target;
 
     this.hud.setScore(Math.max(0, scoreOf(run) - this.pending));
@@ -1009,7 +1009,7 @@ export class CandySlotScene extends MiniGameScene {
     if (outcome.wins.length > 0) {
       const { goal } = this.layout;
       this.floatCoin(goal.x + goal.width / 2, goal.y + goal.height, outcome.total);
-      if (!big && outcome.total >= targetOf(this.run.round) * BIG_WIN_RATIO && outcome.boosts.length === 0) sfx.coin();
+      if (!big && outcome.total >= targetFor(this.run, this.run.round) * BIG_WIN_RATIO && outcome.boosts.length === 0) sfx.coin();
     }
     if (this.run.spinsLeft > 0) {
       this.busy = false;
@@ -1271,7 +1271,7 @@ export class CandySlotScene extends MiniGameScene {
   private isBigWin(outcome: SpinOutcome): boolean {
     if (outcome.wins.length === 0) return false;
     if (outcome.jackpot || outcome.wins.some((win) => win.symbol === WILD)) return true;
-    return outcome.total >= Math.max(BIG_WIN_MIN, targetOf(this.run.round) * BIG_WIN_RATIO);
+    return outcome.total >= Math.max(BIG_WIN_MIN, targetFor(this.run, this.run.round) * BIG_WIN_RATIO);
   }
 
   /**
@@ -1328,7 +1328,7 @@ export class CandySlotScene extends MiniGameScene {
 
   private settle(): void {
     if (!this.playing) return;
-    const short = targetOf(this.run.round) - this.run.coin;
+    const short = targetFor(this.run, this.run.round) - this.run.coin;
     const settlement = settleRound(this.run, randomOf(this.run, 'shop', Math.random));
     if (!settlement) return;
     this.run = settlement.run;
@@ -1343,12 +1343,11 @@ export class CandySlotScene extends MiniGameScene {
     vibrate([15, 30, 15]);
     this.sparks.setParticleTint(THEME.mintDeep);
     this.sparks.explode(12, GAME_WIDTH / 2, this.machineMiddle);
-    // 목표만큼 낸 것과 저금통의 덤을 따로 보여 준다.
+    // 목표만큼 낸 것과 덤(저금통과 금화 항아리)을 따로 보여 준다.
     this.floatCoin(goal.x + goal.width / 2 - 24, goal.y + goal.height, -settlement.paid);
-    if (settlement.savings > 0) {
-      this.time.delayedCall(260, () =>
-        this.floatCoin(goal.x + goal.width / 2 + 24, goal.y + goal.height, settlement.savings),
-      );
+    const bonus = settlement.savings + settlement.interest;
+    if (bonus > 0) {
+      this.time.delayedCall(260, () => this.floatCoin(goal.x + goal.width / 2 + 24, goal.y + goal.height, bonus));
     }
     this.time.delayedCall(SHOP_DELAY_MS, () => this.openShop());
   }
