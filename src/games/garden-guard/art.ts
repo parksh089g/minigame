@@ -6,7 +6,7 @@
 import type Phaser from 'phaser';
 import { THEME, THEME_CSS } from '../../config';
 import { addHiResCanvas, renderScale } from '../../core/hidpi';
-import type { EnemyKind, RelicId, UpgradeId } from './data';
+import type { AllyId, EnemyKind, RelicId, UpgradeId } from './data';
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -88,7 +88,32 @@ export const TEX = {
   mound: 'gg-mound',
   /** 유물 조각 */
   shard: 'gg-shard',
+  /** 열매: 동료 가게에서 쓰는 돈 */
+  fruit: 'gg-fruit',
+  /** 동료가 쏘는 것: 개구리의 혀끝, 박하 잎, 물뿌리개의 물덩이, 참새의 낱알, 선인장의 가시 */
+  tongue: 'gg-tongue',
+  leaf: 'gg-leaf',
+  spray: 'gg-spray',
+  grain: 'gg-grain',
+  spine: 'gg-spine',
+  /** 호박덩굴이 던지는 작은 호박 */
+  pumpkin: 'gg-pumpkin',
 } as const;
+
+/** 동료의 그림. 해바라기는 예전부터 있던 그림을 그대로 쓴다. */
+export const allyTexture = (id: AllyId): string => (id === 'sunflower' ? TEX.sunflower : `gg-ally-${id}`);
+
+/** 동료가 쏜 것의 그림 */
+export const ALLY_SHOT: Readonly<Record<AllyId, string>> = {
+  sunflower: TEX.pip,
+  frog: TEX.tongue,
+  mint: TEX.leaf,
+  can: TEX.spray,
+  sparrow: TEX.grain,
+  cactus: TEX.spine,
+  pumpkin: TEX.pumpkin,
+  hedgehog: TEX.spine,
+};
 
 // ───────── 그리기 도구 ─────────
 
@@ -457,6 +482,79 @@ const ITEM_ART: Readonly<Record<string, Art>> = {
       sunflowerHead(c, 15, 13, 12.5, true);
     },
   },
+  /** 열매: 꼭지에 잎 하나가 달린 빨간 열매. 씨앗 그림과 같은 크기다. */
+  [TEX.fruit]: {
+    width: 14,
+    height: 14,
+    view: [28, 28],
+    draw(c) {
+      oval(c, 14, 16.5, 9.5, 9, '#e9677f');
+      oval(c, 14, 16, 8.8, 8.3, '#ff8f8f');
+      oval(c, 10.5, 12.5, 2.6, 1.6, 'rgba(255, 255, 255, 0.75)', -0.6);
+      stroke(c, 'M14 8Q14.500 5 16.500 3.500', '#a9825f', 1.8);
+      oval(c, 19, 5.5, 4, 2.2, LEAF_DEEP, -0.4);
+    },
+  },
+  [TEX.tongue]: {
+    width: 9,
+    height: 9,
+    view: [18, 18],
+    draw(c) {
+      oval(c, 9, 9, 7.5, 7.5, '#e97f99');
+      oval(c, 9, 9, 6, 6, '#ff9fb5');
+      oval(c, 6.5, 6.5, 1.8, 1.2, 'rgba(255, 255, 255, 0.8)', -0.6);
+    },
+  },
+  [TEX.leaf]: {
+    width: 8,
+    height: 8,
+    view: [16, 16],
+    draw(c) {
+      const d = 'M2 14Q2 3 14 2Q14 13 2 14Z';
+      fill(c, d, '#9fe6c6');
+      stroke(c, d, '#57b98f', 1.4);
+      stroke(c, 'M3 13L11 5', '#57b98f', 1);
+    },
+  },
+  [TEX.spray]: {
+    width: 10,
+    height: 10,
+    view: [20, 20],
+    draw(c) {
+      oval(c, 10, 10, 8.5, 8.5, WATER_DEEP);
+      oval(c, 10, 10, 7, 7, WATER);
+      oval(c, 7, 7, 2.4, 1.5, 'rgba(255, 255, 255, 0.85)', -0.6);
+    },
+  },
+  [TEX.grain]: {
+    width: 6,
+    height: 6,
+    view: [12, 12],
+    draw(c) {
+      oval(c, 6, 6, 4.5, 3.2, '#c98a4e', 0.6);
+      oval(c, 6, 6, 3.6, 2.4, '#e6b56e', 0.6);
+    },
+  },
+  [TEX.spine]: {
+    width: 4,
+    height: 10,
+    view: [8, 20],
+    draw(c) {
+      fill(c, 'M4 1L6.500 17Q4 19 1.500 17Z', '#57b98f');
+      fill(c, 'M4 3L5 15H3Z', '#d9f5e6');
+    },
+  },
+  [TEX.pumpkin]: {
+    width: 12,
+    height: 12,
+    view: [24, 24],
+    draw(c) {
+      stroke(c, 'M12 6Q13 2 16 1.500', LEAF_DEEP, 2);
+      oval(c, 12, 14, 10, 8.5, '#e98a4a');
+      oval(c, 12, 14, 4.5, 8.5, '#f2a65a');
+      stroke(c, 'M7 8Q5 14 7 20M17 8Q19 14 17 20', '#d9743a', 1.2);
+    },
+  },
   [TEX.mound]: {
     width: 26,
     height: 20,
@@ -649,6 +747,149 @@ const UPGRADE_ART: Readonly<Record<UpgradeId, Art>> = {
   },
 };
 
+// ───────── 동료 ─────────
+
+/** 동료의 그림은 해바라기와 같은 크기다. 아래쪽 끝이 땅에 닿는 자리다. */
+const ALLY_SIZE = { width: 30, height: 38, view: [30, 38] as const };
+
+/** 작은 화분. (cx, top)은 화분 윗변의 가운데다. */
+function pot(c: Ctx, cx: number, top: number, w: number, h: number): void {
+  fill(c, `M${cx - w / 2} ${top}H${cx + w / 2}L${cx + w * 0.38} ${top + h}H${cx - w * 0.38}Z`, '#e9a07e');
+  box(c, cx - w / 2 - 1.5, top - 1, w + 3, 4.5, 2, '#f3b896');
+}
+
+const ALLY_ART: Readonly<Record<Exclude<AllyId, 'sunflower'>, Art>> = {
+  /** 개구리: 동그란 몸에 위로 솟은 눈, 하얀 배 */
+  frog: {
+    ...ALLY_SIZE,
+    draw(c) {
+      oval(c, 8, 35, 5.5, 2.8, '#57b98f');
+      oval(c, 22, 35, 5.5, 2.8, '#57b98f');
+      oval(c, 15, 26, 12.5, 10.5, '#7fd3ae');
+      oval(c, 15, 30, 7.5, 5.5, '#e9fbf1');
+      for (const x of [8.5, 21.5]) {
+        oval(c, x, 15.5, 5.2, 5, '#7fd3ae');
+        oval(c, x, 15.5, 3.4, 3.4, WHITE);
+        oval(c, x + 0.4, 16, 1.9, 1.9, INK);
+        oval(c, x + 1, 15.2, 0.7, 0.7, WHITE);
+      }
+      oval(c, 6.5, 24, 2.4, 1.5, BLUSH);
+      oval(c, 23.5, 24, 2.4, 1.5, BLUSH);
+      stroke(c, 'M10.500 23Q15 26.500 19.500 23', INK, 1.3);
+    },
+  },
+  /** 박하: 화분에 심은 박하. 화분에 얼굴이 있다. */
+  mint: {
+    ...ALLY_SIZE,
+    draw(c) {
+      stroke(c, 'M15 24V9', '#57b98f', 2);
+      for (const [x, y, r] of [
+        [9, 18, 0.6],
+        [21, 17, -0.6],
+        [10, 10, 0.9],
+        [20, 9.5, -0.9],
+        [15, 5, 0],
+      ] as const) {
+        oval(c, x, y, 5.6, 3.4, '#57b98f', r);
+        oval(c, x, y, 4.6, 2.5, '#9fe6c6', r);
+      }
+      pot(c, 15, 24, 18, 13);
+      face(c, 15, 29.5, 6, 1.3);
+    },
+  },
+  /** 물뿌리개: 하늘색 통에 위로 솟은 꼭지, 통에 얼굴 */
+  can: {
+    ...ALLY_SIZE,
+    draw(c) {
+      stroke(c, 'M23 22L28.500 11', WATER_DEEP, 3.2);
+      box(c, 26, 8.5, 4, 4, 1.5, WATER_DEEP);
+      stroke(c, 'M8 17Q8 9 15 9Q20 9 20 15', '#9db0c4', 2.4);
+      box(c, 4, 15, 20, 21, 6, WATER_DEEP);
+      box(c, 4, 15, 20, 19.5, 6, WATER);
+      box(c, 6, 17, 3, 10, 1.5, 'rgba(255, 255, 255, 0.55)');
+      face(c, 14, 24, 7, 1.5);
+    },
+  },
+  /** 참새: 말뚝 위에 앉은 동그란 참새 */
+  sparrow: {
+    ...ALLY_SIZE,
+    draw(c) {
+      box(c, 11, 28, 8, 10, 2.5, WOOD_DEEP);
+      box(c, 11, 28, 8, 9, 2.5, WOOD);
+      oval(c, 15, 20, 10.5, 9.5, '#c98a5a');
+      oval(c, 15, 23, 7.5, 6, '#fff0c9');
+      oval(c, 6.5, 21, 4.5, 6.5, '#a9714a', 0.3);
+      oval(c, 15, 12.5, 7.5, 6.5, '#a9714a');
+      oval(c, 15, 15, 5.5, 3.5, '#fff0c9');
+      fill(c, 'M13 15.500L15 19L17 15.500Z', '#f2a65a');
+      oval(c, 11.5, 13, 1.4, 1.4, INK);
+      oval(c, 18.5, 13, 1.4, 1.4, INK);
+      oval(c, 10, 15.5, 1.7, 1, BLUSH);
+      oval(c, 20, 15.5, 1.7, 1, BLUSH);
+    },
+  },
+  /** 선인장: 화분에 심은 팔 달린 선인장과 머리의 꽃 */
+  cactus: {
+    ...ALLY_SIZE,
+    draw(c) {
+      box(c, 3.5, 13, 6, 10, 3, '#57b98f');
+      box(c, 3.5, 19, 9, 5, 2.5, '#57b98f');
+      box(c, 21, 10, 6, 9, 3, '#57b98f');
+      box(c, 18, 16, 9, 5, 2.5, '#57b98f');
+      box(c, 9, 6, 12, 21, 6, '#57b98f');
+      box(c, 10, 6.5, 10, 19.5, 5, '#7fd3ae');
+      for (const [x, y] of [
+        [11.5, 10],
+        [18.5, 11],
+        [12, 20],
+        [18, 21],
+        [5.5, 15],
+        [24, 12.5],
+      ] as const) {
+        stroke(c, `M${x} ${y}l-1.5 -1.5`, '#e9fbf1', 0.9);
+      }
+      oval(c, 15, 5.5, 3.2, 2.6, '#ff9fb5');
+      oval(c, 15, 5.5, 1.3, 1.1, '#ffcf5c');
+      face(c, 15, 15.5, 5, 1.2);
+      pot(c, 15, 27, 16, 10);
+    },
+  },
+  /** 호박덩굴: 덩굴 잎 사이에 앉은 얼굴 있는 호박 */
+  pumpkin: {
+    ...ALLY_SIZE,
+    draw(c) {
+      stroke(c, 'M1 30Q6 22 12 26M29 30Q24 22 18 26', LEAF_DEEP, 2);
+      oval(c, 4.5, 26, 4.2, 3, LEAF, -0.5);
+      oval(c, 25.5, 26, 4.2, 3, LEAF, 0.5);
+      stroke(c, 'M15 14Q15 9 19 7.500', LEAF_DEEP, 2.4);
+      oval(c, 20, 9, 3.6, 2.2, LEAF, -0.4);
+      oval(c, 15, 26, 13, 10, '#e98a4a');
+      oval(c, 15, 26, 8.5, 10, '#f2a65a');
+      oval(c, 15, 26, 4, 9.5, '#f7b874');
+      stroke(c, 'M7.500 18Q4.500 26 7.500 34M22.500 18Q25.500 26 22.500 34', '#d9743a', 1.3);
+      face(c, 15, 26, 6, 1.4);
+    },
+  },
+  /** 고슴도치: 등에 가시가 돋은 동그란 고슴도치 */
+  hedgehog: {
+    ...ALLY_SIZE,
+    draw(c) {
+      for (let at = 0; at < 9; at += 1) {
+        const angle = Math.PI * (0.95 + (at / 8) * 1.1);
+        const x = 15 + Math.cos(angle) * 11;
+        const y = 25 + Math.sin(angle) * 11;
+        fill(c, `M${15 + Math.cos(angle - 0.25) * 7} ${25 + Math.sin(angle - 0.25) * 7}L${x + Math.cos(angle) * 4} ${y + Math.sin(angle) * 4}L${15 + Math.cos(angle + 0.25) * 7} ${25 + Math.sin(angle + 0.25) * 7}Z`, '#8a6a52');
+      }
+      oval(c, 15, 26, 11.5, 9.5, '#a9845f');
+      oval(c, 17, 29, 8, 6.5, '#f3d9bd');
+      oval(c, 9, 35.5, 3, 1.8, '#8a6a52');
+      oval(c, 20, 35.5, 3, 1.8, '#8a6a52');
+      oval(c, 25.5, 28.5, 1.6, 1.4, INK);
+      face(c, 17, 27.5, 5, 1.2);
+    },
+  },
+};
+
 // ───────── 유물의 아이콘 ─────────
 
 const RELIC_ART: Readonly<Record<RelicId, Art>> = {
@@ -764,4 +1005,5 @@ export function registerGardenTextures(scene: Phaser.Scene): void {
   for (const [key, art] of Object.entries(ITEM_ART)) add(key, art);
   for (const [id, art] of Object.entries(UPGRADE_ART)) add(upgradeTexture(id as UpgradeId), art);
   for (const [id, art] of Object.entries(RELIC_ART)) add(relicTexture(id as RelicId), art);
+  for (const [id, art] of Object.entries(ALLY_ART)) add(allyTexture(id as AllyId), art);
 }

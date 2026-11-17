@@ -181,24 +181,22 @@ it('텃밭 지키기: 준비 화면을 띄워 둔 사이에 다른 곳이 저장
   expect((await readMeta(page)).seeds).toBe(7777);
 });
 
-it('텃밭 지키기: 해바라기 없이는 거름을 팔지 않고, 큰 값은 줄여 적어 버튼 안에 넣고, 설명 칸의 두 줄에 위아래 틈이 있다', async ({
+it('텃밭 지키기: 동료 거름은 해바라기 모종 없이도 사고, 큰 값은 줄여 적어 버튼 안에 넣고, 설명 칸의 두 줄에 위아래 틈이 있다', async ({
   page,
 }) => {
-  // 거름의 값(80)은 넘고 해바라기의 값(150)에는 모자란 씨앗.
+  // 거름의 값(80)은 넘고 해바라기 모종의 값(150)에는 모자란 씨앗. 동료 거름은 판에서 들인 모든 동료에게 들어서 조건 없이 산다.
   await openLobby(page, { ...BASE, seeds: 120 });
-  const need = needLine('helper');
   await expect(async () => {
     if (!(await hasText(page, UPGRADES.compost.name))) await nextPage(page);
     expect(await hasText(page, UPGRADES.compost.name)).toBe(true);
   }).toPass(WAIT);
-  expect(await hasText(page, need), '효과 대신 조건을 적는다').toBe(true);
+  expect(await hasText(page, needLine('helper')), '조건을 적지 않는다').toBe(false);
   expect(await hiddenTexts(page, GARDEN_SCENE), '거름이 있는 쪽').toEqual([]);
   const compost = await buyPoint(page, UPGRADES.compost.name);
   if (!compost) throw new Error('거름의 줄이 없다');
   await tapAt(page, compost.x, compost.y);
-  // 누르면 설명은 보이지만 사지지는 않는다.
-  await expect.poll(() => hasText(page, UPGRADES.compost.blurb), WAIT).toBe(true);
-  expect(await readMeta(page)).toMatchObject({ seeds: 120, levels: {} });
+  await expect.poll(async () => (await readMeta(page)).levels, WAIT).toEqual({ compost: 1 });
+  expect((await readMeta(page)).seeds).toBe(120 - UPGRADES.compost.cost);
 
   // 센 물줄기의 마지막 단계: 값이 여덟 자리다. 대장을 둘 넘겨서 시작하는 날도 고를 수 있다.
   const levels = { power: UPGRADES.power.maxLevel - 1 };
@@ -362,7 +360,7 @@ it('텃밭 지키기: 유물이 생기기 전의 저장은 그동안 물리친 �
 });
 
 it('텃밭 지키기: 대장의 날을 지키면 유물 조각을 받아서 저장하고, 결과 화면에도 적는다', async ({ page }) => {
-  // 몇 판 해 본 사람이다. 처음 몇 판에는 조작 안내가 떠서, 곧바로 띄우는 강화 고르기 창과 겹친다.
+  // 몇 판 해 본 사람이다. 처음 몇 판에는 조작 안내가 떠서, 곧바로 띄우는 동료 가게와 겹친다.
   await openLobby(page, { ...BASE, runs: 5, savedAt: Date.now() + 60_000 });
   await tapText(page, GARDEN_SCENE, '출발!');
   type Run = { day: number; queue: unknown[]; enemies: unknown[]; shards: number; fence: number };
@@ -371,6 +369,10 @@ it('텃밭 지키기: 대장의 날을 지키면 유물 조각을 받아서 저�
   const shards = (): Promise<number | undefined> =>
     page.evaluate((key) => (window.__pocketArcade?.scene.getScene(key) as unknown as { run: Run | null }).run?.shards, GARDEN_SCENE);
   await expect.poll(day, { ...WAIT, message: '판이 시작돼야 한다' }).toBe(1);
+  // 첫날 앞의 동료 가게를 닫고 첫날을 시작한다.
+  await expect.poll(() => hasText(page, '1일째 시작'), WAIT).toBe(true);
+  await tapText(page, GARDEN_SCENE, '1일째 시작');
+  await expect.poll(async () => (await lobbyTexts(page)).some((item) => item.text === '동료 가게'), WAIT).toBe(false);
 
   // 오늘을 대장의 날(5일째)로 바꾸고 나올 벌레를 치워서, 그날을 지킨 것으로 만든다.
   await page.evaluate((key) => {
@@ -381,11 +383,11 @@ it('텃밭 지키기: 대장의 날을 지키면 유물 조각을 받아서 저�
   }, GARDEN_SCENE);
   await expect.poll(shards, { ...WAIT, message: '대장의 날을 지키면 조각을 받는다' }).toBe(1);
   await expect.poll(async () => (await readMeta(page)).shards, { ...WAIT, message: '받은 조각을 바로 저장한다' }).toBe(1);
-  // 강화를 고르는 창의 맨 위에, 받은 씨앗 옆에 적는다.
+  // 동료 가게의 맨 위에, 받은 씨앗 옆에 적는다.
   await expect
     .poll(async () => (await lobbyTexts(page)).some((item) => item.text.includes('유물 조각 +1')), { ...WAIT, message: '받은 조각의 알림' })
     .toBe(true);
-  expect(await hiddenTexts(page, GARDEN_SCENE), '조각을 받은 날의 강화 고르기').toEqual([]);
+  expect(await hiddenTexts(page, GARDEN_SCENE), '조각을 받은 날의 동료 가게').toEqual([]);
 
   // 판을 끝내면 결과 화면에도 적힌다. 조각은 이미 넣어 두었으니 두 번 들어가지 않는다.
   await page.evaluate((key) => {

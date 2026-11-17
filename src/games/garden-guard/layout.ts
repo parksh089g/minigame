@@ -15,8 +15,8 @@ export interface FieldLayout {
   height: number;
 }
 
-/** 울타리 아래에 텃밭과 물총이 놓이는 높이 */
-export const GARDEN_HEIGHT = 84;
+/** 울타리 아래에 텃밭(세 줄의 칸)과 물총, 물벼락 버튼, 울타리 막대가 놓이는 높이 */
+export const GARDEN_HEIGHT = 98;
 
 /** 화면 길이에 맞춰 판이 놓일 자리를 정한다. hudHeight 아래부터 판이다. */
 export function layoutField(height: number, hudHeight: number): FieldLayout {

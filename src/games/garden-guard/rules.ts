@@ -193,8 +193,8 @@ export interface Stats {
   thorns: number;
   /** 받는 씨앗에 곱하는 배율 */
   seedMult: number;
-  helpers: number;
-  helperDamage: number;
+  /** 동료의 피해에 곱하는 배율(동료 거름) */
+  allyPower: number;
   /** 물벼락을 다시 쓸 때까지의 시간(초). 아직 배우지 않았으면 0 */
   stormCooldown: number;
   stormDamage: number;
@@ -238,8 +238,7 @@ export function statsFor(levels: Levels, fields = 0, relics: RelicLevels = {}): 
     mend: STEP.mend.base + STEP.mend.step * level('mend'),
     thorns: damage * STEP.thorn * level('thorn'),
     seedMult: (1 + STEP.harvest * level('harvest')) * fieldSeeds(fields),
-    helpers: level('helper'),
-    helperDamage: damage * (STEP.compost.base + STEP.compost.step * level('compost')),
+    allyPower: 1 + STEP.compost * level('compost'),
     stormCooldown: storm > 0 ? STEP.storm.cooldown - STEP.storm.cooldownStep * (storm - 1) : 0,
     stormDamage: storm > 0 ? damage * (STEP.storm.damage + STEP.storm.damageStep * (storm - 1)) : 0,
     critMult: GUN.critMult * (1 + RELIC_STEP.clover * relic('clover')),
@@ -278,9 +277,9 @@ function effectParts(id: UpgradeId, level: number, fields: number): readonly [la
     case 'harvest':
       return ['씨앗', percent(stats.seedMult)];
     case 'helper':
-      return ['', `${stats.helpers}송이`];
+      return ['', none ? '없음' : `해바라기 ★${level}`];
     case 'compost':
-      return ['피해의', percent(STEP.compost.base + STEP.compost.step * level)];
+      return ['동료 피해', percent(stats.allyPower)];
     case 'pierce':
       return ['', none ? '없음' : `${stats.pierce}마리 뚫음`];
     case 'fork':
@@ -324,7 +323,7 @@ export function costLabel(cost: number): string {
 
 /**
  * 이 강화를 사려면 먼저 있어야 하는데 아직 없는 강화. 없으면(살 수 있으면) null.
- * 해바라기가 없으면 거름은 아무 일도 하지 않으므로 팔지 않는다.
+ * 지금은 그런 강화가 없지만, 앞으로 생길 때를 위해 남겨 둔다.
  */
 export function neededFor(levels: Levels, id: UpgradeId): UpgradeId | null {
   const needs = UPGRADES[id].needs;

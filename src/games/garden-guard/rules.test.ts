@@ -7,7 +7,6 @@ import {
   bossCount,
   bossKind,
   buyUpgrade,
-  canBuy,
   canBuyAny,
   clampStartDay,
   clearBonus,
@@ -182,7 +181,7 @@ describe('강화', () => {
     expect(stats.damage).toBe(GUN.damage);
     expect(stats.interval).toBe(GUN.interval);
     expect(stats.fenceMax).toBe(FENCE_BASE);
-    expect(stats.helpers).toBe(0);
+    expect(stats.allyPower).toBe(1);
     expect(stats.pierce).toBe(0);
     expect(stats.streams).toBe(1);
     expect(stats.critChance).toBe(0);
@@ -201,11 +200,12 @@ describe('강화', () => {
       ['chill', (stats) => stats.chill],
       ['thorn', (stats) => stats.thorns],
       ['harvest', (stats) => stats.seedMult],
-      ['helper', (stats) => stats.helpers],
+      ['compost', (stats) => stats.allyPower],
       ['pierce', (stats) => stats.pierce],
       ['fork', (stats) => stats.streams],
       ['storm', (stats) => stats.stormDamage - stats.stormCooldown],
     ];
+    // 해바라기 모종은 능력치가 아니라 판을 시작할 때의 동료를 바꾼다(sim.test.ts에서 본다).
     for (const [id, measure] of better) {
       for (let level = 0; level < UPGRADES[id].maxLevel; level += 1) {
         expect(measure(statsFor({ [id]: level + 1 })), `${id} ${level + 1}`).toBeGreaterThan(
@@ -213,8 +213,6 @@ describe('강화', () => {
         );
       }
     }
-    // 해바라기 거름은 해바라기가 있어야 쓸모가 있다.
-    expect(statsFor({ helper: 1, compost: 3 }).helperDamage).toBeGreaterThan(statsFor({ helper: 1 }).helperDamage);
   });
 
   it('단계는 0과 끝 단계 사이로 읽는다', () => {
@@ -239,7 +237,9 @@ describe('강화', () => {
     expect(effectLine('power', 0)).toBe('피해 20 → 21');
     expect(effectLine('fence', 0)).toBe('체력 100 → 125');
     expect(effectLine('thorn', 0)).toBe('물총의 0% → 30%');
-    expect(effectLine('helper', 2)).toBe('2송이');
+    expect(effectLine('helper', 0)).toBe('없음 → 해바라기 ★1');
+    expect(effectLine('helper', 2)).toBe('해바라기 ★2');
+    expect(effectLine('compost', 1)).toBe('동료 피해 115% → 130%');
     for (const id of UPGRADE_ORDER) {
       const { maxLevel } = UPGRADES[id];
       expect(effectLine(id, maxLevel), id).not.toContain('→');
@@ -337,24 +337,14 @@ describe('판 밖 진행', () => {
     expect(buyUpgrade(full, 'helper')).toBe(full);
   });
 
-  it('해바라기가 없으면 거름은 살 수 없다', () => {
+  it('동료 거름은 해바라기 모종 없이도 산다', () => {
+    // 동료 거름은 판에서 들인 모든 동료에게 든다. 예전(해바라기 거름)에는 해바라기가 있어야 살 수 있었다.
     const bare = { ...createMeta(), seeds: 1e6 };
-    expect(neededFor(bare.levels, 'compost')).toBe('helper');
-    expect(needLine('helper')).toBe('해바라기가 있어야 해요');
+    expect(neededFor(bare.levels, 'compost')).toBeNull();
+    expect(buyUpgrade(bare, 'compost').levels.compost).toBe(1);
+    // 먼저 있어야 하는 강화가 생기면 적는 말
+    expect(needLine('helper')).toBe('해바라기 모종이 있어야 해요');
     expect(needLine('storm')).toBe('물벼락이 있어야 해요');
-    expect(canBuy(bare, 'compost')).toBe(false);
-    expect(buyUpgrade(bare, 'compost')).toBe(bare);
-    // 해바라기를 사면 거름도 살 수 있다.
-    const grown = buyUpgrade(bare, 'helper');
-    expect(neededFor(grown.levels, 'compost')).toBeNull();
-    expect(buyUpgrade(grown, 'compost').levels.compost).toBe(1);
-    // 거름의 값이 있어도 살 것이 거름뿐이면 살 수 있는 강화가 없는 것이다.
-    const others = Object.fromEntries(
-      UPGRADE_ORDER.filter((id) => id !== 'compost' && id !== 'helper').map((id) => [id, UPGRADES[id].maxLevel]),
-    );
-    expect(canBuyAny({ ...createMeta(), seeds: UPGRADES.compost.cost, levels: others })).toBe(false);
-    expect(canBuyAny({ ...createMeta(), seeds: UPGRADES.helper.cost, levels: others })).toBe(true);
-    // 조건이 있는 강화는 거름뿐이고, 조건이 되는 강화는 목록에서 그 앞에 있다.
     for (const id of UPGRADE_ORDER) {
       const needs = UPGRADES[id].needs;
       if (needs) expect(UPGRADE_ORDER.indexOf(needs), id).toBeLessThan(UPGRADE_ORDER.indexOf(id));

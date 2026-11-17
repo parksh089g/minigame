@@ -63,16 +63,14 @@ describe('새 밭 일구기', () => {
       const boosted = statsFor({ power: 5, harvest: 2, helper: 2, thorn: 1, storm: 1 }, fields);
       expect(boosted.damage).toBe(Math.round(GUN.damage * STEP.power ** 5 * (1 + FIELD_BONUS.damage * fields)));
       expect(boosted.seedMult).toBeCloseTo(base.seedMult * (1 + FIELD_BONUS.seeds * fields));
-      // 물총 피해를 따르는 것들(해바라기, 가시, 물벼락)도 같이 는다.
-      expect(boosted.helperDamage).toBeGreaterThan(base.helperDamage);
+      // 물총 피해를 따르는 것들(가시, 물벼락, 그리고 동료의 피해)도 같이 는다.
       expect(boosted.thorns).toBeGreaterThan(base.thorns);
       expect(boosted.stormDamage).toBeGreaterThan(base.stormDamage);
       // 나머지는 그대로다.
-      expect({ ...boosted, damage: 0, seedMult: 0, helperDamage: 0, thorns: 0, stormDamage: 0 }).toEqual({
+      expect({ ...boosted, damage: 0, seedMult: 0, thorns: 0, stormDamage: 0 }).toEqual({
         ...base,
         damage: 0,
         seedMult: 0,
-        helperDamage: 0,
         thorns: 0,
         stormDamage: 0,
       });

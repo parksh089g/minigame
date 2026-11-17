@@ -8,12 +8,16 @@
  * 필드를 더했으면 RUN_VERSION도 올린다. 옛 저장에는 새 필드가 없어서 그대로는 버려지므로,
  * 빠진 값을 채워서 이어 할 수 있으면 readRunRecord에서 채운다(버전 2의 판에 유물의 값을 채우는 fillRelicFields처럼).
  */
-import { BOON_CHOICES, BOONS, ENEMIES, GUN, type BoonId, type EnemyKind } from './data';
+import { cellsValid, copiesFor, openShop, placeAlly, type Ally, type ShopCard } from './allies';
+import { ALLIES, ALLY_STARS, GUN, SHOP, STEP, ENEMIES, type AllyId, type EnemyKind } from './data';
 import { applyRun, bankSeeds, bankShards, MAX_DAY, type GardenMeta, type Spawn, type Stats } from './rules';
 import type { Enemy, Phase, RunState, Shot } from './sim';
 
-/** 3: 유물이 생겼다(판의 shards, guardLeft와 능력치의 유물 값들, 저장의 bankedShards). */
-export const RUN_VERSION = 3;
+/**
+ * 3: 유물이 생겼다(판의 shards, guardLeft와 능력치의 유물 값들, 저장의 bankedShards).
+ * 4: 판마다 고르는 강화 대신 동료가 생겼다(판의 allies와 동료가 선 칸, fruit, shopping, shop, rolls와 물방울의 ally, 능력치의 allyPower).
+ */
+export const RUN_VERSION = 4;
 
 export interface SavedRun {
   state: RunState;
@@ -50,7 +54,7 @@ const STATE_SHAPE: Record<keyof RunState, Kind> = {
   stats: 'object',
   fence: 'number',
   fireIn: 'number',
-  helperIn: 'array',
+  allies: 'array',
   stormIn: 'number',
   aim: 'number',
   manual: 'boolean',
@@ -58,8 +62,10 @@ const STATE_SHAPE: Record<keyof RunState, Kind> = {
   kills: 'number',
   seeds: 'number',
   lastCleared: 'number',
-  boons: 'array',
-  offer: 'array',
+  fruit: 'number',
+  shopping: 'boolean',
+  shop: 'array',
+  rolls: 'number',
   shards: 'number',
   guardLeft: 'number',
 };
@@ -92,8 +98,11 @@ const SHOT_SHAPE: Record<keyof Shot, Kind> = {
   crit: 'boolean',
   pierce: 'number',
   hit: 'array',
-  helper: 'boolean',
+  ally: 'string',
 };
+
+const ALLY_SHAPE: Record<keyof Ally, Kind> = { id: 'string', copies: 'number', fireIn: 'number', cell: 'number' };
+const CARD_SHAPE: Record<keyof ShopCard, Kind> = { id: 'string', sold: 'boolean' };
 
 const SPAWN_SHAPE: Record<keyof Spawn, Kind> = { at: 'number', kind: 'string', x: 'number' };
 
@@ -111,8 +120,7 @@ const STATS_SHAPE: Record<keyof Stats, Kind> = {
   mend: 'number',
   thorns: 'number',
   seedMult: 'number',
-  helpers: 'number',
-  helperDamage: 'number',
+  allyPower: 'number',
   stormCooldown: 'number',
   stormDamage: 'number',
   critMult: 'number',
@@ -142,9 +150,8 @@ function fits(value: unknown, shape: Record<string, Kind>): value is Record<stri
 }
 
 const isKind = (value: unknown): value is EnemyKind => typeof value === 'string' && Object.hasOwn(ENEMIES, value);
-const isBoon = (value: unknown): value is BoonId => typeof value === 'string' && Object.hasOwn(BOONS, value);
+const isAlly = (value: unknown): value is AllyId => typeof value === 'string' && Object.hasOwn(ALLIES, value);
 const allNumbers = (value: unknown): boolean => Array.isArray(value) && value.every((item) => kindOf(item) === 'number');
-const allBoons = (value: unknown): boolean => Array.isArray(value) && value.every(isBoon);
 
 /**
  * 저장에서 읽는 값의 한도. 실제 판에서는 닿지 않을 만큼 넉넉하게 두고, 망가진 저장의 터무니없는 값만 걸러 낸다(10차 검토 G11).
@@ -162,8 +169,8 @@ const LIMIT = {
   interval: 0.02,
   /** 판에 한꺼번에 있는 벌레, 물방울, 나올 차례를 기다리는 벌레의 수 */
   list: 4000,
-  /** 고른 강화의 수 */
-  boons: 200,
+  /** 동료 거름의 배율의 위쪽 끝 */
+  allyPower: 100,
 } as const;
 
 const inRange = (value: unknown, low: number, high: number): boolean =>
@@ -175,12 +182,12 @@ function valuesFit(state: Record<string, unknown>): boolean {
   const statsFit =
     Object.values(stats).every((value) => inRange(value, 0, LIMIT.stat)) &&
     inRange(stats.streams, 1, LIMIT.few) &&
-    inRange(stats.helpers, 0, LIMIT.few) &&
+    inRange(stats.allyPower, 0, LIMIT.allyPower) &&
     inRange(stats.pierce, 0, LIMIT.few) &&
     stats.interval >= LIMIT.interval;
   if (!statsFit) return false;
   const day = state.day as number;
-  const counts = ['t', 'kills', 'seeds', 'shards', 'nextId'].every((key) => inRange(state[key], 0, LIMIT.count));
+  const counts = ['t', 'kills', 'seeds', 'shards', 'nextId', 'fruit', 'rolls'].every((key) => inRange(state[key], 0, LIMIT.count));
   return (
     counts &&
     inRange(day, 1, MAX_DAY) &&
@@ -193,9 +200,10 @@ function valuesFit(state: Record<string, unknown>): boolean {
     (state.queue as unknown[]).length <= LIMIT.list &&
     (state.enemies as unknown[]).length <= LIMIT.list &&
     (state.shots as unknown[]).length <= LIMIT.list &&
-    (state.helperIn as unknown[]).length <= LIMIT.few &&
-    (state.boons as unknown[]).length <= LIMIT.boons &&
-    (state.offer as unknown[]).length <= BOON_CHOICES &&
+    (state.allies as Array<Record<string, number>>).every((ally) => inRange(ally.copies, 1, copiesFor(ALLY_STARS.max))) &&
+    (state.shop as unknown[]).length <= SHOP.cards &&
+    // 가게는 날을 지키고 쉬는 동안(판의 첫날 앞도)에만 열린다.
+    (!state.shopping || state.phase === 'rest') &&
     (state.shots as Array<{ hit: unknown[] }>).every((shot) => shot.hit.length <= LIMIT.list) &&
     (state.enemies as Array<Record<string, number>>).every(
       (enemy) => inRange(enemy.day, 1, MAX_DAY) && inRange(enemy.hp, -LIMIT.count, LIMIT.count) && inRange(enemy.maxHp, 0, LIMIT.count),
@@ -206,14 +214,18 @@ function valuesFit(state: Record<string, unknown>): boolean {
 function isRunState(value: unknown): value is RunState {
   if (!fits(value, STATE_SHAPE)) return false;
   if (!LIVE_PHASES.includes(value.phase as Phase) || !fits(value.stats, STATS_SHAPE)) return false;
-  if (!allNumbers(value.helperIn) || !allBoons(value.boons) || !allBoons(value.offer)) return false;
+  const allies = value.allies as unknown[];
+  // 같은 동료가 여럿 설 수 있지만, 칸을 겹치거나 한쪽 끝을 넘어서 설 수는 없다.
+  if (!allies.every((ally) => fits(ally, ALLY_SHAPE) && isAlly(ally.id))) return false;
+  if (!cellsValid(allies as Ally[])) return false;
+  if (!(value.shop as unknown[]).every((card) => fits(card, CARD_SHAPE) && isAlly(card.id))) return false;
   const queue = value.queue as unknown[];
   const enemies = value.enemies as unknown[];
   const shots = value.shots as unknown[];
   return (
     queue.every((spawn) => fits(spawn, SPAWN_SHAPE) && isKind(spawn.kind)) &&
     enemies.every((enemy) => fits(enemy, ENEMY_SHAPE) && isKind(enemy.kind)) &&
-    shots.every((shot) => fits(shot, SHOT_SHAPE) && allNumbers(shot.hit)) &&
+    shots.every((shot) => fits(shot, SHOT_SHAPE) && allNumbers(shot.hit) && (shot.ally === '' || isAlly(shot.ally))) &&
     valuesFit(value)
   );
 }
@@ -237,6 +249,48 @@ function fillRelicFields(run: Record<string, unknown>): Record<string, unknown> 
   };
 }
 
+/**
+ * 동료가 생기기 전(버전 3까지)에 적은 판을 동료가 있는 판으로 바꾼다. 그 판에서 고른 강화는 능력치에 이미 들어 있으니 그대로 두고,
+ * 해바라기(영구 강화)는 같은 수의 해바라기 동료로, 해바라기 거름은 동료 거름의 배율로 옮긴다.
+ * 강화를 고르던 중에 둔 판은 고르는 창 대신 동료 가게를 연다(가게의 카드는 readRunRecord가 모양을 본 뒤에 뽑는다).
+ * 열매는 판을 시작할 때만큼 쥐여 준다.
+ */
+function fillAllyFields(run: Record<string, unknown>): Record<string, unknown> {
+  const state = run.state;
+  if (!isObject(state) || !isObject(state.stats)) return run;
+  const { helpers, helperDamage, ...stats } = state.stats;
+  const { helperIn, boons: _boons, offer, ...rest } = state;
+  const count = typeof helpers === 'number' ? Math.max(0, Math.min(ALLY_STARS.max, Math.floor(helpers))) : 0;
+  const waits = Array.isArray(helperIn) ? helperIn : [];
+  const team: Pick<RunState, 'allies'> = { allies: [] };
+  const sunflower = count > 0 ? placeAlly(team, 'sunflower', count) : null;
+  if (sunflower) sunflower.fireIn = typeof waits[0] === 'number' ? Math.max(0, waits[0]) : 0.5;
+  const allies = team.allies;
+  // 거름의 단계를 해바라기 씨의 피해 비율에서 거꾸로 셈한다(예전에는 물총 피해의 0.4 + 단계마다 0.15였다).
+  const ratio = typeof helperDamage === 'number' && typeof stats.damage === 'number' && stats.damage > 0 ? helperDamage / stats.damage : 0.4;
+  const compost = Math.max(0, Math.round((ratio - 0.4) / 0.15));
+  const shots = Array.isArray(state.shots)
+    ? state.shots.map((shot) => {
+        if (!isObject(shot)) return shot;
+        const { helper, ...others } = shot;
+        return { ...others, ally: helper === true ? 'sunflower' : '' };
+      })
+    : state.shots;
+  return {
+    ...run,
+    state: {
+      ...rest,
+      shots,
+      allies,
+      fruit: SHOP.purse,
+      shopping: Array.isArray(offer) && offer.length > 0 && state.phase === 'rest',
+      shop: [],
+      rolls: 0,
+      stats: { ...stats, allyPower: 1 + STEP.compost * compost },
+    },
+  };
+}
+
 /** 기기에 적을 모양으로 바꾼다. */
 export function runRecord(run: SavedRun | null, savedAt: number): RunRecord {
   return { version: RUN_VERSION, savedAt, run };
@@ -249,9 +303,12 @@ export function runRecord(run: SavedRun | null, savedAt: number): RunRecord {
 export function readRunRecord(raw: unknown): { savedAt: number; run: SavedRun | null } {
   if (!isObject(raw)) return { savedAt: 0, run: null };
   const savedAt = kindOf(raw.savedAt) === 'number' && (raw.savedAt as number) > 0 ? (raw.savedAt as number) : 0;
-  const known = raw.version === RUN_VERSION || raw.version === 2;
-  const run = raw.version === 2 && isObject(raw.run) ? fillRelicFields(raw.run) : raw.run;
+  const known = raw.version === RUN_VERSION || raw.version === 3 || raw.version === 2;
+  const relics = raw.version === 2 && isObject(raw.run) ? fillRelicFields(raw.run) : raw.run;
+  const run = raw.version !== RUN_VERSION && isObject(relics) ? fillAllyFields(relics) : relics;
   if (!known || !isObject(run) || !isRunState(run.state)) return { savedAt, run: null };
+  // 옛 판에서 강화를 고르던 중이었으면, 그 자리에 가게의 카드를 놓는다.
+  if (run.state.shopping && run.state.shop.length === 0) openShop(run.state);
   const whole = (value: unknown): number => (kindOf(value) === 'number' ? Math.max(0, Math.floor(value as number)) : 0);
   return { savedAt, run: { state: run.state, banked: whole(run.banked), bankedShards: whole(run.bankedShards) } };
 }

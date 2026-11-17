@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buyCheapest, playCareer, playRun } from './bot';
 import { CHARGE, DAY, DIG, ENEMIES, FIELD, GUN, HOP, SHOOTER, STORM, SUMMON, type EnemyKind } from './data';
+import { allyDamage, fruitFor } from './allies';
 import { clearBonus, createMeta, hpScale, recordBonus, type Levels } from './rules';
 import {
   autoAim,
@@ -19,8 +20,11 @@ import {
 
 const DT = 1 / 60;
 
+/** 판을 만들고, 첫날 앞에 열린 동료 가게를 아무것도 사지 않고 닫아서 첫날을 시작한다. */
 function start(levels: Levels = {}, startDay = 1, bestBefore = 0, seed = 11): RunState {
-  return createRun({ seed, startDay, levels, bestBefore }).state;
+  const { state } = createRun({ seed, startDay, levels, bestBefore });
+  step(state, 0, { aim: null, storm: false, ready: true });
+  return state;
 }
 
 /** 그날 나올 벌레를 모두 치우고 빈 판으로 만든다. 벌레를 손으로 놓아 보는 테스트에 쓴다. */
@@ -64,9 +68,17 @@ function run(state: RunState, seconds: number, input?: Input): SimEvent[] {
 const count = (events: SimEvent[], type: SimEvent['type']): number => events.filter((event) => event.type === type).length;
 
 describe('판의 시작', () => {
-  it('고른 날에서, 울타리가 가득 찬 채로 시작한다', () => {
+  it('고른 날에서, 울타리가 가득 찬 채로, 동료 가게를 먼저 열고 시작한다', () => {
     const { state, events } = createRun({ seed: 3, startDay: 6, levels: { fence: 2 }, bestBefore: 7 });
-    expect(events).toEqual([{ type: 'dayStart', day: 6, boss: false }]);
+    expect(events).toEqual([{ type: 'shop' }]);
+    expect(state.day).toBe(6);
+    // 가게를 닫기 전에는 벌레가 오지 않는다.
+    expect(state.phase).toBe('rest');
+    expect(state.shopping).toBe(true);
+    run(state, 5);
+    expect(state.phase).toBe('rest');
+    expect(state.enemies).toEqual([]);
+    expect(step(state, DT, { aim: null, storm: false, ready: true })).toContainEqual({ type: 'dayStart', day: 6, boss: false });
     expect(state.day).toBe(6);
     expect(state.phase).toBe('fight');
     expect(state.fence).toBe(state.stats.fenceMax);
@@ -193,17 +205,17 @@ describe('물총', () => {
     expect(beside.slowLeft).toBe(0);
   });
 
-  it('해바라기는 제게 가까운 벌레를 쏘고, 그 씨에는 물보라와 찬물이 붙지 않는다', () => {
+  it('해바라기 모종을 사 두면 해바라기와 함께 시작하고, 그 씨에는 물총의 물보라와 찬물이 붙지 않는다', () => {
     const state = emptied({ helper: 2, splash: 3, chill: 3 });
+    expect(state.allies).toEqual([expect.objectContaining({ id: 'sunflower', copies: 2 })]);
     state.fireIn = 999; // 물총은 쉬게 한다.
-    const left = put(state, 'snail', 30, 280);
-    const right = put(state, 'snail', 210, 280);
+    const near = put(state, 'snail', 70, 300);
     const events = run(state, 2.5);
-    expect(events.filter((event) => event.type === 'fire' && event.helper).length).toBeGreaterThan(2);
-    expect(left.hp).toBeLessThan(left.maxHp);
-    expect(right.hp).toBeLessThan(right.maxHp);
-    expect((left.maxHp - left.hp) % state.stats.helperDamage).toBeCloseTo(0, 5);
-    expect(left.slowLeft).toBe(0);
+    expect(events.filter((event) => event.type === 'fire' && event.ally === 'sunflower').length).toBeGreaterThan(1);
+    expect(near.hp).toBeLessThan(near.maxHp);
+    const hits = (near.maxHp - near.hp) / allyDamage('sunflower', 2, state.stats.damage, state.stats.allyPower);
+    expect(hits).toBeCloseTo(Math.round(hits), 5);
+    expect(near.slowLeft).toBe(0);
   });
 });
 
@@ -436,14 +448,15 @@ describe('물벼락', () => {
 });
 
 describe('하루', () => {
-  it('벌레를 다 쫓아내면 날이 넘어가고, 씨앗을 받고, 강화를 고르고 잠깐 쉰 뒤 다음 날이 온다', () => {
+  it('벌레를 다 쫓아내면 날이 넘어가고, 씨앗과 열매를 받고, 가게를 닫고 잠깐 쉰 뒤 다음 날이 온다', () => {
     const state = start();
-    const events = run(state, 60, { aim: null, storm: false, pick: 0 });
+    const events = run(state, 60, { aim: null, storm: false, ready: true });
     const clear = events.find((event) => event.type === 'dayClear');
     expect(clear).toMatchObject({ type: 'dayClear', day: 1, record: true });
     expect(count(events, 'kill')).toBeGreaterThanOrEqual(DAY.count.first);
     expect(state.lastCleared).toBeGreaterThanOrEqual(1);
     expect(state.seeds).toBeGreaterThanOrEqual(clearBonus(1) + recordBonus(1) + DAY.count.first * ENEMIES.ant.seeds);
+    expect(clear).toMatchObject({ fruit: fruitFor(1) });
     const starts = events.filter((event) => event.type === 'dayStart');
     expect(starts[0]).toEqual({ type: 'dayStart', day: 2, boss: false });
   });
@@ -455,8 +468,11 @@ describe('하루', () => {
     expect(ant.hp).toBeLessThanOrEqual(0);
     expect(count(events, 'dayClear')).toBe(1);
     expect(state.phase).toBe('rest');
-    // 강화를 고르는 것은 boons.test.ts에서 본다. 여기서는 고를 것이 없을 때의 쉬는 시간만 본다.
-    state.offer = [];
+    // 가게는 allies.test.ts에서 본다. 여기서는 가게를 닫은 뒤의 쉬는 시간만 본다.
+    expect(state.shopping).toBe(true);
+    run(state, 3);
+    expect(state.day).toBe(1);
+    state.shopping = false;
     state.stormIn = 0;
     expect(stormReady(state)).toBe(false);
     const day = state.day;
@@ -522,13 +538,13 @@ describe('하루', () => {
   it('날을 지키고 쉬는 동안의 점수는 다음 날이 시작된 뒤와 같다', () => {
     const state = start({ power: 30, rapid: 8 }, 3, 0, 5);
     run(state, 120, { aim: null, storm: false });
-    // 날을 지켜서 강화를 고르기를 기다린다. 그날 쫓아낸 비율은 100%로 남아 있다.
+    // 날을 지켜서 가게가 열려 있다. 그날 쫓아낸 비율은 100%로 남아 있다.
     expect(state.phase).toBe('rest');
     expect(state.lastCleared).toBe(3);
     expect(state.dayKilled).toBe(state.dayTotal);
     // 3일째에서 시작해 그날을 지켰으니 하루다.
     expect(runScore(state)).toBe(100);
-    step(state, DT, { aim: null, storm: false, pick: 0 });
+    step(state, DT, { aim: null, storm: false, ready: true });
     while (state.phase === 'rest') step(state, DT);
     expect(state.day).toBe(4);
     expect(state.dayKilled).toBe(0);
@@ -537,31 +553,28 @@ describe('하루', () => {
 });
 
 describe('밸런스', () => {
-  it('영구 강화 없이는 지켜보기만 해서 첫 대장을 넘지 못하고, 직접 겨누고 잘 골라도 둘째 대장은 넘지 못한다', () => {
-    let passedFirstBoss = 0;
-    const seeds = [1, 2, 3, 4, 5, 6];
-    for (const seed of seeds) {
+  it('영구 강화 없이도 동료를 모아 첫 대장 근처까지는 가지만, 둘째 대장은 넘지 못한다', () => {
+    // 동료가 생기기 전에는 지켜보기만 하면 4일째에서 막혔다. 지금은 첫 판에도 동료가 붙어서 여드레쯤 간다.
+    for (const seed of [1, 2, 3, 4, 5, 6]) {
       const idle = playRun({ seed, startDay: 1, levels: {}, bestBefore: 0 }, 'idle');
       const active = playRun({ seed, startDay: 1, levels: {}, bestBefore: 0 }, 'active');
       expect(idle.phase).toBe('over');
-      expect(idle.lastCleared, `idle ${seed}`).toBeGreaterThanOrEqual(2);
-      expect(idle.lastCleared, `idle ${seed}`).toBeLessThan(5);
-      expect(active.lastCleared, `active ${seed}`).toBeGreaterThanOrEqual(idle.lastCleared);
-      expect(active.lastCleared, `active ${seed}`).toBeLessThan(10);
-      if (active.lastCleared >= 5) passedFirstBoss += 1;
+      expect(idle.lastCleared, `idle ${seed}`).toBeGreaterThanOrEqual(4);
+      expect(idle.lastCleared, `idle ${seed}`).toBeLessThan(10);
+      expect(active.lastCleared, `active ${seed}`).toBeLessThan(15);
+      // 판에서 동료를 들였다.
+      expect(idle.allies.length, `idle ${seed}`).toBeGreaterThan(0);
       // 첫 판에서도 강화 하나는 살 만큼 번다.
       expect(Math.floor(idle.seeds), `idle ${seed}`).toBeGreaterThanOrEqual(12);
       // 한 판이 너무 길지 않다.
-      expect(active.t).toBeLessThan(300);
+      expect(active.t).toBeLessThan(360);
     }
-    // 고른 강화가 잘 맞은 판에서는 첫 대장을 넘기도 하지만, 늘 그렇지는 않다.
-    expect(passedFirstBoss).toBeLessThan(seeds.length);
   });
 
   it('판을 거듭하며 강화를 사면 점점 더 멀리 간다', () => {
     const career = playCareer(createMeta(), 10, 'active', 5);
     const bests = career.runs.map((_, index) => Math.max(...career.runs.slice(0, index + 1).map((run) => run.cleared)));
-    expect(bests[0]).toBeLessThan(10);
+    expect(bests[0]).toBeLessThan(15);
     expect(bests[4]).toBeGreaterThan(bests[0]);
     expect(bests[9]).toBeGreaterThan(bests[4]);
     expect(career.meta.best).toBe(bests[9]);

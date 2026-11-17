@@ -2,23 +2,26 @@ import { describe, expect, it } from 'vitest';
 import { playCareer } from './bot';
 import { createMeta } from './rules';
 import { readRunRecord, RUN_VERSION, runRecord, settleSavedRun, type SavedRun } from './saved-run';
-import { botInput } from './bot';
-import { createRun, runScore, step, type RunState } from './sim';
+import { botInput, botShop } from './bot';
+import { SHOP } from './data';
+import { toVersion3 } from './legacy-run.testutil';
+import { createRun, runScore, skipShop, step, type RunState } from './sim';
 
 const STEP = 1 / 60;
 const T = 1_700_000_000_000;
 
-/** 벌레와 물방울이 판에 있는 한창인 판. 날을 지키면 내놓는 강화는 맨 앞의 것을 고른다. */
+/** 벌레와 물방울이 판에 있는 한창인 판. 가게가 열리면 살 수 있는 것을 다 사고 다음 날로 간다(자동 플레이). */
 function busyRun(seconds = 25): RunState {
   const { state } = createRun({ seed: 42, startDay: 4, levels: { power: 6, rapid: 3, helper: 1, splash: 1 }, bestBefore: 3 });
-  for (let t = 0; t < seconds; t += STEP) step(state, STEP, { aim: null, storm: false, pick: 0 });
+  for (let t = 0; t < seconds; t += STEP) step(state, STEP, { aim: null, storm: false, ...botShop(state) });
   return state;
 }
 
-/** 날을 막 지켜서 강화 셋을 내놓고 고르기를 기다리는 판 */
-function waitingRun(): RunState {
+/** 날을 막 지켜서 동료 가게가 열려 있는 판 */
+function shoppingRun(): RunState {
   const { state } = createRun({ seed: 42, startDay: 4, levels: { power: 6, rapid: 3, helper: 1, splash: 1 }, bestBefore: 3 });
-  for (let t = 0; t < 120 && state.offer.length === 0; t += STEP) step(state, STEP);
+  skipShop(state);
+  for (let t = 0; t < 120 && !state.shopping; t += STEP) step(state, STEP);
   return state;
 }
 
@@ -38,22 +41,55 @@ describe('하던 판의 저장', () => {
     const original = busyRun();
     const restored = readRunRecord(throughDisk(runRecord({ state: original, banked: 0, bankedShards: 0 }, T))).run!.state;
     for (let t = 0; t < 30; t += STEP) {
-      step(original, STEP, { aim: { x: 40, y: 60 }, storm: true, pick: 1 });
-      step(restored, STEP, { aim: { x: 40, y: 60 }, storm: true, pick: 1 });
+      step(original, STEP, { aim: { x: 40, y: 60 }, storm: true, ...botShop(original) });
+      step(restored, STEP, { aim: { x: 40, y: 60 }, storm: true, ...botShop(restored) });
     }
     expect(restored).toEqual(original);
     expect(original.t).toBeGreaterThan(40);
-    expect(original.boons.length).toBeGreaterThan(0);
+    expect(original.allies.length).toBeGreaterThan(0);
   });
 
-  it('강화를 고르기를 기다리던 판은 읽어도 같은 셋을 내놓고, 고른 강화도 그대로다', () => {
-    const state = waitingRun();
-    expect(state.offer).toHaveLength(3);
+  it('가게가 열려 있던 판은 읽어도 같은 카드와 열매가 있고, 산 동료도 그대로다', () => {
+    const state = shoppingRun();
+    expect(state.shop).toHaveLength(SHOP.cards);
     const restored = readRunRecord(throughDisk(runRecord({ state, banked: 0, bankedShards: 0 }, T))).run!.state;
-    expect(restored.offer).toEqual(state.offer);
-    step(restored, STEP, { aim: null, storm: false, pick: 2 });
-    expect(restored.boons).toEqual([state.offer[2]]);
-    expect(readRunRecord(throughDisk(runRecord({ state: restored, banked: 0, bankedShards: 0 }, T))).run!.state.boons).toEqual(restored.boons);
+    expect(restored.shop).toEqual(state.shop);
+    expect(restored.fruit).toBe(state.fruit);
+    step(restored, STEP, { aim: null, storm: false, buy: { card: 2, mode: 'place' } });
+    expect(restored.shop[2].sold).toBe(true);
+    const again = readRunRecord(throughDisk(runRecord({ state: restored, banked: 0, bankedShards: 0 }, T))).run!.state;
+    expect(again.allies).toEqual(restored.allies);
+    expect(again.shop).toEqual(restored.shop);
+    expect(again.fruit).toBe(restored.fruit);
+  });
+
+  it('동료가 생기기 전(버전 3)에 적은 판은 해바라기를 동료로 옮기고, 고르던 강화 대신 가게를 열어 이어 한다', () => {
+    const { state } = createRun({ seed: 42, startDay: 4, levels: { power: 6, rapid: 3 }, bestBefore: 3 });
+    skipShop(state);
+    for (let t = 0; t < 8; t += STEP) step(state, STEP);
+    expect(state.phase).toBe('fight');
+    const old = (state3: Record<string, unknown>) => ({ version: 3, savedAt: T, run: { state: state3, banked: 4, bankedShards: 0 } });
+    // 해바라기 둘과 거름 2단계를 가진 판
+    const read = readRunRecord(old(toVersion3(state, { helpers: 2, compost: 2, boons: ['jet', 'bloom'] }))).run!;
+    expect(read.banked).toBe(4);
+    expect(read.state.allies).toEqual([{ id: 'sunflower', copies: 2, fireIn: 0.3, cell: 3 }]);
+    expect(read.state.stats.allyPower).toBeCloseTo(1.3);
+    expect(read.state.fruit).toBe(SHOP.purse);
+    expect(read.state.shopping).toBe(false);
+    // 물방울과 벌레, 지킨 날은 그대로다.
+    expect(read.state.shots).toEqual(state.shots);
+    expect(read.state.enemies).toEqual(state.enemies);
+    expect(read.state.day).toBe(state.day);
+    // 이어 하면 멈추지 않고 흘러간다.
+    for (let t = 0; t < 30 && read.state.phase !== 'over'; t += STEP) step(read.state, STEP, botInput(read.state, 'active'));
+    expect(read.state.t).toBeGreaterThan(state.t + 20);
+    // 날을 지키고 강화를 고르기를 기다리던 판은 가게를 열어 둔다.
+    const waiting = shoppingRun();
+    const choosing = readRunRecord(old(toVersion3({ ...waiting, shopping: false, shop: [] }, { offer: ['jet', 'quick', 'sack'] }))).run!;
+    expect(choosing.state.shopping).toBe(true);
+    expect(choosing.state.shop).toHaveLength(SHOP.cards);
+    step(choosing.state, STEP, { aim: null, storm: false, ready: true });
+    expect(choosing.state.shopping).toBe(false);
   });
 
   it('이어 할 판이 없다고 적은 것은 없는 것으로 읽는다', () => {
@@ -78,10 +114,13 @@ describe('하던 판의 저장', () => {
       broken((record) => (record.run.state.phase = 'over')),
       broken((record) => ((record.run.state.stats as Record<string, unknown>).damage = null)),
       broken((record) => ((record.run.state.queue as { kind: string }[])[0].kind = 'dragon')),
-      broken((record) => (record.run.state.helperIn = ['soon'])),
-      broken((record) => (record.run.state.boons = ['jet', 'wings'])),
-      broken((record) => (record.run.state.offer = [3])),
-      broken((record) => delete record.run.state.offer),
+      broken((record) => (record.run.state.allies = [{ id: 'dragon', copies: 1, fireIn: 0, cell: 0 }])),
+      broken((record) => (record.run.state.allies = [{ id: 'frog', copies: 1, fireIn: 0 }])),
+      // 같은 칸에 둘이 서거나, 한쪽 끝을 넘어 선 동료
+      broken((record) => (record.run.state.allies = [{ id: 'frog', copies: 1, fireIn: 0, cell: 0 }, { id: 'frog', copies: 1, fireIn: 0, cell: 1 }])),
+      broken((record) => (record.run.state.allies = [{ id: 'frog', copies: 1, fireIn: 0, cell: 3 }])),
+      broken((record) => (record.run.state.shop = [{ id: 'frog', sold: 'yes' }])),
+      broken((record) => delete record.run.state.fruit),
       broken((record) => (record.run.state = [] as unknown as Record<string, unknown>)),
     ];
     for (const raw of cases) expect(readRunRecord(raw)).toEqual({ savedAt: T, run: null });
@@ -109,6 +148,15 @@ describe('하던 판의 저장에 적힌 값의 범위 (10차 검토 G11)', () =
 
   it('판에서 나올 수 없는 값이 적힌 판은 버린다', () => {
     expect(readWith(() => undefined)).not.toBeNull();
+    // 같은 동료가 다른 칸에 따로 서 있는 것은 판에서 나올 수 있다.
+    const twins = readWith(
+      (state) =>
+        (state.allies = [
+          { id: 'frog', copies: 2, fireIn: 0, cell: 0 },
+          { id: 'frog', copies: 1, fireIn: 0, cell: 2 },
+        ]),
+    );
+    expect(twins?.state.allies.map((ally) => ally.cell)).toEqual([0, 2]);
     const broken: Array<[string, (state: Record<string, any>) => void]> = [
       ['물줄기 200만 갈래', (state) => (state.stats.streams = 2e6)],
       ['물줄기 0갈래', (state) => (state.stats.streams = 0)],
@@ -124,7 +172,10 @@ describe('하던 판의 저장에 적힌 값의 범위 (10차 검토 G11)', () =
       ['넘치는 씨앗', (state) => (state.seeds = 1e15)],
       ['나온 것보다 많이 쫓아냄', (state) => (state.dayKilled = state.dayTotal + 1)],
       ['너무 많은 물방울', (state) => (state.shots = Array.from({ length: 5000 }, () => state.shots[0]))],
-      ['넷을 내놓은 강화', (state) => (state.offer = ['jet', 'jet', 'jet', 'jet'])],
+      ['넷을 놓은 가게', (state) => (state.shop = Array.from({ length: 4 }, () => ({ id: 'frog', sold: false })))],
+      ['열매 1경 개', (state) => (state.fruit = 1e16)],
+      ['동료 백 마리를 합친 것', (state) => (state.allies = [{ id: 'frog', copies: 100, fireIn: 0, cell: 0 }])],
+      ['싸우는 중에 열린 가게', (state) => ((state.phase = 'fight'), (state.shopping = true))],
       ['너무 큰 날의 벌레', (state) => (state.enemies[0].day = 1e6)],
     ];
     for (const [label, change] of broken) expect(readWith(change), label).toBeNull();

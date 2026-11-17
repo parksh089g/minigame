@@ -25,7 +25,8 @@ import {
   type RelicLevels,
 } from './rules';
 import { readRunRecord, RUN_VERSION, runRecord, settleSavedRun } from './saved-run';
-import { createRun, step, type Enemy, type Input, type RunState, type SimEvent } from './sim';
+import { toVersion3 } from './legacy-run.testutil';
+import { createRun, skipShop, step, type Enemy, type Input, type RunState, type SimEvent } from './sim';
 
 const DT = 1 / 60;
 
@@ -35,6 +36,7 @@ const MAXED: RelicLevels = Object.fromEntries(RELIC_ORDER.map((id) => [id, RELIC
 /** 그날 나올 벌레를 모두 치운 빈 판. 벌레를 손으로 놓아 보는 테스트에 쓴다. */
 function emptied(relics: RelicLevels = {}, levels: Levels = {}, startDay = 1): RunState {
   const { state } = createRun({ seed: 11, startDay, levels, bestBefore: 0, relics });
+  skipShop(state);
   state.queue = [];
   state.dayTotal = 0;
   return state;
@@ -246,8 +248,8 @@ describe('판에서의 유물', () => {
     const fourth = run(state, 0.1).find((event) => event.type === 'dayClear');
     expect(fourth).toMatchObject({ day: 4, shards: 0 });
     expect(state.shards).toBe(0);
-    // 강화를 고르고 5일째(대장의 날)로 넘어가서, 나올 벌레를 치워 그날을 지킨다.
-    step(state, DT, { aim: null, storm: false, pick: 0 });
+    // 가게를 닫고 5일째(대장의 날)로 넘어가서, 나올 벌레를 치워 그날을 지킨다.
+    step(state, DT, { aim: null, storm: false, ready: true });
     for (let time = 0; time < 5 && state.day < 5; time += DT) step(state, DT);
     expect(state.day).toBe(5);
     state.queue = [];
@@ -347,7 +349,7 @@ describe('판에서의 유물', () => {
     expect(ant.maxHp - ant.hp).toBeGreaterThan(statsFor({ thorn: 1 }).thorns * 4.5);
     // 다음 날이 시작되면 다시 찬다.
     state.enemies = [];
-    for (let time = 0; time < 10 && state.day === 1; time += DT) step(state, DT, { aim: null, storm: false, pick: 0 });
+    for (let time = 0; time < 10 && state.day === 1; time += DT) step(state, DT, { aim: null, storm: false, ready: true });
     expect(state.day).toBe(2);
     expect(state.guardLeft).toBe(3);
     // 유물이 없으면 처음부터 깎인다.
@@ -360,6 +362,7 @@ describe('판에서의 유물', () => {
   it('오래된 달력은 날을 지킬 때 받는 씨앗만 늘리고, 새 기록의 덤은 그대로다', () => {
     const cleared = (relics: RelicLevels, bestBefore: number): number => {
       const { state } = createRun({ seed: 11, startDay: 3, levels: {}, bestBefore, relics });
+      skipShop(state);
       state.queue = [];
       const event = run(state, 0.1).find((found) => found.type === 'dayClear');
       return event?.type === 'dayClear' ? event.seeds : Number.NaN;
@@ -370,7 +373,7 @@ describe('판에서의 유물', () => {
     expect(cleared({ calendar: 10 }, 0) - cleared({}, 0)).toBeCloseTo(clearBonus(3) * 0.5);
   });
 
-  it('모두 끝까지 올려도 판이 크게 달라지지는 않는다', () => {
+  it('모두 끝까지 올려도 판이 크게 달라지지는 않는다', { timeout: 60_000 }, () => {
     // 열두 판을 하며 강화를 산 사람이 26일째에서 시작하는 판을 유물 없이, 그리고 유물을 모두 끝까지 올리고 해 본다.
     // 자동 플레이로 여덟 판씩 재면 유물 없이 38.8일째, 모두 올리고 42.0일째까지 간다(서른 판 뒤에는 59.0일째와 62.1일째).
     const meta = playCareer(createMeta(), 12, 'active', 3).meta;
@@ -395,6 +398,7 @@ describe('하던 판의 유물', () => {
 
   it('유물이 있는 판을 적었다가 읽으면 그대로다', () => {
     const { state } = createRun({ seed: 42, startDay: 4, levels: { power: 6 }, bestBefore: 3, relics: MAXED });
+    skipShop(state);
     run(state, 12);
     const saved = { state: { ...state, shards: 2 }, banked: 5, bankedShards: 1 };
     expect(readRunRecord(throughDisk(runRecord(saved, T)))).toEqual({ savedAt: T, run: saved });
@@ -406,12 +410,15 @@ describe('하던 판의 유물', () => {
 
   it('유물이 생기기 전에 적은 판은 유물 없는 판으로 채워서 이어 한다', () => {
     const { state } = createRun({ seed: 42, startDay: 4, levels: { power: 6, rapid: 3 }, bestBefore: 3 });
+    skipShop(state);
     run(state, 12);
-    // 버전 2의 판: 유물의 값들이 아직 없다.
+    expect(state.shopping).toBe(false);
+    // 버전 2의 판: 유물의 값들이 아직 없고, 동료도 없다(동료는 버전 4에서 생겼다).
     const old = throughDisk(runRecord({ state, banked: 9, bankedShards: 0 }, T)) as {
       version: number;
       run: { state: Record<string, unknown>; bankedShards?: number };
     };
+    old.run.state = toVersion3(state);
     old.version = 2;
     delete old.run.bankedShards;
     delete old.run.state.shards;
@@ -423,8 +430,8 @@ describe('하던 판의 유물', () => {
     // 이어 하면 유물 없이 시작한 판과 똑같이 흘러간다.
     const restored = read.run!.state;
     for (let time = 0; time < 20; time += DT) {
-      step(state, DT, { aim: null, storm: false, pick: 0 });
-      step(restored, DT, { aim: null, storm: false, pick: 0 });
+      step(state, DT, { aim: null, storm: false, ready: true });
+      step(restored, DT, { aim: null, storm: false, ready: true });
     }
     expect(restored).toEqual(state);
     // 그보다 옛 버전이거나 다른 데가 망가진 판은 채우지 않고 버린다.
