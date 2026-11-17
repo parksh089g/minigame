@@ -5,6 +5,9 @@
  * 기기가 어느 나라에 있든 한국 시각으로 0시에 하루가 넘어간다.
  * 화면과 저장소에 의존하지 않는 순수한 값과 함수만 둔다. 저장은 daily-store.ts가 맡는다.
  *
+ * 오늘의 판의 점수는 그날의 기록에만 남긴다. 운을 알고 다시 할수록 점수가 오르는 판이라, 운에 맡기는 여느 판과 같은
+ * 최고 기록과 랭킹에 넣으면 두 가지 판이 섞인다(씬의 offRecordNote). 한 판으로는 세고 코인도 준다.
+ *
  * 기록은 이 기기에만 남는다. 오늘의 랭킹(online/)에는 올리지 않는다: 오늘의 랭킹이 있는 게임의 목록
  * (protocol.ts의 DAILY_BOARD)은 서버가 함께 쓰는 약속이라, 거기에 이 게임을 넣고 서버를 다시 올려야 받는다.
  */
@@ -143,6 +146,16 @@ export function addDailyRun(record: SlotDaily, today: number, run: DailyRun): Da
  * 결과 화면에서 친구 점수와 견준 줄의 이름
  */
 export const DAILY_LABEL = { name: '오늘의 판', back: '보통 판으로', friend: '친구 기록' } as const;
+
+/**
+ * 오늘의 판을 마쳤을 때 결과 화면에서 최고 기록 자리에 적는 한 줄. 오늘의 판은 운이 정해져 있고 몇 번이든 다시 할 수 있어서,
+ * 그 점수를 여느 판과 같은 최고 기록과 랭킹에는 넣지 않는다(10차 검토 S10). today는 오늘의 판이고,
+ * past는 두었다가 날이 넘어간 뒤에 마친 판이다(그날의 기록에도 남지 않는다).
+ */
+export const DAILY_OFF_RECORD = {
+  today: '오늘의 판은 그날의 기록에만 남아요',
+  past: '날이 지나서 기록에 안 남아요',
+} as const;
 
 /** 시작 화면에서 오늘의 판을 골랐을 때 그 아래에 적는 한 줄: 오늘의 최고 기록이나, 아직 안 했으면 무엇을 하는 판인지 */
 export function dailyInfo(record: SlotDaily, today: number): string {

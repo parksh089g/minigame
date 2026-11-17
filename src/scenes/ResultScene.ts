@@ -26,6 +26,8 @@ import { askNickname } from './nickname';
 import type { RankingData } from './RankingScene';
 
 const PANEL_WIDTH = 204;
+/** 최고 기록에 넣지 않은 판에서 최고 기록 자리에 적는 한 줄. 게임이 따로 주면(ResultData.offRecord) 그것을 쓴다. */
+const OFF_RECORD_LINE = '기록에 남지 않는 판이에요';
 /**
  * 기록 한 줄의 높이. 아이콘 줄(STRIP)까지 넣으면 화면을 넘칠 때는 그 줄을 빼기 전에 tight로 먼저 좁혀 본다.
  * 잔치의 밤처럼 무기가 여섯이라 아이콘 줄이 두 줄이 되는 판도 가장 작은 화면에서 피해 나눔이 남게 하려는 것이다.
@@ -79,7 +81,8 @@ export class ResultScene extends Phaser.Scene implements BackAware {
     const achieved = result.newAchievements;
     const missions = result.newMissions;
     // 점수를 낸 적이 있으면 온라인 랭킹 줄을 둔다. 닉네임을 정하기 전에는 참여를 권하는 줄이 된다.
-    const ranked = result.best > 0 && isRankedGame(data.gameId);
+    // 기록에 넣지 않은 판은 랭킹과 상관이 없으므로 두지 않는다.
+    const ranked = result.ranked && result.best > 0 && isRankedGame(data.gameId);
     const extraRows =
       (daily ? 1 : 0) + (achieved.length > 0 ? 1 : 0) + (missions.length > 0 ? 1 : 0) + (ranked ? 1 : 0);
     const buttonsHeight = 12 + BUTTON_HEIGHT * 2 + BUTTON_GAP + 3;
@@ -168,7 +171,9 @@ export class ResultScene extends Phaser.Scene implements BackAware {
         this.celebrate(centerX, top);
       });
     } else {
-      addText(this, centerX, badgeY + 9, `최고 기록 ${result.best}`, {
+      // 기록에 넣지 않은 판은 그 점수와 견줄 수 없는 최고 기록 대신, 왜 넣지 않는지를 적는다.
+      const line = result.ranked ? `최고 기록 ${result.best}` : (data.offRecord ?? OFF_RECORD_LINE);
+      addText(this, centerX, badgeY + 9, line, {
         color: THEME_CSS.sub,
         originX: 0.5,
         originY: 0.5,

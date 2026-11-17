@@ -33,6 +33,8 @@ export interface ResultData {
   share?: ShareOverride;
   /** "다시 하기"가 게임 씬을 다시 열 때 넘길 값. 없으면 여느 때처럼 처음부터 연다. */
   retry?: object;
+  /** 최고 기록에 넣지 않은 판(result.ranked가 false)에서, 최고 기록을 적는 자리에 대신 적을 한 줄 */
+  offRecord?: string;
 }
 
 /** 결과 화면의 기록 아래에 덧붙이는 아이콘 한 줄. 예: 무기마다 준 피해의 비중 */
@@ -252,6 +254,15 @@ export abstract class MiniGameScene extends Phaser.Scene implements BackAware {
     return undefined;
   }
 
+  /**
+   * 이 판의 점수를 최고 기록과 랭킹에 넣지 않을 때, 결과 화면에서 최고 기록을 적는 자리에 대신 적을 한 줄.
+   * 기본은 null이고 여느 판처럼 기록한다. 운이 정해져 있어서 다시 할수록 유리한 판(행운 슬롯의 오늘의 판)처럼
+   * 여느 판과 견줄 수 없는 판이 바꿔 쓴다. 그런 판도 한 판으로 세고 코인은 준다.
+   */
+  protected offRecordNote(): string | null {
+    return null;
+  }
+
   /** 판이 끝날 때 나는 소리. 끝맺음 소리가 따로 있는 게임은 이것을 바꿔 쓴다. */
   protected playFinishSound(): void {
     sfx.finish();
@@ -275,16 +286,19 @@ export abstract class MiniGameScene extends Phaser.Scene implements BackAware {
     this.playFinishSound();
 
     const game = getGame(this.gameId);
+    const offRecord = this.offRecordNote();
     const result = store.recordPlay(
       this.gameId,
       score,
       game?.coinsFor(score) ?? 0,
       todaysChallenge(),
       thisWeek(store.data.weekly),
+      offRecord === null,
     );
     announceLastWeek(result.lastWeekCoins);
     // 랭킹에 참여하고 있으면 결과 화면이 뜨기 전에 기록을 올려 둔다. 인터넷이 없으면 다음에 올라간다.
-    void syncScores();
+    // 기록에 넣지 않은 판은 올릴 것이 없다.
+    if (result.ranked) void syncScores();
     const data: ResultData = {
       title: game?.title ?? '결과',
       sceneKey: this.scene.key,
@@ -294,6 +308,7 @@ export abstract class MiniGameScene extends Phaser.Scene implements BackAware {
       strip,
       share,
       retry: this.retryData(),
+      offRecord: offRecord ?? undefined,
     };
     this.time.delayedCall(resultDelayMs, () => {
       this.scene.pause();
