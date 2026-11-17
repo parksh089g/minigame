@@ -458,14 +458,29 @@ export class PinPullScene extends MiniGameScene {
   }
 
   private onPause(): void {
+    this.chargeGrace();
     // 단계 모드는 시간을 재지 않으니 가릴 까닭이 없다.
     if (this.playing && this.stageLevel === null) this.board.setVisible(false);
   }
 
   private onResume(): void {
     this.board.setVisible(true);
-    // 아직 시간이 가지 않고 있었으면 숨 고를 시간도 필요 없다.
-    if (this.playing && this.gate.open) this.grace = RESUME_GRACE_SECONDS;
+    // 아직 시간이 가지 않고 있었으면 숨 고를 시간도 필요 없다. 시간이 이미 다 되었으면 여유 없이 다음 프레임에 끝낸다.
+    if (this.playing && this.gate.open && this.timeLeft > 0) this.grace = RESUME_GRACE_SECONDS;
+  }
+
+  /**
+   * 돌아온 뒤의 여유가 끝나기 전에 다시 멈추면, 그동안 판을 본 시간을 시계에서 뺀다.
+   * 그러지 않으면 멈추기를 되풀이해 시계를 세워 둔 채 판을 볼 수 있다.
+   * 여유는 판을 기다리는(idle) 동안에만 줄어드니, 줄어든 몫이 곧 판을 본 시간이다.
+   */
+  private chargeGrace(): void {
+    if (this.grace <= 0) return;
+    const seen = RESUME_GRACE_SECONDS - this.grace;
+    this.grace = 0;
+    if (!this.playing || this.stageLevel !== null || this.phase !== 'idle') return;
+    this.timeLeft = Math.max(0, this.timeLeft - seen);
+    this.hud.setTime(this.timeLeft, this.timeLimit);
   }
 
   // ───────── 도움말 ─────────
