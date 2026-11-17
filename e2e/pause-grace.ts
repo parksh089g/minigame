@@ -8,14 +8,16 @@
 import { expect, type Page } from '@playwright/test';
 import { startScene } from './app';
 
-/** 장면들이 일시정지에서 돌아온 뒤 시계를 세워 두는 시간(초). 다섯 게임 모두 같다. */
+/** 장면들이 일시정지에서 돌아온 뒤 시계를 세워 두는 시간(초). 따로 적지 않은 게임은 이 값을 쓴다. */
 const RESUME_GRACE_SECONDS = 0.6;
 
 /** 장면에서 이 점검이 들여다보는 것 */
 interface ClockView {
   playing: boolean;
   phase?: string;
-  run: { timeLeft: number };
+  /** 남은 시간은 판의 상태(run)에 두는 게임이 많고, 장면에 바로 두는 게임(핀 뽑기)도 있다. */
+  run?: { timeLeft: number };
+  timeLeft?: number;
 }
 
 export interface PauseGraceGame {
@@ -25,10 +27,17 @@ export interface PauseGraceGame {
   clock: 'gate' | 'started';
   /** 판을 누를 수 있을 때의 장면 단계. 단계를 따로 두지 않는 게임은 비워 둔다. */
   phase?: string;
+  /** 돌아온 뒤 시계를 세워 두는 시간(초). 비우면 RESUME_GRACE_SECONDS */
+  graceSeconds?: number;
 }
 
 function timeLeft(page: Page, key: string): Promise<number> {
-  return page.evaluate((k) => (window.__pocketArcade?.scene.getScene(k) as unknown as ClockView).run.timeLeft, key);
+  return page.evaluate((k) => {
+    const scene = window.__pocketArcade?.scene.getScene(k) as unknown as ClockView;
+    const left = scene.run?.timeLeft ?? scene.timeLeft;
+    if (left === undefined) throw new Error('남은 시간을 찾지 못했다');
+    return left;
+  }, key);
 }
 
 /** 시계가 그만큼 줄어들 때까지 기다린다. */
@@ -101,7 +110,7 @@ export async function expectRepausingCostsTime(page: Page, game: PauseGraceGame)
       game.key,
     );
     expect(grace, '다시 멈춘 것은 "준비!"가 끝나기 전이어야 한다').toBeGreaterThan(0);
-    shown += RESUME_GRACE_SECONDS - grace;
+    shown += (game.graceSeconds ?? RESUME_GRACE_SECONDS) - grace;
   }
   const spent = start - (await timeLeft(page, game.key));
   // 고치기 전에는 시계가 조금도 줄지 않았다.
