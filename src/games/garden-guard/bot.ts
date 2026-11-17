@@ -7,6 +7,7 @@ import {
   applyRun,
   bankSeeds,
   buyUpgrade,
+  canBuy,
   clampStartDay,
   levelOf,
   startDays,
@@ -76,7 +77,7 @@ export function buyCheapest(meta: GardenMeta): GardenMeta {
     let cheapest = Infinity;
     for (const id of UPGRADE_ORDER) {
       const cost = upgradeCost(id, levelOf(next.levels, id));
-      if (cost !== null && cost <= next.seeds && cost < cheapest) {
+      if (cost !== null && cost < cheapest && canBuy(next, id)) {
         cheapest = cost;
         pick = id;
       }

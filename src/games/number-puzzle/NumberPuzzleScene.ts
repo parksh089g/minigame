@@ -782,6 +782,7 @@ export class NumberPuzzleScene extends MiniGameScene {
 
   private onPause(): void {
     this.dropAim();
+    this.chargeGrace();
     // 단계 모드는 시간을 재지 않으니 가릴 까닭이 없다.
     if (this.playing && this.stageLevel === null) this.boardLayer.setVisible(false);
   }
@@ -790,9 +791,24 @@ export class NumberPuzzleScene extends MiniGameScene {
     this.boardLayer.setVisible(true);
     // 판을 고르던 중이 아니거나 아직 첫 조작 전이면 시간이 흐르고 있지 않았으니 여유도 필요 없다.
     if (!this.playing || this.phase !== 'idle' || !this.gate.open || this.stageLevel !== null) return;
+    // 시간이 이미 다 되었으면 여유 없이 다음 프레임에 끝낸다.
+    if (isOver(this.run)) return;
     this.grace = RESUME_GRACE_SECONDS;
     const ms = RESUME_GRACE_SECONDS * 1000;
     showBanner(this, this.boardCenterY, '준비!', LOOK.text.ready, ms, DEPTH.banner);
+  }
+
+  /**
+   * "준비!"가 끝나기 전에 다시 멈추면, 그동안 판을 본 시간을 시계에서 뺀다.
+   * 그러지 않으면 멈추기를 되풀이해 시계를 세워 둔 채 판을 볼 수 있다.
+   */
+  private chargeGrace(): void {
+    if (this.grace <= 0) return;
+    const seen = RESUME_GRACE_SECONDS - this.grace;
+    this.grace = 0;
+    if (!this.playing || this.phase !== 'idle' || this.stageLevel !== null) return;
+    this.run = elapse(this.run, seen);
+    this.drawTime();
   }
 
   private endRun(): void {

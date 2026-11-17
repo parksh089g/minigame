@@ -7,24 +7,29 @@ import {
   bossCount,
   bossKind,
   buyUpgrade,
+  canBuy,
   canBuyAny,
   clampStartDay,
   clearBonus,
   coinsFor,
+  costLabel,
   createMeta,
   dayCount,
   dayWindow,
   effectLine,
-  hpScale,
   HP_GROWTH,
   HP_GROWTH_LATE,
+  hpScale,
   isBossDay,
   kindWeight,
   LATE_FROM,
   latestStart,
   levelOf,
-  nextRandom,
+  MAX_DAY,
   META_VERSION,
+  neededFor,
+  needLine,
+  nextRandom,
   normalizeMeta,
   openedStart,
   planDay,
@@ -316,6 +321,56 @@ describe('판 밖 진행', () => {
     expect(buyUpgrade(full, 'helper')).toBe(full);
   });
 
+  it('해바라기가 없으면 거름은 살 수 없다', () => {
+    const bare = { ...createMeta(), seeds: 1e6 };
+    expect(neededFor(bare.levels, 'compost')).toBe('helper');
+    expect(needLine('helper')).toBe('해바라기가 있어야 해요');
+    expect(needLine('storm')).toBe('물벼락이 있어야 해요');
+    expect(canBuy(bare, 'compost')).toBe(false);
+    expect(buyUpgrade(bare, 'compost')).toBe(bare);
+    // 해바라기를 사면 거름도 살 수 있다.
+    const grown = buyUpgrade(bare, 'helper');
+    expect(neededFor(grown.levels, 'compost')).toBeNull();
+    expect(buyUpgrade(grown, 'compost').levels.compost).toBe(1);
+    // 거름의 값이 있어도 살 것이 거름뿐이면 살 수 있는 강화가 없는 것이다.
+    const others = Object.fromEntries(
+      UPGRADE_ORDER.filter((id) => id !== 'compost' && id !== 'helper').map((id) => [id, UPGRADES[id].maxLevel]),
+    );
+    expect(canBuyAny({ ...createMeta(), seeds: UPGRADES.compost.cost, levels: others })).toBe(false);
+    expect(canBuyAny({ ...createMeta(), seeds: UPGRADES.helper.cost, levels: others })).toBe(true);
+    // 조건이 있는 강화는 거름뿐이고, 조건이 되는 강화는 목록에서 그 앞에 있다.
+    for (const id of UPGRADE_ORDER) {
+      const needs = UPGRADES[id].needs;
+      if (needs) expect(UPGRADE_ORDER.indexOf(needs), id).toBeLessThan(UPGRADE_ORDER.indexOf(id));
+      else expect(neededFor({}, id), id).toBeNull();
+    }
+  });
+
+  it('값 버튼에는 여섯 자리까지 그대로 적고, 더 큰 값은 올려서 만과 억으로 줄인다', () => {
+    expect(costLabel(12)).toBe('12');
+    expect(costLabel(999_999)).toBe('999999');
+    expect(costLabel(1_000_000)).toBe('100만');
+    expect(costLabel(1_000_001)).toBe('101만');
+    expect(costLabel(10_650_123)).toBe('1066만');
+    expect(costLabel(99_990_000)).toBe('9999만');
+    expect(costLabel(99_990_001)).toBe('1억');
+    expect(costLabel(123_456_789)).toBe('1.3억');
+    expect(costLabel(5_890_000_000)).toBe('58.9억');
+    expect(costLabel(99_900_000_001)).toBe('1000억');
+    // 지금의 모든 값은 버튼에 들어가는 여섯 글자 안쪽이고, 적힌 만큼 모으면 반드시 살 수 있다.
+    const worth = (label: string): number =>
+      label.endsWith('억') ? Number(label.slice(0, -1)) * 1e8 : label.endsWith('만') ? Number(label.slice(0, -1)) * 1e4 : Number(label);
+    for (const id of UPGRADE_ORDER) {
+      for (let level = 0; level < UPGRADES[id].maxLevel; level += 1) {
+        const cost = upgradeCost(id, level) ?? 0;
+        const label = costLabel(cost);
+        expect(label.length, `${id} ${level}`).toBeLessThanOrEqual(6);
+        expect(worth(label), `${id} ${level}`).toBeGreaterThanOrEqual(cost);
+        expect(worth(label), `${id} ${level}`).toBeLessThan(cost * 1.01 + 1);
+      }
+    }
+  });
+
   it('번 씨앗과 판의 기록을 쌓는다', () => {
     const meta = createMeta();
     expect(bankSeeds(meta, 0)).toBe(meta);
@@ -384,6 +439,11 @@ describe('판 밖 진행', () => {
     });
     // 열리지 않은 날을 골라 둔 저장은 열린 날로 돌린다.
     expect(normalizeMeta({ best: 3, startDay: 11 }).startDay).toBe(1);
+    // 터무니없이 큰 기록은 잘라서, 시작할 수 있는 날을 세다가 멈추지 않게 한다.
+    const huge = normalizeMeta({ version: META_VERSION, best: 1e12, bestEver: 1e15, startDay: 1e12 });
+    expect(huge).toMatchObject({ best: MAX_DAY, bestEver: MAX_DAY, startDay: latestStart(MAX_DAY) });
+    expect(startDays(huge.best).length).toBeLessThan(MAX_DAY);
+    expect(normalizeMeta({ version: 1, best: 1e12 }).startDay).toBe(latestStart(MAX_DAY));
     // 한 번 맞춘 것은 다시 맞춰도 그대로다.
     expect(normalizeMeta(meta)).toEqual(meta);
   });
