@@ -1,7 +1,7 @@
 /**
  * 행운 슬롯의 오늘의 판을 화면에서 점검한다: 시작 화면의 버튼으로 오늘의 판으로 바꾸면 새로 열 때마다 같은 판이 나오는지,
  * 판을 바꾸는 버튼과 오늘의 판이라는 표시가 두 화면 크기에서 가려지거나 화면 밖으로 나가지 않는지,
- * 첫 스핀을 돌리면 버튼이 사라지는지, 그리고 마친 판이 그날의 기록으로 남는지 본다.
+ * 첫 스핀을 돌리면 버튼이 사라지는지, 그리고 마친 판이 그날의 기록으로만 남고 최고 기록과 랭킹에는 들어가지 않는지 본다.
  * 장면을 새로 열기 전에는 하던 판을 마쳐 둔다. 하다 만 판이 남아 있으면 새로 연 장면이 그 판을 이어 줄 수도 있기 때문이다.
  */
 import './app-globals';
@@ -11,10 +11,12 @@ import {
   addDailyRun,
   createDaily,
   DAILY_LABEL,
+  DAILY_OFF_RECORD,
   dailyDayOf,
   dailyInfo,
   dailyVerdict,
   dayIndexOf,
+  SLOT_GAME_ID,
 } from '../src/games/candy-slot/daily';
 import { newRun, randomOf, spin, type RunState } from '../src/games/candy-slot/rules';
 import { hiddenTexts, it, openApp, startScene, tapText, textPoint, waitForScene } from './app';
@@ -94,6 +96,38 @@ function firstGridOf(seed: string): number[] {
 }
 
 /** 일시정지 화면의 "기록하고 끝내기"와 같은 길로 판을 마치고, 결과 화면이 뜰 때까지 기다린다. */
+/** 허브의 세이브(core/store.ts)에 적힌 코인과 행운 슬롯의 기록, 이번 주 랭킹에 올릴 기록. 저장하는 곳과 이름은 그 파일과 같다. */
+function readHubSave(page: Page): Promise<{ coins: number; best: number; plays: number; week: number | null } | null> {
+  return page.evaluate(
+    (gameId) =>
+      new Promise<{ coins: number; best: number; plays: number; week: number | null } | null>((resolve, reject) => {
+        const open = indexedDB.open('pocket-arcade');
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const request = open.result.transaction('kv').objectStore('kv').get('save');
+          request.onsuccess = () => {
+            open.result.close();
+            const save = request.result as
+              | {
+                  coins: number;
+                  games: Record<string, { best: number; plays: number }>;
+                  online: { week: { bests: Record<string, number> } | null };
+                }
+              | undefined;
+            const record = save?.games[gameId];
+            resolve(
+              save && record
+                ? { coins: save.coins, best: record.best, plays: record.plays, week: save.online.week?.bests[gameId] ?? null }
+                : null,
+            );
+          };
+          request.onerror = () => reject(request.error);
+        };
+      }),
+    SLOT_GAME_ID,
+  );
+}
+
 async function finishRun(page: Page): Promise<void> {
   await page.evaluate(
     (key) => (window.__pocketArcade?.scene.getScene(key) as unknown as SlotView).finishFromPause(),
@@ -190,6 +224,14 @@ it('행운 슬롯 오늘의 판: 마친 판이 그날의 기록으로 남고, �
   await finishRun(page);
   await expect.poll(() => textPoint(page, SCENE.result, DAILY_LABEL.name), WAIT).not.toBeNull();
   expect(await textPoint(page, SCENE.result, dailyVerdict(outcome)), '오늘 처음 마친 판이라고 적힌다').not.toBeNull();
+  // 오늘의 판은 최고 기록과 랭킹에 들어가지 않는다(10차 검토 S10). 결과 화면은 신기록 대신 그렇다고 적고, 랭킹 줄을 두지 않는다.
+  expect(await textPoint(page, SCENE.result, DAILY_OFF_RECORD.today), '기록에 남지 않는다고 적힌다').not.toBeNull();
+  expect(await textPoint(page, SCENE.result, '신기록!'), '신기록이 아니다').toBeNull();
+  expect(await hiddenTexts(page, SCENE.result), '오늘의 판의 결과 화면').toEqual([]);
+  await expect
+    .poll(() => readHubSave(page), { message: '한 판으로 세고 코인은 주되 최고 기록과 이번 주 기록은 그대로다' })
+    .toMatchObject({ best: 0, plays: 1, week: null });
+  expect((await readHubSave(page))?.coins ?? 0, '코인은 받는다').toBeGreaterThan(0);
 
   // 다시 하기를 누르면 오늘의 판이 다시 열리고, 시작 화면에 오늘의 최고 기록이 적힌다.
   await tapText(page, SCENE.result, '다시 하기');

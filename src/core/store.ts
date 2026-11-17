@@ -76,7 +76,7 @@ class SaveStore {
 
   /**
    * 한 판의 결과(점수, 얻은 코인)를 기록한다. challenge를 주면 오늘의 도전 달성도 함께 따지고,
-   * week를 주면 이 판을 주간 미션에도 센다.
+   * week를 주면 이 판을 주간 미션에도 센다. ranked가 false면 점수를 최고 기록과 랭킹에 넣지 않는다.
    */
   recordPlay(
     gameId: string,
@@ -84,8 +84,9 @@ class SaveStore {
     coins: number,
     challenge: DailyChallenge | null = null,
     week: WeekContext | null = null,
+    ranked = true,
   ): PlayResult {
-    const result = applyPlayResult(this.data, gameId, score, coins, Date.now(), challenge, week);
+    const result = applyPlayResult(this.data, gameId, score, coins, Date.now(), challenge, week, ranked);
     this.data = result.save;
     this.commit();
     // 한 판이라도 했으면 지켜야 할 기록이 생긴 것이다.
