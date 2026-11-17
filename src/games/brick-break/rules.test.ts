@@ -41,6 +41,7 @@ import {
   makeCells,
   MAX_BALLS,
   MAX_BOUNCE_ANGLE,
+  MIN_BOUNCE_ANGLE,
   MIN_ROW_BRICKS,
   MIN_VERTICAL_RATIO,
   MISS_DROP,
@@ -61,6 +62,7 @@ import {
   type BrickKind,
   type Game,
   type GameEvent,
+  visibleMiddle,
   type Row,
 } from './rules';
 
@@ -220,12 +222,20 @@ describe('벽돌 깨기: 막대', () => {
     expect(Math.abs(steerPaddle(100, 160, 0.1) - 160)).toBeLessThan(4);
   });
 
-  it('가운데에 맞으면 곧게, 끝에 맞을수록 그쪽으로 눕는다', () => {
-    expect(bounceAngle(0)).toBe(0);
+  it('끝에 맞을수록 그쪽으로 눕고, 가운데에 맞아도 곧게 오르지는 않는다', () => {
     expect(bounceAngle(1)).toBe(MAX_BOUNCE_ANGLE);
     expect(bounceAngle(-1)).toBe(-MAX_BOUNCE_ANGLE);
     expect(bounceAngle(5)).toBe(MAX_BOUNCE_ANGLE);
     expect(bounceAngle(0.5)).toBeGreaterThan(bounceAngle(0.2));
+    expect(bounceAngle(0.2)).toBeGreaterThan(bounceAngle(0.01));
+    // 가운데 가까이에 맞아도 MIN_BOUNCE_ANGLE(10도쯤)만큼은 기운다. 곧게 오르내리며 한 열만 깨지 않는다.
+    expect(MIN_BOUNCE_ANGLE).toBeGreaterThan(0.15);
+    expect(bounceAngle(0.01)).toBeGreaterThanOrEqual(MIN_BOUNCE_ANGLE);
+    expect(bounceAngle(-0.01)).toBeLessThanOrEqual(-MIN_BOUNCE_ANGLE);
+    // 한가운데에 맞으면 오던 쪽으로 계속 간다. 곧게 내려온 공은 오른쪽으로 간다.
+    expect(bounceAngle(0, 80)).toBe(MIN_BOUNCE_ANGLE);
+    expect(bounceAngle(0, -80)).toBe(-MIN_BOUNCE_ANGLE);
+    expect(bounceAngle(0)).toBe(MIN_BOUNCE_ANGLE);
     // 가장 누운 공도 세로 빠르기가 MIN_VERTICAL_RATIO보다 넉넉히 남는다.
     expect(Math.cos(MAX_BOUNCE_ANGLE)).toBeGreaterThan(MIN_VERTICAL_RATIO);
   });
@@ -380,7 +390,7 @@ describe('벽돌 깨기: 공의 움직임', () => {
     expect(ball.vx).toBeGreaterThan(0);
   });
 
-  it('막대의 가운데에 맞으면 곧게 오르고, 오른쪽 끝에 맞으면 오른쪽으로 튄다', () => {
+  it('막대의 가운데에 맞아도 조금 기울어 오르고, 오른쪽 끝에 맞으면 오른쪽으로 크게 튄다', () => {
     const drop = (x: number): { ball: Ball; events: GameEvent[] } => {
       const start = playing([ballAt(x, PADDLE_Y - 20, 0, 200, 3)]);
       const { game, events } = run(start, 1, { until: (_, all) => kinds(all).includes('paddle') });
@@ -388,7 +398,7 @@ describe('벽돌 깨기: 공의 움직임', () => {
     };
     const middle = drop(CENTER);
     expect(middle.ball.vy).toBeLessThan(0);
-    expect(middle.ball.vx).toBeCloseTo(0);
+    expect(Math.atan2(middle.ball.vx, -middle.ball.vy)).toBeCloseTo(MIN_BOUNCE_ANGLE);
     expect(middle.ball.streak).toBe(0);
     expect(middle.events.at(-1)).toMatchObject({ kind: 'paddle', offset: 0 });
 
@@ -490,6 +500,29 @@ describe('벽돌 깨기: 벽돌을 맞혔을 때', () => {
     ]);
     expect(game.balls).toHaveLength(MAX_BALLS);
     expect(game.score).toBe(1 + GIFT_POINTS);
+  });
+
+  it('천장에서 들어오는 중인 벽돌도 깨지고, 깨진 자리와 새 공은 판 안(보이는 부분)에 있다', () => {
+    // 줄의 4px만 판 안에 들어와 있다.
+    const ball = ballAt(cellLeft(3) + CELL_WIDTH / 2 - 6, 40, 60, -190);
+    const start = playing([ball], [], { rows: [rowWith(1, 4 - CELL_HEIGHT, { 3: 'gift' })] });
+    const { game, events } = run(start, 1, { until: (_, all) => all.length > 0 && kinds(all).includes('break') });
+    const broke = events.find((event) => event.kind === 'break');
+    expect(broke).toMatchObject({ kind: 'break', row: 1, col: 3, brick: 'gift' });
+    const at = broke as Extract<GameEvent, { kind: 'break' }>;
+    expect(at.y).toBeGreaterThan(0);
+    expect(at.y).toBeLessThan(5);
+    expect(events.find((event) => event.kind === 'gift')).toMatchObject({ extra: true, y: at.y });
+    const extra = game.balls[1];
+    expect(extra.y).toBeGreaterThanOrEqual(BALL_RADIUS);
+    expect(extra.vy).toBeLessThan(0);
+  });
+
+  it('판 안에 보이는 부분의 한가운데: 다 들어온 줄은 벽돌의 한가운데, 들어오는 줄은 보이는 만큼의 한가운데', () => {
+    expect(visibleMiddle(28)).toBe(28 + CELL_HEIGHT / 2);
+    expect(visibleMiddle(0)).toBe(CELL_HEIGHT / 2);
+    expect(visibleMiddle(-10)).toBe(2);
+    expect(visibleMiddle(-CELL_HEIGHT)).toBe(0);
   });
 
   it('다 깨진 줄은 치우고, 맨 위에서 기다리는 줄은 남긴다', () => {

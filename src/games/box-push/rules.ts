@@ -245,6 +245,37 @@ export function stuckBoxes(board: Board, dead: readonly boolean[]): number[] {
   return stuck;
 }
 
+/**
+ * 별 자리 밖에서 얼어붙은 상자의 번호들: 가로로도 세로로도 다시는 밀 수 없는 상자다. 이런 상자가 있으면 되돌리지 않고는 판을 깰 수 없다.
+ * 한 줄로 밀려면 상자의 양옆이 모두 비어야 하므로(한쪽에 캐릭터가 서고 다른 쪽으로 간다), 한쪽 옆이 벽이면 그 줄로는 못 민다.
+ * 양옆이 모두 막힌 칸이어도 그 줄로 밀면 끝이므로 못 미는 것으로 친다. 옆에 다른 상자가 붙어 있으면 그 상자도 얼어붙었는지 따진다.
+ * 상자 둘이 서로를 막은 모습처럼, 상자 하나만 보는 deadCells가 못 잡는 것을 잡는다. 그래도 모두 잡지는 못한다(isLost가 나머지를 찾는다).
+ */
+export function frozenBoxes(board: Board, dead: readonly boolean[]): number[] {
+  const { puzzle } = board;
+  const isWall = (cell: number): boolean => cell < 0 || puzzle.walls[cell];
+  // 따지는 중인 상자들. 옆 상자를 따지는 동안에는 벽으로 친다(서로를 끝없이 따지지 않게).
+  const holding = new Set<number>();
+  const frozen = (cell: number): boolean => {
+    holding.add(cell);
+    const blocked = (one: Direction, other: Direction): boolean => {
+      const a = neighbour(puzzle, cell, one);
+      const b = neighbour(puzzle, cell, other);
+      if (isWall(a) || isWall(b) || holding.has(a) || holding.has(b)) return true;
+      if (dead[a] && dead[b]) return true;
+      return (boxAt(board, a) >= 0 && frozen(a)) || (boxAt(board, b) >= 0 && frozen(b));
+    };
+    const result = blocked('left', 'right') && blocked('up', 'down');
+    holding.delete(cell);
+    return result;
+  };
+  const stuck: number[] = [];
+  board.boxes.forEach((cell, index) => {
+    if (!isTarget(puzzle, cell) && frozen(cell)) stuck.push(index);
+  });
+  return stuck;
+}
+
 // ───────── 판을 만들고 푸는 데 쓰는 바닥 지도 ─────────
 
 /**
@@ -507,9 +538,29 @@ export const SOLVE_LIMIT = 600_000;
  * limit개의 모습을 살펴보고도 답이 안 나오면 null을 돌려준다.
  */
 export function minPushes(puzzle: Puzzle, limit = SOLVE_LIMIT): number | null {
+  const found = searchPushes(puzzle, limit);
+  return typeof found === 'number' ? found : null;
+}
+
+/** 지금 모습이 깰 수 없는 판인지 끝까지 찾아볼 때 살펴보는 모습의 수의 한도. 미는 순간이 끊기지 않을 만큼만 찾는다. */
+export const LOST_LIMIT = 1000;
+
+/**
+ * 지금 모습에서 아무리 밀어도 판을 깰 수 없는지. 갈 수 있는 모습을 limit개 안에서 끝까지 다 살펴봤는데 깨는 모습이 없을 때만 true다.
+ * 깰 수 없게 된 판은 갈 수 있는 모습이 적어서 금방 바닥나고, 풀리는 판은 한도에 닿아서 false가 된다(잘못 알리는 일은 없다).
+ */
+export function isLost(board: Board, limit = LOST_LIMIT): boolean {
+  return searchPushes({ ...board.puzzle, boxes: board.boxes, player: board.player }, limit) === 'none';
+}
+
+/**
+ * minPushes의 속. 가장 적게 미는 횟수를 돌려주고, 풀 수 없다는 것을 끝까지 살펴서 알았으면 'none',
+ * 한도에 닿아서(또는 판이 너무 커서) 모르면 'unknown'이다.
+ */
+function searchPushes(puzzle: Puzzle, limit: number): number | 'none' | 'unknown' {
   const floor = floorOf(puzzle.cols, puzzle.rows, puzzle.walls);
   const count = puzzle.boxes.length;
-  if (floor.cells.length > MAX_FLOOR || count > MAX_BOXES) return null;
+  if (floor.cells.length > MAX_FLOOR || count > MAX_BOXES) return 'unknown';
   const { next } = floor;
   const reach = new Reach(floor);
   const after = new Reach(floor, reach.blocked);
@@ -560,7 +611,7 @@ export function minPushes(puzzle: Puzzle, limit = SOLVE_LIMIT): number | null {
         reach.blocked[at] = 1;
         const key = made * 64 + lowest;
         if (seen.has(key)) continue;
-        if (found >= limit) return null;
+        if (found >= limit) return 'unknown';
 
         seen.add(key);
         boxesOf.copyWithin(found * count, base, base + count);
@@ -573,7 +624,7 @@ export function minPushes(puzzle: Puzzle, limit = SOLVE_LIMIT): number | null {
     }
     for (let box = 0; box < count; box += 1) reach.blocked[boxesOf[base + box]] = 0;
   }
-  return null;
+  return 'none';
 }
 
 // ───────── 방 만들기 ─────────
@@ -889,7 +940,7 @@ export const STAGE_PLANS: readonly StagePlan[] = [
     lines: [2, 2],
     boards: 1,
     points: 10,
-    seconds: 6,
+    seconds: 8,
   },
   {
     puzzle: { innerCols: 4, innerRows: 5, pieces: [2, 5], boxes: 2, par: [3, 12], limit: 8000, clean: true },
@@ -1065,9 +1116,18 @@ export function undo(run: RunState): RunState {
   return { ...run, board: run.history[run.history.length - 1], history: run.history.slice(0, -1) };
 }
 
-/** 지금 판이 처음 모습과 달라졌는지. 상자를 민 적이 있거나 캐릭터가 자리를 떴다. */
+/**
+ * 지금 판이 처음 모습과 달라졌는지. 상자를 민 적이 있거나 캐릭터가 자리를 떴다.
+ * 되돌리기가 기억하는 것보다 많이 밀었으면 끝까지 되돌려도 처음 모습이 아닐 수 있어서, 민 횟수와 상자의 자리도 본다.
+ */
 export function hasMoved(run: RunState): boolean {
-  return run.history.length > 0 || run.board.player !== run.board.puzzle.player;
+  const { board } = run;
+  return (
+    run.history.length > 0 ||
+    board.pushes > 0 ||
+    board.player !== board.puzzle.player ||
+    board.boxes.some((cell, box) => cell !== board.puzzle.boxes[box])
+  );
 }
 
 /** 지금 판을 처음 모습으로 되돌린다. 민 횟수도 0으로 돌아간다. */

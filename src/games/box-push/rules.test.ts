@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { seededRandom } from '../../core/stages';
+import { levelPuzzle } from './levels';
 import {
   advance,
   boardLayout,
@@ -18,9 +19,11 @@ import {
   fallbackPuzzle,
   finalScore,
   formatPuzzle,
+  frozenBoxes,
   generateNear,
   generatePuzzle,
   hasMoved,
+  isLost,
   isOver,
   isSolved,
   MAX_CELL,
@@ -275,6 +278,89 @@ describe('더 갈 곳이 없는 칸', () => {
     // 그런 판은 정말로 풀 수 없다.
     expect(minPushes({ ...puzzle, boxes: pushed.boxes, player: pushed.player })).toBeNull();
   });
+
+  it('벽에 나란히 붙어 서로를 막은 상자 둘은 얼어붙었다', () => {
+    // 위쪽 벽을 따라 별 자리가 있어서 두 칸 모두 막힌 칸은 아니지만, 서로가 있어서 어느 쪽으로도 밀 수 없다.
+    const puzzle = puzzleOf('.bbo/...o/p...');
+    const board = newBoard(puzzle);
+    const dead = deadCells(puzzle);
+    expect(stuckBoxes(board, dead)).toEqual([]);
+    expect(frozenBoxes(board, dead)).toEqual([0, 1]);
+    expect(minPushes(puzzle)).toBeNull();
+  });
+
+  it('위아래로 밀 수 있는 상자나 별 자리에 놓인 상자는 얼어붙었다고 하지 않는다', () => {
+    const open = puzzleOf('..../.bb./..../p.oo');
+    expect(frozenBoxes(newBoard(open), deadCells(open))).toEqual([]);
+    const placed = puzzleOf('BB../..../p...');
+    expect(frozenBoxes(newBoard(placed), deadCells(placed))).toEqual([]);
+  });
+
+  it('상자 하나하나는 움직일 수 있어도 깰 수 없게 된 판은 끝까지 찾아서 안다', () => {
+    // 캐릭터가 상자 쪽으로 건너갈 길이 없다.
+    const puzzle = puzzleOf('ob./###/.p.');
+    const board = newBoard(puzzle);
+    const dead = deadCells(puzzle);
+    expect(stuckBoxes(board, dead)).toEqual([]);
+    expect(frozenBoxes(board, dead)).toEqual([]);
+    expect(isLost(board)).toBe(true);
+    expect(minPushes(puzzle)).toBeNull();
+  });
+
+  it('풀리는 판이나 다 깬 판은 깰 수 없다고 하지 않는다', () => {
+    for (let level = 1; level <= 100; level += 1) {
+      const board = newBoard(levelPuzzle(level));
+      expect(frozenBoxes(board, deadCells(board.puzzle)), `${level}단계`).toEqual([]);
+      expect(isLost(board), `${level}단계`).toBe(false);
+    }
+    expect(isLost(newBoard(puzzleOf('pB.')))).toBe(false);
+  });
+
+  it('검토에서 알림이 뜨지 않던 진 판을 이제 알린다', () => {
+    // 9단계: 아래, 오른쪽으로 걷고 위로 민다. 31단계: 걷지 않고 바로 위로 민다.
+    const cases: [number, Direction[]][] = [
+      [9, ['down', 'right', 'up']],
+      [31, ['up']],
+    ];
+    for (const [level, moves] of cases) {
+      const puzzle = levelPuzzle(level);
+      const board = walk(newBoard(puzzle), moves);
+      expect(board.pushes, `${level}단계`).toBe(1);
+      expect(minPushes({ ...puzzle, boxes: board.boxes, player: board.player }), `${level}단계`).toBeNull();
+      const dead = deadCells(puzzle);
+      const noticed = stuckBoxes(board, dead).length > 0 || frozenBoxes(board, dead).length > 0 || isLost(board);
+      expect(noticed, `${level}단계`).toBe(true);
+    }
+  });
+
+  it('아무 데나 밀다가 깰 수 없게 되면 거의 다 알아채고, 풀리는 판을 깰 수 없다고 하는 일은 없다', () => {
+    const random = seededRandom('막힌 판');
+    let lost = 0;
+    let noticed = 0;
+    for (let level = 1; level <= 100; level += 2) {
+      const puzzle = levelPuzzle(level);
+      const dead = deadCells(puzzle);
+      for (let game = 0; game < 4; game += 1) {
+        let board = newBoard(puzzle);
+        for (let move = 0; move < 120; move += 1) {
+          const result = step(board, DIRECTIONS[Math.floor(random() * 4)]);
+          board = result.board;
+          if (result.pushed < 0) continue;
+          const said = stuckBoxes(board, dead).length > 0 || frozenBoxes(board, dead).length > 0 || isLost(board);
+          if (minPushes({ ...puzzle, boxes: board.boxes, player: board.player }) !== null) {
+            expect(said, `${level}단계에서 풀리는 판을 깰 수 없다고 했다`).toBe(false);
+            continue;
+          }
+          lost += 1;
+          if (said) noticed += 1;
+          break;
+        }
+      }
+    }
+    expect(lost).toBeGreaterThan(40);
+    expect(noticed / lost).toBeGreaterThan(0.85);
+    // 풀이꾼으로 한 판 한 판 풀어 보므로 몇 초 걸린다.
+  }, 30_000);
 });
 
 describe('풀어 보기', () => {
@@ -564,6 +650,8 @@ describe('판의 차례', () => {
     expect(clearSeconds(first)).toBe(STAGE_PLANS[STAGE_PLANS.length - 1].seconds);
     expect(clearSeconds(first + 1)).toBeLessThan(clearSeconds(first));
     expect(clearSeconds(first + 100)).toBe(MIN_CLEAR_SECONDS);
+    // 적어 둔 시간이 아래 한도에 가려 쓰이지 않는 일이 없다.
+    for (const plan of STAGE_PLANS) expect(plan.seconds).toBeGreaterThanOrEqual(MIN_CLEAR_SECONDS);
     for (let stage = 1; stage <= first + 30; stage += 1) {
       expect(clearSeconds(stage)).toBeGreaterThanOrEqual(MIN_CLEAR_SECONDS);
       expect(clearSeconds(stage)).toBeLessThanOrEqual(START_SECONDS);
@@ -642,6 +730,10 @@ describe('한 판의 진행', () => {
     for (let turn = 0; turn < 80; turn += 1) run = play(run, lap);
     expect(run.board.pushes).toBeGreaterThan(MAX_HISTORY);
     expect(run.history).toHaveLength(MAX_HISTORY);
+    // 기억하는 것을 다 되돌려도 처음 모습이 아니므로, 처음부터 다시 할 수 있어야 한다.
+    while (canUndo(run)) run = undo(run);
+    expect(run.board.pushes).toBeGreaterThan(0);
+    expect(hasMoved(run)).toBe(true);
   });
 
   it('시간이 흐르고, 다 되면 끝난다', () => {

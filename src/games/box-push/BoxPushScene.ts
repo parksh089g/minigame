@@ -22,7 +22,9 @@ import {
   deadCells,
   elapse,
   finalScore,
+  frozenBoxes,
   hasMoved,
+  isLost,
   isOver,
   isSolved,
   isTarget,
@@ -168,6 +170,10 @@ export class BoxPushScene extends MiniGameScene {
   private hints: Phaser.GameObjects.Text[] = [];
   /** 더 갈 곳이 없는 상자가 있다는 알림이 떠 있는지 */
   private stuckShown = false;
+  /** 지금 판에서 끝까지 찾아본 모습마다, 깰 수 없는 판인지. 되돌려서 같은 모습으로 오면 다시 찾지 않는다. */
+  private lostSeen = new Map<string, boolean>();
+  /** 걸음이 도는 동안 시간이 다 됐다. 그 걸음이 끝나면 판을 깼는지 보고 끝낸다. */
+  private timeUp = false;
 
   private hud!: GameHud;
   /** 방, 상자, 캐릭터를 담는 층. 일시정지 중에 통째로 가린다. */
@@ -224,6 +230,7 @@ export class BoxPushScene extends MiniGameScene {
     if (!this.playing || this.stageLevel !== null) return;
     // 탭이 가려졌다 돌아와도 시간이 한꺼번에 흐르지 않게 한 프레임의 길이를 제한한다.
     const dt = Math.min(deltaMs, 100) / 1000;
+    if (this.timeUp) return;
     if (this.grace > 0) {
       this.grace -= dt;
       return;
@@ -234,7 +241,14 @@ export class BoxPushScene extends MiniGameScene {
       return;
     }
 
-    this.run = elapse(this.run, dt);
+    const run = elapse(this.run, dt);
+    if (isOver(run) && this.stepping) {
+      // 걸음이 도는 동안 시간이 다 됐다. 끝내기를 그 걸음이 끝날 때까지 미룬다:
+      // 마지막 상자를 미는 중이었으면 깬 판으로 치고, 아니면 그때 끝낸다(walk).
+      this.timeUp = true;
+      return;
+    }
+    this.run = run;
     this.hud.setTime(this.run.timeLeft, START_SECONDS);
     if (isOver(this.run)) {
       this.endRun();
@@ -266,6 +280,8 @@ export class BoxPushScene extends MiniGameScene {
     this.boxLooks = [];
     this.hints = [];
     this.stuckShown = false;
+    this.lostSeen = new Map();
+    this.timeUp = false;
   }
 
   private playerTexture(pose: 'idle' | 'cheer'): string {
@@ -368,6 +384,8 @@ export class BoxPushScene extends MiniGameScene {
     this.stepping = false;
     this.tapped = null;
     this.touch = null;
+    this.timeUp = false;
+    this.lostSeen = new Map();
     this.setStuck(false);
     this.tweens.killTweensOf([this.player, this.shade, ...this.boxViews]);
     this.boxLayer.removeAll(true);
@@ -414,19 +432,41 @@ export class BoxPushScene extends MiniGameScene {
     return centerOf(this.run.board.puzzle, this.layout, cell);
   }
 
-  /** 상자가 지금 어떤 모습이어야 하는지 */
-  private lookOf(board: Board, box: number): BoxLook {
-    const at = board.boxes[box];
-    if (isTarget(board.puzzle, at)) return 'placed';
-    return this.dead[at] ? 'stuck' : 'loose';
+  /** 더 갈 곳이 없는 상자들: 막힌 칸에 들어갔거나, 별 자리 밖에서 얼어붙어 다시는 밀 수 없다. */
+  private stuckOf(board: Board): Set<number> {
+    return new Set([...stuckBoxes(board, this.dead), ...frozenBoxes(board, this.dead)]);
   }
 
-  /** 상자의 모습이 달라졌으면 다시 그린다. */
-  private refreshBox(board: Board, box: number): void {
-    const look = this.lookOf(board, box);
-    if (this.boxLooks[box] === look) return;
-    this.boxLooks[box] = look;
-    drawBox(this.boxViews[box], look, this.layout.cell);
+  /** 상자마다 모습(놓임, 더 갈 곳 없음, 그 밖)이 달라졌으면 다시 그린다. */
+  private refreshLooks(board: Board, stuck: ReadonlySet<number>): void {
+    board.boxes.forEach((at, box) => {
+      const look: BoxLook = isTarget(board.puzzle, at) ? 'placed' : stuck.has(box) ? 'stuck' : 'loose';
+      if (this.boxLooks[box] === look) return;
+      this.boxLooks[box] = look;
+      drawBox(this.boxViews[box], look, this.layout.cell);
+    });
+  }
+
+  /**
+   * 지금 모습에서 판을 깰 수 없게 됐는지 보고 알린다. 더 갈 곳이 없는 상자는 회색으로 바꾼다.
+   * 그런 상자가 없어도, 상자끼리나 캐릭터의 길이 얽혀서 깰 수 없게 된 판은 한도 안에서 끝까지 찾아봐서 알린다.
+   */
+  private refreshStuck(board: Board): void {
+    const stuck = this.stuckOf(board);
+    this.refreshLooks(board, stuck);
+    this.setStuck(stuck.size > 0 || this.isLostBoard(board));
+  }
+
+  /** 끝까지 찾아봐서 깰 수 없는 판인지. 같은 모습은 한 번만 찾는다. */
+  private isLostBoard(board: Board): boolean {
+    if (isSolved(board)) return false;
+    const key = `${board.player}:${board.boxes.join(',')}`;
+    let lost = this.lostSeen.get(key);
+    if (lost === undefined) {
+      lost = isLost(board);
+      this.lostSeen.set(key, lost);
+    }
+    return lost;
   }
 
   /** 캐릭터와 상자를 모두 board의 자리에 바로 놓는다. */
@@ -437,8 +477,8 @@ export class BoxPushScene extends MiniGameScene {
     board.boxes.forEach((cell, box) => {
       const spot = this.spotOf(cell);
       this.boxViews[box].setPosition(spot.x, spot.y).setScale(1);
-      this.refreshBox(board, box);
     });
+    this.refreshLooks(board, this.stuckOf(board));
   }
 
   /** 판 아래의 놓은 상자와 민 횟수를 고쳐 적고, 두 버튼을 누를 수 있는지 맞춘다. */
@@ -502,20 +542,28 @@ export class BoxPushScene extends MiniGameScene {
   private onPause(): void {
     this.touch = null;
     this.queue = [];
+    // "준비!" 동안에도 판은 보인다. 그 사이에 다시 멈추면 본 만큼을 시계에서 뺀다:
+    // 멈췄다 돌아오기를 되풀이해서 시계를 세워 둔 채 판을 볼 수 없게 한다.
+    if (this.grace > 0 && this.playing && this.stageLevel === null) {
+      this.run = elapse(this.run, RESUME_GRACE_SECONDS - this.grace);
+      this.hud.setTime(this.run.timeLeft, START_SECONDS);
+      this.grace = 0;
+    }
     // 끝난 뒤 결과 화면이 뜰 때는 풀던 판을 그대로 보여 준다. 시간을 재지 않는 단계 모드에서도 가리지 않는다.
     if (this.playing && this.stageLevel === null) this.boardLayer.setVisible(false);
   }
 
   private onResume(): void {
     this.boardLayer.setVisible(true);
-    if (!this.playing || !this.started || this.stageLevel !== null) return;
+    // 위에서 뺀 것으로 시간이 다 됐으면 기다리지 않고 바로 끝낸다(update).
+    if (!this.playing || !this.started || this.stageLevel !== null || isOver(this.run)) return;
     this.grace = RESUME_GRACE_SECONDS;
     showBanner(this, this.boardCenter.y, '준비!', LOOK.text.ready, RESUME_GRACE_SECONDS * 1000, DEPTH.banner);
   }
 
-  /** 지금 조작을 받을 수 있는지: 판이 깔려 있고, 일시정지에서 막 돌아온 참이 아니다. */
+  /** 지금 조작을 받을 수 있는지: 판이 깔려 있고, 일시정지에서 막 돌아온 참이 아니고, 시간이 다 되지 않았다. */
   private get canAct(): boolean {
-    return this.playing && this.grace <= 0;
+    return this.playing && this.grace <= 0 && !this.timeUp;
   }
 
   private onPointerDown(pointer: Phaser.Input.Pointer): void {
@@ -622,13 +670,24 @@ export class BoxPushScene extends MiniGameScene {
     }
     this.run = run;
     this.stepping = true;
+    this.restartButton.setEnabled(hasMoved(run));
     const pushed = step.pushed >= 0;
     const duration = pushed ? PUSH_MS : next.routed ? ROUTE_MS : WALK_MS;
+    // 앞서 돌던 움직임(막혀서 부딪히기, 되돌리기의 미끄러짐)은 이 걸음보다 늦게 끝나면서 옛 칸에 도로 놓는다.
+    // 그래서 걸음을 떼기 전에 멈추고, 걸음을 떼는 칸에 놓는다.
+    const from = this.spotOf(before.player);
+    this.tweens.killTweensOf([this.player, this.shade]);
+    this.player.setPosition(from.x, from.y);
+    this.shade.setPosition(from.x, from.y);
     const to = this.spotOf(run.board.player);
     this.tweens.add({ targets: [this.player, this.shade], x: to.x, y: to.y, duration, ease: 'Sine.Out' });
     if (pushed) {
+      const view = this.boxViews[step.pushed];
+      const was = this.spotOf(before.boxes[step.pushed]);
+      this.tweens.killTweensOf(view);
+      view.setPosition(was.x, was.y).setScale(1);
       const spot = this.spotOf(run.board.boxes[step.pushed]);
-      this.tweens.add({ targets: this.boxViews[step.pushed], x: spot.x, y: spot.y, duration, ease: 'Sine.Out' });
+      this.tweens.add({ targets: view, x: spot.x, y: spot.y, duration, ease: 'Sine.Out' });
       sfx.stack();
       vibrate(8);
     } else if (!next.routed) {
@@ -638,6 +697,13 @@ export class BoxPushScene extends MiniGameScene {
       this.stepping = false;
       if (pushed) this.afterPush(before, step.pushed);
       if (!this.playing) return;
+      if (this.timeUp) {
+        // 걸음이 도는 동안 시간이 다 됐고, 이 걸음으로 판을 깨지 못했다.
+        this.run = elapse(this.run, this.run.timeLeft);
+        this.hud.setTime(this.run.timeLeft, START_SECONDS);
+        this.endRun();
+        return;
+      }
       const tapped = this.tapped;
       this.tapped = null;
       if (tapped !== null) this.tapCell(tapped);
@@ -664,7 +730,7 @@ export class BoxPushScene extends MiniGameScene {
     const { board } = this.run;
     const wasPlaced = isTarget(before.puzzle, before.boxes[box]);
     const nowPlaced = isTarget(board.puzzle, board.boxes[box]);
-    this.refreshBox(board, box);
+    this.refreshStuck(board);
     this.refreshStatus();
     if (nowPlaced && !wasPlaced) {
       const spot = this.spotOf(board.boxes[box]);
@@ -675,11 +741,7 @@ export class BoxPushScene extends MiniGameScene {
       sfx.hit(placedCount(board));
       vibrate(12);
     }
-    if (isSolved(board)) {
-      this.onSolved();
-      return;
-    }
-    this.setStuck(stuckBoxes(board, this.dead).length > 0);
+    if (isSolved(board)) this.onSolved();
   }
 
   /** 마지막으로 민 것을 되돌린다. */
@@ -711,10 +773,9 @@ export class BoxPushScene extends MiniGameScene {
       const spot = this.spotOf(cell);
       const view = this.boxViews[box].setScale(1);
       this.tweens.add({ targets: view, x: spot.x, y: spot.y, duration: REWIND_MS, ease: 'Sine.Out' });
-      this.refreshBox(board, box);
     });
     this.refreshStatus();
-    this.setStuck(stuckBoxes(board, this.dead).length > 0);
+    this.refreshStuck(board);
   }
 
   // ───────── 판 깨기 ─────────
