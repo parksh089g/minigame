@@ -1998,7 +1998,7 @@ export class CandySlotScene extends MiniGameScene {
       if (shop.refund > 0) remove.setPrice(shop.refund, REFUND_SIGN);
       back.fillStyle(THEME.shadow, 1);
       back.fillRect(box.x + 8, place.shop.rule, box.width - 16, 1);
-      const leadColor = { ready: LOOK.text.points, poor: LOOK.text.bad, done: LOOK.text.faint }[offer.state];
+      const leadColor = offer.tight ? LOOK.text.bad : { ready: LOOK.text.points, poor: LOOK.text.bad, done: LOOK.text.faint }[offer.state];
       const lead = small(place.shop.lead, offer.lead, leadColor);
       views.push(remove, lead);
       zones.push(remove.zone);

@@ -211,9 +211,9 @@ describe('효과를 적는 줄', () => {
     expect(effectLine('hammer', 0)).toBe('강화 값 0% → -2%');
     expect(effectLine('hammer', 3)).toBe('강화 값 -6% → -8%');
     expect(effectLine('hammer', RELIC_MAX)).toBe('강화 값 -20%');
-    expect(effectLine('jar', 0)).toBe('남은 금화의 0% → 0.5%');
-    expect(effectLine('jar', 2)).toBe('남은 금화의 1% → 1.5%');
-    expect(effectLine('jar', RELIC_MAX)).toBe('남은 금화의 5%');
+    expect(effectLine('jar', 0)).toBe('남은 금화의 0% → 0.2%');
+    expect(effectLine('jar', 2)).toBe('남은 금화의 0.4% → 0.6%');
+    expect(effectLine('jar', RELIC_MAX)).toBe('남은 금화의 2%');
   });
 
   it('적힌 값은 규칙의 수에서 나온다', () => {
@@ -235,20 +235,25 @@ describe('효과를 적는 줄', () => {
   it('적힌 값대로 판에서 듣는다', () => {
     const number = (text: string): number => Number(text.replace('%', ''));
     for (let level = 0; level <= RELIC_MAX; level += 1) {
-      // 낡은 저울: 큰 목표에서는 적힌 비율만큼 낮아진다(올림하므로 금화 한 개까지는 어긋난다).
+      // 낡은 저울: 큰 목표에서는 적힌 비율만큼 낮아진다(가까운 정수로 맞추므로 금화 한 개까지는 어긋난다).
       const scale = newRun(null, [], { scale: level });
       const target = targetOf(14);
-      expect(targetFor(scale, 14)).toBeGreaterThanOrEqual(target * (1 + number(effectValue('scale', level)) / 100));
-      expect(targetFor(scale, 14)).toBeLessThan(target * (1 + number(effectValue('scale', level)) / 100) + 1);
+      const lowered = target * (1 + number(effectValue('scale', level)) / 100);
+      expect(Math.abs(targetFor(scale, 14) - lowered)).toBeLessThan(1);
       // 금화 항아리: 남은 금화 1000개에서 적힌 비율만큼 받는다.
-      expect(interestFor(1000, newRun(null, [], { jar: level }))).toBe(number(effectValue('jar', level)) * 10);
-      // 상인의 도장과 대장장이 망치: 값이 100의 배수면 적힌 비율 그대로다.
+      expect(interestFor(1000, newRun(null, [], { jar: level }))).toBe(Math.round(number(effectValue('jar', level)) * 10));
+      // 대장장이 망치: 적힌 비율만큼 싸지고, 금화 한 개가 안 되는 나머지는 깎아 준다.
+      // 상인의 도장: 기본 몫은 내림하고, 유물로 느는 몫은 올림한다. 그래도 치른 값보다는 적다.
       for (const charm of CHARMS) {
         const base = upgradeCostOf(charm.id);
         const cut = upgradeCostOf(charm.id, newRun(null, [], { hammer: level }));
-        expect(cut).toBe(Math.max(1, Math.ceil((base * (100 + number(effectValue('hammer', level)))) / 100)));
+        expect(cut).toBe(Math.max(1, Math.floor((base * (100 + number(effectValue('hammer', level)))) / 100)));
         const back = refundOf(charm.id, newRun(null, [], { seal: level }));
-        expect(back).toBe(Math.floor((charm.price * number(effectValue('seal', level))) / 100));
+        const share = Math.round(REFUND_RATE * 100);
+        const bonus = number(effectValue('seal', level)) - share;
+        expect(back).toBe(
+          Math.min(charm.price - 1, Math.floor((charm.price * share) / 100) + Math.ceil((charm.price * bonus) / 100)),
+        );
       }
     }
   });

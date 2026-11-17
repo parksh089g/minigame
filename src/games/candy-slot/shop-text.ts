@@ -7,6 +7,7 @@ import {
   hitChance,
   isUpgraded,
   refundOf,
+  targetFor,
   upgradeBlock,
   upgradeCostOf,
   upgradedOf,
@@ -85,6 +86,8 @@ export const BUBBLE_TEXT = {
   lead: '강화하면',
   poor: '금화가 모자라요',
   done: '이미 강화했어요',
+  /** 강화할 수는 있지만, 하고 나면 가진 금화가 다음 라운드의 목표보다 적어질 때의 머리말 */
+  tight: '목표보다 적게 남아요',
 } as const;
 
 /** 설명 창의 강화 칸 */
@@ -99,6 +102,11 @@ export interface UpgradeOffer {
   cost: number | null;
   /** 확률 부적을 강화하면 한 줄이 맞을 확률이 어떻게 바뀌는지. 강화할 수 있는 확률 부적에만 있다. */
   chip: HitChip | null;
+  /**
+   * 강화하고 나면 가진 금화가 다음 라운드의 목표보다 적어지는지. 강화는 값이 커서, 있는 금화를 다 쓰면
+   * 다음 라운드를 넘기기 어려워진다. 막지는 않고 머리말로 알리기만 한다.
+   */
+  tight: boolean;
 }
 
 /** 가게에서 붙인 부적의 설명 창에 더 적는 것 */
@@ -119,19 +127,24 @@ export function bubbleShop(run: RunState, slot: number): BubbleShop | null {
   const id = run.charms[slot];
   const refund = refundOf(id, run);
   if (block === 'done') {
-    return { refund, upgrade: { state: 'done', lead: BUBBLE_TEXT.done, description: null, cost: null, chip: null } };
+    return { refund, upgrade: { state: 'done', lead: BUBBLE_TEXT.done, description: null, cost: null, chip: null, tight: false } };
   }
   const base = charmOf(id);
   const description = base?.upgrade.description ?? '';
   const cost = upgradeCostOf(id, run);
   if (block === 'coin') {
-    return { refund, upgrade: { state: 'poor', lead: BUBBLE_TEXT.poor, description, cost, chip: null } };
+    return { refund, upgrade: { state: 'poor', lead: BUBBLE_TEXT.poor, description, cost, chip: null, tight: false } };
+  }
+  // 가게가 열려 있는 동안 run.round는 방금 넘긴 라운드다. 다음에 낼 목표는 그다음 라운드의 것이다.
+  if (run.coin - cost < targetFor(run, run.round + 1)) {
+    // 알리는 글이 길어서 미리 보기 표는 놓지 않는다.
+    return { refund, upgrade: { state: 'ready', lead: BUBBLE_TEXT.tight, description, cost, chip: null, tight: true } };
   }
   const chip =
     base?.kind === 'odds'
       ? hitChip(hitChance(run.charms), hitChance(run.charms.map((charm, index) => (index === slot ? upgradedOf(charm) : charm))))
       : null;
-  return { refund, upgrade: { state: 'ready', lead: BUBBLE_TEXT.lead, description, cost, chip } };
+  return { refund, upgrade: { state: 'ready', lead: BUBBLE_TEXT.lead, description, cost, chip, tight: false } };
 }
 
 /** 강화한 부적인지. 설명 창의 이름 옆에 별을 놓을 때 쓴다. */

@@ -8,6 +8,7 @@ import {
   refundOf,
   REROLL_COST,
   upgrade,
+  targetFor,
   upgradeCostOf,
   upgradedOf,
   type Box,
@@ -111,13 +112,13 @@ describe('돌리기 버튼의 글', () => {
 describe('붙인 부적의 설명 창', () => {
   it('가게가 아니거나 빈자리면 더 적을 것이 없다', () => {
     expect(bubbleShop({ ...newRun(), charms: ['wide'] }, 0)).toBeNull();
-    expect(bubbleShop(shopping(99, ['wide']), 1)).toBeNull();
+    expect(bubbleShop(shopping(999, ['wide']), 1)).toBeNull();
     expect(bubbleKindOf(null)).toBe('plain');
   });
 
   it('강화할 수 있으면 강화하면 바뀌는 설명과 값을, 떼면 돌려받는 금화와 함께 낸다', () => {
     for (const charm of CHARMS) {
-      const shop = bubbleShop(shopping(99, [charm.id]), 0);
+      const shop = bubbleShop(shopping(999, [charm.id]), 0);
       expect(shop?.refund, charm.id).toBe(refundOf(charm.id));
       expect(shop?.upgrade.state, charm.id).toBe('ready');
       expect(shop?.upgrade.lead).toBe(BUBBLE_TEXT.lead);
@@ -128,7 +129,7 @@ describe('붙인 부적의 설명 창', () => {
       expect(bubbleKindOf(shop ?? null)).toBe('upgrade');
     }
     const stacked = ['more-cherry', 'more-clover'];
-    const chip = bubbleShop(shopping(99, stacked), 1)?.upgrade.chip;
+    const chip = bubbleShop(shopping(999, stacked), 1)?.upgrade.chip;
     expect(chip).toEqual(hitChip(hitChance(stacked), hitChance(['more-cherry', 'more-clover+'])));
   });
 
@@ -141,15 +142,35 @@ describe('붙인 부적의 설명 창', () => {
       description: CHARMS.find((charm) => charm.id === 'twins')?.upgrade.description,
       cost,
       chip: null,
+      tight: false,
     });
     expect(bubbleShop(shopping(cost, ['twins']), 0)?.upgrade.state).toBe('ready');
   });
 
+  it('강화하고 나면 다음 목표보다 적게 남을 때는 막지 않고 알리기만 한다', () => {
+    const cost = upgradeCostOf('more-cherry');
+    const next = targetFor(shopping(0, []), 2);
+    // 목표만큼은 남는다: 여느 머리말이고, 확률 부적이라 미리 보기 표가 놓인다.
+    const roomy = bubbleShop(shopping(cost + next, ['more-cherry']), 0)?.upgrade;
+    expect(roomy).toMatchObject({ state: 'ready', lead: BUBBLE_TEXT.lead, tight: false });
+    expect(roomy?.chip).not.toBeNull();
+    // 하나라도 모자라게 남는다: 강화할 수는 있지만 머리말이 알리는 글로 바뀐다.
+    const tight = bubbleShop(shopping(cost + next - 1, ['more-cherry']), 0)?.upgrade;
+    expect(tight).toMatchObject({ state: 'ready', lead: '목표보다 적게 남아요', cost, chip: null, tight: true });
+    // 낡은 저울로 목표가 낮아진 판에서는 낮아진 목표로 따진다.
+    const relics = { scale: 10 };
+    const late = { ...shopping(0, ['more-cherry']), round: 9, relics };
+    const lowered = targetFor(late, 10);
+    expect(lowered).toBeLessThan(targetFor(shopping(0, []), 10));
+    expect(bubbleShop({ ...late, coin: cost + lowered }, 0)?.upgrade.tight).toBe(false);
+    expect(bubbleShop({ ...late, coin: cost + lowered - 1 }, 0)?.upgrade.tight).toBe(true);
+  });
+
   it('이미 강화한 부적은 그렇다고 적고, 돌려받는 금화는 강화하는 값까지 친 것이다', () => {
-    const before = shopping(99, ['twins']);
+    const before = shopping(999, ['twins']);
     const after = upgrade(before, 0);
     const shop = bubbleShop(after, 0);
-    expect(shop?.upgrade).toEqual({ state: 'done', lead: '이미 강화했어요', description: null, cost: null, chip: null });
+    expect(shop?.upgrade).toEqual({ state: 'done', lead: '이미 강화했어요', description: null, cost: null, chip: null, tight: false });
     expect(shop?.refund).toBe(refundOf('twins+'));
     expect(shop?.refund).toBeGreaterThan(refundOf('twins'));
     expect(bubbleKindOf(shop ?? null)).toBe('done');
@@ -166,7 +187,7 @@ describe('유물이 있는 판의 설명 창', () => {
     let cheaper = 0;
     let richer = 0;
     for (const charm of CHARMS) {
-      const run: RunState = { ...shopping(99, [charm.id]), relics };
+      const run: RunState = { ...shopping(999, [charm.id]), relics };
       const shop = bubbleShop(run, 0);
       const cost = shop?.upgrade.cost ?? -1;
       expect(cost, charm.id).toBe(upgradeCostOf(charm.id, run));
