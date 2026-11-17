@@ -507,6 +507,7 @@ export class ParkingOutScene extends MiniGameScene {
   }
 
   private hideCars(): void {
+    this.chargeGrace();
     // 단계 모드는 시간이 흐르지 않으므로 멈춰 놓고 궁리해도 된다.
     if (this.stageLevel !== null) return;
     this.carLayer.setVisible(false);
@@ -515,9 +516,23 @@ export class ParkingOutScene extends MiniGameScene {
   private onResume(): void {
     this.carLayer.setVisible(true);
     // 아직 시간이 가지 않고 있었으면 숨 고를 시간도 필요 없다.
-    if (!this.playing || !this.gate.open || this.stageLevel !== null) return;
+    // 시간이 이미 다 되었으면 여유 없이 다음 프레임에 끝낸다.
+    if (!this.playing || !this.gate.open || this.stageLevel !== null || isOver(this.run)) return;
     this.grace = RESUME_GRACE_SECONDS;
     showBanner(this, this.lotCard.y, '준비!', LOOK.text.ready, RESUME_GRACE_SECONDS * 1000, DEPTH.banner);
+  }
+
+  /**
+   * "준비!"가 끝나기 전에 다시 멈추면, 그동안 판을 본 시간을 시계에서 뺀다.
+   * 그러지 않으면 멈추기를 되풀이해 시계를 세워 둔 채 판을 볼 수 있다.
+   */
+  private chargeGrace(): void {
+    if (this.grace <= 0) return;
+    const seen = RESUME_GRACE_SECONDS - this.grace;
+    this.grace = 0;
+    if (!this.playing || this.stageLevel !== null) return;
+    this.run = elapse(this.run, seen);
+    this.drawTime();
   }
 
   /** 첫 주차장 바로 위에 도움말 두 줄을 잠깐 띄운다. */
