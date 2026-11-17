@@ -393,3 +393,45 @@ describe('오늘의 랭킹', () => {
     });
   });
 });
+
+describe('점수 세는 법이 바뀐 게임의 랭킹', () => {
+  const GARDEN = 'garden-guard';
+  const WEEK = '2026-11-16';
+
+  /** 규칙이 바뀌기 전의 서버가 남긴 저장소: 옛 점수가 올라 있고, 어느 규칙인지는 적혀 있지 않다. */
+  function oldStorage(): SqlRunner {
+    const sql = memorySql();
+    const db = new BoardDb(sql);
+    db.submit(device(1), '하나', { [GARDEN]: 5000, [OTHER]: 40 }, 1000, { week: WEEK, scores: { [GARDEN]: 5000, [OTHER]: 40 } });
+    sql.exec('DELETE FROM rules');
+    return sql;
+  }
+
+  it('규칙이 바뀐 뒤 처음 열 때 그 게임의 랭킹만 비운다. 다른 게임의 랭킹은 그대로다', () => {
+    const sql = oldStorage();
+    const db = new BoardDb(sql);
+    expect(db.board(GARDEN, device(1))).toEqual({ top: [], me: null });
+    expect(db.board(GARDEN, device(1), WEEK)).toEqual({ top: [], me: null, week: WEEK });
+    expect(db.board(OTHER, device(1)).me).toEqual({ rank: 1, score: 40, name: '하나' });
+    expect(db.board(OTHER, device(1), WEEK).me).toEqual({ rank: 1, score: 40, name: '하나' });
+    expect(db.standings(device(1))).toEqual({ [OTHER]: { rank: 1, score: 40 } });
+  });
+
+  it('한 번 비운 뒤에는 다시 열어도 새 규칙으로 올린 점수가 남아 있다', () => {
+    const sql = oldStorage();
+    const db = new BoardDb(sql);
+    // 옛 점수(5000)보다 낮은 새 점수도 이제는 그대로 올라간다.
+    expect(db.submit(device(1), '하나', { [GARDEN]: 900 }, 2000)).toEqual({
+      bests: { [GARDEN]: 900 },
+      ranks: { [GARDEN]: 1 },
+    });
+    const again = new BoardDb(sql);
+    expect(again.board(GARDEN, device(1)).me).toEqual({ rank: 1, score: 900, name: '하나' });
+  });
+
+  it('처음 만든 저장소에서는 지울 것이 없고, 올린 점수가 남는다', () => {
+    const sql = memorySql();
+    new BoardDb(sql).submit(device(1), '하나', { [GARDEN]: 700 }, 1000);
+    expect(new BoardDb(sql).board(GARDEN, null).top).toEqual([{ rank: 1, name: '하나', score: 700, mine: false }]);
+  });
+});

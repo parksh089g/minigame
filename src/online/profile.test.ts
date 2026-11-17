@@ -11,6 +11,7 @@ import {
   weekBestOf,
   withDayScore,
   withName,
+  withoutGame,
   withoutName,
   withSent,
   withWeekScore,
@@ -417,5 +418,57 @@ describe('오늘의 판에서 낸 점수', () => {
     expect(normalizeOnline({ day }).day).toEqual({ key: DAY, bests: { [GAME]: 700 }, sent: {} });
     // 오늘의 랭킹이 생기기 전의 세이브에는 이 값이 없다.
     expect(normalizeOnline({ ...joined() }).day).toBeNull();
+  });
+});
+
+describe('점수 세는 법이 바뀐 게임', () => {
+  const GARDEN = 'garden-guard';
+
+  it('그 게임의 점수를 올릴 때는 어느 규칙으로 낸 점수인지를 같이 보낸다', () => {
+    const request = pendingSubmit(joined(), { [GARDEN]: { best: 900 }, 'stack-tower': { best: 40 } });
+    expect(request).toEqual({
+      device: ID,
+      name: '등불지기',
+      scores: { [GARDEN]: 900, 'stack-tower': 40 },
+      rules: { [GARDEN]: 2 },
+    });
+    // 이번 주의 점수에만 들어 있어도 붙인다.
+    const week = { key: WEEK, bests: { [GARDEN]: 300 }, sent: {} };
+    const weekly = pendingSubmit(joined({ sent: { [GARDEN]: 900 }, week }), { [GARDEN]: { best: 900 } }, WEEK);
+    expect(weekly).toEqual({
+      device: ID,
+      name: '등불지기',
+      scores: {},
+      weekly: { week: WEEK, scores: { [GARDEN]: 300 } },
+      rules: { [GARDEN]: 2 },
+    });
+  });
+
+  it('다른 게임의 점수만 올릴 때는 아무것도 붙이지 않는다', () => {
+    const request = pendingSubmit(joined(), { 'stack-tower': { best: 40 } });
+    expect(request).toEqual({ device: ID, name: '등불지기', scores: { 'stack-tower': 40 } });
+  });
+
+  it('규칙이 바뀐 게임에서 올렸다는 표시와 이번 주, 오늘 낸 점수를 지운다. 다른 게임의 것은 그대로다', () => {
+    const state = joined({
+      sent: { [GARDEN]: 5000, 'stack-tower': 40 },
+      week: { key: WEEK, bests: { [GARDEN]: 5000, 'stack-tower': 30 }, sent: { [GARDEN]: 5000 } },
+      day: { key: 20_000, bests: { 'lantern-keeper': 700 }, sent: {} },
+    });
+    const next = withoutGame(state, GARDEN);
+    expect(next.sent).toEqual({ 'stack-tower': 40 });
+    expect(next.week).toEqual({ key: WEEK, bests: { 'stack-tower': 30 }, sent: {} });
+    expect(next.day).toEqual(state.day);
+    expect(next.name).toBe('등불지기');
+    // 옛 점수를 지운 뒤 새 규칙으로 낸 점수는 서버에 올라가 있던 옛 점수보다 낮아도 올라간다.
+    expect(pendingSubmit(next, { [GARDEN]: { best: 900 } })?.scores).toEqual({ [GARDEN]: 900 });
+    expect(pendingSubmit(state, { [GARDEN]: { best: 900 } })).toBeNull();
+  });
+
+  it('지울 것이 없으면 받은 것을 그대로 돌려준다', () => {
+    const state = joined({ sent: { 'stack-tower': 40 }, week: { key: WEEK, bests: { 'stack-tower': 30 }, sent: {} } });
+    expect(withoutGame(state, GARDEN)).toBe(state);
+    const empty = createOnline();
+    expect(withoutGame(empty, GARDEN)).toBe(empty);
   });
 });

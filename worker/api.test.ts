@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
-import { MAX_BUNDLE_CHARS, rankDayOf, TRANSFER_TTL_MS } from '../src/online/protocol';
+import { MAX_BUNDLE_CHARS, rankDayOf, rankWeekOf, TRANSFER_TTL_MS } from '../src/online/protocol';
 import { handleApi } from './api';
 import type { SqlRunner, SqlValue } from './board-db';
 import { LIMITS } from './limiter';
@@ -597,5 +597,56 @@ describe('오늘의 랭킹 요청', () => {
       expect((await call('GET', '/api/daily/lantern-keeper')).status).toBe(200);
     }
     expect((await call('GET', '/api/daily/lantern-keeper')).status).toBe(429);
+  });
+});
+
+describe('점수 세는 법이 바뀐 게임의 점수', () => {
+  /** server()의 시계가 가리키는 주 */
+  const NOW_WEEK = rankWeekOf(1_800_000_000_000);
+
+  it('지금 규칙으로 냈다고 밝힌 점수만 받는다. 업데이트하지 않은 앱이 보낸 옛 점수는 그 게임 것만 흘려보낸다', async () => {
+    const { call } = server();
+    // 옛 앱: 텃밭 지키기의 점수를 규칙 번호 없이 보낸다. 요청은 받아들이고 다른 게임의 점수는 올린다.
+    const old = await call('POST', '/api/rank', {
+      device: device(1),
+      name: '옛앱',
+      scores: { 'garden-guard': 5000, 'stack-tower': 40 },
+      weekly: { week: NOW_WEEK, scores: { 'garden-guard': 5000, 'stack-tower': 40 } },
+    });
+    expect(old.status).toBe(200);
+    expect(old.body).toEqual({ bests: { 'stack-tower': 40 }, ranks: { 'stack-tower': 1 } });
+    expect((await call('GET', '/api/rank/garden-guard')).body.top).toEqual([]);
+    expect((await call('GET', '/api/rank/garden-guard?span=week')).body.top).toEqual([]);
+    expect((await call('GET', '/api/rank/stack-tower?span=week')).body.top).toHaveLength(1);
+
+    // 새 앱: 규칙 번호를 같이 보낸다.
+    const fresh = await call('POST', '/api/rank', {
+      device: device(2),
+      name: '새앱',
+      scores: { 'garden-guard': 900 },
+      weekly: { week: NOW_WEEK, scores: { 'garden-guard': 900 } },
+      rules: { 'garden-guard': 2 },
+    });
+    expect(fresh.status).toBe(200);
+    expect(fresh.body).toEqual({ bests: { 'garden-guard': 900 }, ranks: { 'garden-guard': 1 } });
+    expect((await call('GET', '/api/rank/garden-guard')).body.top).toEqual([
+      { rank: 1, name: '새앱', score: 900, mine: false },
+    ]);
+    expect((await call('GET', '/api/rank/garden-guard?span=week')).body.top).toHaveLength(1);
+  });
+
+  it('번호가 다르거나 모양이 이상해도 요청은 받아들이고 그 게임의 점수만 받지 않는다', async () => {
+    const { call } = server();
+    for (const rules of [{ 'garden-guard': 1 }, { 'garden-guard': '2' }, 'x', 7, null, ['garden-guard']]) {
+      const posted = await call('POST', '/api/rank', {
+        device: device(3),
+        name: '이름',
+        scores: { 'garden-guard': 5000 },
+        rules,
+      });
+      expect(posted.status).toBe(200);
+      expect(posted.body).toEqual({ bests: {}, ranks: {} });
+    }
+    expect((await call('GET', '/api/rank/garden-guard')).body.top).toEqual([]);
   });
 });
