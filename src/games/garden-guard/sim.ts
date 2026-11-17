@@ -211,9 +211,14 @@ export function createRun(config: RunConfig): { state: RunState; events: SimEven
   return { state, events };
 }
 
-/** 지금까지의 점수 */
+/**
+ * 지금까지의 점수. 날을 지키고 쉬는 동안(강화를 고르는 동안도)에는 그날의 몫이 이미 100점으로 들어가 있으므로,
+ * 그날 쫓아낸 비율(100%)을 또 더하지 않는다. 그때 "기록하고 끝내기"로 끝내도 다음 날이 시작된 뒤에 끝낸 것과 같은 점수다.
+ */
 export function runScore(state: RunState): number {
-  return scoreFor(state.lastCleared, state.dayKilled, state.dayTotal);
+  return state.phase === 'rest'
+    ? scoreFor(state.lastCleared, 0, 0)
+    : scoreFor(state.lastCleared, state.dayKilled, state.dayTotal);
 }
 
 /** 물벼락을 쓸 수 있는지 */

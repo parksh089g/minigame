@@ -311,6 +311,8 @@ export interface UpgradeDef {
   /** 첫 단계의 값과, 한 단계마다 곱해지는 배율 */
   cost: number;
   growth: number;
+  /** 이 강화가 있어야 쓸모가 있다. 그것이 없으면 살 수 없다(해바라기 없이는 거름이 아무 일도 하지 않는다). */
+  needs?: UpgradeId;
 }
 
 export const UPGRADES: Readonly<Record<UpgradeId, UpgradeDef>> = {
@@ -324,7 +326,7 @@ export const UPGRADES: Readonly<Record<UpgradeId, UpgradeDef>> = {
   thorn: { name: '가시 울타리', blurb: '울타리를 갉는 벌레가 가시에 찔려요', maxLevel: 10, cost: 20, growth: 1.6 },
   harvest: { name: '풍년', blurb: '씨앗을 더 많이 받아요', maxLevel: 10, cost: 30, growth: 1.7 },
   helper: { name: '해바라기', blurb: '해바라기가 옆에서 알아서 씨를 쏴요', maxLevel: 2, cost: 150, growth: 10 },
-  compost: { name: '해바라기 거름', blurb: '해바라기가 쏘는 씨가 세져요', maxLevel: 6, cost: 80, growth: 2 },
+  compost: { name: '해바라기 거름', blurb: '해바라기가 쏘는 씨가 세져요', maxLevel: 6, cost: 80, growth: 2, needs: 'helper' },
   pierce: { name: '뚫는 물줄기', blurb: '물방울이 벌레를 뚫고 뒤의 벌레도 맞혀요', maxLevel: 3, cost: 300, growth: 6 },
   fork: { name: '갈래 물총', blurb: '물방울을 여러 갈래로 한꺼번에 쏴요', maxLevel: 3, cost: 500, growth: 6 },
   storm: { name: '물벼락', blurb: '버튼을 누르면 판의 벌레를 모두 적셔요', maxLevel: 5, cost: 100, growth: 2.2 },
