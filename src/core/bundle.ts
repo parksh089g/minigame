@@ -75,7 +75,7 @@ export async function exportBundleText(maxChars = Infinity, pretty = false): Pro
   return null;
 }
 
-/** 따로 저장하는 덩어리(등불지기, 새싹 컴퍼니, 텃밭 지키기)를 모두 처음 상태로 돌린다. 설정의 "기록 초기화"가 허브 세이브와 함께 지운다. */
+/** 따로 저장하는 덩어리(등불지기, 새싹 컴퍼니, 텃밭 지키기, 행운 슬롯의 오늘의 판)를 모두 처음 상태로 돌린다. 설정의 "기록 초기화"가 허브 세이브와 함께 지운다. */
 export async function resetParts(): Promise<void> {
   for (const part of parts.values()) await part.write(null);
 }

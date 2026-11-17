@@ -74,6 +74,8 @@ export const LOOK = {
   guide: 0xb5810f,
   /** 맞은 칸의 바닥에 잠깐 깔리는 빛 */
   winGlow: THEME.butter,
+  /** 잠근 열: 열을 두르는 금테와 그 바깥 선, 자물쇠의 색, 잠글 수 없을 때의 흐린 자물쇠 */
+  hold: { frame: 0xffc21a, edge: 0x8a5a14, lock: 0x7a4a08, off: 0xc9b6ad },
   /** 부적의 갈래마다의 테두리 */
   charm: {
     odds: { edge: THEME.mintDeep, face: THEME.mintSoft },
@@ -83,6 +85,8 @@ export const LOOK = {
   } satisfies Record<CharmKind, { edge: number; face: number }>,
   /** 부적이 붙지 않은 빈자리 */
   emptySlot: { edge: 0x12573b, face: 0x186848 },
+  /** 도감에서 아직 찾지 못한 부적의 칸 */
+  unknownCharm: { edge: THEME.shadow, face: THEME.dim },
   /** 부적 그림 위의 표시: 더하기, 빼기 */
   plus: THEME.good,
   minus: THEME.bad,
@@ -622,6 +626,21 @@ export function emptySlotTexture(scene: Phaser.Scene): string {
   });
 }
 
+/**
+ * 도감에서 아직 찾지 못한 부적의 칸. 무슨 부적인지 짐작할 수 없게 갈래의 색 없이 흐린 칸만 그린다.
+ * 물음표는 씬이 글자로 얹는다.
+ */
+export function unknownCharmTexture(scene: Phaser.Scene): string {
+  const box = { width: CHARM_BOX, height: CHARM_BOX };
+  return bakeShape(scene, 'candy-slot-charm-unknown', box, (g) => {
+    const half = CHARM_BOX / 2;
+    g.fillStyle(LOOK.unknownCharm.edge, 1);
+    g.fillRoundedRect(-half, -half, CHARM_BOX, CHARM_BOX, 8);
+    g.fillStyle(LOOK.unknownCharm.face, 1);
+    g.fillRoundedRect(-half + 2, -half + 2, CHARM_BOX - 4, CHARM_BOX - 4, 6);
+  });
+}
+
 // ───────── 기계 ─────────
 
 /**
@@ -658,9 +677,18 @@ const BULBS_PER_SIDE = 9;
 
 /**
  * 몸통의 테두리를 따라 박힌 전구를 그린다. 하나 걸러 하나씩 켜지고, phase가 바뀌면 켜진 것과 꺼진 것이 바뀐다.
+ * chase면 셋에 하나만 꺼지고, phase가 오를 때마다 꺼진 자리가 시계 방향으로 한 칸씩 돈다(크게 맞았을 때).
  * 자리는 drawMachine과 같이 준다.
  */
-export function drawBulbs(g: Graphics, x: number, y: number, cell: number, frame: number, phase: number): void {
+export function drawBulbs(
+  g: Graphics,
+  x: number,
+  y: number,
+  cell: number,
+  frame: number,
+  phase: number,
+  chase = false,
+): void {
   const size = cell * SIZE + frame * 2;
   const look = LOOK.machine;
   const inset = (frame - 2) / 2;
@@ -670,7 +698,7 @@ export function drawBulbs(g: Graphics, x: number, y: number, cell: number, frame
   const step = (size - from * 2) / (BULBS_PER_SIDE - 1);
   let count = 0;
   const bulb = (bx: number, by: number): void => {
-    const lit = (count + phase) % 2 === 0;
+    const lit = chase ? (count + 2 * phase) % 3 !== 0 : (count + phase) % 2 === 0;
     count += 1;
     g.fillStyle(lit ? look.bulbOn : look.bulbOff, 1);
     g.fillCircle(bx, by, lit ? radius : radius - 0.3);
@@ -679,6 +707,51 @@ export function drawBulbs(g: Graphics, x: number, y: number, cell: number, frame
   for (let index = 0; index < BULBS_PER_SIDE; index += 1) bulb(x + size - inset, y + from + step * index);
   for (let index = BULBS_PER_SIDE - 1; index >= 0; index -= 1) bulb(x + from + step * index, y + size - inset);
   for (let index = BULBS_PER_SIDE - 1; index >= 0; index -= 1) bulb(x + inset, y + from + step * index);
+}
+
+// ───────── 열 잠그기 ─────────
+
+/** 자물쇠 하나를 (x, y)를 한가운데로, s를 반쯤 되는 크기로 그린다. hole은 열쇠 구멍의 색이다. */
+export function drawLock(g: Graphics, x: number, y: number, s: number, color: number, hole: number): void {
+  // 고리: 위가 둥근 ㄷ 모양
+  const ring = s * 0.42;
+  const neck = y - s * 0.3;
+  g.lineStyle(Math.max(1.2, s * 0.3), color, 1);
+  g.beginPath();
+  g.moveTo(x - ring, y);
+  g.lineTo(x - ring, neck);
+  g.arc(x, neck, ring, Math.PI, Math.PI * 2);
+  g.lineTo(x + ring, y);
+  g.strokePath();
+  g.fillStyle(color, 1);
+  g.fillRoundedRect(x - s * 0.72, y - s * 0.08, s * 1.44, s * 1.02, s * 0.24);
+  g.fillStyle(hole, 1);
+  g.fillCircle(x, y + s * 0.4, Math.max(0.7, s * 0.17));
+}
+
+/** 잠근 열의 위쪽 가장자리에 걸치는 자물쇠 표시의 반지름 */
+export const HOLD_BADGE = 7;
+
+/**
+ * 잠근 열을 두르는 금테와, 그 위쪽 가장자리에 걸친 자물쇠를 그린다.
+ * (x, y)는 열의 왼쪽 위, cell은 칸 한 변의 길이다.
+ */
+export function drawHoldFrame(g: Graphics, x: number, y: number, cell: number): void {
+  const look = LOOK.hold;
+  const height = cell * SIZE;
+  for (const [width, color] of [
+    [5, look.edge],
+    [3, look.frame],
+  ] as const) {
+    g.lineStyle(width, color, 1);
+    g.strokeRoundedRect(x + 1.5, y + 1.5, cell - 3, height - 3, 9);
+  }
+  const badge = { x: x + cell / 2, y: y + 1 };
+  g.fillStyle(look.edge, 1);
+  g.fillCircle(badge.x, badge.y, HOLD_BADGE + 1);
+  g.fillStyle(look.frame, 1);
+  g.fillCircle(badge.x, badge.y, HOLD_BADGE);
+  drawLock(g, badge.x, badge.y - 0.5, HOLD_BADGE * 0.62, look.lock, look.frame);
 }
 
 // ───────── 테이블 ─────────
