@@ -58,6 +58,89 @@ describe('부적 강화', () => {
     expect(charmOf('twins++')).toBeUndefined();
   });
 
+  it('강화한 효과는 같은 그림과 같은 줄에 듣고, 원래 효과보다 세다', () => {
+    for (const charm of CHARMS) {
+      const plain = charm.effect;
+      const strong = charm.upgrade.effect;
+      // [가리키는 것(그림이나 줄의 갈래, 줄의 수), 세기]로 견준다.
+      const pairs: Array<[readonly [unknown, number] | undefined, readonly [unknown, number] | undefined]> = [
+        [plain.weight, strong.weight],
+        [plain.value, strong.value],
+        [plain.lineTimes, strong.lineTimes],
+        [plain.combo, strong.combo],
+        [plain.comboExact, strong.comboExact],
+      ];
+      for (const [before, after] of pairs) {
+        if (!before || !after) continue;
+        expect(after[0], charm.id).toBe(before[0]);
+        expect(Math.sign(after[1]), charm.id).toBe(Math.sign(before[1]));
+        expect(Math.abs(after[1]), charm.id).toBeGreaterThan(Math.abs(before[1]));
+      }
+      const amounts: Array<[number | undefined, number | undefined]> = [
+        [plain.spins, strong.spins],
+        [plain.consolation, strong.consolation],
+        [plain.lastTimes, strong.lastTimes],
+        [plain.reboundTimes, strong.reboundTimes],
+        [plain.centerWild, strong.centerWild],
+        [plain.savingsCap, strong.savingsCap],
+      ];
+      for (const [before, after] of amounts) {
+        if (before === undefined || after === undefined) continue;
+        expect(after, charm.id).toBeGreaterThan(before);
+      }
+    }
+  });
+
+  it('설명에 적힌 수는 효과의 수와 같다(강화한 설명도)', () => {
+    const counts: Record<number, string> = { 2: '두', 3: '세', 4: '네', 5: '다섯', 6: '여섯' };
+    const times = (value: number): string => `${counts[value]} 배`;
+    const lineWord = { row: '가로줄', col: '세로줄', diag: '대각선' } as const;
+    for (const charm of CHARMS) {
+      for (const [description, effect] of [
+        [charm.description, charm.effect],
+        [charm.upgrade.description, charm.upgrade.effect],
+      ] as const) {
+        const label = `${charm.id}: ${description}`;
+        if (effect.value) expect(description, label).toContain(`+${effect.value[1]}`);
+        // 곱하는 값은 모두 정수다. 금화가 반 개가 되는 일이 없다.
+        for (const value of [effect.lineTimes?.[1], effect.combo?.[1], effect.comboExact?.[1], effect.lastTimes, effect.reboundTimes]) {
+          if (value !== undefined) expect(Number.isInteger(value), label).toBe(true);
+        }
+        if (effect.lineTimes) {
+          expect(description, label).toContain(lineWord[effect.lineTimes[0]]);
+          expect(description.endsWith(times(effect.lineTimes[1])), label).toBe(true);
+        }
+        if (effect.combo) {
+          expect(description, label).toContain(`${counts[effect.combo[0]]} 줄 이상`);
+          expect(description.endsWith(times(effect.combo[1])), label).toBe(true);
+        }
+        if (effect.comboExact) {
+          expect(description, label).toContain(`딱 ${counts[effect.comboExact[0]]} 줄`);
+          expect(description.endsWith(times(effect.comboExact[1])), label).toBe(true);
+        }
+        if (effect.lastTimes !== undefined) expect(description.endsWith(times(effect.lastTimes)), label).toBe(true);
+        if (effect.reboundTimes !== undefined) expect(description.endsWith(times(effect.reboundTimes)), label).toBe(true);
+        if (effect.spins !== undefined) expect(description, label).toContain(`${counts[effect.spins]} 번`);
+        if (effect.consolation !== undefined) expect(description, label).toContain(`${effect.consolation}개`);
+        if (effect.savingsCap !== undefined) expect(description, label).toContain(`${effect.savingsCap}까지`);
+        if (effect.centerWild !== undefined) {
+          // "셋에 한 번"은 셋에 하나쯤(0.3~0.4), "셋에 두 번"은 셋에 둘쯤(0.6~0.7)이다.
+          const said = (
+            [
+              ['둘에 한 번', 1 / 2],
+              ['셋에 한 번', 1 / 3],
+              ['셋에 두 번', 2 / 3],
+              ['넷에 한 번', 1 / 4],
+              ['넷에 세 번', 3 / 4],
+            ] as const
+          ).find(([words]) => description.includes(words));
+          expect(said, label).toBeDefined();
+          expect(Math.abs(said![1] - effect.centerWild), label).toBeLessThan(0.05);
+        }
+      }
+    }
+  });
+
   it('강화하면 확률, 상금, 스핀 수가 강화한 효과대로 바뀐다', () => {
     const cherry = 0;
     expect(oddsOf(['more-cherry+'])[cherry]).toBeGreaterThan(oddsOf(['more-cherry'])[cherry]);

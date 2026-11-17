@@ -17,6 +17,7 @@ import {
   discard,
   drawOffers,
   drawSymbol,
+  hitChance,
   HOLDS_PER_ROUND,
   JACKPOT_TIMES,
   layoutFor,
@@ -31,8 +32,12 @@ import {
   nextRound,
   oddsOf,
   OFFERS,
+  PERK_IDS,
   randomOf,
   refundOf,
+  RELIC_IDS,
+  RELIC_MAX,
+  type RelicLevels,
   reroll,
   REROLL_COST,
   REROLL_STEP,
@@ -52,7 +57,11 @@ import {
   spinsOf,
   START_COIN,
   SYMBOLS,
+  targetFor,
   targetOf,
+  upgrade,
+  upgradeCostOf,
+  upgradedOf,
   valuesOf,
   weightsOf,
   WILD,
@@ -187,6 +196,37 @@ describe('확률', () => {
     expect(after.reduce((sum, chance) => sum + chance, 0)).toBeCloseTo(1, 10);
   });
 
+  it('듬뿍의 설명은 다른 그림이 줄어든다고 알린다: 서로 다른 듬뿍을 겹치면 줄이 덜 맞기도 한다', () => {
+    const more = CHARMS.filter((charm) => (charm.effect.weight?.[1] ?? 0) > 0);
+    expect(more).toHaveLength(SYMBOLS.length);
+    for (const charm of more) {
+      const symbol = charm.effect.weight![0];
+      expect(charm.description).toBe(`${SYMBOLS[symbol].name} 늘고 다른 그림 줄어요`);
+      expect(charm.upgrade.description).toBe(`${SYMBOLS[symbol].name} 더 늘고 나머지 줄어요`);
+      // 설명대로다: 강화하든 아니든 그 그림만 늘고 다른 그림은 모두 준다.
+      for (const id of [charm.id, upgradedOf(charm.id)]) {
+        const before = oddsOf([]);
+        const after = oddsOf([id]);
+        SYMBOLS.forEach((_, other) => {
+          if (other === symbol) expect(after[other], id).toBeGreaterThan(before[other]);
+          else expect(after[other], id).toBeLessThan(before[other]);
+        });
+      }
+    }
+    // 그래서 서로 다른 듬뿍을 둘 붙이면, 하나만 붙였을 때보다 줄이 덜 맞는 짝이 절반을 넘는다.
+    let pairs = 0;
+    let worse = 0;
+    for (let a = 0; a < more.length; a += 1) {
+      for (let b = a + 1; b < more.length; b += 1) {
+        pairs += 1;
+        const both = hitChance([more[a].id, more[b].id]);
+        if (both < Math.max(hitChance([more[a].id]), hitChance([more[b].id]))) worse += 1;
+      }
+    }
+    expect(pairs).toBe(15);
+    expect(worse).toBeGreaterThan(pairs / 2);
+  });
+
   it('덜기 부적은 그 그림의 확률을 내리고 나머지를 올린다', () => {
     const before = oddsOf([]);
     const after = oddsOf(['less-cherry']);
@@ -309,7 +349,7 @@ describe('한 번 돌린 결과', () => {
     expect(scoreSpin(grid, ['wide'], PLAIN).total).toBe(16);
   });
 
-  it('쌍둥이 줄은 두 줄부터, 왕관은 세 줄부터 듣고, 둘은 겹친다', () => {
+  it('쌍둥이 줄은 딱 두 줄일 때만, 왕관은 세 줄부터 듣고, 둘은 한 스핀에 함께 듣지 않는다', () => {
     const one = [BELL, BELL, BELL, CHERRY, CLOVER, HORSESHOE, DIAMOND, CHERRY, CLOVER];
     const two = [HORSESHOE, CLOVER, BELL, HORSESHOE, HORSESHOE, CHERRY, HORSESHOE, CHERRY, HORSESHOE];
     // 가로 세 줄이 체리, 클로버, 종으로 맞는다.
@@ -322,20 +362,43 @@ describe('한 번 돌린 결과', () => {
     expect(scoreSpin(two, ['twins'], PLAIN).boosts).toEqual([{ kind: 'combo', times: 2 }]);
     expect(scoreSpin(two, ['crown'], PLAIN).total).toBe(16);
     expect(scoreSpin(three, ['crown'], PLAIN).total).toBe(20);
-    expect(scoreSpin(three, ['twins', 'crown'], PLAIN).total).toBe(40);
-    expect(scoreSpin(three, ['twins', 'crown'], PLAIN).boosts).toEqual([{ kind: 'combo', times: 4 }]);
+    // 세 줄이 맞으면 쌍둥이 줄은 듣지 않는다. 그래서 둘을 함께 붙여도 곱이 겹치지 않고, 두 줄과 세 줄 이상을 나눠 맡는다.
+    expect(scoreSpin(three, ['twins'], PLAIN).total).toBe(10);
+    expect(scoreSpin(three, ['twins'], PLAIN).boosts).toEqual([]);
+    expect(scoreSpin(two, ['twins', 'crown'], PLAIN).total).toBe(32);
+    expect(scoreSpin(three, ['twins', 'crown'], PLAIN).total).toBe(20);
+    expect(scoreSpin(three, ['twins', 'crown'], PLAIN).boosts).toEqual([{ kind: 'combo', times: 2 }]);
+    // 강화하면 곱이 커질 뿐, 듣는 줄의 수는 그대로다.
+    expect(scoreSpin(two, ['twins+'], PLAIN).total).toBe(64);
+    expect(scoreSpin(three, ['twins+'], PLAIN).total).toBe(10);
+    expect(scoreSpin(one, ['twins+', 'crown+'], PLAIN).total).toBe(5);
+  });
+
+  it('강화한 줄 부적과 재주는 곱이 한 배나 두 배 커진다', () => {
+    const one = [BELL, BELL, BELL, CHERRY, CLOVER, HORSESHOE, DIAMOND, CHERRY, CLOVER];
+    const three = [CHERRY, CHERRY, CHERRY, CLOVER, CLOVER, CLOVER, BELL, BELL, BELL];
+    expect(lineTimesOf(['wide+'])).toEqual({ row: 3, col: 1, diag: 1 });
+    expect(scoreSpin(one, ['wide+'], PLAIN).wins).toEqual([{ line: 0, symbol: BELL, amount: 15 }]);
+    expect(scoreSpin(three, ['wide+'], PLAIN).total).toBe(6 + 9 + 15);
+    expect(lineTimesOf(['tall+', 'slant+'])).toEqual({ row: 1, col: 3, diag: 4 });
+    // 왕관을 강화하면 세 배: 10개가 30개.
+    expect(scoreSpin(three, ['crown+'], PLAIN).total).toBe(30);
+    expect(scoreSpin(three, ['crown+'], PLAIN).boosts).toEqual([{ kind: 'combo', times: 3 }]);
+    // 오뚝이를 강화하면 네 배, 막판 한 방을 강화하면 다섯 배다.
+    expect(scoreSpin(one, ['rebound+'], { last: false, afterMiss: true }).total).toBe(20);
+    expect(scoreSpin(one, ['finale+'], { last: true, afterMiss: false }).total).toBe(25);
   });
 
   it('막판 한 방은 마지막 스핀에만, 오뚝이는 꽝 다음 스핀에만 듣는다', () => {
     const grid = [BELL, BELL, BELL, CHERRY, CLOVER, HORSESHOE, DIAMOND, CHERRY, CLOVER];
     expect(scoreSpin(grid, ['finale'], PLAIN).total).toBe(5);
-    expect(scoreSpin(grid, ['finale'], { last: true, afterMiss: false }).total).toBe(20);
+    expect(scoreSpin(grid, ['finale'], { last: true, afterMiss: false }).total).toBe(15);
     expect(scoreSpin(grid, ['rebound'], PLAIN).total).toBe(5);
     expect(scoreSpin(grid, ['rebound'], { last: false, afterMiss: true }).total).toBe(15);
     const both = scoreSpin(grid, ['finale', 'rebound'], { last: true, afterMiss: true });
-    expect(both.total).toBe(60);
+    expect(both.total).toBe(45);
     expect(both.boosts).toEqual([
-      { kind: 'last', times: 4 },
+      { kind: 'last', times: 3 },
       { kind: 'rebound', times: 3 },
     ]);
     // 부적이 없으면 마지막 스핀이어도 그대로다.
@@ -354,15 +417,17 @@ describe('한 번 돌린 결과', () => {
 
   it('상금은 언제나 0 이상의 정수다', () => {
     const random = seeded(21);
+    // 강화한 부적도 섞는다.
     const all = CHARMS.map((charm) => charm.id);
-    for (let n = 0; n < 300; n += 1) {
-      const charms = all.filter(() => random() < 0.25);
+    for (let n = 0; n < 600; n += 1) {
+      const charms = all.filter(() => random() < 0.25).map((id) => (random() < 0.5 ? `${id}+` : id));
       const outcome = scoreSpin(rollGrid(charms, random), charms, {
         last: random() < 0.2,
         afterMiss: random() < 0.5,
       });
       expect(Number.isInteger(outcome.total)).toBe(true);
       expect(outcome.total).toBeGreaterThanOrEqual(outcome.wins.length === 0 ? MISS_COIN : outcome.base);
+      for (const win of outcome.wins) expect(Number.isInteger(win.amount)).toBe(true);
     }
   });
 });
@@ -449,9 +514,9 @@ describe('한 판', () => {
     // 0.31은 언제나 클로버라 아홉 칸이 다 맞는다.
     const allDrops = (): number => 0.31;
     const last = spin({ ...newRun(), spinsLeft: 1, charms: ['finale'] }, allDrops)!;
-    expect(last.outcome.boosts).toContainEqual({ kind: 'last', times: 4 });
+    expect(last.outcome.boosts).toContainEqual({ kind: 'last', times: 3 });
     const early = spin({ ...newRun(), spinsLeft: 2, charms: ['finale'] }, allDrops)!;
-    expect(early.outcome.boosts).not.toContainEqual({ kind: 'last', times: 4 });
+    expect(early.outcome.boosts).not.toContainEqual({ kind: 'last', times: 3 });
     const rebound = spin({ ...newRun(), afterMiss: true, charms: ['rebound'] }, allDrops)!;
     expect(rebound.outcome.boosts).toContainEqual({ kind: 'rebound', times: 3 });
     expect(rebound.run.afterMiss).toBe(false);
@@ -834,13 +899,27 @@ function buyAnything(run: RunState): RunState {
   return next;
 }
 
-/** 여러 판을 해서 넘긴 라운드의 수를 작은 것부터 늘어놓는다. */
-function roundsOf(runs: number, seed: number, shop: (run: RunState) => RunState): number[] {
-  const random = seeded(seed);
-  const rounds: number[] = [];
-  for (let n = 0; n < runs; n += 1) rounds.push(clearedRounds(playRun(random, shop)));
-  return rounds.sort((a, b) => a - b);
+/** 여러 판을 해서 넘긴 라운드의 수를 작은 것부터 늘어놓는다. start를 주면 판마다 그 판에서 시작한다(해금이나 유물을 켠 판). */
+function roundsOf(
+  runs: number,
+  seed: number,
+  shop: (run: RunState) => RunState,
+  start: () => RunState = newRun,
+): number[] {
+  return runsOf(runs, seed, shop, start)
+    .map((run) => clearedRounds(run))
+    .sort((a, b) => a - b);
 }
+
+/** 여러 판을 끝까지 한다. */
+function runsOf(runs: number, seed: number, shop: (run: RunState) => RunState, start: () => RunState = newRun): RunState[] {
+  const random = seeded(seed);
+  const done: RunState[] = [];
+  for (let n = 0; n < runs; n += 1) done.push(playRun(random, shop, start()));
+  return done;
+}
+
+const middleOf = (sorted: readonly number[]): number => sorted[Math.floor(sorted.length / 2)];
 
 /**
  * 부적마다 잘 맞는 자리: 이 부적들에 붙였을 때 제 몫을 한다.
@@ -873,6 +952,42 @@ const HOMES: Readonly<Record<string, readonly string[]>> = {
   rebound: ['more-diamond', 'gold-diamond'],
 };
 
+/**
+ * 살 수 있는 것을 보이는 대로 사고, 남는 금화로는 붙여 둔 것을 앞에서부터 강화하는 사람.
+ * 다음 라운드의 목표를 낼 금화는 남겨 둔다(그것까지 털어 강화하면 강화하지 않느니만 못하다).
+ */
+function buyAndUpgradeAnything(run: RunState): RunState {
+  let next = buyAnything(run);
+  const keep = targetFor(next, next.round + 1);
+  for (let slot = 0; slot < next.charms.length; slot += 1) {
+    if (next.coin - upgradeCostOf(next.charms[slot], next) >= keep) next = upgrade(next, slot);
+  }
+  return next;
+}
+
+/** 조합의 부적을 모두 강화한 것 */
+const allUpgraded = (charms: readonly string[]): string[] => charms.map((id) => upgradedOf(id));
+
+/**
+ * 자동 플레이로 찾은, 끝까지 들고 가는 센 조합들(강화하기 전의 것). 쌍둥이 줄이 든 것과 들지 않은 것을 따로 적는다.
+ * 부적의 숫자를 고쳐서 센 조합이 바뀌면 여기도 고친다.
+ */
+const STRONG_WITHOUT_TWINS: readonly (readonly string[])[] = [
+  ['more-diamond', 'gold-diamond', 'slant', 'finale', 'rebound'],
+  ['more-cherry', 'gold-cherry', 'less-clover', 'crown', 'finale'],
+  ['more-cherry', 'gold-cherry', 'slant', 'crown', 'finale'],
+  ['more-clover', 'gold-clover', 'less-cherry', 'crown', 'finale'],
+  ['more-horseshoe', 'gold-horseshoe', 'slant', 'finale', 'rebound'],
+  ['more-diamond', 'gold-diamond', 'slant', 'extra', 'rebound'],
+  ['more-bell', 'gold-bell', 'less-cherry', 'less-clover', 'crown'],
+  ['more-horseshoe', 'gold-horseshoe', 'less-cherry', 'less-clover', 'crown'],
+];
+const STRONG_WITH_TWINS: readonly (readonly string[])[] = [
+  ['more-diamond', 'gold-diamond', 'wide', 'twins', 'rebound'],
+  ['more-horseshoe', 'gold-horseshoe', 'twins', 'finale', 'rebound'],
+  ['more-diamond', 'gold-diamond', 'extra', 'twins', 'rebound'],
+];
+
 describe('밸런스', () => {
   it('부적 없이도 첫 라운드는 거의 언제나 넘긴다', () => {
     const rounds = roundsOf(2_000, 101, (state) => state);
@@ -895,7 +1010,16 @@ describe('밸런스', () => {
     expect(median).toBeGreaterThanOrEqual(6);
     expect(median).toBeLessThanOrEqual(8);
     expect(any[Math.floor(any.length * 0.9)]).toBeLessThanOrEqual(11);
-  });
+  }, 60_000);
+
+  it('고르지 않고 남는 금화로 강화까지 닥치는 대로 해도 판은 거의 그대로다', () => {
+    const any = roundsOf(1_000, 108, buyAnything);
+    const both = roundsOf(1_000, 108, buyAndUpgradeAnything);
+    const median = both[Math.floor(both.length / 2)];
+    expect(median).toBeGreaterThanOrEqual(any[Math.floor(any.length / 2)] - 1);
+    expect(median).toBeLessThanOrEqual(any[Math.floor(any.length / 2)] + 1);
+    expect(both[Math.floor(both.length * 0.9)]).toBeLessThanOrEqual(11);
+  }, 60_000);
 
   it('부적마다 값어치가 있다: 혼자 붙여도 평균 벌이가 줄지 않는다', () => {
     const base = averageRound([], 4_000, seeded(104));
@@ -904,7 +1028,7 @@ describe('밸런스', () => {
       if (charm.effect.savingsCap !== undefined) continue;
       expect(averageRound([charm.id], 4_000, seeded(104)), charm.id).toBeGreaterThan(base);
     }
-  });
+  }, 60_000);
 
   it('죽은 부적이 없다: 어느 부적이든 제자리에 붙이면 벌이가 넷에 하나는 는다', () => {
     const rounds = 3_000;
@@ -920,38 +1044,113 @@ describe('밸런스', () => {
       const withIt = averageRound([...home, charm.id], rounds, seeded(106));
       expect(withIt / without, charm.id).toBeGreaterThan(1.25);
     }
+  }, 60_000);
+
+  it('강화하는 값은 가운데 라운드에 남는 금화로 치를 만한 크기다', () => {
+    const costs = CHARMS.map((charm) => upgradeCostOf(charm.id));
+    for (const charm of CHARMS) {
+      // 새 부적보다 열 배는 넘게 비싸다: 자리가 남았을 때는 새 부적을 사는 쪽이 싸다.
+      expect(upgradeCostOf(charm.id), charm.id).toBeGreaterThanOrEqual(charm.price * 10);
+    }
+    // 첫 서너 라운드에는 엄두를 내기 어렵다: 가장 싼 강화도 다섯째 라운드의 목표보다 비싸다.
+    expect(Math.min(...costs)).toBeGreaterThan(targetOf(5));
+    // 가운데 라운드에는 손이 닿는다: 가장 비싼 강화도 아홉째 라운드의 목표보다 싸다.
+    expect(Math.max(...costs)).toBeLessThan(targetOf(9));
+    // 다섯 장을 다 강화하려면 여러 라운드에 걸쳐 모아야 한다.
+    for (const charms of [...STRONG_WITHOUT_TWINS, ...STRONG_WITH_TWINS]) {
+      const all = charms.reduce((sum, id) => sum + upgradeCostOf(id), 0);
+      expect(all, charms.join(' ')).toBeGreaterThan(targetOf(9));
+      expect(all, charms.join(' ')).toBeLessThan(targetOf(12));
+    }
   });
 
-  it('쌍둥이 줄이 없어도 센 조합이 있다', () => {
-    const average = (charms: string[]): number => averageRound(charms, 6_000, seeded(107));
-    const withTwins = Math.max(
-      average(['more-cherry', 'gold-cherry', 'less-clover', 'twins', 'crown']),
-      average(['more-bell', 'gold-bell', 'less-cherry', 'less-clover', 'twins']),
-    );
-    const without = Math.max(
-      average(['more-diamond', 'gold-diamond', 'slant', 'finale', 'rebound']),
-      average(['more-horseshoe', 'gold-horseshoe', 'slant', 'finale', 'rebound']),
-    );
-    expect(without / withTwins).toBeGreaterThan(0.85);
-  });
+  it('강화는 제 몫을 하지만 꼭 해야 하는 강화는 없고, 같은 금화로는 새 부적이 더 번다', () => {
+    const rounds = 4_000;
+    for (const charm of CHARMS) {
+      const home = HOMES[charm.id];
+      const strong = upgradedOf(charm.id);
+      if (charm.effect.savingsCap !== undefined) {
+        expect(savingsFor(1000, [strong]), charm.id).toBeGreaterThan(savingsFor(1000, [charm.id]));
+        continue;
+      }
+      const without = averageRound(home, rounds, seeded(109));
+      const withIt = averageRound([...home, charm.id], rounds, seeded(109));
+      const withStrong = averageRound([...home, strong], rounds, seeded(109));
+      // 강화하면 벌이가 스물에 하나는 넘게 늘지만 한 배 반까지는 늘지 않는다.
+      expect(withStrong / withIt, charm.id).toBeGreaterThan(1.05);
+      expect(withStrong / withIt, charm.id).toBeLessThan(1.5);
+      // 금화 한 개마다 느는 벌이는 새로 붙일 때가 강화할 때보다 크다.
+      expect((withStrong - withIt) / upgradeCostOf(charm.id), charm.id).toBeLessThan((withIt - without) / charm.price);
+    }
+  }, 60_000);
+
+  it('쌍둥이 줄은 여러 길 가운데 하나다: 없이도 센 조합이 여럿이고, 넣은 조합도 뒤지지 않는다', () => {
+    const average = (charms: readonly string[]): number => averageRound(allUpgraded(charms), 6_000, seeded(107));
+    const withTwins = Math.max(...STRONG_WITH_TWINS.map(average));
+    const without = STRONG_WITHOUT_TWINS.map(average);
+    // 쌍둥이 줄 없이도 그만큼 버는 조합이 셋은 넘는다.
+    expect(without.filter((earned) => earned > withTwins * 0.9).length).toBeGreaterThanOrEqual(3);
+    // 쌍둥이 줄을 넣은 조합이 가장 센 조합보다 한참 처지지도, 한참 앞서지도 않는다.
+    expect(withTwins / Math.max(...without)).toBeGreaterThan(0.85);
+    expect(withTwins / Math.max(...without)).toBeLessThan(1.15);
+    // 쌍둥이 줄과 왕관은 맡는 줄의 수가 달라서, 함께 붙여도 곱이 겹쳐 터지지 않는다.
+    const cherry = ['more-cherry', 'gold-cherry', 'less-clover'];
+    const both = average([...cherry, 'twins', 'crown']) / average(cherry);
+    const each = (average([...cherry, 'twins']) / average(cherry)) * (average([...cherry, 'crown']) / average(cherry));
+    expect(both).toBeLessThan(each);
+  }, 60_000);
+
+  it('다섯 장을 다 강화하면 벌이가 두 배를 넘지만 다섯 배까지는 아니다', () => {
+    for (const charms of [...STRONG_WITHOUT_TWINS, ...STRONG_WITH_TWINS]) {
+      const plain = averageRound(charms, 4_000, seeded(110));
+      const strong = averageRound(allUpgraded(charms), 4_000, seeded(110));
+      expect(strong / plain, charms.join(' ')).toBeGreaterThan(2);
+      expect(strong / plain, charms.join(' ')).toBeLessThan(5);
+    }
+  }, 60_000);
+
+  it('영구 해금을 다 켜도 판이 두어 라운드 더 갈 뿐이다', () => {
+    const perked = (): RunState => newRun(null, PERK_IDS);
+    // 사지 않는 사람: 두둑한 시작과 잠그기 한 번 더만 듣는다.
+    const none = roundsOf(1_000, 111, (state) => state);
+    const noneWith = roundsOf(1_000, 111, (state) => state, perked);
+    expect(middleOf(noneWith)).toBeGreaterThanOrEqual(middleOf(none));
+    expect(middleOf(noneWith)).toBeLessThanOrEqual(middleOf(none) + 1);
+    // 닥치는 대로 사고 강화하는 사람: 여섯째 자리까지 듣는다.
+    const any = roundsOf(1_000, 112, buyAndUpgradeAnything);
+    const anyWith = roundsOf(1_000, 112, buyAndUpgradeAnything, perked);
+    expect(middleOf(anyWith)).toBeGreaterThanOrEqual(middleOf(any));
+    expect(middleOf(anyWith)).toBeLessThanOrEqual(middleOf(any) + 2);
+  }, 60_000);
+
+  it('유물을 다 올려도 판은 거의 그대로다: 한 라운드를 넘게 더 가지 않고, 점수는 조금만 는다', () => {
+    const full: RelicLevels = Object.fromEntries(RELIC_IDS.map((id) => [id, RELIC_MAX]));
+    const score = (runs: readonly RunState[]): number => runs.reduce((sum, run) => sum + scoreOf(run), 0) / runs.length;
+    const rounds = (runs: readonly RunState[]): number[] => runs.map((run) => clearedRounds(run)).sort((a, b) => a - b);
+    const plain = runsOf(1_500, 113, buyAndUpgradeAnything);
+    const blessed = runsOf(1_500, 113, buyAndUpgradeAnything, () => newRun(null, [], full));
+    expect(middleOf(rounds(blessed))).toBeGreaterThanOrEqual(middleOf(rounds(plain)));
+    expect(middleOf(rounds(blessed))).toBeLessThanOrEqual(middleOf(rounds(plain)) + 1);
+    // 도움은 되지만(0은 아니다) 판을 바꿀 만큼은 아니다.
+    expect(score(blessed) / score(plain)).toBeGreaterThan(1);
+    expect(score(blessed) / score(plain)).toBeLessThan(1.3);
+  }, 60_000);
 
   it('가장 센 조합으로도 판은 끝나고, 점수는 랭킹이 받는 범위 안이다', () => {
-    // 자동 플레이로 찾은 가장 센 조합들을 처음부터 거저 붙여 준다.
-    const strongest = [
-      ['more-cherry', 'gold-cherry', 'less-clover', 'twins', 'crown'],
-      ['more-clover', 'gold-clover', 'less-cherry', 'twins', 'crown'],
-      ['more-bell', 'gold-bell', 'less-cherry', 'less-clover', 'twins'],
-      ['more-diamond', 'gold-diamond', 'slant', 'finale', 'rebound'],
-      ['more-seven', 'middle', 'slant', 'twins', 'crown'],
-    ];
+    // 자동 플레이로 찾은 가장 센 조합들을 처음부터 모두 강화해서 거저 붙여 준다.
     const random = seeded(105);
-    for (const charms of strongest) {
-      for (let n = 0; n < 150; n += 1) {
+    let far = 0;
+    let top = 0;
+    for (const plain of [...STRONG_WITHOUT_TWINS, ...STRONG_WITH_TWINS]) {
+      const charms = allUpgraded(plain);
+      for (let n = 0; n < 120; n += 1) {
         const run = playRun(random, (state) => state, { ...newRun(), charms: [...charms], spinsLeft: spinsOf(charms) });
+        far = Math.max(far, clearedRounds(run));
+        top = Math.max(top, scoreOf(run));
         expect(run.phase, charms.join(' ')).toBe('over');
-        expect(clearedRounds(run), charms.join(' ')).toBeLessThanOrEqual(16);
+        expect(clearedRounds(run), charms.join(' ')).toBeLessThanOrEqual(20);
         expect(scoreOf(run)).toBeLessThan(MAX_SCORE / 10);
       }
     }
-  });
+  }, 60_000);
 });
