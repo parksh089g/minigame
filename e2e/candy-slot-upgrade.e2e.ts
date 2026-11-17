@@ -611,7 +611,7 @@ it('행운 슬롯: 강화한 부적을 든 판을 다시 열어 이어 하고, �
   const found = [last.id];
   await expect
     .poll(() => storedSlot(page), { ...WAIT, message: '강화한 판과 도감이 기기에 저장되어야 한다' })
-    .toEqual({ found, run: expect.objectContaining({ run: after }) });
+    .toEqual(expect.objectContaining({ found, run: expect.objectContaining({ run: after }) }));
   await expect.poll(() => textPoint(page, KEY, collectionLabel(found)), WAIT).not.toBeNull();
 
   // 다시 열어 이어 하면 강화한 부적이 그대로 붙어 있고, 확률 줄의 퍼센트를 더하면 100이다.

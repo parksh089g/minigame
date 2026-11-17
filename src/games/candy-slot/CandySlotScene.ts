@@ -1934,7 +1934,7 @@ export class CandySlotScene extends MiniGameScene {
    * 뒤로 가기로 닫히는 것과 판이 끝날 때 닫히는 것, 떠 있는 동안 키보드로 돌리지 못하는 것이 도감과 같다(closeBook).
    */
   private openRank(): void {
-    if (this.book || this.ended) return;
+    if (this.book || this.perkPanel || this.ended) return;
     this.hideBubble();
     const view = openRankView(this, {
       depth: BOOK_DEPTH,
