@@ -6,7 +6,7 @@ import { LANTERN_GAME_ID } from '../games/lantern-keeper/data';
 import { AWAY, COMPANY_GAME_ID } from '../games/sprout-company/data';
 import { createGoals } from '../games/sprout-company/goals';
 import { createCompany } from '../games/sprout-company/rules';
-import { companyTodo, gardenTodo, lanternTodo, weeklyTodo } from './hub-todo';
+import { companyTodo, gardenTodo, lanternTodo, slotTodo, weeklyTodo } from './hub-todo';
 
 describe('등불지기의 오늘 할 일', () => {
   it('멈춰 둔 판이 있으면 지난 시간과 함께 이어 하라고 한다', () => {
@@ -20,6 +20,20 @@ describe('등불지기의 오늘 할 일', () => {
     expect(lanternTodo(null, false, true)).toEqual({ text: '오늘의 판 아직', start: { page: 'daily' } });
     expect(lanternTodo(null, true, true)).toBeNull();
     expect(lanternTodo(null, false, false)).toBeNull();
+  });
+});
+
+describe('행운 슬롯의 오늘 할 일 (10차 검토 S11)', () => {
+  it('두고 간 판이 있으면 오늘의 판보다 먼저 이어 하라고 한다', () => {
+    // 이어 하기는 시작 화면에 뜨므로, 누르면 여느 때처럼 연다.
+    expect(slotTodo(true, false, true)).toEqual({ text: '이어하기' });
+    expect(slotTodo(true, true, false)).toEqual({ text: '이어하기' });
+  });
+
+  it('해 본 사람에게만 오늘의 판을 아직 안 했다고 알리고, 누르면 오늘의 판으로 연다', () => {
+    expect(slotTodo(false, false, true)).toEqual({ text: '오늘의 판 아직', start: { daily: true } });
+    expect(slotTodo(false, true, true)).toBeNull();
+    expect(slotTodo(false, false, false)).toBeNull();
   });
 });
 
@@ -83,9 +97,9 @@ describe('텃밭 지키기의 오늘 할 일', () => {
 
   it('두고 간 판이 있으면 강화보다 먼저 그 판의 날과 함께 이어 하라고 한다', () => {
     const rich = { ...createMeta(), runs: 3, seeds: 5000 };
-    expect(gardenTodo(rich, { day: 17 })).toEqual({ text: '이어하기 17일째' });
-    expect(gardenTodo(createMeta(), { day: 1 })).toEqual({ text: '이어하기 1일째' });
-    expect(gardenTodo(rich, null)).toEqual({ text: '강화 가능' });
+    expect(gardenTodo(rich, true)).toEqual({ text: '이어하기' });
+    expect(gardenTodo(createMeta(), true)).toEqual({ text: '이어하기' });
+    expect(gardenTodo(rich, false)).toEqual({ text: '강화 가능' });
   });
 });
 

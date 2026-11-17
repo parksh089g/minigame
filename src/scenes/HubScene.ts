@@ -133,6 +133,7 @@ const STAR_SETTLE_MS = 160;
 const RECORDS: HubRecords = {
   playedBefore: (id) => getRecord(store.data, id).plays > 0,
   weekly: () => store.data.weekly,
+  slotRun: () => store.data.slot.run !== null,
 };
 
 /** 허브를 띄워 둔 동안 할 일을 다시 셈하는 틈(ms). 닫아 둔 회사의 수익이 그사이 다 차는 것 같은 일을 따라간다. */
