@@ -208,6 +208,11 @@ export class FieldView {
           this.burst(event.x, layout.fenceY - 2, LOOK.woodDeep, 3, 50);
           this.ring(event.x, layout.fenceY - 2, LOOK.bite, 8, 0.2);
           break;
+        case 'guard':
+          // 울타리 방울이 갉기를 막았다. 울타리는 흔들리지 않고 금빛 고리만 번진다.
+          this.ring(event.x, layout.fenceY - 2, LOOK.crit, 10, 0.3);
+          this.burst(event.x, layout.fenceY - 2, LOOK.crit, 2, 40);
+          break;
         case 'storm':
           for (let index = 0; index < 60 && this.particles.length < PARTICLE_CAP; index += 1) {
             this.particles.push({

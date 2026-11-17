@@ -315,7 +315,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     // 영구 강화를 얼마나 했느냐에 따라 점수가 크게 달라서 오늘의 도전에는 넣지 않는다.
     dailyTargets: [],
     genre: 'action',
-    // 점수(지킨 날마다 100점)보다 지킨 날이 알기 쉽다.
+    // 점수(그 판에서 지킨 날마다 100점)보다 한 판에 지킨 날 수가 알기 쉽다.
     recordLabel: gardenRecord,
     steady: '벌레를 막고 텃밭을 가꿔요',
     // 판이 끝나도 강화가 남는 큰 게임이라 몇 주에 한 번 큰 게임 미션으로 나온다. 한 판이 등불지기보다 짧아서 판 수를 조금 더 묻는다.

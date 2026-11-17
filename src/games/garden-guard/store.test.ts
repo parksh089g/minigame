@@ -25,7 +25,7 @@ const T = 1_700_000_000_000;
 
 /** 막 시작한 판 */
 function freshRun(day = 1): SavedRun {
-  return { state: createRun({ seed: 9, startDay: day, levels: {}, bestBefore: 0 }).state, banked: 0 };
+  return { state: createRun({ seed: 9, startDay: day, levels: {}, bestBefore: 0 }).state, banked: 0, bankedShards: 0 };
 }
 
 async function opened(): Promise<GardenStore> {

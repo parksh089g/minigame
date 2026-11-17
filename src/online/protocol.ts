@@ -224,6 +224,38 @@ export interface DayScores {
   scores: Record<string, number>;
 }
 
+/**
+ * 점수 세는 법이 바뀐 게임과, 지금 규칙의 번호(처음 규칙이 1이다).
+ * 규칙이 바뀌면 옛 점수와 새 점수를 한 랭킹에서 견줄 수 없다. 그래서 서버는 번호가 오르면 그 게임의 랭킹을 한 번 비우고
+ * (worker/board-db.ts), 앱은 그 게임의 점수를 올릴 때 번호를 같이 보낸다(SubmitRequest.rules). 번호가 맞지 않는 점수,
+ * 곧 아직 업데이트하지 않은 앱이 옛 규칙으로 낸 점수는 서버가 받지 않는다. 앱의 세이브에 남은 옛 최고 점수는
+ * core/save.ts의 SCORE_RESETS가 비운다.
+ *
+ * - 텃밭 지키기 2: "몇째 날까지 갔는지"가 아니라 "이 판에서 며칠을 지켰는지"를 센다.
+ */
+export const SCORE_RULES: Readonly<Partial<Record<RankedGame, number>>> = { 'garden-guard': 2 };
+
+/** 점수 묶음에 든 게임 가운데 규칙이 바뀐 게임의 규칙 번호. 그런 게임이 없으면 undefined(아무것도 보내지 않는다). */
+export function rulesFor(
+  ...scores: ReadonlyArray<Readonly<Record<string, number>> | undefined>
+): Record<string, number> | undefined {
+  const rules: Record<string, number> = {};
+  for (const group of scores) {
+    for (const game of Object.keys(group ?? {})) {
+      const rule = isRankedGame(game) ? SCORE_RULES[game] : undefined;
+      if (rule !== undefined) rules[game] = rule;
+    }
+  }
+  return Object.keys(rules).length > 0 ? rules : undefined;
+}
+
+/** 앱이 보낸 규칙 번호(SubmitRequest.rules)로 볼 때, 이 게임의 점수가 지금 규칙으로 낸 것인지 */
+export function followsRules(game: RankedGame, rules: unknown): boolean {
+  const rule = SCORE_RULES[game];
+  if (rule === undefined) return true;
+  return typeof rules === 'object' && rules !== null && (rules as Record<string, unknown>)[game] === rule;
+}
+
 export interface SubmitRequest {
   device: string;
   name: string;
@@ -233,6 +265,11 @@ export interface SubmitRequest {
   weekly?: WeekScores;
   /** 오늘의 랭킹에 올릴 점수. 올릴 것이 없으면 보내지 않는다. 서버의 오늘과 다른 날의 것은 서버가 버린다. */
   daily?: DayScores;
+  /**
+   * 게임 id → 이 점수들을 낸 규칙의 번호(SCORE_RULES). 규칙이 바뀐 게임의 점수를 올릴 때만 보낸다.
+   * 번호가 없거나 서버의 것과 다르면 서버는 그 게임의 점수만 받지 않는다.
+   */
+  rules?: Record<string, number>;
 }
 
 export interface SubmitResult {

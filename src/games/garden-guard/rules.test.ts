@@ -15,6 +15,7 @@ import {
   costLabel,
   createMeta,
   dayCount,
+  daysKept,
   dayWindow,
   effectLine,
   HP_GROWTH,
@@ -258,7 +259,19 @@ describe('강화', () => {
 });
 
 describe('점수와 씨앗', () => {
-  it('지킨 날마다 100점이고, 무너진 날은 쫓아낸 만큼 더한다', () => {
+  it('이 판에서 지킨 날은 시작한 날부터 마지막으로 지킨 날까지를 센다', () => {
+    expect(daysKept(1, 0)).toBe(0);
+    expect(daysKept(1, 1)).toBe(1);
+    expect(daysKept(1, 9)).toBe(9);
+    // 뒤쪽 날에서 시작한 판은 몇째 날까지 갔든 그 판에서 지킨 날만 센다.
+    expect(daysKept(31, 0)).toBe(0);
+    expect(daysKept(31, 31)).toBe(1);
+    expect(daysKept(31, 33)).toBe(3);
+    // 시작한 날보다 앞의 날이 적혀 있는 일은 없지만, 있어도 음수가 되지 않는다.
+    expect(daysKept(31, 30)).toBe(0);
+  });
+
+  it('이 판에서 지킨 날마다 100점이고, 무너진 날은 쫓아낸 만큼 더한다', () => {
     expect(scoreFor(0, 0, 7)).toBe(0);
     expect(scoreFor(0, 3, 6)).toBe(50);
     expect(scoreFor(4, 0, 10)).toBe(400);
@@ -268,20 +281,23 @@ describe('점수와 씨앗', () => {
     expect(scoreFor(4, 0, 0)).toBe(400);
   });
 
-  it('허브 카드에는 점수 대신 지킨 날을 적는다', () => {
-    expect(recordLabel(950)).toBe('최고 9일째');
-    expect(recordLabel(100)).toBe('최고 1일째');
-    expect(recordLabel(4499)).toBe('최고 44일째');
+  it('허브 카드에는 점수 대신 한 판에 지킨 날 수를 적는다', () => {
+    expect(recordLabel(950)).toBe('한 판에 9일');
+    expect(recordLabel(100)).toBe('한 판에 1일');
+    expect(recordLabel(4499)).toBe('한 판에 44일');
     expect(recordLabel(57)).toBe('최고 57');
     expect(recordLabel(0)).toBe('최고 0');
   });
 
-  it('코인은 지킨 날 하나에 하나씩, 한 판에 30개까지다', () => {
+  it('코인은 이 판에서 지킨 날 하나에 하나씩, 한 판에 30개까지다', () => {
     expect(coinsFor(0)).toBe(0);
     expect(coinsFor(99)).toBe(0);
     expect(coinsFor(450)).toBe(4);
     expect(coinsFor(2999)).toBe(29);
     expect(coinsFor(9900)).toBe(30);
+    // 31일째에서 시작해 하루만 지키고 끝낸 판은 코인 하나다(전에는 30개였다).
+    expect(coinsFor(scoreFor(daysKept(31, 31), 0, 0))).toBe(1);
+    expect(coinsFor(scoreFor(daysKept(1, 31), 0, 0))).toBe(30);
   });
 
   it('날을 넘기면 씨앗을 받고, 처음 넘긴 대장의 날은 세 배를 더 받는다', () => {
@@ -436,6 +452,8 @@ describe('판 밖 진행', () => {
       startDay: 11,
       savedAt: 55,
       levels: { power: 7, helper: UPGRADES.helper.maxLevel },
+      // 유물이 생기기 전의 저장이라, 그동안 물리친 대장(5일째와 10일째)의 유물 조각을 받는다.
+      shards: 2,
     });
     // 열리지 않은 날을 골라 둔 저장은 열린 날로 돌린다.
     expect(normalizeMeta({ best: 3, startDay: 11 }).startDay).toBe(1);

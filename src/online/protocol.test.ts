@@ -11,6 +11,7 @@ import {
   codeFrom,
   DAILY_GAMES,
   deviceIdFrom,
+  followsRules,
   formatCode,
   isDeviceId,
   hasDailyBoard,
@@ -29,6 +30,8 @@ import {
   RANK_WEEK_MS,
   rankWeekOf,
   rankWeekStart,
+  rulesFor,
+  SCORE_RULES,
 } from './protocol';
 
 describe('랭킹이 있는 게임', () => {
@@ -279,6 +282,30 @@ describe('랭킹 날', () => {
       for (const at of [midnight - 1, midnight, midnight + 1, kst('2026-12-31T23:59:59'), kst('2027-01-01T00:00:00')]) {
         expect(gameDays[game](new Date(at)), `${game} ${new Date(at).toISOString()}`).toBe(rankDayOf(at));
       }
+    }
+  });
+});
+
+describe('점수 세는 법이 바뀐 게임', () => {
+  it('텃밭 지키기의 점수는 둘째 규칙(이 판에서 지킨 날 수)으로 센다', () => {
+    expect(SCORE_RULES).toEqual({ 'garden-guard': 2 });
+  });
+
+  it('올릴 점수에 그런 게임이 들어 있을 때만 규칙 번호를 붙인다', () => {
+    expect(rulesFor({ 'stack-tower': 40 })).toBeUndefined();
+    expect(rulesFor({}, undefined)).toBeUndefined();
+    expect(rulesFor({ 'stack-tower': 40, 'garden-guard': 900 })).toEqual({ 'garden-guard': 2 });
+    // 최고 점수에는 없고 이번 주의 점수에만 있어도 붙인다.
+    expect(rulesFor({ 'stack-tower': 40 }, { 'garden-guard': 300 }, undefined)).toEqual({ 'garden-guard': 2 });
+  });
+
+  it('규칙이 바뀌지 않은 게임의 점수는 번호 없이도 받고, 바뀐 게임의 점수는 번호가 맞아야 받는다', () => {
+    expect(followsRules('stack-tower', undefined)).toBe(true);
+    expect(followsRules('stack-tower', { 'stack-tower': 9 })).toBe(true);
+    expect(followsRules('garden-guard', { 'garden-guard': 2 })).toBe(true);
+    // 업데이트하지 않은 앱은 번호를 보내지 않는다.
+    for (const rules of [undefined, null, {}, { 'garden-guard': 1 }, { 'garden-guard': '2' }, 2, 'x', [2]]) {
+      expect(followsRules('garden-guard', rules)).toBe(false);
     }
   });
 });

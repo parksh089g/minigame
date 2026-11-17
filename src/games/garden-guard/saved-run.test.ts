@@ -28,13 +28,13 @@ describe('하던 판의 저장', () => {
     const state = busyRun();
     expect(state.enemies.length).toBeGreaterThan(0);
     expect(state.shots.length).toBeGreaterThan(0);
-    const saved: SavedRun = { state, banked: 7 };
+    const saved: SavedRun = { state, banked: 7, bankedShards: 0 };
     expect(readRunRecord(throughDisk(runRecord(saved, T)))).toEqual({ savedAt: T, run: saved });
   });
 
   it('읽은 판을 이어 하면 멈추지 않고 한 판과 똑같이 흘러간다', () => {
     const original = busyRun();
-    const restored = readRunRecord(throughDisk(runRecord({ state: original, banked: 0 }, T))).run!.state;
+    const restored = readRunRecord(throughDisk(runRecord({ state: original, banked: 0, bankedShards: 0 }, T))).run!.state;
     for (let t = 0; t < 30; t += STEP) {
       step(original, STEP, { aim: { x: 40, y: 60 }, storm: true, pick: 1 });
       step(restored, STEP, { aim: { x: 40, y: 60 }, storm: true, pick: 1 });
@@ -47,11 +47,11 @@ describe('하던 판의 저장', () => {
   it('강화를 고르기를 기다리던 판은 읽어도 같은 셋을 내놓고, 고른 강화도 그대로다', () => {
     const state = waitingRun();
     expect(state.offer).toHaveLength(3);
-    const restored = readRunRecord(throughDisk(runRecord({ state, banked: 0 }, T))).run!.state;
+    const restored = readRunRecord(throughDisk(runRecord({ state, banked: 0, bankedShards: 0 }, T))).run!.state;
     expect(restored.offer).toEqual(state.offer);
     step(restored, STEP, { aim: null, storm: false, pick: 2 });
     expect(restored.boons).toEqual([state.offer[2]]);
-    expect(readRunRecord(throughDisk(runRecord({ state: restored, banked: 0 }, T))).run!.state.boons).toEqual(restored.boons);
+    expect(readRunRecord(throughDisk(runRecord({ state: restored, banked: 0, bankedShards: 0 }, T))).run!.state.boons).toEqual(restored.boons);
   });
 
   it('이어 할 판이 없다고 적은 것은 없는 것으로 읽는다', () => {
@@ -60,7 +60,7 @@ describe('하던 판의 저장', () => {
   });
 
   it('망가졌거나 다른 버전이 적은 판은 버리고, 적은 때는 남긴다', () => {
-    const good = throughDisk(runRecord({ state: busyRun(5), banked: 3 }, T)) as {
+    const good = throughDisk(runRecord({ state: busyRun(5), banked: 3, bankedShards: 0 }, T)) as {
       version: number;
       run: { state: Record<string, unknown>; banked: number };
     };
@@ -90,7 +90,7 @@ describe('하던 판의 저장', () => {
   it('이어 하지 않기로 한 판은 남은 씨앗을 넣고 판 수와 벌레 수를 더한다', () => {
     const state = { ...busyRun(5), seeds: 130.6, kills: 40, lastCleared: 6 };
     const meta = { ...createMeta(), seeds: 90, best: 6, runs: 2, kills: 100, startDay: 6 };
-    const settled = settleSavedRun(meta, { state, banked: 100 });
+    const settled = settleSavedRun(meta, { state, banked: 100, bankedShards: 0 });
     expect(settled).toMatchObject({ seeds: 120, runs: 3, kills: 140, best: 6, startDay: 6 });
   });
 });

@@ -8,6 +8,7 @@ import {
   DAILY_GAMES,
   RANK_SCAN,
   RANKED_GAMES,
+  SCORE_RULES,
   TOP_COUNT,
   TRANSFER_TTL_MS,
   type RankBoard,
@@ -70,6 +71,11 @@ const SCHEMA = [
      bundle TEXT NOT NULL,
      expires INTEGER NOT NULL
    ) WITHOUT ROWID`,
+  // 게임마다, 랭킹에 올라 있는 점수가 어느 규칙(protocol.ts의 SCORE_RULES)으로 낸 것인지. 줄이 없으면 처음 규칙(1)이다.
+  `CREATE TABLE IF NOT EXISTS rules (
+     game TEXT NOT NULL PRIMARY KEY,
+     rule INTEGER NOT NULL
+   ) WITHOUT ROWID`,
 ] as const;
 
 /**
@@ -119,6 +125,28 @@ export class BoardDb {
 
   constructor(private readonly sql: SqlRunner) {
     for (const statement of SCHEMA) sql.exec(statement);
+    this.applyRules();
+  }
+
+  /**
+   * 점수 세는 법이 바뀐 게임의 랭킹(전체, 주간, 오늘)을 한 번 비운다. 옛 규칙으로 낸 점수와 새 점수를 한 줄에 세울 수 없다.
+   * 어느 규칙까지 비웠는지 적어 두므로, 서버가 다시 깨어나도 같은 규칙으로 다시 비우지 않는다.
+   */
+  private applyRules(): void {
+    for (const game of RANKED_GAMES) {
+      const rule = SCORE_RULES[game];
+      if (rule === undefined) continue;
+      const rows = this.sql.exec<{ rule: number }>('SELECT rule FROM rules WHERE game = ?', game).toArray();
+      if ((rows[0]?.rule ?? 1) >= rule) continue;
+      for (const table of ['scores', 'weekly', 'daily'] as const) {
+        this.sql.exec(`DELETE FROM ${table} WHERE game = ?`, game);
+      }
+      this.sql.exec(
+        'INSERT INTO rules (game, rule) VALUES (?, ?) ON CONFLICT (game) DO UPDATE SET rule = excluded.rule',
+        game,
+        rule,
+      );
+    }
   }
 
   /** 이 기기가 이 게임의 랭킹에 이미 올라 있는지 */

@@ -5,8 +5,10 @@
 
 import {
   claim,
+  claimable,
   completedIds,
   createAchievements,
+  isClaimed,
   normalizeAchievements,
   statsOf,
   getAchievement,
@@ -22,7 +24,7 @@ import {
   type DailyChallenge,
   type DailyState,
 } from './daily';
-import { createOnline, normalizeOnline, withWeekScore, type OnlineState } from '../online/profile';
+import { createOnline, normalizeOnline, withoutGame, withWeekScore, type OnlineState } from '../online/profile';
 import { rankWeekOf } from '../online/protocol';
 import { createVolume, normalizeVolume, type VolumeState } from './volume';
 import {
@@ -51,6 +53,17 @@ import { clearLevel, normalizeStages, type StageProgress } from './stages';
 import { createSlotSave, normalizeSlotSave, type SlotSave } from '../games/candy-slot/save';
 
 export const SAVE_VERSION = 12;
+
+/**
+ * 점수 세는 법이 바뀐 게임과, 새 규칙이 들어온 세이브 버전(since). 그보다 앞선 세이브에 적힌 그 게임의 최고 점수는
+ * 옛 규칙으로 낸 것이라 새 점수와 견줄 수 없어서, 읽을 때 비운다(resetOldScores). 서버의 랭킹도 함께 새로 시작한다
+ * (online/protocol.ts의 SCORE_RULES).
+ */
+export const SCORE_RESETS: readonly { since: number; game: string }[] = [
+  // 텃밭 지키기: "몇째 날까지 갔는지"에서 "이 판에서 며칠을 지켰는지"로. 가장 멀리 간 날은 텃밭의 저장에 따로 남아 있다.
+  // 세이브 10(행운 슬롯의 도감이 들어온 버전)까지는 옛 규칙으로 낸 점수가 적혀 있다.
+  { since: 11, game: 'garden-guard' },
+];
 
 /** 점수를 냈으면 한 판에 적어도 이만큼은 코인을 준다. 처음 하는 사람이 빈손으로 끝나지 않게 한다. */
 export const MIN_COINS_PER_PLAY = 1;
@@ -202,7 +215,7 @@ export function normalizeSave(raw: unknown, now: number = Date.now()): SaveData 
     }
   }
 
-  return {
+  const save: SaveData = {
     version: SAVE_VERSION,
     coins: toCount(raw.coins),
     settings: {
@@ -224,6 +237,35 @@ export function normalizeSave(raw: unknown, now: number = Date.now()): SaveData 
     createdAt: toTimestamp(raw.createdAt, now),
     updatedAt: toTimestamp(raw.updatedAt, now),
   };
+  // 버전이 적혀 있지 않으면 어느 규칙으로 낸 점수인지 알 수 없으니 옛것으로 본다.
+  return resetOldScores(save, toCount(raw.version));
+}
+
+/**
+ * version 버전의 세이브에서, 그 뒤로 점수 세는 법이 바뀐 게임의 최고 점수를 비운다. 판 수와 마지막으로 한 때는 남긴다.
+ * 서버에 올렸다는 표시와 이번 주에 낸 점수도 지워서, 옛 점수는 다시 올라가지 않고 새 규칙으로 낸 점수가 처음부터 올라가게 한다.
+ * 옛 점수로 이미 이뤄 놓고 보상을 받지 않은 업적은 보상을 넣어 주고 받은 것으로 적는다. 업적은 줄지 않는 기록에서 셈하는데
+ * 여기서만 기록이 줄기 때문이다. 이미 보상을 받은 업적은 받은 채로 남는다.
+ */
+export function resetOldScores(save: SaveData, version: number): SaveData {
+  let next = save;
+  for (const { since, game } of SCORE_RESETS) {
+    if (version >= since) continue;
+    const record = next.games[game];
+    const cleared: SaveData = {
+      ...next,
+      games: record ? { ...next.games, [game]: { ...record, best: 0 } } : next.games,
+      online: withoutGame(next.online, game),
+    };
+    const still = new Set(claimable(cleared.achievements, statsOf(cleared)).map((achievement) => achievement.id));
+    const lost = claimable(next.achievements, statsOf(next)).filter((achievement) => !still.has(achievement.id));
+    next = {
+      ...cleared,
+      coins: cleared.coins + lost.reduce((sum, achievement) => sum + achievement.reward, 0),
+      achievements: { claimed: [...cleared.achievements.claimed, ...lost.map((achievement) => achievement.id)] },
+    };
+  }
+  return next;
 }
 
 /** 가져오기 파일이 이 앱의 세이브처럼 보이는지 확인한다. */
@@ -338,7 +380,8 @@ export function applyPlayResult(
 function newlyAchieved(before: SaveData, after: SaveData): Achievement[] {
   const had = new Set(completedIds(statsOf(before)));
   return completedIds(statsOf(after))
-    .filter((id) => !had.has(id))
+    // 점수 세는 법이 바뀌어 기록을 비운 게임에서는 이미 보상을 받은 업적에 다시 닿을 수 있다. 그것은 새로 이룬 것이 아니다.
+    .filter((id) => !had.has(id) && !isClaimed(after.achievements, id))
     .map((id) => getAchievement(id))
     .filter((achievement): achievement is Achievement => achievement !== undefined);
 }
