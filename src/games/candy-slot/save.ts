@@ -1,5 +1,5 @@
 /**
- * 행운 슬롯이 허브 세이브(core/save.ts의 slot)에 남기는 것: 하던 판과 부적 도감, 행운 조각과 영구 해금.
+ * 행운 슬롯이 허브 세이브(core/save.ts의 slot)에 남기는 것: 하던 판과 부적 도감, 행운 조각과 영구 해금, 유물의 단계.
  * 허브 세이브에 들어 있어서 내보내기, 가져오기, 기기 옮기기에 그대로 실려 가고, 기록 초기화로 함께 지워진다.
  *
  * 하던 판은 RunState를 그대로 적는다. RunState에는 운의 씨앗과 차례(seed, spinCount, drawCount)까지 들어 있어서
@@ -9,6 +9,7 @@
  */
 import { normalizeFound, addFound } from './collection';
 import { addPieces, PIECES_MAX, unlock } from './perks';
+import { raise } from './relics';
 import {
   CELLS,
   charmOf,
@@ -23,6 +24,7 @@ import {
   spinsOf,
   SYMBOLS,
   type PerkId,
+  type RelicId,
   type RelicLevels,
   type RunState,
   type Shop,
@@ -46,10 +48,12 @@ export interface SlotSave {
   found: string[];
   /** 하던 판. 없으면 null이다. */
   run: SavedRun | null;
-  /** 가진 행운 조각. 판이 끝날 때 받고, 영구 해금을 여는 데 쓴다(perks.ts). */
+  /** 가진 행운 조각. 판이 끝날 때 받고, 영구 해금을 열고(perks.ts) 유물을 올리는 데(relics.ts) 쓴다. */
   pieces: number;
   /** 열어 둔 영구 해금. PERK_IDS의 차례로 들어 있다. */
   perks: PerkId[];
+  /** 유물의 단계(relics.ts). 1단계 이상인 것만, RELIC_IDS의 차례로 들어 있다. */
+  relics: RelicLevels;
 }
 
 /** 이어 하기와 관련해 화면에 적는 글 */
@@ -68,7 +72,7 @@ export function resumeCaption(run: RunState): string {
 }
 
 export function createSlotSave(): SlotSave {
-  return { found: [], run: null, pieces: 0, perks: [] };
+  return { found: [], run: null, pieces: 0, perks: [], relics: {} };
 }
 
 /**
@@ -248,8 +252,24 @@ function normalizeUnlocked(raw: unknown): PerkId[] {
 }
 
 /**
+ * 유물의 단계: 지금 있는 유물만, 1부터 RELIC_MAX까지의 정수만, RELIC_IDS의 차례로 남긴다.
+ * 없거나(유물이 생기기 전의 세이브) 모양이 맞지 않으면 올린 것이 없다. 하던 판의 유물(readRelics)과 달리
+ * 하나가 맞지 않아도 나머지는 살린다. 맞지 않는 단계(소수, 음수, RELIC_MAX를 넘는 수)는 고쳐 쓰지 않고 0단계로 본다.
+ */
+function normalizeRelics(raw: unknown): RelicLevels {
+  const relics: RelicLevels = {};
+  if (!isObject(raw)) return relics;
+  for (const id of RELIC_IDS) {
+    // 물려받은 이름(toString 같은 것)이 아니라 세이브에 적힌 값만 본다.
+    const level = Object.hasOwn(raw, id) ? raw[id] : undefined;
+    if (isCount(level) && level >= 1 && level <= RELIC_MAX) relics[id] = level;
+  }
+  return relics;
+}
+
+/**
  * 저장소나 가져오기 파일에서 읽은 값을 안전한 SlotSave로 바꾼다.
- * 도감과 해금은 맞는 것만 남기고, 하던 판은 조금이라도 맞지 않으면 버린다. 한쪽이 깨져도 다른 쪽은 살린다.
+ * 도감과 해금과 유물은 맞는 것만 남기고, 하던 판은 조금이라도 맞지 않으면 버린다. 한쪽이 깨져도 다른 쪽은 살린다.
  */
 export function normalizeSlotSave(raw: unknown): SlotSave {
   if (!isObject(raw)) return createSlotSave();
@@ -259,6 +279,7 @@ export function normalizeSlotSave(raw: unknown): SlotSave {
     run: run && isResumable(run) ? { version: RUN_VERSION, run } : null,
     pieces: normalizePieces(raw.pieces),
     perks: normalizeUnlocked(raw.perks),
+    relics: normalizeRelics(raw.relics),
   };
 }
 
@@ -291,4 +312,12 @@ export function withPieces(slot: SlotSave, amount: number): SlotSave {
 export function withPerk(slot: SlotSave, id: PerkId): SlotSave {
   const next = unlock(slot, id);
   return next === slot ? slot : { ...slot, pieces: next.pieces, perks: [...next.perks] };
+}
+
+/**
+ * 조각을 내고 유물 하나를 한 단계 올린 새 SlotSave를 돌려준다. 다 올렸거나 조각이 모자라면 받은 것 그대로다.
+ * 하던 판은 건드리지 않는다. 판은 시작할 때의 단계를 스스로 적어 두고 있다(RunState.relics).
+ */
+export function withRelic(slot: SlotSave, id: RelicId): SlotSave {
+  return raise(slot, id);
 }

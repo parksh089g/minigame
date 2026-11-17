@@ -22,6 +22,7 @@ import {
   type CharmKind,
   type LineKind,
   type PerkId,
+  type RelicId,
   type SymbolKey,
 } from './rules';
 
@@ -96,6 +97,19 @@ export const LOOK = {
   piece: { face: 0xa98cf5, lip: 0x6a52c4, facet: 0xd9ccff, shine: THEME.white },
   /** 영구 해금의 그림이 놓이는 칸 */
   perk: { edge: THEME.lilacDeep, face: THEME.lilacSoft },
+  /** 유물의 그림이 놓이는 칸과, 그림에 쓰는 나무, 쇠, 인주, 질그릇의 색 */
+  relic: {
+    edge: THEME.butterDeep,
+    face: THEME.butterSoft,
+    wood: 0xa9713c,
+    woodDark: 0x74481f,
+    metal: 0x9aa7bd,
+    metalDark: 0x5f6b84,
+    wax: 0xc92a3c,
+    clay: 0xcf8448,
+    clayDark: 0x94552a,
+    shine: THEME.white,
+  },
   /** 부적 그림 위의 표시: 더하기, 빼기 */
   plus: THEME.good,
   minus: THEME.bad,
@@ -904,5 +918,97 @@ export function perkTexture(scene: Phaser.Scene, id: PerkId): string {
     g.fillStyle(LOOK.perk.face, 1);
     g.fillRoundedRect(-half + 2, -half + 2, PERK_BOX - 4, PERK_BOX - 4, 5);
     PERK_ART[id](g);
+  });
+}
+
+// ───────── 유물 ─────────
+
+/** 유물 그림의 크기. 해금 그림과 같아서 두 쪽의 줄이 같은 자리에서 시작한다. */
+export const RELIC_BOX = PERK_BOX;
+
+/** 네모의 네 모서리 */
+function corners(x: number, y: number, width: number, height: number): Point[] {
+  return [
+    { x, y },
+    { x: x + width, y },
+    { x: x + width, y: y + height },
+    { x, y: y + height },
+  ];
+}
+
+/** 유물마다의 그림. 원점이 한가운데다. */
+const RELIC_ART: Readonly<Record<RelicId, (g: Graphics) => void>> = {
+  /** 낡은 저울: 한쪽으로 살짝 기운 접시저울 */
+  scale: (g) => {
+    const look = LOOK.relic;
+    // 받침과 기둥
+    g.fillStyle(look.woodDark, 1);
+    g.fillRoundedRect(-5, 7, 10, 2.6, 1.2);
+    g.fillStyle(look.wood, 1);
+    g.fillRect(-1.2, -6, 2.4, 13.4);
+    // 기운 가로대와 접시를 다는 줄
+    g.lineStyle(2, look.metalDark, 1);
+    g.lineBetween(-7.6, -4.4, 7.6, -6.4);
+    g.lineStyle(1, look.metalDark, 1);
+    g.lineBetween(-7.6, -4.4, -7.6, 2.6);
+    g.lineBetween(7.6, -6.4, 7.6, 0.2);
+    // 접시: 왼쪽이 무거워서 내려가 있다.
+    for (const pan of [
+      { x: -7.6, y: 2.6 },
+      { x: 7.6, y: 0.2 },
+    ]) {
+      fillShape(g, [{ x: -3.4, y: 0 }, { x: 3.4, y: 0 }, { x: 2, y: 2.6 }, { x: -2, y: 2.6 }], pan.x, pan.y, look.metal);
+    }
+    g.fillStyle(look.metal, 1);
+    g.fillCircle(0, -6.2, 2);
+  },
+  /** 상인의 도장: 둥근 손잡이가 달린 나무 도장과 붉은 인주 */
+  seal: (g) => {
+    const look = LOOK.relic;
+    g.fillStyle(look.wood, 1);
+    g.fillRect(-2, -3.4, 4, 6);
+    g.fillCircle(0, -5, 4);
+    g.fillStyle(look.shine, 0.7);
+    g.fillCircle(-1.4, -6.4, 1.1);
+    g.fillStyle(look.woodDark, 1);
+    g.fillRoundedRect(-6.6, 1.6, 13.2, 4.8, 1.6);
+    g.fillStyle(look.wax, 1);
+    g.fillRoundedRect(-6.6, 5.6, 13.2, 3, 1.2);
+  },
+  /** 대장장이 망치: 비스듬히 든 쇠망치 */
+  hammer: (g) => {
+    const look = LOOK.relic;
+    const tilt = -Math.PI / 4.4;
+    fillShape(g, turned(corners(-1.5, -3, 3, 12.6), tilt), -0.8, 0.8, look.wood);
+    fillShape(g, turned(corners(-6.6, -8.6, 13.2, 6.6), tilt), -0.8, 0.8, look.metalDark);
+    fillShape(g, turned(corners(-6.6, -8.6, 13.2, 4.4), tilt), -0.8, 0.8, look.metal);
+    fillShape(g, turned(corners(-5.4, -7.8, 4, 1.4), tilt), -0.8, 0.8, look.shine);
+  },
+  /** 금화 항아리: 금화가 넘치는 질항아리 */
+  jar: (g) => {
+    const look = LOOK.relic;
+    drawCoin(g, -2.4, -7, 3);
+    drawCoin(g, 2.6, -7.6, 3);
+    g.fillStyle(look.clayDark, 1);
+    g.fillEllipse(0, 3.2, 17, 13.6);
+    g.fillStyle(look.clay, 1);
+    g.fillEllipse(0, 2.4, 17, 12.6);
+    g.fillRect(-4.6, -5.4, 9.2, 4);
+    g.fillStyle(look.clayDark, 1);
+    g.fillRoundedRect(-6.2, -6.6, 12.4, 3, 1.4);
+    g.fillStyle(look.shine, 0.55);
+    g.fillEllipse(-4.4, 0.6, 2.4, 4.4);
+  },
+};
+
+/** 유물 쪽의 줄에 놓는 그림 */
+export function relicTexture(scene: Phaser.Scene, id: RelicId): string {
+  return bakeShape(scene, `candy-slot-relic-${id}`, { width: RELIC_BOX, height: RELIC_BOX }, (g) => {
+    const half = RELIC_BOX / 2;
+    g.fillStyle(LOOK.relic.edge, 1);
+    g.fillRoundedRect(-half, -half, RELIC_BOX, RELIC_BOX, 7);
+    g.fillStyle(LOOK.relic.face, 1);
+    g.fillRoundedRect(-half + 2, -half + 2, RELIC_BOX - 4, RELIC_BOX - 4, 5);
+    RELIC_ART[id](g);
   });
 }

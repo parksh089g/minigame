@@ -9,13 +9,17 @@ import {
   reroll,
   settleRound,
   PERK_IDS,
+  RELIC_IDS,
+  RELIC_MAX,
   SLOTS,
   spin,
   spinsOf,
   SYMBOLS,
+  type RelicLevels,
   type RunState,
 } from './rules';
 import { PERKS, PIECES_MAX } from './perks';
+import { RELIC_FULL_PRICE, relicPrice } from './relics';
 import {
   createSlotSave,
   isResumable,
@@ -28,6 +32,7 @@ import {
   savedRunOf,
   withFound,
   withPerk,
+  withRelic,
   withPieces,
   withRun,
   type SavedRun,
@@ -264,18 +269,24 @@ describe('normalizeSlotSave', () => {
     for (const raw of [undefined, null, 'slot', 3, []]) {
       expect(normalizeSlotSave(raw)).toEqual(createSlotSave());
     }
-    expect(createSlotSave()).toEqual({ found: [], run: null, pieces: 0, perks: [] });
+    expect(createSlotSave()).toEqual({ found: [], run: null, pieces: 0, perks: [], relics: {} });
   });
 
   it('맞는 것은 그대로 둔다', () => {
-    const slot = { found: ['piggy', 'wide'], run: packRun(shopping('2026-11-16')), pieces: 37, perks: ['purse', 'hold'] };
+    const slot = {
+      found: ['piggy', 'wide'],
+      run: packRun(shopping('2026-11-16')),
+      pieces: 37,
+      perks: ['purse', 'hold'],
+      relics: { scale: 1, hammer: RELIC_MAX },
+    };
     expect(slot.run).not.toBeNull();
     expect(normalizeSlotSave(JSON.parse(JSON.stringify(slot)))).toEqual(slot);
   });
 
   it('하던 판이 깨졌으면 판만 버리고 도감은 살린다', () => {
     const raw = { found: ['piggy', 'gone', 'piggy'], run: broken(spun(newRun(), 1), { coin: -3 }) };
-    expect(normalizeSlotSave(raw)).toEqual({ found: ['piggy'], run: null, pieces: 0, perks: [] });
+    expect(normalizeSlotSave(raw)).toEqual({ found: ['piggy'], run: null, pieces: 0, perks: [], relics: {} });
   });
 
   it('도감이 깨졌어도 하던 판은 살린다', () => {
@@ -285,6 +296,7 @@ describe('normalizeSlotSave', () => {
       run: packRun(run),
       pieces: 0,
       perks: [],
+      relics: {},
     });
   });
 
@@ -295,6 +307,7 @@ describe('normalizeSlotSave', () => {
       run: packRun(run),
       pieces: 0,
       perks: [],
+      relics: {},
     });
   });
 
@@ -319,10 +332,43 @@ describe('normalizeSlotSave', () => {
     for (const bad of ['slot', { slot: true }, 4, null, true]) expect(perksOf(bad), String(bad)).toEqual([]);
   });
 
+  it('유물은 지금 있는 것의 1부터 RELIC_MAX까지의 정수 단계만, 정해진 차례로 남긴다', () => {
+    const relicsOf = (relics: unknown): RelicLevels => normalizeSlotSave({ found: [], run: null, relics }).relics;
+    expect(relicsOf({})).toEqual({});
+    expect(relicsOf({ jar: 2, scale: 7 })).toEqual({ scale: 7, jar: 2 });
+    expect(Object.keys(relicsOf({ jar: 2, hammer: 1, seal: 3, scale: 7 }))).toEqual([...RELIC_IDS]);
+    expect(relicsOf({ scale: 1, seal: RELIC_MAX })).toEqual({ scale: 1, seal: RELIC_MAX });
+    // 0단계는 적지 않는다. 모르는 유물은 버리고, 맞지 않는 단계는 0단계로 본다(고쳐 쓰지 않는다).
+    expect(relicsOf({ scale: 0, seal: 4, nope: 3 })).toEqual({ seal: 4 });
+    for (const bad of [-1, 2.5, RELIC_MAX + 1, 1e9, Number.NaN, Number.POSITIVE_INFINITY, '3', null, [3], { level: 3 }, true]) {
+      expect(relicsOf({ scale: bad, jar: 5 }), String(bad)).toEqual({ jar: 5 });
+    }
+    for (const bad of ['scale', ['scale'], [3, 4], 4, null, true, undefined]) expect(relicsOf(bad), String(bad)).toEqual({});
+    // 물려받은 이름은 유물이 아니다.
+    expect(relicsOf(Object.create({ scale: 3 }))).toEqual({});
+  });
+
+  it('유물이 생기기 전의 세이브는 유물 없음으로 읽고, 조각과 해금은 살린다', () => {
+    expect(normalizeSlotSave({ found: ['piggy'], run: null, pieces: 9, perks: ['purse'] })).toEqual({
+      found: ['piggy'],
+      run: null,
+      pieces: 9,
+      perks: ['purse'],
+      relics: {},
+    });
+  });
+
+  it('유물을 올린 채로 시작한 판은 지금의 단계와 상관없이 그대로 읽는다', () => {
+    const run = spun(newRun(null, [], { scale: 3, jar: 1 }), 1);
+    const read = normalizeSlotSave({ found: [], run: stored(run), pieces: 3, relics: 'broken' });
+    expect(read.relics).toEqual({});
+    expect(read.run?.run.relics).toEqual({ scale: 3, jar: 1 });
+  });
+
   it('조각이나 해금이 깨졌어도 도감과 하던 판은 살린다', () => {
     const run = spun(newRun(), 1);
     const raw = { found: ['piggy'], run: stored(run), pieces: 'many', perks: 'all' };
-    expect(normalizeSlotSave(raw)).toEqual({ found: ['piggy'], run: packRun(run), pieces: 0, perks: [] });
+    expect(normalizeSlotSave(raw)).toEqual({ found: ['piggy'], run: packRun(run), pieces: 0, perks: [], relics: {} });
   });
 
   it('해금을 켠 채로 시작한 판은 지금 열어 둔 해금과 상관없이 그대로 읽는다', () => {
@@ -419,6 +465,51 @@ describe('조각과 해금을 세이브에 적기', () => {
     const later = withFound(withRun(paid, null), 'wide');
     expect(later.pieces).toBe(paid.pieces);
     expect(later.perks).toEqual(['reroll']);
+  });
+
+  it('조각을 내고 유물을 한 단계 올린다. 조각이 모자라거나 다 올렸으면 그대로다', () => {
+    const first = relicPrice(0)!;
+    const poor = withPieces(createSlotSave(), first - 1);
+    expect(withRelic(poor, 'scale')).toBe(poor);
+    const rich = withPieces(poor, 1 + relicPrice(1)!);
+    const one = withRelic(rich, 'scale');
+    expect(one.relics).toEqual({ scale: 1 });
+    expect(one.pieces).toBe(rich.pieces - first);
+    // 원본은 그대로다.
+    expect(rich.relics).toEqual({});
+    const two = withRelic(one, 'scale');
+    expect(two.relics).toEqual({ scale: 2 });
+    expect(two.pieces).toBe(0);
+    expect(withRelic(two, 'scale')).toBe(two);
+
+    // 끝까지 올리면 더 오르지 않고, 조각도 그대로다.
+    let slot = withPieces(createSlotSave(), RELIC_FULL_PRICE + 30);
+    for (let level = 1; level <= RELIC_MAX; level += 1) {
+      slot = withRelic(slot, 'jar');
+      expect(slot.relics.jar).toBe(level);
+    }
+    expect(slot.pieces).toBe(30);
+    expect(withRelic(slot, 'jar')).toBe(slot);
+  });
+
+  it('유물을 올려도 도감과 하던 판, 해금은 그대로이고, 하던 판은 시작할 때의 단계를 따른다', () => {
+    const run = spun(newRun(null, ['purse'], { seal: 2 }), 1);
+    const base = withPerk(withPieces(withRun(withFound(createSlotSave(), 'piggy'), run), 60), 'purse');
+    const raised = withRelic(withRelic(base, 'seal'), 'hammer');
+    expect(raised.found).toEqual(['piggy']);
+    expect(raised.perks).toEqual(['purse']);
+    expect(raised.relics).toEqual({ seal: 1, hammer: 1 });
+    expect(savedRunOf(raised)).toEqual(run);
+    expect(savedRunOf(raised)?.relics).toEqual({ seal: 2 });
+    const later = withFound(withRun(raised, null), 'wide');
+    expect(later.relics).toEqual(raised.relics);
+    expect(later.pieces).toBe(raised.pieces);
+  });
+
+  it('세이브를 문자열로 옮겼다가 읽어도 유물의 단계가 그대로다', () => {
+    const slot = withRelic(withRelic(withRelic(withPieces(createSlotSave(), 100), 'jar'), 'scale'), 'jar');
+    expect(slot.relics).toEqual({ scale: 1, jar: 2 });
+    expect(normalizeSlotSave(JSON.parse(JSON.stringify(slot)))).toEqual(slot);
   });
 
   it('세이브를 문자열로 옮겼다가 읽어도 조각과 해금이 그대로다', () => {

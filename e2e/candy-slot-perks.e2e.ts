@@ -1,8 +1,10 @@
 /**
- * 행운 슬롯의 영구 해금을 화면에서 점검한다: 판이 끝나면 넘긴 라운드만큼 조각을 받는지, 해금 창에서 조각이 넉넉할 때만
+ * 행운 슬롯의 영구 해금과 유물을 화면에서 점검한다: 판이 끝나면 넘긴 라운드만큼 조각을 받는지, 해금 창에서 조각이 넉넉할 때만
  * 열리는지, 연 해금이 여느 판에 듣고(여섯 자리, 두 번 잠그기, 금화 더, 첫 다시 뽑기 공짜) 오늘의 판에는 듣지 않는지,
  * 조각과 해금이 앱을 다시 열어도 남는지, 해금 창과 여섯 자리의 줄에서 글자가 가리거나 화면 밖으로 나가지 않는지 본다.
- * 조각이나 해금을 가진 채로 시작해야 하는 점검은 앱을 열기 전에 기기의 세이브에 넣어 둔다.
+ * 유물은 창의 "유물" 쪽에서 조각으로 단계가 오르는지, 조각이 모자라거나 다 올렸으면 오르지 않는지, 올린 단계가 여느 판에
+ * 듣고(낮아진 목표) 오늘의 판과 이어 하는 판에는 듣지 않는지, 앱을 다시 열어도 남는지 본다.
+ * 조각이나 해금, 유물을 가진 채로 시작해야 하는 점검은 앱을 열기 전에 기기의 세이브에 넣어 둔다.
  */
 import './app-globals';
 import { expect, type Page } from '@playwright/test';
@@ -25,18 +27,37 @@ import {
   type PerkState,
 } from '../src/games/candy-slot/perks';
 import {
+  effectLine,
+  keepLabel,
+  keepNote,
+  LEVEL_SUM_MAX,
+  levelText,
+  raisedNotice,
+  RELIC_TEXT,
+  relicOf,
+  relicPrice,
+  RELICS,
+  relicShortNotice,
+  type KeepState,
+} from '../src/games/candy-slot/relics';
+import {
   charmOf,
   CHARMS,
   HOLDS_PER_ROUND,
   holdsOf,
   PERK_IDS,
   PERK_PURSE,
+  RELIC_MAX,
   REROLL_COST,
   SIZE,
   SLOTS,
   SLOTS_MAX,
   START_COIN,
+  targetFor,
+  targetOf,
   type PerkId,
+  type RelicId,
+  type RelicLevels,
   type RunState,
 } from '../src/games/candy-slot/rules';
 import { RESUME_TEXT, type SlotSave } from '../src/games/candy-slot/save';
@@ -67,6 +88,7 @@ interface SlotView {
   time: { now: number };
   shopGuardUntil: number;
   openShop(): void;
+  refreshNumbers(): void;
   settle(): void;
   trySpin(): void;
   finishFromPause(): void;
@@ -112,7 +134,7 @@ async function shown(page: Page, text: string, scene: string = KEY): Promise<boo
  * 앱을 열기 전에 기기(IndexedDB)의 허브 세이브에 행운 슬롯의 몫을 넣어 둔다. 앱이 뜨지 않는 같은 주소의 파일을 열고 넣어서,
  * 앱이 저장하는 것과 엇갈리지 않는다. 저장하는 곳과 이름은 core/store.ts와 같다.
  */
-async function seedSlot(page: Page, slot: Partial<PerkState>): Promise<void> {
+async function seedSlot(page: Page, slot: Partial<KeepState>): Promise<void> {
   await page.goto('/licenses/Jua-OFL.txt');
   await page.evaluate(
     (value) =>
@@ -130,7 +152,7 @@ async function seedSlot(page: Page, slot: Partial<PerkState>): Promise<void> {
           tx.onerror = () => reject(tx.error);
         };
       }),
-    { version: SAVE_VERSION, games: {}, slot: { found: [], run: null, pieces: 0, perks: [], ...slot } },
+    { version: SAVE_VERSION, games: {}, slot: { found: [], run: null, pieces: 0, perks: [], relics: {}, ...slot } },
   );
 }
 
@@ -169,6 +191,12 @@ async function storedPerks(page: Page): Promise<PerkState | null> {
   return slot ? { pieces: slot.pieces, perks: slot.perks } : null;
 }
 
+/** 기기에 저장된 조각과 유물의 단계 */
+async function storedRelics(page: Page): Promise<{ pieces: number; relics: RelicLevels } | null> {
+  const slot = await storedSlot(page);
+  return slot ? { pieces: slot.pieces, relics: slot.relics } : null;
+}
+
 /** 페이지를 새로 열고 행운 슬롯을 다시 연다(앱을 껐다 켠 것과 같다). */
 async function reopen(page: Page): Promise<void> {
   await openApp(page);
@@ -194,6 +222,7 @@ function spinRun(round: number, patch: Partial<RunState> = {}): RunState {
     spinCount: round * 6 - 2,
     drawCount: round - 1,
     perks,
+    relics: {},
     ...patch,
   };
 }
@@ -217,6 +246,18 @@ function setRun(page: Page, run: RunState): Promise<void> {
   return page.evaluate(
     ([key, next]) => {
       (window.__pocketArcade?.scene.getScene(key) as unknown as SlotView).run = next;
+    },
+    [KEY, run] as const,
+  );
+}
+
+/** 하던 판을 바꿔 놓고 화면의 수(목표, 금화, 남은 스핀)를 그 판에 맞게 다시 적는다. */
+function showRun(page: Page, run: RunState): Promise<void> {
+  return page.evaluate(
+    ([key, next]) => {
+      const scene = window.__pocketArcade?.scene.getScene(key) as unknown as SlotView;
+      scene.run = next;
+      scene.refreshNumbers();
     },
     [KEY, run] as const,
   );
@@ -333,10 +374,25 @@ function panelTexts(page: Page): Promise<string[]> {
   );
 }
 
-/** 시작 화면의 해금 버튼을 눌러 해금 창을 연다. */
-async function openPanel(page: Page, state: PerkState): Promise<void> {
-  await tapText(page, KEY, perkLabel(state));
+/**
+ * 시작 화면의 해금 버튼을 눌러 해금과 유물의 창을 연다. 해금이 남아 있으면 해금 쪽이, 다 열었으면 유물 쪽이 먼저 보인다.
+ */
+async function openPanel(page: Page, state: PerkState & { relics?: RelicLevels }): Promise<void> {
+  await tapText(page, KEY, keepLabel({ relics: {}, ...state }));
   await expect.poll(() => shown(page, PERK_TEXT.noDaily), { ...WAIT, message: '해금 창이 열려야 한다' }).toBe(true);
+}
+
+/** 창의 머리글에서 쪽의 이름을 눌러 그 쪽으로 바꾼다. 그 쪽의 안내(hint)가 보일 때까지 기다린다. */
+async function showTab(page: Page, title: string, hint: string): Promise<void> {
+  await tapText(page, KEY, title);
+  await expect.poll(() => shown(page, hint), { ...WAIT, message: `${title} 쪽이 보여야 한다` }).toBe(true);
+}
+
+/** 유물 쪽에서 그 유물의 줄 오른쪽에 있는 값 버튼을 누른다. 버튼은 이름과 같은 줄의, 창의 오른쪽 끝에 놓인다. */
+async function tapRaise(page: Page, id: RelicId): Promise<void> {
+  const name = await textPoint(page, KEY, relicOf(id).name);
+  if (!name) throw new Error(`${relicOf(id).name}의 줄이 보이지 않는다`);
+  await tapAt(page, PANEL.right - 32, name.y + 6);
 }
 
 async function closePanel(page: Page): Promise<void> {
@@ -421,10 +477,11 @@ it('행운 슬롯 해금: 창에서 조각이 넉넉한 것만 열리고, 연 �
   await openPanel(page, start);
   expect(await hiddenTexts(page, KEY, { from: PERK_TEXT.title }), '해금 창').toEqual([]);
   expect(await panelProblems(page), '해금 창의 글자').toEqual([]);
-  // 머리글, 가진 조각, 해금마다 이름과 설명과 값, 조각을 받는 법, 오늘의 판에는 듣지 않는다는 줄, 닫기
+  // 두 쪽의 이름, 가진 조각, 해금마다 이름과 설명과 값, 조각을 받는 법, 오늘의 판에는 듣지 않는다는 줄, 닫기
   expect([...(await panelTexts(page))].sort(), '해금 창에 적힌 것').toEqual(
     [
       PERK_TEXT.title,
+      RELIC_TEXT.title,
       String(start.pieces),
       ...PERKS.flatMap((perk) => [perk.name, perk.description, String(perk.price)]),
       PERK_TEXT.how,
@@ -494,11 +551,15 @@ it('행운 슬롯 해금: 다 연 여느 판은 여섯 자리와 두 번 잠그�
   let now = await view(page);
   expect(now.run).toMatchObject({ perks: ALL, seed: null, coin: START_COIN + PERK_PURSE, holdsLeft: HOLDS_PER_ROUND + 1 });
   expectSlotRow(now, SLOTS_MAX, '여느 판');
-  expect(await shown(page, perkLabel(owned))).toBe(true);
+  // 해금을 다 열었으면 버튼에는 유물의 단계가 적히고, 창은 유물 쪽부터 보인다.
+  expect(await shown(page, `${RELIC_TEXT.title} 0/${LEVEL_SUM_MAX}`)).toBe(true);
+  expect(await shown(page, perkLabel(owned)), '해금의 수는 더 적지 않는다').toBe(false);
   expect(await shown(page, activeNote(owned, false) ?? ''), '켜진 해금을 알리는 한 줄').toBe(true);
   expect(await hiddenTexts(page, KEY), '여섯 자리의 시작 화면').toEqual([]);
-  // 다 열었으면 창에 값이 하나도 없고, 다 열었다고 적힌다.
   await openPanel(page, owned);
+  expect(await shown(page, RELIC_TEXT.idle), '유물 쪽이 먼저 보인다').toBe(true);
+  // 해금 쪽: 다 열었으면 값이 하나도 없고, 다 열었다고 적힌다.
+  await showTab(page, PERK_TEXT.title, PERK_TEXT.all);
   const texts = await panelTexts(page);
   expect(texts).toContain(PERK_TEXT.all);
   expect(texts.filter((text) => text === PERK_TEXT.open), '줄마다 열림이라고 적힌다').toHaveLength(PERKS.length);
@@ -656,4 +717,223 @@ it('행운 슬롯 해금: 이어 하는 판은 시작할 때의 해금을 지키
   expectSlotRow(fresh, SLOTS_MAX, '새 판');
   expect(await storedPerks(page)).toEqual(after);
   expect(await hiddenTexts(page, KEY), '여섯 자리로 시작한 새 판').toEqual([]);
+});
+
+it('행운 슬롯 유물: 조각으로 단계가 오르고, 모자라면 오르지 않고, 다시 열어도 남는다', async ({ page }) => {
+  it.slow();
+  const first = relicPrice(0);
+  const second = relicPrice(1);
+  if (first === null || second === null) throw new Error('값이 없는 단계');
+  // 낡은 저울을 두 번 올리고 나면 다른 유물의 첫 단계에 한 개가 모자란 만큼의 조각
+  const start = { pieces: first + second + first - 1, perks: [] as PerkId[], relics: {} as RelicLevels };
+  await seedSlot(page, { pieces: start.pieces });
+  await reopen(page);
+  expect((await view(page)).run.relics, '아직 올린 유물이 없다').toEqual({});
+
+  // 해금이 남아 있으면 해금 쪽이 먼저 보인다. 머리글의 "유물"을 누르면 유물 쪽으로 바뀐다.
+  await openPanel(page, start);
+  expect(await shown(page, PERK_TEXT.how)).toBe(true);
+  await showTab(page, RELIC_TEXT.title, RELIC_TEXT.idle);
+  expect(await shown(page, PERK_TEXT.how), '해금 쪽의 줄은 치워진다').toBe(false);
+  expect(await hiddenTexts(page, KEY, { from: PERK_TEXT.title }), '유물 쪽').toEqual([]);
+  expect(await panelProblems(page), '유물 쪽의 글자').toEqual([]);
+  // 두 쪽의 이름, 가진 조각, 유물마다 이름과 단계와 효과와 값, 설명 칸의 안내, 오늘의 판에는 듣지 않는다는 줄, 닫기
+  expect([...(await panelTexts(page))].sort(), '유물 쪽에 적힌 것').toEqual(
+    [
+      PERK_TEXT.title,
+      RELIC_TEXT.title,
+      String(start.pieces),
+      ...RELICS.flatMap((relic) => [relic.name, levelText(0), effectLine(relic.id, 0), String(first)]),
+      RELIC_TEXT.idle,
+      PERK_TEXT.noDaily,
+      PERK_TEXT.close,
+    ].sort(),
+  );
+
+  // 줄의 왼쪽을 누르면 설명만 보이고 조각은 그대로다.
+  const scale = relicOf('scale');
+  await tapText(page, KEY, scale.name);
+  await expect.poll(() => shown(page, scale.description), { ...WAIT, message: '설명이 보여야 한다' }).toBe(true);
+  expect(await shown(page, RELIC_TEXT.idle), '안내 대신 설명이 적힌다').toBe(false);
+  expect(await storedRelics(page)).toEqual({ pieces: start.pieces, relics: {} });
+  expect(await hiddenTexts(page, KEY, { from: PERK_TEXT.title }), '설명이 보이는 유물 쪽').toEqual([]);
+  expect(await panelProblems(page), '설명이 보이는 유물 쪽의 글자').toEqual([]);
+
+  // 값 버튼을 누르면 조각을 내고 한 단계 오르고, 아직 돌리지 않은 판에 바로 듣는다.
+  await tapRaise(page, 'scale');
+  await expect
+    .poll(() => storedRelics(page), { ...WAIT, message: '올린 단계가 기기에 저장되어야 한다' })
+    .toEqual({ pieces: start.pieces - first, relics: { scale: 1 } });
+  await expect.poll(() => shown(page, raisedNotice('scale', 1)), WAIT).toBe(true);
+  let texts = await panelTexts(page);
+  expect(texts, '단계가 오른다').toContain(levelText(1));
+  expect(texts, '다음 단계의 효과').toContain(effectLine('scale', 1));
+  expect(texts, '앞 단계의 효과는 지워진다').not.toContain(effectLine('scale', 0));
+  expect(texts, '다음 단계의 값').toContain(String(second));
+  expect(texts, '줄어든 조각').toContain(String(start.pieces - first));
+  expect((await view(page)).run, '방금 올린 유물이 켜진 판').toMatchObject({ relics: { scale: 1 }, spinCount: 0, seed: null });
+
+  // 한 번 더 올리면 둘째 단계의 값을 낸다.
+  await tapRaise(page, 'scale');
+  const after = { pieces: start.pieces - first - second, perks: [] as PerkId[], relics: { scale: 2 } as RelicLevels };
+  await expect.poll(() => storedRelics(page), WAIT).toEqual({ pieces: after.pieces, relics: after.relics });
+  await expect.poll(() => shown(page, raisedNotice('scale', 2)), WAIT).toBe(true);
+
+  // 조각이 한 개 모자란 유물은 오르지 않고, 얼마나 모자란지 알린다.
+  await tapRaise(page, 'jar');
+  await expect.poll(() => shown(page, relicShortNotice(after, 'jar')), { ...WAIT, message: '모자란 조각을 알려야 한다' }).toBe(true);
+  expect(await storedRelics(page)).toEqual({ pieces: after.pieces, relics: after.relics });
+  expect((await view(page)).run.relics).toEqual(after.relics);
+  // 톡 튀고 흔들리는 움직임이 끝난 뒤에 본다.
+  await expect.poll(() => panelProblems(page), { ...WAIT, message: '올린 뒤의 유물 쪽의 글자' }).toEqual([]);
+  expect(await hiddenTexts(page, KEY, { from: PERK_TEXT.title }), '올린 뒤의 유물 쪽').toEqual([]);
+
+  // 닫으면 시작 화면의 한 줄이 켜진 유물을 알린다.
+  await closePanel(page);
+  const note = keepNote(after, false) ?? '';
+  expect(await shown(page, note), `"${note}"`).toBe(true);
+  expect(await hiddenTexts(page, KEY), '유물을 올린 뒤의 시작 화면').toEqual([]);
+
+  // 앱을 다시 열어도 조각과 단계가 그대로이고, 새 판은 그 단계로 시작한다.
+  await reopen(page);
+  await expect.poll(() => shown(page, note), WAIT).toBe(true);
+  expect(await storedRelics(page)).toEqual({ pieces: after.pieces, relics: after.relics });
+  expect((await view(page)).run).toMatchObject({ relics: after.relics, spinCount: 0 });
+  await openPanel(page, after);
+  await showTab(page, RELIC_TEXT.title, RELIC_TEXT.idle);
+  texts = await panelTexts(page);
+  expect(texts).toContain(levelText(2));
+  expect(texts).toContain(effectLine('scale', 2));
+  expect(texts).toContain(String(after.pieces));
+  expect(await hiddenTexts(page, KEY, { from: PERK_TEXT.title }), '다시 연 유물 쪽').toEqual([]);
+});
+
+it('행운 슬롯 유물: 끝까지 올린 유물은 "다 올림"이 되고 조각이 넘쳐도 더 오르지 않는다', async ({ page }) => {
+  it.slow();
+  const last = relicPrice(RELIC_MAX - 1);
+  if (last === null) throw new Error('값이 없는 단계');
+  // 해금은 다 열었고, 낡은 저울은 한 단계가 남았고, 상인의 도장은 다 올렸다.
+  const owned = { pieces: last + 50, perks: ALL, relics: { scale: RELIC_MAX - 1, seal: RELIC_MAX } as RelicLevels };
+  await seedSlot(page, owned);
+  await reopen(page);
+  expect((await view(page)).run.relics).toEqual(owned.relics);
+  expect(await shown(page, `${RELIC_TEXT.title} ${RELIC_MAX * 2 - 1}/${LEVEL_SUM_MAX}`), '버튼에 단계의 합이 적힌다').toBe(true);
+  expect(await hiddenTexts(page, KEY), '유물을 올려 둔 시작 화면').toEqual([]);
+
+  // 해금을 다 열었으면 창은 유물 쪽부터 보인다.
+  await openPanel(page, owned);
+  expect(await shown(page, RELIC_TEXT.idle)).toBe(true);
+  let texts = await panelTexts(page);
+  expect(texts.filter((text) => text === RELIC_TEXT.max), '다 올린 유물은 하나다').toHaveLength(1);
+  expect(texts.filter((text) => text === RELIC_TEXT.end)).toHaveLength(1);
+  expect(texts, '다 올린 유물은 지금 값만 적는다').toContain(effectLine('seal', RELIC_MAX));
+  expect(texts).toContain(effectLine('scale', RELIC_MAX - 1));
+  expect(texts).toContain(String(last));
+  expect(await hiddenTexts(page, KEY, { from: PERK_TEXT.title }), '다 올린 유물이 있는 유물 쪽').toEqual([]);
+  expect(await panelProblems(page), '다 올린 유물이 있는 유물 쪽의 글자').toEqual([]);
+
+  // 마지막 단계를 올리면 값 대신 "다 올림"이 적힌다.
+  await tapRaise(page, 'scale');
+  const full = { pieces: 50, relics: { ...owned.relics, scale: RELIC_MAX } };
+  await expect.poll(() => storedRelics(page), { ...WAIT, message: '마지막 단계가 저장되어야 한다' }).toEqual(full);
+  await expect.poll(() => shown(page, raisedNotice('scale', RELIC_MAX)), WAIT).toBe(true);
+  texts = await panelTexts(page);
+  expect(texts.filter((text) => text === RELIC_TEXT.max), '다 올린 유물이 둘이 된다').toHaveLength(2);
+  expect(texts.filter((text) => text === RELIC_TEXT.end)).toHaveLength(2);
+  expect(texts).toContain(effectLine('scale', RELIC_MAX));
+  expect(texts, '다 올린 줄에는 값이 없다').not.toContain(String(last));
+
+  // 다 올린 유물은 조각이 남아 있어도 더 오르지 않는다. 눌러도 조각이 줄지 않는다.
+  await tapRaise(page, 'scale');
+  await expect.poll(() => shown(page, RELIC_TEXT.maxed), { ...WAIT, message: '끝까지 올렸다고 알려야 한다' }).toBe(true);
+  await tapRaise(page, 'seal');
+  expect(await storedRelics(page)).toEqual(full);
+  expect((await view(page)).run.relics).toEqual(full.relics);
+  await expect.poll(() => panelProblems(page), { ...WAIT, message: '끝까지 올린 뒤의 글자' }).toEqual([]);
+  expect(await hiddenTexts(page, KEY, { from: PERK_TEXT.title }), '끝까지 올린 뒤의 유물 쪽').toEqual([]);
+
+  await closePanel(page);
+  await expect.poll(() => shown(page, `${RELIC_TEXT.title} ${RELIC_MAX * 2}/${LEVEL_SUM_MAX}`), WAIT).toBe(true);
+  expect(await hiddenTexts(page, KEY), '끝까지 올린 뒤의 시작 화면').toEqual([]);
+});
+
+it('행운 슬롯 유물: 여느 판은 올린 단계로 시작해 목표가 낮아지고, 오늘의 판에는 듣지 않는다', async ({ page }) => {
+  it.slow();
+  const owned = { pieces: 0, perks: [] as PerkId[], relics: { scale: RELIC_MAX, jar: 3 } as RelicLevels };
+  await seedSlot(page, owned);
+  await reopen(page);
+
+  // 여느 판: 올린 단계가 판에 적혀 있다.
+  let now = await view(page);
+  expect(now.run).toMatchObject({ relics: owned.relics, seed: null, perks: [] });
+  const note = keepNote(owned, false) ?? '';
+  expect(await shown(page, note), `"${note}"`).toBe(true);
+  expect(await hiddenTexts(page, KEY), '유물이 켜진 시작 화면').toEqual([]);
+
+  // 목표가 큰 여덟째 라운드로 가면, 낡은 저울만큼 낮아진 목표가 적힌다.
+  const round = 8;
+  const low = targetFor(now.run, round);
+  expect(low, '낡은 저울을 다 올리면 여덟째 라운드의 목표가 낮아진다').toBeLessThan(targetOf(round));
+  await showRun(page, spinRun(round, { relics: now.run.relics }));
+  await expect.poll(() => shown(page, `0 / ${low}`), { ...WAIT, message: '낮아진 목표가 적혀야 한다' }).toBe(true);
+  expect(await shown(page, `0 / ${targetOf(round)}`)).toBe(false);
+
+  // 오늘의 판: 누구나 같은 조건이라 유물이 듣지 않는다. 같은 라운드의 목표가 그대로다.
+  await showRun(page, now.run);
+  await tapText(page, KEY, DAILY_LABEL.name);
+  await expect.poll(async () => (await view(page)).run.seed, { ...WAIT, message: '오늘의 판으로 바뀌어야 한다' }).not.toBeNull();
+  now = await view(page);
+  expect(now.run.relics, '오늘의 판에는 유물이 없다').toEqual({});
+  const dailyNote = keepNote(owned, true) ?? '';
+  await expect.poll(() => shown(page, dailyNote), { ...WAIT, message: '유물 없이 한다는 한 줄' }).toBe(true);
+  expect(await shown(page, note)).toBe(false);
+  await expect.poll(() => hiddenTexts(page, KEY), { ...WAIT, message: '오늘의 판의 시작 화면' }).toEqual([]);
+  const daily = now.run;
+  await showRun(page, spinRun(round, { seed: daily.seed, relics: daily.relics }));
+  await expect.poll(() => shown(page, `0 / ${targetOf(round)}`), { ...WAIT, message: '오늘의 판의 목표는 그대로다' }).toBe(true);
+  expect(await shown(page, `0 / ${low}`)).toBe(false);
+
+  // 여느 판으로 돌아오면 다시 켜진다.
+  await showRun(page, daily);
+  await tapText(page, KEY, DAILY_LABEL.back);
+  await expect.poll(async () => (await view(page)).run.seed, { ...WAIT, message: '여느 판으로 돌아가야 한다' }).toBeNull();
+  expect((await view(page)).run.relics).toEqual(owned.relics);
+  expect(await storedRelics(page), '단계는 그대로 남아 있다').toEqual({ pieces: 0, relics: owned.relics });
+});
+
+it('행운 슬롯 유물: 이어 하는 판은 시작할 때의 단계를 지키고, 새 판은 지금의 단계로 시작한다', async ({ page }) => {
+  it.slow();
+  const next = relicPrice(2);
+  if (next === null) throw new Error('값이 없는 단계');
+  const start = { pieces: next, perks: [] as PerkId[], relics: { scale: 2 } as RelicLevels };
+  await seedSlot(page, start);
+  await reopen(page);
+
+  // 낡은 저울 2단계로 시작한 판을 한 번 돌리고 두고 간다.
+  await spinOnce(page);
+  await expect.poll(async () => (await storedSlot(page))?.run?.run.spinCount, { ...WAIT, message: '하던 판이 저장되어야 한다' }).toBe(1);
+  const left = (await view(page)).run;
+  expect(left.relics).toEqual({ scale: 2 });
+
+  // 다시 열어 이어 할지 묻는 화면에서 한 단계 올린다. 두고 간 판은 그대로다.
+  await reopen(page);
+  await expect.poll(() => shown(page, RESUME_TEXT.resume), WAIT).toBe(true);
+  await openPanel(page, start);
+  await showTab(page, RELIC_TEXT.title, RELIC_TEXT.idle);
+  await tapRaise(page, 'scale');
+  await expect.poll(() => storedRelics(page), { ...WAIT, message: '올린 단계가 저장되어야 한다' }).toEqual({ pieces: 0, relics: { scale: 3 } });
+  expect((await storedSlot(page))?.run?.run, '두고 간 판은 그대로다').toEqual(left);
+  await closePanel(page);
+  expect(await hiddenTexts(page, KEY), '유물을 올린 뒤의 이어 할지 묻는 화면').toEqual([]);
+
+  // 이어 한 판은 시작할 때의 단계 그대로다.
+  await tapText(page, KEY, RESUME_TEXT.resume);
+  await expect.poll(async () => (await view(page)).run, { ...WAIT, message: '두고 간 판이 이어져야 한다' }).toEqual(left);
+
+  // 다시 열어 새 판을 고르면 지금의 단계로 시작한다.
+  await reopen(page);
+  await tapText(page, KEY, RESUME_TEXT.fresh);
+  await expect.poll(() => shown(page, '돌리기를 눌러요'), { ...WAIT, message: '새 판의 도움말이 떠야 한다' }).toBe(true);
+  expect((await view(page)).run).toMatchObject({ relics: { scale: 3 }, spinCount: 0 });
+  expect(await storedRelics(page)).toEqual({ pieces: 0, relics: { scale: 3 } });
 });

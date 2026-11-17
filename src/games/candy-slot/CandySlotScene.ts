@@ -95,19 +95,18 @@ import {
   foundCount,
   type CollectionEntry,
 } from './collection';
-import { RESUME_TEXT, resumeCaption, savedRunOf, withFound, withPerk, withPieces, withRun } from './save';
+import { RESUME_TEXT, resumeCaption, savedRunOf, withFound, withPerk, withPieces, withRelic, withRun } from './save';
 import {
-  activeNote,
   holdHowText,
   holdUsedText,
   PERK_TEXT,
-  perkLabel,
   piecesFor,
   piecesVerdict,
   rerollLabel,
   slotsNote,
   unlockBlock,
 } from './perks';
+import { keepLabel, keepNote, raiseBlock } from './relics';
 import {
   addPerkButton,
   addPerkNote,
@@ -2579,12 +2578,16 @@ export class CandySlotScene extends MiniGameScene {
     return { x: 0, y: HUD_HEIGHT, width: GAME_WIDTH, height: this.scale.height - HUD_HEIGHT };
   }
 
-  /** 열어 둔 영구 해금을 켠 새 여느 판. 오늘의 판은 해금 없이 newRun(씨앗)으로 만든다. */
+  /** 열어 둔 영구 해금과 올린 유물을 켠 새 여느 판. 오늘의 판은 둘 다 없이 newRun(씨앗)으로 만든다. */
   private freshRun(): RunState {
-    return newRun(null, store.data.slot.perks);
+    const { perks, relics } = store.data.slot;
+    return newRun(null, perks, relics);
   }
 
-  /** 아직 한 번도 돌리지 않은 여느 판인지. 그런 판은 해금을 새로 열면 그 자리에서 해금을 켠 판으로 갈아 끼운다. */
+  /**
+   * 아직 한 번도 돌리지 않은 여느 판인지. 그런 판은 해금을 새로 열거나 유물을 올리면
+   * 그 자리에서 그것을 켠 판으로 갈아 끼운다.
+   */
   private isUnstartedNormal(): boolean {
     const { run } = this;
     return run.seed === null && run.phase === 'spin' && run.round === 1 && run.spinCount === 0 && !this.busy;
@@ -2616,7 +2619,7 @@ export class CandySlotScene extends MiniGameScene {
     this.hideStartPerks(true);
     const gap = 6;
     const bookWidth = textWidth(this, collectionLabel(store.data.slot.found)) + PERK_BUTTON_PAD;
-    const perkWidth = textWidth(this, perkLabel(store.data.slot)) + PERK_BUTTON_PAD;
+    const perkWidth = textWidth(this, keepLabel(store.data.slot)) + PERK_BUTTON_PAD;
     const left = Math.round((GAME_WIDTH - bookWidth - gap - perkWidth) / 2);
     this.startPerks = addPerkButton(
       this,
@@ -2651,25 +2654,33 @@ export class CandySlotScene extends MiniGameScene {
   }
 
   /**
-   * 해금 버튼 아래의 한 줄을 지금 판에 맞게 적는다: 여느 판이면 켜진 해금의 수, 오늘의 판이면 해금 없이 한다는 것.
-   * 열어 둔 해금이 없거나, 기계 밖으로 나갈 만큼 화면이 짧으면 적지 않는다.
+   * 해금 버튼 아래의 한 줄을 지금 판에 맞게 적는다: 여느 판이면 켜진 해금의 수와 유물의 단계,
+   * 오늘의 판이면 그것들 없이 한다는 것. 연 해금도 올린 유물도 없거나, 기계 밖으로 나갈 만큼 화면이 짧으면 적지 않는다.
    */
   private refreshPerkNote(): void {
     const note = this.perkNote;
     if (!note) return;
     const { machine } = this.layout;
     const fits = note.top + PERK_NOTE_HEIGHT <= machine.y + machine.height - MACHINE_FRAME;
-    const label = fits ? (activeNote(store.data.slot, this.dailyDay !== null) ?? '') : '';
+    const label = fits ? (keepNote(store.data.slot, this.dailyDay !== null) ?? '') : '';
     if (label === note.label) return;
     note.view?.destroy();
     note.label = label;
     note.view = label === '' ? null : addPerkNote(this, note.top, DEPTH.hint, label);
   }
 
-  /** 해금 창을 연다. 가진 조각과 해금 넷이 놓이고, 줄을 누르면 조각을 내고 연다. */
+  /**
+   * 해금과 유물의 창을 연다. 가진 조각과 해금 넷(다른 쪽에는 유물 넷)이 놓이고, 누르면 조각을 내고 열거나 올린다.
+   */
   private openPerks(): void {
     if (this.perkPanel || this.book || this.ended) return;
     this.hideBubble();
+    /** 조각을 쓴 뒤: 버튼의 글을 맞추고, 아직 돌리지 않은 여느 판이면 방금 산 것을 바로 켠다. 오늘의 판과 하던 판은 그대로다. */
+    const spent = (): void => {
+      this.startPerks?.refresh();
+      if (this.isUnstartedNormal()) this.run = this.freshRun();
+      this.refreshNumbers();
+    };
     this.perkPanel = openPerkPanel(this, {
       depth: BOOK_DEPTH,
       state: () => store.data.slot,
@@ -2677,10 +2688,14 @@ export class CandySlotScene extends MiniGameScene {
         const block = unlockBlock(store.data.slot, id);
         if (block !== null) return block;
         store.update((save) => void (save.slot = withPerk(save.slot, id)));
-        this.startPerks?.refresh();
-        // 아직 돌리지 않은 여느 판이면 방금 연 해금을 바로 켠다. 오늘의 판과 하던 판은 그대로다.
-        if (this.isUnstartedNormal()) this.run = this.freshRun();
-        this.refreshNumbers();
+        spent();
+        return null;
+      },
+      raise: (id) => {
+        const block = raiseBlock(store.data.slot, id);
+        if (block !== null) return block;
+        store.update((save) => void (save.slot = withRelic(save.slot, id)));
+        spent();
         return null;
       },
       addButton: (box, label, onTap) => new SoftButton(this, box, 'gold', BOOK_DEPTH, label, onTap),
