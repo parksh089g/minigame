@@ -111,18 +111,19 @@ export interface BubbleShop {
 /**
  * 가게에서 slot번째 부적을 눌렀을 때 설명 창에 더 적을 것(돌려받는 금화와 강화 칸).
  * 가게가 아니거나 그 자리에 부적이 없으면 null이고, 그때는 이름과 설명만 보인다.
+ * 돌려받는 금화와 강화하는 값은 그 판의 유물까지 넣어 셈해서, 적힌 수가 곧 실제로 오가는 수다.
  */
 export function bubbleShop(run: RunState, slot: number): BubbleShop | null {
   const block = upgradeBlock(run, slot);
   if (block === 'closed' || block === 'none') return null;
   const id = run.charms[slot];
-  const refund = refundOf(id);
+  const refund = refundOf(id, run);
   if (block === 'done') {
     return { refund, upgrade: { state: 'done', lead: BUBBLE_TEXT.done, description: null, cost: null, chip: null } };
   }
   const base = charmOf(id);
   const description = base?.upgrade.description ?? '';
-  const cost = upgradeCostOf(id);
+  const cost = upgradeCostOf(id, run);
   if (block === 'coin') {
     return { refund, upgrade: { state: 'poor', lead: BUBBLE_TEXT.poor, description, cost, chip: null } };
   }

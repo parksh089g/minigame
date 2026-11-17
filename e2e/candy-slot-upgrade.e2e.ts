@@ -1,6 +1,7 @@
 /**
  * 행운 슬롯의 부적 강화와 가게의 미리 보기 화면 점검: 가게에서 붙인 부적을 눌러 강화하면 금화를 내고 별이 붙는지,
- * 강화할 수 없을 때 까닭을 알리는지, 떼면 금화를 돌려받는지, 확률 부적에 줄이 맞을 확률의 미리 보기가 붙는지,
+ * 강화할 수 없을 때 까닭을 알리는지, 떼면 금화를 돌려받는지(유물이 있는 판에서도 적힌 수와 오가는 수가 같은지),
+ * 확률 부적에 줄이 맞을 확률의 미리 보기가 붙는지,
  * 다음 스핀에 걸린 곱이 돌리기 버튼에 적히는지, 강화한 부적을 든 판을 이어 하고 도감과 결과 화면을 열어도 탈이 없는지 본다.
  * 값과 글은 규칙(rules.ts)과 글 모듈(shop-text.ts)에서 읽어 견주므로, 부적의 값이나 힘을 고쳐도 이 점검은 그대로 맞는다.
  * 점검마다 저장이 비어 있는 새 브라우저에서 시작한다.
@@ -21,7 +22,7 @@ import {
   REROLL_COST,
   SIZE,
   spin,
-  targetOf,
+  targetFor,
   upgrade,
   upgradeCostOf,
   upgradedOf,
@@ -92,6 +93,7 @@ function shopRun(coin: number, charms: readonly string[], offers: readonly strin
     spinCount: 6,
     drawCount: 1,
     perks: [],
+    relics: {},
   };
 }
 
@@ -231,7 +233,7 @@ function storedSlot(page: Page): Promise<SlotSave | null> {
 
 /** 목표 카드에 적히는 글. 가게에서는 다음 라운드의 목표가 적힌다. */
 function goalLabel(run: RunState): string {
-  return `${run.coin} / ${targetOf(run.phase === 'shop' ? run.round + 1 : run.round)}`;
+  return `${run.coin} / ${targetFor(run, run.phase === 'shop' ? run.round + 1 : run.round)}`;
 }
 
 it('행운 슬롯: 가게에서 붙인 부적을 강화하면 금화를 내고 별이 붙으며, 강화한 설명이 보이고 판이 저장된다', async ({ page }) => {
@@ -251,11 +253,11 @@ it('행운 슬롯: 가게에서 붙인 부적을 강화하면 금화를 내고 �
       charm.name,
       charm.description,
       BUBBLE_TEXT.remove,
-      `+${refundOf(charm.id)}`,
+      `+${refundOf(charm.id, start)}`,
       BUBBLE_TEXT.lead,
       charm.upgrade.description,
       BUBBLE_TEXT.upgrade,
-      String(upgradeCostOf(charm.id)),
+      String(upgradeCostOf(charm.id, start)),
     ].sort(),
   );
   expect(await hiddenTexts(page, KEY, { from: BUBBLE_TEXT.remove }), '강화 칸이 있는 설명 창').toEqual([]);
@@ -263,13 +265,13 @@ it('행운 슬롯: 가게에서 붙인 부적을 강화하면 금화를 내고 �
   // 강화하면 금화가 줄고, 부적의 그림에 별이 붙고, 설명 창은 강화한 설명으로 바뀐다.
   const strong = mustCharm(upgradedOf(charm.id));
   const after = upgrade(start, 0);
-  expect(after.coin, '강화할 수 있는 판이어야 한다').toBe(start.coin - upgradeCostOf(charm.id));
+  expect(after.coin, '강화할 수 있는 판이어야 한다').toBe(start.coin - upgradeCostOf(charm.id, start));
   await tapText(page, KEY, BUBBLE_TEXT.upgrade);
   await expect.poll(() => runOf(page), { ...WAIT, message: '강화한 판' }).toEqual(after);
   expect((await slotTextures(page))[0], '강화한 부적은 별이 붙은 그림으로 바뀐다').toBe(`${CHARM_TEXTURE}${strong.id}`);
   await expect
     .poll(() => bubbleTexts(page), { ...WAIT, message: '이미 강화한 부적의 설명 창' })
-    .toEqual([strong.name, strong.description, BUBBLE_TEXT.remove, `+${refundOf(strong.id)}`, BUBBLE_TEXT.done].sort());
+    .toEqual([strong.name, strong.description, BUBBLE_TEXT.remove, `+${refundOf(strong.id, after)}`, BUBBLE_TEXT.done].sort());
   await expect.poll(() => textPoint(page, KEY, goalLabel(after)), { ...WAIT, message: '금화의 수가 줄어야 한다' }).not.toBeNull();
   await expect
     .poll(() => hiddenTexts(page, KEY, { from: BUBBLE_TEXT.remove }), { ...WAIT, message: '강화한 뒤의 설명 창' })
@@ -296,7 +298,7 @@ it('행운 슬롯: 금화가 모자라거나 이미 강화한 부적은 강화�
   await startScene(page, KEY);
   const charm = mustCharm('twins');
   const done = mustCharm(upgradedOf('crown'));
-  const cost = upgradeCostOf(charm.id);
+  const cost = upgradeCostOf(charm.id, shopRun(0, [], []));
   const poor = shopRun(cost - 1, [charm.id, done.id], ['tall', 'slant', 'wide']);
   await openShopWith(page, poor);
 
@@ -308,7 +310,7 @@ it('행운 슬롯: 금화가 모자라거나 이미 강화한 부적은 강화�
       charm.name,
       charm.description,
       BUBBLE_TEXT.remove,
-      `+${refundOf(charm.id)}`,
+      `+${refundOf(charm.id, poor)}`,
       BUBBLE_TEXT.poor,
       charm.upgrade.description,
       BUBBLE_TEXT.upgrade,
@@ -322,7 +324,7 @@ it('행운 슬롯: 금화가 모자라거나 이미 강화한 부적은 강화�
   await tapSlot(page, 1);
   await expect.poll(() => textPoint(page, KEY, BUBBLE_TEXT.done), WAIT).not.toBeNull();
   expect(await bubbleTexts(page), '이미 강화한 부적의 설명 창').toEqual(
-    [done.name, done.description, BUBBLE_TEXT.remove, `+${refundOf(done.id)}`, BUBBLE_TEXT.done].sort(),
+    [done.name, done.description, BUBBLE_TEXT.remove, `+${refundOf(done.id, poor)}`, BUBBLE_TEXT.done].sort(),
   );
   expect(await hiddenTexts(page, KEY, { from: BUBBLE_TEXT.remove }), '이미 강화한 설명 창').toEqual([]);
   expect(await runOf(page), '강화할 수 없으면 판은 그대로다').toEqual(poor);
@@ -342,7 +344,7 @@ it('행운 슬롯: 붙인 부적을 떼면 버튼에 적힌 만큼 금화를 돌
   await startScene(page, KEY);
   const strong = mustCharm(upgradedOf('twins'));
   const start = shopRun(3, [strong.id, 'wide'], ['tall', 'slant', 'crown']);
-  const refund = refundOf(strong.id);
+  const refund = refundOf(strong.id, start);
   expect(refund, '돌려받는 금화가 있는 부적이어야 한다').toBeGreaterThan(0);
   await openShopWith(page, start);
 
@@ -361,6 +363,52 @@ it('행운 슬롯: 붙인 부적을 떼면 버튼에 적힌 만큼 금화를 돌
     .poll(async () => (await storedSlot(page))?.run?.run, { ...WAIT, message: '뗀 판이 기기에 저장되어야 한다' })
     .toEqual(after);
   await expect.poll(() => hiddenTexts(page, KEY), { ...WAIT, message: '뗀 뒤의 가게' }).toEqual([]);
+});
+
+it('행운 슬롯: 유물이 있는 판에서도 버튼에 적힌 강화 값과 돌려받는 금화가 실제로 오가는 금화와 같다', async ({ page }) => {
+  await openApp(page);
+  await startScene(page, KEY);
+  // 대장장이 망치(강화가 싸진다)와 상인의 도장(돌려받는 몫이 는다)을 끝까지 올린 판
+  const charm = mustCharm('twins');
+  const start: RunState = { ...shopRun(40, [charm.id, 'wide'], ['tall', 'slant', 'crown']), relics: { hammer: 10, seal: 10 } };
+  const cost = upgradeCostOf(charm.id, start);
+  const refund = refundOf(charm.id, start);
+  expect(cost, '유물로 강화가 싸지는 판이어야 한다').toBeLessThan(upgradeCostOf(charm.id));
+  expect(refund, '유물로 돌려받는 금화가 느는 판이어야 한다').toBeGreaterThan(refundOf(charm.id));
+  await openShopWith(page, start);
+
+  // 버튼에는 유물까지 넣어 셈한 수가 적힌다.
+  await tapSlot(page, 0);
+  await expect.poll(() => textPoint(page, KEY, BUBBLE_TEXT.upgrade), WAIT).not.toBeNull();
+  expect(await bubbleTexts(page), '유물이 있는 판의 설명 창').toEqual(
+    [
+      charm.name,
+      charm.description,
+      BUBBLE_TEXT.remove,
+      `+${refund}`,
+      BUBBLE_TEXT.lead,
+      charm.upgrade.description,
+      BUBBLE_TEXT.upgrade,
+      String(cost),
+    ].sort(),
+  );
+
+  // 강화하면 적힌 값만큼만 금화가 준다.
+  await tapText(page, KEY, BUBBLE_TEXT.upgrade);
+  const strong = upgrade(start, 0);
+  await expect.poll(() => runOf(page), { ...WAIT, message: '강화한 판' }).toEqual(strong);
+  expect((await runOf(page)).coin, '적힌 값만큼 낸다').toBe(start.coin - cost);
+
+  // 강화한 부적의 떼는 버튼에는 강화하는 값까지 친 금화가 적히고, 떼면 그만큼 돌아온다.
+  const back = refundOf(strong.charms[0], strong);
+  expect(back).toBeGreaterThan(refund);
+  await expect
+    .poll(() => bubbleTexts(page), { ...WAIT, message: '강화한 뒤의 설명 창' })
+    .toEqual([charm.name, charm.upgrade.description, BUBBLE_TEXT.remove, `+${back}`, BUBBLE_TEXT.done].sort());
+  await tapText(page, KEY, BUBBLE_TEXT.remove);
+  await expect.poll(() => runOf(page), { ...WAIT, message: '뗀 판' }).toEqual(discard(strong, 0));
+  expect((await runOf(page)).coin, '적힌 만큼 돌려받는다').toBe(strong.coin + back);
+  await expect.poll(() => textPoint(page, KEY, goalLabel(discard(strong, 0))), { ...WAIT, message: '금화의 수' }).not.toBeNull();
 });
 
 it('행운 슬롯: 가게의 확률 부적에는 사면 줄이 맞을 확률이 어떻게 바뀌는지가 적힌다', async ({ page }) => {

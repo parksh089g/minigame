@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   CHARMS,
+  discard,
   hitChance,
   newRun,
   nextSpinTimes,
@@ -156,6 +157,45 @@ describe('붙인 부적의 설명 창', () => {
     expect(hasUpgradeMark(before.charms[0])).toBe(false);
     expect(hasUpgradeMark(undefined)).toBe(false);
     expect(hasUpgradeMark('no-such-charm+')).toBe(false);
+  });
+});
+
+describe('유물이 있는 판의 설명 창', () => {
+  it('적힌 강화 값과 돌려받는 금화는 그 판에서 실제로 내고 받는 금화와 같다', () => {
+    const relics = { hammer: 10, seal: 10 };
+    let cheaper = 0;
+    let richer = 0;
+    for (const charm of CHARMS) {
+      const run: RunState = { ...shopping(99, [charm.id]), relics };
+      const shop = bubbleShop(run, 0);
+      const cost = shop?.upgrade.cost ?? -1;
+      expect(cost, charm.id).toBe(upgradeCostOf(charm.id, run));
+      expect(shop?.refund, charm.id).toBe(refundOf(charm.id, run));
+      // 강화하면 적힌 값만큼 줄고, 떼면 적힌 만큼 는다.
+      const strong = upgrade(run, 0);
+      expect(run.coin - strong.coin, charm.id).toBe(cost);
+      expect(discard(run, 0).coin - run.coin, charm.id).toBe(shop?.refund);
+      const after = bubbleShop(strong, 0);
+      expect(after?.refund, charm.id).toBe(refundOf(strong.charms[0], strong));
+      expect(discard(strong, 0).coin - strong.coin, charm.id).toBe(after?.refund);
+      if (cost < upgradeCostOf(charm.id)) cheaper += 1;
+      if ((shop?.refund ?? 0) > refundOf(charm.id)) richer += 1;
+    }
+    // 유물이 듣는 판이어야 이 점검에 뜻이 있다.
+    expect(cheaper).toBeGreaterThan(0);
+    expect(richer).toBeGreaterThan(0);
+  });
+
+  it('금화가 모자란지도 그 판의 값으로 따진다', () => {
+    const relics = { hammer: 10 };
+    const id = CHARMS.find((charm) => upgradeCostOf(charm.id, { relics }) < upgradeCostOf(charm.id))?.id;
+    expect(id, '유물로 강화가 싸지는 부적이 있어야 한다').toBeDefined();
+    if (!id) return;
+    const cost = upgradeCostOf(id, { relics });
+    // 유물이 없으면 모자랐을 금화로도 강화할 수 있다.
+    expect(bubbleShop({ ...shopping(cost, [id]), relics }, 0)?.upgrade.state).toBe('ready');
+    expect(bubbleShop(shopping(cost, [id]), 0)?.upgrade.state).toBe('poor');
+    expect(bubbleShop({ ...shopping(cost - 1, [id]), relics }, 0)?.upgrade).toMatchObject({ state: 'poor', cost });
   });
 });
 
