@@ -452,6 +452,8 @@ describe('판 밖 진행', () => {
       startDay: 11,
       savedAt: 55,
       levels: { power: 7, helper: UPGRADES.helper.maxLevel },
+      // 유물이 생기기 전의 저장이라, 그동안 물리친 대장(5일째와 10일째)의 유물 조각을 받는다.
+      shards: 2,
     });
     // 열리지 않은 날을 골라 둔 저장은 열린 날로 돌린다.
     expect(normalizeMeta({ best: 3, startDay: 11 }).startDay).toBe(1);

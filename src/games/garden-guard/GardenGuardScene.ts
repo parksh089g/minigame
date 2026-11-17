@@ -13,6 +13,7 @@ import { openPickPanel, pickedInfo, type ClearedNote, type PickPanel } from './p
 import {
   applyRun,
   bankSeeds,
+  bankShards,
   bossKind,
   clampStartDay,
   daysKept,
@@ -93,6 +94,8 @@ export const TEXT = {
   resumed: (day: number) => `${day}일째 이어서!`,
   /** 대장을 처음 물리친 날에 띄운다. 다음 판은 그다음 날부터 시작한다. */
   nextStart: (day: number) => `다음 판은 ${day}일째부터!`,
+  /** 대장의 날을 지켜서 유물 조각을 받았을 때, 받은 씨앗 옆에 적는다. */
+  shards: (count: number) => `유물 조각 +${count}`,
 } as const;
 
 /** 새 출발점이 열린 뒤 처음 여는 준비 화면의 설명 칸에 적는다. */
@@ -117,6 +120,8 @@ export class GardenGuardScene extends MiniGameScene {
   private pending = 0;
   /** 이 판에서 번 씨앗 가운데 이미 저장해 둔 양. 날을 넘길 때마다 넣어 둔다. */
   private banked = 0;
+  /** 이 판에서 받은 유물 조각 가운데 이미 저장해 둔 양 */
+  private bankedShards = 0;
   /** 판의 기록(판 수, 쫓아낸 벌레)을 이미 넣었는지 */
   private settled = false;
   /** 하던 판을 마지막으로 저장한 때(판 안의 초) */
@@ -164,6 +169,7 @@ export class GardenGuardScene extends MiniGameScene {
     this.run = null;
     this.pending = 0;
     this.banked = 0;
+    this.bankedShards = 0;
     this.settled = false;
     this.savedT = 0;
     this.hold = 0;
@@ -275,6 +281,7 @@ export class GardenGuardScene extends MiniGameScene {
     if (saved) {
       state = structuredClone(saved.state);
       this.banked = saved.banked;
+      this.bankedShards = saved.bankedShards;
     } else {
       // 두고 간 판이 남아 있으면 마치고 새로 시작한다.
       this.closeSaved();
@@ -285,6 +292,7 @@ export class GardenGuardScene extends MiniGameScene {
         levels: meta.levels,
         bestBefore: meta.best,
         fields: meta.fields,
+        relics: meta.relics,
       }));
     }
     this.run = state;
@@ -523,6 +531,10 @@ export class GardenGuardScene extends MiniGameScene {
             vibrate(12);
           });
           break;
+        case 'guard':
+          // 울타리 방울이 딸랑 울린다.
+          this.chirp('guard', 160, () => tone(1760, 0.09, { type: 'triangle', slideTo: 2090, volume: 0.1 }));
+          break;
         case 'storm':
           sfx.whoosh();
           tone(1500, 0.3, { type: 'sawtooth', slideTo: 300, volume: 0.12, delay: 0.05 });
@@ -562,7 +574,8 @@ export class GardenGuardScene extends MiniGameScene {
         case 'dayClear': {
           sfx.gold();
           const title = `${event.day}일째 지킴!`;
-          const bonus = `씨앗 +${Math.floor(event.seeds)}${event.record ? ` · ${TEXT.record}` : ''}`;
+          const shards = event.shards > 0 ? ` · ${TEXT.shards(event.shards)}` : '';
+          const bonus = `씨앗 +${Math.floor(event.seeds)}${shards}${event.record ? ` · ${TEXT.record}` : ''}`;
           // 대장을 처음 물리쳤으면 다음 판은 그다음 날부터라는 것을 알린다.
           const nextStart = event.record && isBossDay(event.day) ? TEXT.nextStart(event.day + 1) : null;
           if ((this.run?.offer.length ?? 0) > 0) {
@@ -664,14 +677,15 @@ export class GardenGuardScene extends MiniGameScene {
     }
   }
 
-  /** 지금까지 번 씨앗을 저장해 둔다. 날을 넘길 때마다 불러서, 판을 하다가 앱이 꺼져도 남게 한다. */
+  /** 지금까지 번 씨앗과 유물 조각을 저장해 둔다. 날을 넘길 때마다 불러서, 판을 하다가 앱이 꺼져도 남게 한다. */
   private bankSoFar(clearedDay = 0): void {
     const state = this.run;
     if (!state) return;
     const whole = Math.floor(state.seeds);
-    const meta = raiseBest(bankSeeds(gardenStore.data, whole - this.banked), clearedDay);
+    const banked = bankShards(bankSeeds(gardenStore.data, whole - this.banked), state.shards - this.bankedShards);
     this.banked = whole;
-    this.save(meta);
+    this.bankedShards = state.shards;
+    this.save(raiseBest(banked, clearedDay));
   }
 
   /** 하던 판을 저장해 둔다. 끝난 판은 저장하지 않는다. */
@@ -679,7 +693,7 @@ export class GardenGuardScene extends MiniGameScene {
     const state = this.run;
     if (!state || this.phase !== 'run' || state.phase === 'over') return;
     this.savedT = state.t;
-    gardenStore.setRun({ state, banked: this.banked });
+    gardenStore.setRun({ state, banked: this.banked, bankedShards: this.bankedShards });
   }
 
   /** 판을 두고 갈 때(멈출 때, 판을 하다가 나갈 때) 그때까지 번 씨앗을 넣고 판을 저장한다. */
@@ -737,6 +751,8 @@ export class GardenGuardScene extends MiniGameScene {
       ['쫓아낸 벌레', `${state.kills}마리`],
       ['받은 씨앗', `${Math.floor(state.seeds)}개`],
     ];
+    // 대장을 물리친 판에만 적는다.
+    if (state.shards > 0) stats.push(['받은 유물 조각', `${state.shards}개`]);
     this.finishMiniGame(runScore(state), stats, state.phase === 'over' ? ENDING_MS : 600);
   }
 }

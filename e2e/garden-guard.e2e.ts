@@ -2,13 +2,23 @@
  * 텃밭 지키기의 화면 점검 가운데 준비 화면의 저장과 사고팔기를 본다:
  * 띄워 둔 사이에 다른 곳이 저장한 진행을 덮어쓰지 않는지, 살 수 없는 강화와 큰 값이 어떻게 적히는지,
  * 망가진 저장으로도 열리는지. 점수와 코인이 이 판에서 지킨 날 수를 따르는지도 본다.
+ * 유물도 여기서 본다: 유물 화면이 언제 열리고 조각으로 어떻게 올리는지, 대장의 날을 지키면 조각을 받는지.
  * 배치와 판의 흐름은 layout.e2e.ts와 smoke.e2e.ts가 본다.
  */
 import './app-globals';
 import { expect, type Page } from '@playwright/test';
 import { GAME_WIDTH, SCENE } from '../src/config';
-import { GARDEN_SCENE, UPGRADES } from '../src/games/garden-guard/data';
-import { costLabel, MAX_DAY, META_VERSION, needLine, upgradeCost, type GardenMeta } from '../src/games/garden-guard/rules';
+import { GARDEN_SCENE, RELIC_ORDER, RELICS, UPGRADES } from '../src/games/garden-guard/data';
+import {
+  costLabel,
+  MAX_DAY,
+  META_VERSION,
+  needLine,
+  relicLine,
+  shardsUpTo,
+  upgradeCost,
+  type GardenMeta,
+} from '../src/games/garden-guard/rules';
 import { hiddenTexts, it, openApp, startScene, tapAt, tapText, textPoint, waitForScene } from './app';
 
 const WAIT = { timeout: 20_000 } as const;
@@ -17,6 +27,10 @@ const WAIT = { timeout: 20_000 } as const;
 const INFO_HINT = '강화를 누르면 설명이 보여요';
 const START_DAY_INFO = '고른 날부터 시작해요.\n대장을 물리치면 그다음 날이 열려요.';
 const exactCost = (cost: number): string => `값은 씨앗 ${cost.toLocaleString('en-US')}개예요`;
+// 유물 화면의 글(garden-guard/relic-page.ts). 그 파일도 Phaser를 불러서 여기서 가져올 수 없다.
+const RELIC_LABEL = '유물';
+const RELIC_HINT = '유물을 누르면 설명이 보여요';
+const RELIC_BACK = '준비 화면으로';
 
 /** 한 판을 해 본 사람의 빈 텃밭 */
 const BASE: GardenMeta = {
@@ -29,6 +43,8 @@ const BASE: GardenMeta = {
   startDay: 1,
   fields: 0,
   bestEver: 0,
+  shards: 0,
+  relics: {},
   savedAt: 1,
 };
 
@@ -288,4 +304,96 @@ it('텃밭 지키기: 뒤쪽 날에서 시작해 하루만 지키고 끝낸 판�
   await expect.poll(() => textPoint(page, SCENE.result, '1일 (31일째까지)'), { ...WAIT, message: '결과 화면의 지킨 날' }).not.toBeNull();
   expect(await textPoint(page, SCENE.result, '+1'), '받은 코인').not.toBeNull();
   expect(await hiddenTexts(page, SCENE.result), '결과 화면').toEqual([]);
+});
+
+it('텃밭 지키기: 대장을 물리친 사람은 준비 화면에서 유물을 열어, 조각으로 유물을 한 단계씩 올린다', async ({ page }) => {
+  // 처음 하는 사람의 준비 화면에는 아직 쓸 일이 없는 유물 버튼이 없다.
+  await openLobby(page, BASE);
+  expect(await hasText(page, RELIC_LABEL)).toBe(false);
+
+  // 대장을 둘 물리친 사람: 조각 셋을 가지고 있다.
+  await openLobby(page, { ...BASE, best: 12, bestEver: 12, runs: 9, startDay: 11, shards: 3, savedAt: Date.now() + 60_000 });
+  await expect.poll(() => hasText(page, RELIC_LABEL), WAIT).toBe(true);
+  expect(await hiddenTexts(page, GARDEN_SCENE), '유물 버튼이 있는 준비 화면').toEqual([]);
+  await tapText(page, GARDEN_SCENE, RELIC_LABEL);
+  await expect.poll(() => hasText(page, RELIC_HINT), WAIT).toBe(true);
+  // 유물 여섯이 한 쪽에 다 보이고, 지금 값과 다음 값이 적혀 있다.
+  for (const id of RELIC_ORDER) {
+    expect(await hasText(page, RELICS[id].name), RELICS[id].name).toBe(true);
+    expect(await hasText(page, relicLine(id, 0)), relicLine(id, 0)).toBe(true);
+  }
+  expect(await hiddenTexts(page, GARDEN_SCENE), '유물 화면').toEqual([]);
+
+  // 두더지 발톱을 한 단계 올린다(조각 하나).
+  const claw = await buyPoint(page, RELICS.claw.name);
+  expect(claw, '두더지 발톱의 값 버튼').not.toBeNull();
+  await tapAt(page, claw!.x, claw!.y);
+  await expect.poll(async () => (await readMeta(page)).relics, WAIT).toEqual({ claw: 1 });
+  expect((await readMeta(page)).shards).toBe(2);
+  await expect.poll(() => hasText(page, relicLine('claw', 1)), WAIT).toBe(true);
+  expect(await hasText(page, RELICS.claw.blurb), '고른 유물의 설명').toBe(true);
+
+  // 허수아비는 조각 둘이 든다. 올리고 나면 조각이 없어서 다른 유물은 올라가지 않는다.
+  const scarecrow = await buyPoint(page, RELICS.scarecrow.name);
+  await tapAt(page, scarecrow!.x, scarecrow!.y);
+  await expect.poll(async () => (await readMeta(page)).relics, WAIT).toEqual({ claw: 1, scarecrow: 1 });
+  expect((await readMeta(page)).shards).toBe(0);
+  const dew = await buyPoint(page, RELICS.dew.name);
+  await tapAt(page, dew!.x, dew!.y);
+  await expect.poll(() => hasText(page, RELICS.dew.blurb), WAIT).toBe(true);
+  expect(await readMeta(page)).toMatchObject({ shards: 0, relics: { claw: 1, scarecrow: 1 } });
+  expect(await hiddenTexts(page, GARDEN_SCENE), '유물을 올린 유물 화면').toEqual([]);
+
+  // 돌아가면 준비 화면이 그대로 열린다.
+  await tapText(page, GARDEN_SCENE, RELIC_BACK);
+  await expect.poll(() => hasText(page, INFO_HINT), WAIT).toBe(true);
+  expect(await hasText(page, '출발!')).toBe(true);
+});
+
+it('텃밭 지키기: 유물이 생기기 전의 저장은 그동안 물리친 대장만큼의 조각을 받고 시작한다', async ({ page }) => {
+  // 유물이 없던 버전(3)의 저장: 42일째까지 간 사람
+  const { shards: _shards, relics: _relics, ...old } = BASE;
+  await openLobby(page, { ...old, version: 3, best: 42, bestEver: 42, runs: 60, startDay: 41, savedAt: Date.now() + 60_000 });
+  await expect.poll(() => hasText(page, RELIC_LABEL), WAIT).toBe(true);
+  await tapText(page, GARDEN_SCENE, RELIC_LABEL);
+  await expect.poll(() => hasText(page, RELIC_HINT), WAIT).toBe(true);
+  expect(shardsUpTo(42)).toBe(12);
+  expect(await hasText(page, '12'), '가진 유물 조각').toBe(true);
+});
+
+it('텃밭 지키기: 대장의 날을 지키면 유물 조각을 받아서 저장하고, 결과 화면에도 적는다', async ({ page }) => {
+  // 몇 판 해 본 사람이다. 처음 몇 판에는 조작 안내가 떠서, 곧바로 띄우는 강화 고르기 창과 겹친다.
+  await openLobby(page, { ...BASE, runs: 5, savedAt: Date.now() + 60_000 });
+  await tapText(page, GARDEN_SCENE, '출발!');
+  type Run = { day: number; queue: unknown[]; enemies: unknown[]; shards: number; fence: number };
+  const day = (): Promise<number | undefined> =>
+    page.evaluate((key) => (window.__pocketArcade?.scene.getScene(key) as unknown as { run: Run | null }).run?.day, GARDEN_SCENE);
+  const shards = (): Promise<number | undefined> =>
+    page.evaluate((key) => (window.__pocketArcade?.scene.getScene(key) as unknown as { run: Run | null }).run?.shards, GARDEN_SCENE);
+  await expect.poll(day, { ...WAIT, message: '판이 시작돼야 한다' }).toBe(1);
+
+  // 오늘을 대장의 날(5일째)로 바꾸고 나올 벌레를 치워서, 그날을 지킨 것으로 만든다.
+  await page.evaluate((key) => {
+    const run = (window.__pocketArcade?.scene.getScene(key) as unknown as { run: Run }).run;
+    run.day = 5;
+    run.queue = [];
+    run.enemies = [];
+  }, GARDEN_SCENE);
+  await expect.poll(shards, { ...WAIT, message: '대장의 날을 지키면 조각을 받는다' }).toBe(1);
+  await expect.poll(async () => (await readMeta(page)).shards, { ...WAIT, message: '받은 조각을 바로 저장한다' }).toBe(1);
+  // 강화를 고르는 창의 맨 위에, 받은 씨앗 옆에 적는다.
+  await expect
+    .poll(async () => (await lobbyTexts(page)).some((item) => item.text.includes('유물 조각 +1')), { ...WAIT, message: '받은 조각의 알림' })
+    .toBe(true);
+  expect(await hiddenTexts(page, GARDEN_SCENE), '조각을 받은 날의 강화 고르기').toEqual([]);
+
+  // 판을 끝내면 결과 화면에도 적힌다. 조각은 이미 넣어 두었으니 두 번 들어가지 않는다.
+  await page.evaluate((key) => {
+    (window.__pocketArcade?.scene.getScene(key) as unknown as { run: Run }).run.fence = 0;
+  }, GARDEN_SCENE);
+  await waitForScene(page, SCENE.result);
+  await expect.poll(() => textPoint(page, SCENE.result, '받은 유물 조각'), { ...WAIT, message: '결과 화면의 조각' }).not.toBeNull();
+  expect(await textPoint(page, SCENE.result, '1개')).not.toBeNull();
+  expect(await hiddenTexts(page, SCENE.result), '결과 화면').toEqual([]);
+  expect(await readMeta(page)).toMatchObject({ shards: 1, best: 5, runs: 6 });
 });

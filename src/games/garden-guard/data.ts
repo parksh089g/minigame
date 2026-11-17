@@ -482,3 +482,55 @@ export const BOON_ORDER: readonly BoonId[] = [
   'cloud',
   'sack',
 ];
+
+// ------------------------------------------------------------ 유물
+
+/**
+ * 유물: 대장의 날을 지킬 때 받는 유물 조각으로 강화한다. 한 번 올린 단계는 줄지 않고, 새 밭을 일궈도 남는다.
+ * 영구 강화(UPGRADES)가 건드리지 않는 값만 조금씩 바꿔서, 다 올려도 판이 크게 달라지지는 않는다.
+ * 값은 RELIC_STEP에 있고 rules.ts의 statsFor가 읽는다.
+ */
+export type RelicId = 'claw' | 'dew' | 'clover' | 'scarecrow' | 'bell' | 'calendar';
+
+export interface RelicDef {
+  name: string;
+  /** 무엇을 하는지 한 줄. 유물 화면에서 그 유물을 고르면 목록 아래에 보인다. */
+  blurb: string;
+  maxLevel: number;
+  /** 첫 단계의 값(유물 조각). 한 단계마다 이만큼씩 더 든다(2면 2, 4, 6, ...). */
+  cost: number;
+}
+
+export const RELICS: Readonly<Record<RelicId, RelicDef>> = {
+  claw: { name: '두더지 발톱', blurb: '대장에게 주는 피해가 커져요', maxLevel: 10, cost: 1 },
+  dew: { name: '아침 이슬', blurb: '아직 안 맞은 벌레에게 주는 피해가 커져요', maxLevel: 10, cost: 1 },
+  clover: { name: '네잎클로버', blurb: '크게 맞혔을 때의 피해가 커져요', maxLevel: 10, cost: 1 },
+  scarecrow: { name: '허수아비', blurb: '벌레가 겁을 먹고 조금 천천히 와요', maxLevel: 5, cost: 2 },
+  bell: { name: '울타리 방울', blurb: '날마다 처음 몇 번의 갉기를 막아 줘요', maxLevel: 5, cost: 2 },
+  calendar: { name: '오래된 달력', blurb: '날을 지킬 때 받는 씨앗이 늘어요', maxLevel: 10, cost: 1 },
+};
+
+/** 유물 화면의 목록에 놓이는 차례 */
+export const RELIC_ORDER: readonly RelicId[] = ['claw', 'dew', 'clover', 'scarecrow', 'bell', 'calendar'];
+
+/** 유물이 한 단계마다 바꾸는 값. rules.ts의 statsFor가 읽는다. */
+export const RELIC_STEP = {
+  /** 두더지 발톱: 대장에게 주는 피해 + */
+  claw: 0.015,
+  /** 아침 이슬: 아직 안 다친(체력이 가득한) 벌레에게 주는 피해 + */
+  dew: 0.03,
+  /** 네잎클로버: 치명타의 피해 배율(GUN.critMult)을 이만큼씩 더 키운다. */
+  clover: 0.015,
+  /** 허수아비: 벌레가 다가오는 빠르기 - */
+  scarecrow: 0.01,
+  /** 울타리 방울: 날마다 울타리가 그냥 막아 내는 갉기의 수 + */
+  bell: 1,
+  /** 오래된 달력: 날을 지켰을 때 받는 씨앗 + */
+  calendar: 0.05,
+} as const;
+
+/**
+ * 대장의 날을 지켰을 때 받는 유물 조각: first개에, 날이 every일 깊어질 때마다 하나씩 더.
+ * 뒤쪽 날의 대장일수록 더 줘서, 쉬운 앞쪽 대장만 되풀이해 잡는 것보다 갈 수 있는 데까지 가는 쪽이 낫다.
+ */
+export const SHARDS = { first: 1, every: 25 } as const;

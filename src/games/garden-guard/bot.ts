@@ -2,14 +2,19 @@
  * 자동 플레이. 테스트에서 "강화 없이는 며칠째에 막히고, 강화를 사면 얼마나 더 가는지"를 숫자로 확인한다.
  * 화면에서 하는 판과 같은 step을 돌린다.
  */
-import { ENEMIES, SHOOTER, UPGRADE_ORDER, type BoonId } from './data';
+import { ENEMIES, RELIC_ORDER, SHOOTER, UPGRADE_ORDER, type BoonId } from './data';
 import {
   applyRun,
   bankSeeds,
+  bankShards,
+  buyRelic,
   buyUpgrade,
   canBuy,
+  canBuyRelic,
   clampStartDay,
   levelOf,
+  relicCost,
+  relicLevel,
   startDays,
   upgradeCost,
   type GardenMeta,
@@ -87,15 +92,34 @@ export function buyCheapest(meta: GardenMeta): GardenMeta {
   }
 }
 
+/** 유물 조각이 되는 대로 가장 싼 유물부터 올린다. */
+export function buyCheapestRelic(meta: GardenMeta): GardenMeta {
+  let next = meta;
+  for (;;) {
+    let pick: (typeof RELIC_ORDER)[number] | null = null;
+    let cheapest = Infinity;
+    for (const id of RELIC_ORDER) {
+      const cost = relicCost(id, relicLevel(next.relics, id));
+      if (cost !== null && cost < cheapest && canBuyRelic(next, id)) {
+        cheapest = cost;
+        pick = id;
+      }
+    }
+    if (!pick) return next;
+    next = buyRelic(next, pick);
+  }
+}
+
 export interface Career {
   meta: GardenMeta;
-  /** 판마다: 시작한 날, 마지막으로 지킨 날, 걸린 시간(초), 번 씨앗 */
-  runs: Array<{ start: number; cleared: number; seconds: number; seeds: number }>;
+  /** 판마다: 시작한 날, 마지막으로 지킨 날, 걸린 시간(초), 번 씨앗, 받은 유물 조각 */
+  runs: Array<{ start: number; cleared: number; seconds: number; seeds: number; shards: number }>;
 }
 
 /**
  * 여러 판을 이어서 한다: 판을 하고, 번 씨앗으로 가장 싼 강화부터 사고, 다시 한다.
  * 시작하는 날은 열린 날 가운데 가장 멀리 지킨 날보다 back일 넘게 앞선 가장 늦은 날이다(막힌 날 바로 앞에서 시작하지 않는다).
+ * 받은 유물 조각은 늘 넣어 두고, relics가 true일 때만 그것으로 유물을 올린다(유물이 있을 때와 없을 때를 견줄 수 있게).
  */
 export function playCareer(
   meta: GardenMeta,
@@ -104,6 +128,7 @@ export function playCareer(
   seed = 1,
   back = 4,
   picks: PickStyle = 'keen',
+  relics = false,
 ): Career {
   let next = meta;
   const log: Career['runs'] = [];
@@ -111,14 +136,22 @@ export function playCareer(
     const wanted = Math.max(1, next.best - back);
     const start = clampStartDay(Math.max(...startDays(next.best).filter((day) => day <= wanted)), next.best);
     const state = playRun(
-      { seed: seed * 1000 + run, startDay: start, levels: next.levels, bestBefore: next.best, fields: next.fields },
+      {
+        seed: seed * 1000 + run,
+        startDay: start,
+        levels: next.levels,
+        bestBefore: next.best,
+        fields: next.fields,
+        relics: next.relics,
+      },
       style,
       3600,
       picks,
     );
     const seeds = Math.floor(state.seeds);
-    next = buyCheapest(applyRun(bankSeeds(next, seeds), state.lastCleared, state.kills));
-    log.push({ start, cleared: state.lastCleared, seconds: state.t, seeds });
+    next = buyCheapest(applyRun(bankShards(bankSeeds(next, seeds), state.shards), state.lastCleared, state.kills));
+    if (relics) next = buyCheapestRelic(next);
+    log.push({ start, cleared: state.lastCleared, seconds: state.t, seeds, shards: state.shards });
   }
   return { meta: next, runs: log };
 }
