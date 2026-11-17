@@ -6,7 +6,7 @@ import './app-globals';
 import { expect, type Page } from '@playwright/test';
 import { SCENE } from '../src/config';
 import { FIELD_HEIGHT } from '../src/games/brick-break/rules';
-import { activeScenes, expectRendering, it, openApp, startScene, tapAt, tapText, textPoint, waitForScene } from './app';
+import { activeScenes, expectRendering, it, openApp, startScene, tapAt, tapText, waitForScene } from './app';
 
 const KEY = SCENE.brickBreak;
 
@@ -164,20 +164,26 @@ it('벽돌 깨기: 판이 끝날 때 "끝!" 아래의 줄이 벽돌에 겹치지
     scene.board = { ...scene.board, drop: 400 };
   }, KEY);
   const sub = '벽돌이 점선에 닿았어요';
-  await expect.poll(() => textPoint(page, KEY, sub), { message: '끝났다는 줄이 떠야 한다', timeout: 10_000 }).not.toBeNull();
-  await expectRendering(page);
-
+  // 끝났다는 줄은 0.9초만 떠 있다가 결과 화면으로 넘어간다. 점검 쪽에서 띄엄띄엄 들여다보면 느린 기계에서는
+  // 그 사이를 놓치므로, 페이지 안에서 프레임마다 지켜보다가 줄이 뜬 바로 그 프레임에 겹침을 잰다.
   const overlaps = await page.evaluate(
-    ([key, label]) => {
+    async ([key, label]) => {
       const scene = window.__pocketArcade?.scene.getScene(key);
       if (!scene) return ['장면이 없다'];
       const all = (list: Phaser.GameObjects.GameObject[]): Phaser.GameObjects.GameObject[] =>
         list.flatMap((item) => (item.type === 'Container' ? all((item as Phaser.GameObjects.Container).list) : [item]));
-      const items = all(scene.children.list);
-      const text = items.find(
-        (item): item is Phaser.GameObjects.Text => item.type === 'Text' && (item as Phaser.GameObjects.Text).text === label,
-      );
-      if (!text) return ['글자가 없다'];
+      const find = (): Phaser.GameObjects.Text | undefined =>
+        all(scene.children.list).find(
+          (item): item is Phaser.GameObjects.Text =>
+            item.type === 'Text' && (item as Phaser.GameObjects.Text).text === label && (item as Phaser.GameObjects.Text).visible,
+        );
+      const until = performance.now() + 20_000;
+      let text = find();
+      while (!text && performance.now() < until) {
+        await new Promise((next) => requestAnimationFrame(next));
+        text = find();
+      }
+      if (!text) return ['끝났다는 줄이 뜨지 않았다'];
       const box = text.getBounds();
       // 벽돌 그림은 줄마다의 컨테이너 안에 든 그림이다.
       const bricks = scene.children.list
@@ -193,4 +199,5 @@ it('벽돌 깨기: 판이 끝날 때 "끝!" 아래의 줄이 벽돌에 겹치지
     [KEY, sub] as const,
   );
   expect(overlaps).toEqual([]);
+  await expectRendering(page);
 });
