@@ -21,6 +21,7 @@ import {
   type CharmInfo,
   type CharmKind,
   type LineKind,
+  type PerkId,
   type SymbolKey,
 } from './rules';
 
@@ -91,6 +92,10 @@ export const LOOK = {
   emptySlot: { edge: 0x12573b, face: 0x186848 },
   /** 도감에서 아직 찾지 못한 부적의 칸 */
   unknownCharm: { edge: THEME.shadow, face: THEME.dim },
+  /** 행운 조각: 보랏빛 수정 조각. 금화(노랑)나 그림들과 색이 겹치지 않는다. */
+  piece: { face: 0xa98cf5, lip: 0x6a52c4, facet: 0xd9ccff, shine: THEME.white },
+  /** 영구 해금의 그림이 놓이는 칸 */
+  perk: { edge: THEME.lilacDeep, face: THEME.lilacSoft },
   /** 부적 그림 위의 표시: 더하기, 빼기 */
   plus: THEME.good,
   minus: THEME.bad,
@@ -828,4 +833,76 @@ export function drawFelt(g: Graphics, width: number, height: number, focus: Poin
 export function symbolColor(symbol: number): number {
   if (symbol === WILD) return LOOK.sevenTrim.face;
   return LOOK.symbols[SYMBOLS[symbol].key].face;
+}
+
+// ───────── 행운 조각과 영구 해금 ─────────
+
+/** 행운 조각 하나를 (x, y)를 한가운데로 그린다. r은 반쯤 되는 크기다. 비스듬히 선 마름모꼴의 수정 조각이다. */
+function drawPiece(g: Graphics, x: number, y: number, r: number): void {
+  const look = LOOK.piece;
+  const top = { x: r * 0.16, y: -r };
+  const right = { x: r * 0.84, y: -r * 0.1 };
+  const bottom = { x: -r * 0.16, y: r * 0.92 };
+  const left = { x: -r * 0.84, y: r * 0.02 };
+  const shape = [top, right, bottom, left];
+  fillShape(g, shape, x, y + r * 0.2, look.lip);
+  fillShape(g, shape, x, y, look.face);
+  // 깎인 면: 왼쪽 위가 밝다.
+  fillShape(g, [top, { x: 0, y: -r * 0.04 }, left], x, y, look.facet);
+  g.fillStyle(look.shine, 0.9);
+  g.fillCircle(x - r * 0.2, y - r * 0.36, Math.max(0.6, r * 0.14));
+}
+
+/** 조각 아이콘의 크기 */
+export const PIECE_ICON = { width: 12, height: 12 } as const;
+
+/** 조각의 수 옆에 놓는 작은 조각 */
+export function pieceTexture(scene: Phaser.Scene): string {
+  return bakeShape(scene, 'candy-slot-piece', PIECE_ICON, (g) => drawPiece(g, 0, -0.6, 5));
+}
+
+/** 해금 그림의 크기 */
+export const PERK_BOX = 26;
+
+/** 해금마다의 그림. 원점이 한가운데다. */
+const PERK_ART: Readonly<Record<PerkId, (g: Graphics) => void>> = {
+  /** 두둑한 시작: 겹쳐 놓인 금화 */
+  purse: (g) => {
+    drawCoin(g, -3.4, 2.6, 5.6);
+    drawCoin(g, 3.2, -2.4, 5.6);
+  },
+  /** 첫 뽑기 공짜: 한 바퀴 도는 화살표 */
+  reroll: (g) => {
+    g.lineStyle(2.6, LOOK.perk.edge, 1);
+    g.beginPath();
+    g.arc(0, 0.6, 5.6, -Math.PI * 0.35, Math.PI * 1.25);
+    g.strokePath();
+    g.fillStyle(LOOK.perk.edge, 1);
+    g.fillTriangle(1, -8.2, 1, -1.6, 6.6, -4.6);
+  },
+  /** 잠그기 한 번 더: 자물쇠와 더하기 */
+  hold: (g) => {
+    drawLock(g, -1.4, 0.4, 6.4, LOOK.hold.lock, LOOK.hold.frame);
+    drawBadge(g, 7, -6.6, 'plus');
+  },
+  /** 여섯째 자리: 빈자리와 더하기 */
+  slot: (g) => {
+    g.fillStyle(LOOK.emptySlot.edge, 1);
+    g.fillRoundedRect(-8, -6.4, 14.4, 14.4, 4);
+    g.fillStyle(LOOK.emptySlot.face, 1);
+    g.fillRoundedRect(-6.4, -4.8, 11.2, 11.2, 3);
+    drawBadge(g, 7, -6.6, 'plus');
+  },
+};
+
+/** 해금 창의 줄에 놓는 그림 */
+export function perkTexture(scene: Phaser.Scene, id: PerkId): string {
+  return bakeShape(scene, `candy-slot-perk-${id}`, { width: PERK_BOX, height: PERK_BOX }, (g) => {
+    const half = PERK_BOX / 2;
+    g.fillStyle(LOOK.perk.edge, 1);
+    g.fillRoundedRect(-half, -half, PERK_BOX, PERK_BOX, 7);
+    g.fillStyle(LOOK.perk.face, 1);
+    g.fillRoundedRect(-half + 2, -half + 2, PERK_BOX - 4, PERK_BOX - 4, 5);
+    PERK_ART[id](g);
+  });
 }

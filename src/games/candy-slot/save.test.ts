@@ -8,12 +8,14 @@ import {
   randomOf,
   reroll,
   settleRound,
+  PERK_IDS,
   SLOTS,
   spin,
   spinsOf,
   SYMBOLS,
   type RunState,
 } from './rules';
+import { PERKS, PIECES_MAX } from './perks';
 import {
   createSlotSave,
   isResumable,
@@ -25,6 +27,8 @@ import {
   RUN_VERSION,
   savedRunOf,
   withFound,
+  withPerk,
+  withPieces,
   withRun,
   type SavedRun,
 } from './save';
@@ -260,23 +264,76 @@ describe('normalizeSlotSave', () => {
     for (const raw of [undefined, null, 'slot', 3, []]) {
       expect(normalizeSlotSave(raw)).toEqual(createSlotSave());
     }
-    expect(createSlotSave()).toEqual({ found: [], run: null });
+    expect(createSlotSave()).toEqual({ found: [], run: null, pieces: 0, perks: [] });
   });
 
   it('맞는 것은 그대로 둔다', () => {
-    const slot = { found: ['piggy', 'wide'], run: packRun(shopping('2026-11-16')) };
+    const slot = { found: ['piggy', 'wide'], run: packRun(shopping('2026-11-16')), pieces: 37, perks: ['purse', 'hold'] };
     expect(slot.run).not.toBeNull();
     expect(normalizeSlotSave(JSON.parse(JSON.stringify(slot)))).toEqual(slot);
   });
 
   it('하던 판이 깨졌으면 판만 버리고 도감은 살린다', () => {
     const raw = { found: ['piggy', 'gone', 'piggy'], run: broken(spun(newRun(), 1), { coin: -3 }) };
-    expect(normalizeSlotSave(raw)).toEqual({ found: ['piggy'], run: null });
+    expect(normalizeSlotSave(raw)).toEqual({ found: ['piggy'], run: null, pieces: 0, perks: [] });
   });
 
   it('도감이 깨졌어도 하던 판은 살린다', () => {
     const run = spun(newRun(), 1);
-    expect(normalizeSlotSave({ found: 'all', run: stored(run) })).toEqual({ found: [], run: packRun(run) });
+    expect(normalizeSlotSave({ found: 'all', run: stored(run) })).toEqual({
+      found: [],
+      run: packRun(run),
+      pieces: 0,
+      perks: [],
+    });
+  });
+
+  it('조각과 해금이 생기기 전의 세이브는 조각 0개와 해금 없음으로 읽는다', () => {
+    const run = spun(newRun(), 1);
+    expect(normalizeSlotSave({ found: ['piggy'], run: stored(run) })).toEqual({
+      found: ['piggy'],
+      run: packRun(run),
+      pieces: 0,
+      perks: [],
+    });
+  });
+
+  it('조각은 0 이상의 정수만 받고, 한도에서 자른다', () => {
+    const piecesOf = (pieces: unknown): number => normalizeSlotSave({ found: [], run: null, pieces }).pieces;
+    expect(piecesOf(0)).toBe(0);
+    expect(piecesOf(57)).toBe(57);
+    expect(piecesOf(PIECES_MAX)).toBe(PIECES_MAX);
+    expect(piecesOf(PIECES_MAX + 1)).toBe(PIECES_MAX);
+    expect(piecesOf(1e12)).toBe(PIECES_MAX);
+    for (const bad of [-1, 2.5, Number.NaN, Number.POSITIVE_INFINITY, '12', null, [3], { pieces: 3 }, true]) {
+      expect(piecesOf(bad), String(bad)).toBe(0);
+    }
+  });
+
+  it('해금은 지금 있는 것만, 겹치지 않게, 정해진 차례로 남긴다', () => {
+    const perksOf = (perks: unknown): string[] => normalizeSlotSave({ found: [], run: null, perks }).perks;
+    expect(perksOf([])).toEqual([]);
+    expect(perksOf(['slot', 'purse'])).toEqual(['purse', 'slot']);
+    expect(perksOf(['hold', 'hold', 'nope', 3, null, 'reroll'])).toEqual(['reroll', 'hold']);
+    expect(perksOf([...PERK_IDS].reverse())).toEqual([...PERK_IDS]);
+    for (const bad of ['slot', { slot: true }, 4, null, true]) expect(perksOf(bad), String(bad)).toEqual([]);
+  });
+
+  it('조각이나 해금이 깨졌어도 도감과 하던 판은 살린다', () => {
+    const run = spun(newRun(), 1);
+    const raw = { found: ['piggy'], run: stored(run), pieces: 'many', perks: 'all' };
+    expect(normalizeSlotSave(raw)).toEqual({ found: ['piggy'], run: packRun(run), pieces: 0, perks: [] });
+  });
+
+  it('해금을 켠 채로 시작한 판은 지금 열어 둔 해금과 상관없이 그대로 읽는다', () => {
+    // 여섯째 자리를 켜고 시작해 여섯 장을 붙인 판. 해금 목록이 깨져서 비어도 판은 제 해금을 적어 두고 있다.
+    const six = CHARMS.slice(0, SLOTS + 1).map((charm) => charm.id);
+    const run: RunState = { ...spun(newRun(null, ['slot', 'hold']), 1), charms: six };
+    const read = normalizeSlotSave({ found: [], run: stored(run), pieces: 3, perks: 'broken' });
+    expect(read.perks).toEqual([]);
+    expect(read.run?.run.perks).toEqual(['hold', 'slot']);
+    expect(read.run?.run.charms).toEqual(six);
+    expect(read.run?.run.holdsLeft).toBe(HOLDS_PER_ROUND + 1);
   });
 
   it('이어 할 수 없는 판은 적혀 있어도 버린다', () => {
@@ -320,6 +377,54 @@ describe('세이브 고치기', () => {
     expect(withFound(one, 'piggy')).toBe(one);
     expect(withFound(one, 'gone')).toBe(one);
     expect(withFound(one, 'wide').found).toEqual(['piggy', 'wide']);
+  });
+});
+
+describe('조각과 해금을 세이브에 적기', () => {
+  it('조각을 더한다. 더할 것이 없으면 그대로이고, 한도를 넘지 않는다', () => {
+    const empty = createSlotSave();
+    const some = withPieces(empty, 7);
+    expect(some.pieces).toBe(7);
+    expect(empty.pieces).toBe(0);
+    expect(withPieces(some, 0)).toBe(some);
+    expect(withPieces(some, -3)).toBe(some);
+    expect(withPieces(some, 1.5)).toBe(some);
+    expect(withPieces(some, PIECES_MAX * 2).pieces).toBe(PIECES_MAX);
+    const full = withPieces(some, PIECES_MAX);
+    expect(withPieces(full, 5)).toBe(full);
+  });
+
+  it('조각을 내고 해금을 연다. 조각이 모자라거나 이미 열었으면 그대로다', () => {
+    const purse = PERKS.find((perk) => perk.id === 'purse');
+    if (!purse) throw new Error('없는 해금');
+    const poor = withPieces(createSlotSave(), purse.price - 1);
+    expect(withPerk(poor, 'purse')).toBe(poor);
+    const rich = withPieces(poor, 6);
+    const opened = withPerk(rich, 'purse');
+    expect(opened.perks).toEqual(['purse']);
+    expect(opened.pieces).toBe(rich.pieces - purse.price);
+    // 원본은 그대로다.
+    expect(rich.perks).toEqual([]);
+    expect(withPerk(withPieces(opened, 99), 'purse').pieces).toBe(opened.pieces + 99);
+  });
+
+  it('조각을 받거나 해금을 열어도 도감과 하던 판은 그대로이고, 판을 적거나 도감에 넣어도 조각과 해금은 그대로다', () => {
+    const run = spun(newRun(), 1);
+    const base = withRun(withFound(createSlotSave(), 'piggy'), run);
+    const paid = withPerk(withPieces(base, 50), 'reroll');
+    expect(paid.found).toEqual(['piggy']);
+    expect(savedRunOf(paid)).toEqual(run);
+    // 하던 판은 시작할 때의 해금 그대로다.
+    expect(savedRunOf(paid)?.perks).toEqual([]);
+    const later = withFound(withRun(paid, null), 'wide');
+    expect(later.pieces).toBe(paid.pieces);
+    expect(later.perks).toEqual(['reroll']);
+  });
+
+  it('세이브를 문자열로 옮겼다가 읽어도 조각과 해금이 그대로다', () => {
+    const slot = withPerk(withPerk(withPieces(createSlotSave(), 120), 'slot'), 'purse');
+    expect(slot.perks).toEqual(['purse', 'slot']);
+    expect(normalizeSlotSave(JSON.parse(JSON.stringify(slot)))).toEqual(slot);
   });
 });
 

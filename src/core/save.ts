@@ -50,7 +50,7 @@ import {
 import { clearLevel, normalizeStages, type StageProgress } from './stages';
 import { createSlotSave, normalizeSlotSave, type SlotSave } from '../games/candy-slot/save';
 
-export const SAVE_VERSION = 10;
+export const SAVE_VERSION = 11;
 
 /** 점수를 냈으면 한 판에 적어도 이만큼은 코인을 준다. 처음 하는 사람이 빈손으로 끝나지 않게 한다. */
 export const MIN_COINS_PER_PLAY = 1;
@@ -96,7 +96,7 @@ export interface SaveData {
   weekly: WeeklyState;
   /** 퍼즐 단계 모드: 게임마다 깬 가장 높은 단계 */
   stages: StageProgress;
-  /** 행운 슬롯: 찾은 부적(도감)과, 도중에 두고 간 판 */
+  /** 행운 슬롯: 찾은 부적(도감), 도중에 두고 간 판, 행운 조각과 그것으로 연 영구 해금 */
   slot: SlotSave;
   createdAt: number;
   updatedAt: number;
@@ -507,7 +507,7 @@ export function claimWeeklyMission(
 }
 
 /**
- * 기록, 코인, 산 꾸미기, 받은 업적 보상, 행운 슬롯의 도감과 하던 판을 지우고 설정과 닉네임은 남긴다.
+ * 기록, 코인, 산 꾸미기, 받은 업적 보상, 행운 슬롯의 도감과 하던 판, 조각과 영구 해금을 지우고 설정과 닉네임은 남긴다.
  * 이 기기 안의 기록만 지운다. 온라인 랭킹에 올라간 기록은 랭킹 화면에서 따로 뺀다.
  */
 export function resetProgress(save: SaveData, now: number = Date.now()): SaveData {

@@ -55,6 +55,7 @@ import {
   charmOf,
   clearedRounds,
   discard,
+  holdsOf,
   layoutFor,
   LINES,
   MACHINE_FRAME,
@@ -69,7 +70,7 @@ import {
   SHOP_HEAD,
   SHOP_ROW,
   SIZE,
-  SLOTS,
+  slotsOf,
   spin,
   spinsOf,
   SYMBOLS,
@@ -94,7 +95,30 @@ import {
   foundCount,
   type CollectionEntry,
 } from './collection';
-import { RESUME_TEXT, resumeCaption, savedRunOf, withFound, withRun } from './save';
+import { RESUME_TEXT, resumeCaption, savedRunOf, withFound, withPerk, withPieces, withRun } from './save';
+import {
+  activeNote,
+  holdHowText,
+  holdUsedText,
+  PERK_TEXT,
+  perkLabel,
+  piecesFor,
+  piecesVerdict,
+  rerollLabel,
+  slotsNote,
+  unlockBlock,
+} from './perks';
+import {
+  addPerkButton,
+  addPerkNote,
+  openPerkPanel,
+  PERK_BUTTON_PAD,
+  PERK_NOTE_HEIGHT,
+  showPieceGain,
+  textWidth,
+  type PerkButton,
+  type PerkNote,
+} from './perk-views';
 import { UPGRADE_MARK_BOX, upgradeMarkTexture } from './art';
 import { nextSpinTimes, upgrade } from './rules';
 import {
@@ -139,10 +163,9 @@ const BIG_WIN_MIN = 8;
 const HOLD_GRACE_MS = 300;
 /** 열을 잠그는 법을 처음 알리는 글이 떠 있는 시간(ms) */
 const HOLD_TIP_MS = 2600;
+/** 잠그는 법과 다 썼을 때의 글은 잠글 수 있는 횟수에 따라 달라서 perks.ts(holdHowText, holdUsedText)가 만든다. */
 const HOLD_NOTES = {
-  how: '열을 누르면 한 번 잠글 수 있어요',
   first: '한 번 돌린 뒤에 잠글 수 있어요',
-  used: '잠그기는 라운드마다 한 번이에요',
 } as const;
 /** 곱해진 상금을 알리는 글이 떠 있는 시간(ms) */
 const BOOST_MS = 620;
@@ -468,6 +491,14 @@ export class CandySlotScene extends MiniGameScene {
   private book: Disposable[] | null = null;
   /** 판이 끝났는지. 끝난 뒤에는 도감을 열지 않는다(곧 결과 화면이 뜬다). */
   private ended = false;
+  /** 부적 자리의 줄에 놓인 것들(그림과 누르는 자리). 자리의 수가 달라지면 치우고 다시 놓는다. */
+  private slotViews: Disposable[] = [];
+  /** 시작 화면의 해금 버튼 */
+  private startPerks: PerkButton | null = null;
+  /** 해금 버튼 아래에 켜진 해금을 알리는 한 줄이 놓일 자리(top)와, 지금 적혀 있는 글과 그것을 그린 것. 적을 것이 없으면 view가 null이다. */
+  private perkNote: { top: number; label: string; view: PerkNote | null } | null = null;
+  /** 열려 있는 해금 창에 놓인 것들. 닫혀 있으면 null이다. */
+  private perkPanel: Disposable[] | null = null;
   /** 씬을 열 때 넘겨받은 것. init이 적어 두고 setUpDaily가 쓴다. */
   private dailyStart: SlotStart = {};
   /** 시작 화면에서 여느 판과 오늘의 판을 오가는 버튼. 첫 스핀에 도움말과 함께 사라진다. */
@@ -491,9 +522,9 @@ export class CandySlotScene extends MiniGameScene {
     this.beginMiniGame();
     this.resetState();
 
-    const { height } = this.scale;
-    this.layout = layoutFor({ x: 0, y: HUD_HEIGHT, width: GAME_WIDTH, height: height - HUD_HEIGHT });
-    this.run = newRun();
+    // 여느 판은 열어 둔 영구 해금을 켜고 시작한다. 부적 자리의 수도 그 판을 따른다.
+    this.run = this.freshRun();
+    this.layout = layoutFor(this.playArea, slotsOf(this.run));
 
     this.addTable();
     this.addMachine();
@@ -657,7 +688,7 @@ export class CandySlotScene extends MiniGameScene {
         .image(slot.x + slotSize / 2, slot.y + slotSize / 2, emptySlotTexture(this))
         .setDepth(DEPTH.panel);
       this.slotImages.push(image);
-      addTapZone(
+      const zone = addTapZone(
         this,
         slot.x - 2,
         slot.y - 2,
@@ -666,6 +697,7 @@ export class CandySlotScene extends MiniGameScene {
         (pressed) => image.setScale(pressed && index < this.run.charms.length ? 0.92 : 1),
         () => this.onSlotTap(index),
       ).setDepth(DEPTH.panel);
+      this.slotViews.push(image, zone);
     });
   }
 
@@ -724,6 +756,7 @@ export class CandySlotScene extends MiniGameScene {
     this.goalText.setText(`${coin} / ${target}`).setX(Math.round(bar.x + bar.width / 2));
     this.refreshHold();
     this.refreshDailyBadge();
+    this.refreshPerks();
   }
 
   private refreshSlots(): void {
@@ -1236,18 +1269,18 @@ export class CandySlotScene extends MiniGameScene {
   private explainHold(): void {
     if (!this.playing || this.busy || this.run.phase !== 'spin' || this.hints.length > 0) return;
     if (canHold(this.run)) {
-      this.holdNote(HOLD_NOTES.how);
+      this.holdNote(holdHowText(holdsOf(this.run), this.run.holdsLeft));
       return;
     }
     sfx.deny();
-    this.holdNote(this.run.holdsLeft > 0 ? HOLD_NOTES.first : HOLD_NOTES.used);
+    this.holdNote(this.run.holdsLeft > 0 ? HOLD_NOTES.first : holdUsedText(holdsOf(this.run)));
   }
 
   /** 첫 라운드에서 열을 잠글 수 있게 된 첫 순간에 한 번, 잠그는 법을 알린다. */
   private tellHold(): void {
     if (this.holdTold || this.run.round > GUIDE_ROUNDS || !canHold(this.run)) return;
     this.holdTold = true;
-    this.holdNote(HOLD_NOTES.how, HOLD_TIP_MS);
+    this.holdNote(holdHowText(holdsOf(this.run), this.run.holdsLeft), HOLD_TIP_MS);
   }
 
   private holdNote(label: string, ms = 1300): void {
@@ -1391,6 +1424,7 @@ export class CandySlotScene extends MiniGameScene {
     this.hideHints();
     this.hideBubble();
     this.wrapUp();
+    const pieces = this.payPieces();
     this.spinButton.setEnabled(false);
     this.rerollButton?.setEnabled(false);
     // 가게에서 끝내면 알림이 가게의 글 위에 겹치므로, 가게를 걷고 기계 위에 알린다.
@@ -1409,6 +1443,7 @@ export class CandySlotScene extends MiniGameScene {
       shadow: LOOK.text.shadow,
     }).setDepth(DEPTH.banner);
     this.tweens.add({ targets: banner, scale: { from: 0.7, to: 1 }, duration: 180, ease: 'Back.Out' });
+    if (pieces.earned > 0) showPieceGain(this, GAME_WIDTH / 2, this.machineMiddle + 24, pieces.earned, DEPTH.banner);
 
     const { run } = this;
     const chips = run.charms.flatMap((id) => {
@@ -1423,6 +1458,7 @@ export class CandySlotScene extends MiniGameScene {
         ...(daily?.stats ?? []),
         ['넘긴 라운드', `${clearedRounds(run)}번`],
         ['가장 큰 한 방', `금화 ${run.bestSpin}개`],
+        [PERK_TEXT.piece, piecesVerdict(pieces.earned, pieces.total)],
       ],
       OVER_RESULT_MS,
       strip,
@@ -1457,6 +1493,7 @@ export class CandySlotScene extends MiniGameScene {
   /** 도감이 열려 있으면 뒤로 가기로는 도감만 닫는다. */
   override onBackRequest(): void {
     if (this.book) this.closeBook();
+    else if (this.perkPanel) this.closePerks();
     else super.onBackRequest();
   }
 
@@ -1503,7 +1540,7 @@ export class CandySlotScene extends MiniGameScene {
     const footRoom = shop.y + shop.height - rowsBottom;
     if (footRoom >= SHOP_FOOT_MIN) {
       this.shopViews.push(
-        addText(this, shop.x + shop.width / 2, rowsBottom + (footRoom - 4) / 2, `부적은 ${SLOTS}장까지 붙일 수 있어요`, {
+        addText(this, shop.x + shop.width / 2, rowsBottom + (footRoom - 4) / 2, slotsNote(slotsOf(this.run)), {
           size: FONT_SIZE.small,
           color: LOOK.text.faint,
           originX: 0.5,
@@ -1611,7 +1648,11 @@ export class CandySlotScene extends MiniGameScene {
     for (let offer = 0; offer < OFFERS; offer += 1) this.drawOfferRow(offer);
     this.refreshOfferChips();
     const cost = this.run.shop?.rerollCost ?? 0;
-    this.rerollButton?.setPrice(cost).setEnabled(this.run.coin >= cost);
+    // 공짜일 때는 금화 0개라고 적는 대신 공짜라고 적는다.
+    this.rerollButton
+      ?.setLabel(rerollLabel(cost))
+      .setPrice(cost === 0 ? null : cost)
+      .setEnabled(this.run.coin >= cost);
   }
 
   private tryBuy(offer: number): void {
@@ -1803,7 +1844,7 @@ export class CandySlotScene extends MiniGameScene {
   /** 여느 판과 오늘의 판을 바꾼다. 아직 돌리지 않은 판이라 새 판으로 갈아 끼우기만 하면 된다. */
   private switchMode(): void {
     if (!this.playing || !this.canSwitchMode()) return;
-    this.run = newRun(this.dailyDay === null ? dailySeed(dayIndexOf(new Date())) : null);
+    this.run = this.dailyDay === null ? newRun(dailySeed(dayIndexOf(new Date()))) : this.freshRun();
     this.refreshNumbers();
     this.showDailySwitch();
     // 오늘의 판으로 바꿨으면 점수 아래의 표시가 스르르 나타나 어디가 달라졌는지 알린다.
@@ -1936,7 +1977,8 @@ export class CandySlotScene extends MiniGameScene {
     const back = this.add.graphics().setDepth(depth);
     drawPanel(back, box.x, box.y, box.width, box.height, { radius: 10, border: LOOK.machine.trim });
     // 어느 부적의 설명인지 가리키는 꼬리
-    const tipX = slots[slot].x + slotSize / 2;
+    // 자리가 여섯이면 양 끝의 부적이 창의 둥근 모서리 밑에 온다. 꼬리가 모서리에서 떨어지지 않게 안쪽으로 당긴다.
+    const tipX = Phaser.Math.Clamp(slots[slot].x + slotSize / 2, box.x + 16, box.x + box.width - 16);
     back.fillStyle(LOOK.machine.trim, 1);
     back.fillTriangle(tipX - 6, box.y + box.height - 1, tipX + 6, box.y + box.height - 1, tipX, box.y + box.height + 6);
     const title = addText(this, place.title.x, place.title.y, name, { color: LOOK.text.ink }).setDepth(depth);
@@ -2139,6 +2181,7 @@ export class CandySlotScene extends MiniGameScene {
     this.shopBook = null;
     this.book = null;
     this.ended = false;
+    this.resetPerkViews();
     // 도감을 연 채로 씬이 닫혔으면 키보드가 꺼진 채로 남아 있다.
     if (this.input.keyboard) this.input.keyboard.enabled = true;
   }
@@ -2168,6 +2211,7 @@ export class CandySlotScene extends MiniGameScene {
   private wrapUp(): void {
     this.ended = true;
     this.closeBook();
+    this.closePerks();
     this.dropRun();
   }
 
@@ -2361,11 +2405,14 @@ export class CandySlotScene extends MiniGameScene {
   /** 시작 화면의 도감 버튼을 카드 바로 밑에 놓는다. top은 버튼의 위쪽 끝이다. */
   private showStartBook(top: number): void {
     this.startBook?.destroy();
-    this.startBook = this.addBookButton(GAME_WIDTH / 2, Math.round(top), BOOK_BUTTON.height, DEPTH.hint);
+    // 도감 버튼의 오른쪽에 해금 버튼이 나란히 놓인다. 둘을 한 덩어리로 가운데에 맞춘다.
+    const centerX = this.showStartPerks(Math.round(top));
+    this.startBook = this.addBookButton(centerX, Math.round(top), BOOK_BUTTON.height, DEPTH.hint);
   }
 
   /** 시작 화면의 도감 버튼을 치운다. 처음의 도움말과 함께 사라진다. */
   private hideStartBook(now: boolean): void {
+    this.hideStartPerks(now);
     const button = this.startBook;
     if (!button) return;
     this.startBook = null;
@@ -2395,7 +2442,7 @@ export class CandySlotScene extends MiniGameScene {
    * 아직 찾지 못한 부적은 물음표가 적힌 흐린 칸으로만 보인다.
    */
   private openBook(): void {
-    if (this.book || this.ended) return;
+    if (this.book || this.perkPanel || this.ended) return;
     this.hideBubble();
     const { width: screenWidth, height: screenHeight } = this.scale;
     const found = store.data.slot.found;
@@ -2515,5 +2562,149 @@ export class CandySlotScene extends MiniGameScene {
     for (const view of this.book) view.destroy();
     this.book = null;
     if (this.input.keyboard) this.input.keyboard.enabled = true;
+  }
+
+  // ───────── 영구 해금 ─────────
+
+  /** 씬을 다시 열 때 해금에 딸린 것들을 처음 상태로 돌린다. 놓여 있던 것은 씬이 닫힐 때 이미 치워졌다. */
+  private resetPerkViews(): void {
+    this.slotViews = [];
+    this.startPerks = null;
+    this.perkNote = null;
+    this.perkPanel = null;
+  }
+
+  /** 게임 영역: HUD 아래의 자리 */
+  private get playArea(): Box {
+    return { x: 0, y: HUD_HEIGHT, width: GAME_WIDTH, height: this.scale.height - HUD_HEIGHT };
+  }
+
+  /** 열어 둔 영구 해금을 켠 새 여느 판. 오늘의 판은 해금 없이 newRun(씨앗)으로 만든다. */
+  private freshRun(): RunState {
+    return newRun(null, store.data.slot.perks);
+  }
+
+  /** 아직 한 번도 돌리지 않은 여느 판인지. 그런 판은 해금을 새로 열면 그 자리에서 해금을 켠 판으로 갈아 끼운다. */
+  private isUnstartedNormal(): boolean {
+    const { run } = this;
+    return run.seed === null && run.phase === 'spin' && run.round === 1 && run.spinCount === 0 && !this.busy;
+  }
+
+  /**
+   * 판이 바뀌었을 때(새 판, 이어 하기, 여느 판과 오늘의 판 바꾸기) 부적 자리의 수를 그 판에 맞춘다.
+   * 자리의 수가 그대로면 아무것도 하지 않는다. 시작 화면의 한 줄도 지금 판에 맞게 다시 적는다.
+   */
+  private refreshPerks(): void {
+    const count = slotsOf(this.run);
+    if (count !== this.layout.slots.length) {
+      this.hideBubble();
+      this.layout = layoutFor(this.playArea, count);
+      for (const view of this.slotViews) view.destroy();
+      this.slotViews = [];
+      this.slotImages = [];
+      this.addSlots();
+      this.refreshSlots();
+    }
+    this.refreshPerkNote();
+  }
+
+  /**
+   * 시작 화면의 카드 밑에 도감 버튼과 해금 버튼이 나란히 놓일 자리를 잡고, 해금 버튼과 그 아래의 한 줄을 놓는다.
+   * 왼쪽에 놓일 도감 버튼의 가운데를 돌려준다. top은 버튼의 위쪽 끝이다.
+   */
+  private showStartPerks(top: number): number {
+    this.hideStartPerks(true);
+    const gap = 6;
+    const bookWidth = textWidth(this, collectionLabel(store.data.slot.found)) + PERK_BUTTON_PAD;
+    const perkWidth = textWidth(this, perkLabel(store.data.slot)) + PERK_BUTTON_PAD;
+    const left = Math.round((GAME_WIDTH - bookWidth - gap - perkWidth) / 2);
+    this.startPerks = addPerkButton(
+      this,
+      left + bookWidth + gap + perkWidth / 2,
+      top,
+      BOOK_BUTTON.height,
+      DEPTH.hint,
+      () => store.data.slot,
+      () => this.openPerks(),
+    );
+    // 이어 할지 묻는 동안에는 한 줄을 적지 않는다. 이어 하는 판은 시작할 때의 해금을 따르기 때문이다.
+    if (this.resumeViews.length === 0) {
+      this.perkNote = { top: top + BOOK_BUTTON.height + 5, label: '', view: null };
+      this.refreshPerkNote();
+    }
+    return left + bookWidth / 2;
+  }
+
+  /** 시작 화면의 해금 버튼과 그 아래의 한 줄을 치운다. 처음의 도움말과 함께 사라진다. */
+  private hideStartPerks(now: boolean): void {
+    const button = this.startPerks;
+    const note = this.perkNote?.view;
+    this.startPerks = null;
+    this.perkNote = null;
+    if (now) {
+      button?.destroy();
+      note?.destroy();
+    } else {
+      button?.fade();
+      note?.fade();
+    }
+  }
+
+  /**
+   * 해금 버튼 아래의 한 줄을 지금 판에 맞게 적는다: 여느 판이면 켜진 해금의 수, 오늘의 판이면 해금 없이 한다는 것.
+   * 열어 둔 해금이 없거나, 기계 밖으로 나갈 만큼 화면이 짧으면 적지 않는다.
+   */
+  private refreshPerkNote(): void {
+    const note = this.perkNote;
+    if (!note) return;
+    const { machine } = this.layout;
+    const fits = note.top + PERK_NOTE_HEIGHT <= machine.y + machine.height - MACHINE_FRAME;
+    const label = fits ? (activeNote(store.data.slot, this.dailyDay !== null) ?? '') : '';
+    if (label === note.label) return;
+    note.view?.destroy();
+    note.label = label;
+    note.view = label === '' ? null : addPerkNote(this, note.top, DEPTH.hint, label);
+  }
+
+  /** 해금 창을 연다. 가진 조각과 해금 넷이 놓이고, 줄을 누르면 조각을 내고 연다. */
+  private openPerks(): void {
+    if (this.perkPanel || this.book || this.ended) return;
+    this.hideBubble();
+    this.perkPanel = openPerkPanel(this, {
+      depth: BOOK_DEPTH,
+      state: () => store.data.slot,
+      unlock: (id) => {
+        const block = unlockBlock(store.data.slot, id);
+        if (block !== null) return block;
+        store.update((save) => void (save.slot = withPerk(save.slot, id)));
+        this.startPerks?.refresh();
+        // 아직 돌리지 않은 여느 판이면 방금 연 해금을 바로 켠다. 오늘의 판과 하던 판은 그대로다.
+        if (this.isUnstartedNormal()) this.run = this.freshRun();
+        this.refreshNumbers();
+        return null;
+      },
+      addButton: (box, label, onTap) => new SoftButton(this, box, 'gold', BOOK_DEPTH, label, onTap),
+      close: () => this.closePerks(),
+    });
+    // 창이 떠 있는 동안에는 키보드로 돌리지 못하게 한다.
+    if (this.input.keyboard) this.input.keyboard.enabled = false;
+  }
+
+  private closePerks(): void {
+    if (!this.perkPanel) return;
+    for (const view of this.perkPanel) view.destroy();
+    this.perkPanel = null;
+    if (this.input.keyboard) this.input.keyboard.enabled = true;
+  }
+
+  /**
+   * 끝난 판의 조각을 세이브에 넣고, 이번 판에 받은 조각과 받은 뒤에 가진 조각을 돌려준다.
+   * endRun이 판마다 한 번만 부른다. 도중에 버린 판(새 판을 고른 판)은 여기를 거치지 않아서 조각을 받지 못한다.
+   */
+  private payPieces(): { earned: number; total: number } {
+    const before = store.data.slot;
+    const after = withPieces(before, piecesFor(this.run));
+    if (after !== before) store.update((save) => void (save.slot = after));
+    return { earned: after.pieces - before.pieces, total: after.pieces };
   }
 }

@@ -1,5 +1,5 @@
 /**
- * 행운 슬롯이 허브 세이브(core/save.ts의 slot)에 남기는 것: 하던 판과 부적 도감.
+ * 행운 슬롯이 허브 세이브(core/save.ts의 slot)에 남기는 것: 하던 판과 부적 도감, 행운 조각과 영구 해금.
  * 허브 세이브에 들어 있어서 내보내기, 가져오기, 기기 옮기기에 그대로 실려 가고, 기록 초기화로 함께 지워진다.
  *
  * 하던 판은 RunState를 그대로 적는다. RunState에는 운의 씨앗과 차례(seed, spinCount, drawCount)까지 들어 있어서
@@ -8,6 +8,7 @@
  * 화면과 저장소 어느 쪽에도 기대지 않는 순수 함수들이다.
  */
 import { normalizeFound, addFound } from './collection';
+import { addPieces, PIECES_MAX, unlock } from './perks';
 import {
   CELLS,
   charmOf,
@@ -45,6 +46,10 @@ export interface SlotSave {
   found: string[];
   /** 하던 판. 없으면 null이다. */
   run: SavedRun | null;
+  /** 가진 행운 조각. 판이 끝날 때 받고, 영구 해금을 여는 데 쓴다(perks.ts). */
+  pieces: number;
+  /** 열어 둔 영구 해금. PERK_IDS의 차례로 들어 있다. */
+  perks: PerkId[];
 }
 
 /** 이어 하기와 관련해 화면에 적는 글 */
@@ -63,7 +68,7 @@ export function resumeCaption(run: RunState): string {
 }
 
 export function createSlotSave(): SlotSave {
-  return { found: [], run: null };
+  return { found: [], run: null, pieces: 0, perks: [] };
 }
 
 /**
@@ -227,8 +232,24 @@ export function readRun(raw: unknown): RunState | null {
 }
 
 /**
+ * 가진 조각: 0 이상의 정수만 받고 한도(PIECES_MAX)에서 자른다. 없거나(조각이 생기기 전의 세이브) 맞지 않으면 0이다.
+ */
+function normalizePieces(raw: unknown): number {
+  return isCount(raw) ? Math.min(PIECES_MAX, raw) : 0;
+}
+
+/**
+ * 열어 둔 해금: 지금 있는 해금만, 겹치지 않게, PERK_IDS의 차례로 남긴다. 없거나 목록이 아니면 연 것이 없다.
+ * 하던 판의 해금(readPerks)과 달리 모르는 것이 섞여 있어도 아는 것은 살린다. 조각을 내고 연 것이라 버리면 아깝다.
+ */
+function normalizeUnlocked(raw: unknown): PerkId[] {
+  if (!Array.isArray(raw)) return [];
+  return PERK_IDS.filter((id) => raw.includes(id));
+}
+
+/**
  * 저장소나 가져오기 파일에서 읽은 값을 안전한 SlotSave로 바꾼다.
- * 도감은 맞는 것만 남기고, 하던 판은 조금이라도 맞지 않으면 버린다. 한쪽이 깨져도 다른 쪽은 살린다.
+ * 도감과 해금은 맞는 것만 남기고, 하던 판은 조금이라도 맞지 않으면 버린다. 한쪽이 깨져도 다른 쪽은 살린다.
  */
 export function normalizeSlotSave(raw: unknown): SlotSave {
   if (!isObject(raw)) return createSlotSave();
@@ -236,6 +257,8 @@ export function normalizeSlotSave(raw: unknown): SlotSave {
   return {
     found: normalizeFound(raw.found),
     run: run && isResumable(run) ? { version: RUN_VERSION, run } : null,
+    pieces: normalizePieces(raw.pieces),
+    perks: normalizeUnlocked(raw.perks),
   };
 }
 
@@ -253,4 +276,19 @@ export function withRun(slot: SlotSave, run: RunState | null): SlotSave {
 export function withFound(slot: SlotSave, charmId: string): SlotSave {
   const found = addFound(slot.found, charmId);
   return found === slot.found ? slot : { ...slot, found: [...found] };
+}
+
+/** 조각을 amount개 더한 새 SlotSave를 돌려준다. 더할 것이 없거나 이미 한도면 받은 것 그대로다. */
+export function withPieces(slot: SlotSave, amount: number): SlotSave {
+  const next = addPieces(slot, amount);
+  return next === slot ? slot : { ...slot, pieces: next.pieces };
+}
+
+/**
+ * 조각을 내고 해금 하나를 연 새 SlotSave를 돌려준다. 이미 열었거나 조각이 모자라면 받은 것 그대로다.
+ * 하던 판은 건드리지 않는다. 판은 시작할 때 켜져 있던 해금을 스스로 적어 두고 있다(RunState.perks).
+ */
+export function withPerk(slot: SlotSave, id: PerkId): SlotSave {
+  const next = unlock(slot, id);
+  return next === slot ? slot : { ...slot, pieces: next.pieces, perks: [...next.perks] };
 }

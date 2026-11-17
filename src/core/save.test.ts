@@ -23,7 +23,7 @@ import { createCosmetics } from './shop';
 import { MILESTONE_COINS, STAGE_COINS } from './stages';
 import { createWeekly, MISSION_RULES, missionsFor, pickedGame, type WeekContext, type WeeklyGame } from './weekly';
 import { newRun, spin } from '../games/candy-slot/rules';
-import { packRun, RUN_VERSION, withFound, withRun } from '../games/candy-slot/save';
+import { packRun, RUN_VERSION, withFound, withPerk, withPieces, withRun } from '../games/candy-slot/save';
 
 const NOW = 1_700_000_000_000;
 
@@ -82,7 +82,7 @@ describe('normalizeSave', () => {
         claimed: ['easy'],
       },
       stages: { 'color-sort': 12, 'number-puzzle': 1 },
-      slot: { found: ['piggy', 'wide'], run: packRun(slotRun()) },
+      slot: { found: ['piggy', 'wide'], run: packRun(slotRun()), pieces: 31, perks: ['purse', 'slot'] },
       createdAt: NOW - 5000,
       updatedAt: NOW - 1000,
     };
@@ -96,19 +96,39 @@ describe('normalizeSave', () => {
       NOW,
     );
     expect(old.version).toBe(SAVE_VERSION);
-    expect(old.slot).toEqual({ found: [], run: null });
+    expect(old.slot).toEqual({ found: [], run: null, pieces: 0, perks: [] });
     expect(old.coins).toBe(3);
     expect(old.games['candy-slot'].best).toBe(120);
     expect(old.stages).toEqual({ 'color-sort': 4 });
-    expect(createDefaultSave(NOW).slot).toEqual({ found: [], run: null });
+    expect(createDefaultSave(NOW).slot).toEqual({ found: [], run: null, pieces: 0, perks: [] });
+  });
+
+  it('행운 슬롯의 조각과 영구 해금이 생기기 전의 세이브는 조각 0개와 해금 없음으로 읽고, 도감과 하던 판은 살린다', () => {
+    const run = packRun(slotRun());
+    const old = normalizeSave({ version: 10, coins: 3, games: {}, slot: { found: ['piggy'], run } }, NOW);
+    expect(old.version).toBe(SAVE_VERSION);
+    expect(old.slot).toEqual({ found: ['piggy'], run, pieces: 0, perks: [] });
+    expect(old.coins).toBe(3);
+  });
+
+  it('행운 슬롯의 조각과 해금이 이상하면 그것만 버리고 나머지는 살린다', () => {
+    const slot = { found: ['piggy'], run: null, pieces: -4, perks: ['slot', 'nope', 'slot', 7, 'purse'] };
+    const save = normalizeSave({ version: SAVE_VERSION, coins: 9, games: {}, slot }, NOW);
+    expect(save.slot).toEqual({ found: ['piggy'], run: null, pieces: 0, perks: ['purse', 'slot'] });
+    expect(save.coins).toBe(9);
   });
 
   it('행운 슬롯의 하던 판이 깨졌으면 그 판만 버리고 도감과 나머지는 살린다', () => {
     const run = { version: RUN_VERSION, run: { ...slotRun(), charms: ['no-such-charm'] } };
     const save = normalizeSave({ version: SAVE_VERSION, coins: 9, games: {}, slot: { found: ['piggy', 'gone'], run } }, NOW);
-    expect(save.slot).toEqual({ found: ['piggy'], run: null });
+    expect(save.slot).toEqual({ found: ['piggy'], run: null, pieces: 0, perks: [] });
     expect(save.coins).toBe(9);
-    expect(normalizeSave({ version: SAVE_VERSION, games: {}, slot: 'broken' }, NOW).slot).toEqual({ found: [], run: null });
+    expect(normalizeSave({ version: SAVE_VERSION, games: {}, slot: 'broken' }, NOW).slot).toEqual({
+      found: [],
+      run: null,
+      pieces: 0,
+      perks: [],
+    });
   });
 
   it('단계 모드가 생기기 전의 세이브는 깬 단계가 없는 채로 읽는다', () => {
@@ -597,12 +617,14 @@ describe('resetProgress', () => {
     expect(resetProgress(claimed.save, NOW + 100).achievements).toEqual({ claimed: [] });
   });
 
-  it('행운 슬롯의 도감과 하던 판도 지운다', () => {
+  it('행운 슬롯의 도감과 하던 판, 조각과 영구 해금도 지운다', () => {
     const save = createDefaultSave(NOW);
-    save.slot = withRun(withFound(save.slot, 'piggy'), slotRun());
+    save.slot = withPerk(withPieces(withRun(withFound(save.slot, 'piggy'), slotRun()), 40), 'purse');
     expect(save.slot.found).toEqual(['piggy']);
     expect(save.slot.run).not.toBeNull();
-    expect(resetProgress(save, NOW + 100).slot).toEqual({ found: [], run: null });
+    expect(save.slot.pieces).toBe(25);
+    expect(save.slot.perks).toEqual(['purse']);
+    expect(resetProgress(save, NOW + 100).slot).toEqual({ found: [], run: null, pieces: 0, perks: [] });
   });
 
   it('오늘의 도전 기록도 지운다', () => {
