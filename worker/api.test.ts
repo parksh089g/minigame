@@ -583,6 +583,56 @@ describe('오늘의 랭킹 요청', () => {
     expect((await call('POST', '/api/daily/lantern-keeper', {})).status).toBe(404);
   });
 
+  it('행운 슬롯의 오늘의 판 점수도 받는다. 게임마다 랭킹이 따로이고, 서버의 오늘과 다른 날의 점수는 버린다', async () => {
+    const { call, wait } = server();
+    const slot = (n: number, name: string, score: number, day: number) =>
+      call('POST', '/api/rank', {
+        device: device(n),
+        name,
+        scores: { 'candy-slot': score },
+        daily: { day, scores: { 'candy-slot': score } },
+      });
+    expect((await slot(1, '행운이', 240, TODAY)).body).toEqual({
+      bests: { 'candy-slot': 240 },
+      ranks: { 'candy-slot': 1 },
+    });
+    await slot(2, '클로버', 310, TODAY);
+    await submit(call, 3, '등불지기', 700);
+    expect((await call('GET', `/api/daily/candy-slot?me=${device(1)}`)).body).toEqual({
+      top: [
+        { rank: 1, name: '클로버', score: 310, mine: false },
+        { rank: 2, name: '행운이', score: 240, mine: true },
+      ],
+      me: { rank: 2, score: 240, name: '행운이' },
+      day: TODAY,
+    });
+    // 등불지기의 오늘의 랭킹과는 섞이지 않는다.
+    expect((await call('GET', '/api/daily/lantern-keeper')).body.top).toEqual([
+      { rank: 1, name: '등불지기', score: 700, mine: false },
+    ]);
+    // 어제의 판이나 내일의 판(기기의 시계가 틀린 경우)의 점수는 오늘의 랭킹에 들어가지 않는다. 최고 기록은 그대로 받는다.
+    for (const day of [TODAY - 1, TODAY + 1]) {
+      const posted = await slot(4, '늦은이', 999, day);
+      expect(posted.status).toBe(200);
+      expect(posted.body.bests).toEqual({ 'candy-slot': 999 });
+    }
+    expect((await call('GET', `/api/daily/candy-slot?me=${device(4)}`)).body).toMatchObject({ me: null });
+    expect((await call('GET', '/api/daily/candy-slot')).body.top).toHaveLength(2);
+    // 한국 시각으로 0시가 지나면 새 날의 빈 랭킹이다. 어제의 날로 늦게 온 점수는 새 날에 들어가지 않는다.
+    wait(8 * HOUR);
+    expect((await call('GET', `/api/daily/candy-slot?me=${device(1)}`)).body).toEqual({
+      top: [],
+      me: null,
+      day: TODAY + 1,
+    });
+    await slot(1, '행운이', 500, TODAY);
+    expect((await call('GET', '/api/daily/candy-slot')).body.top).toEqual([]);
+    await slot(1, '행운이', 120, TODAY + 1);
+    expect((await call('GET', '/api/daily/candy-slot')).body.top).toEqual([
+      { rank: 1, name: '행운이', score: 120, mine: false },
+    ]);
+  });
+
   it('기록을 지우면 오늘의 랭킹에서도 빠진다', async () => {
     const { call } = server();
     await submit(call, 1, '등불지기', 700);

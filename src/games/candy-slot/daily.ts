@@ -5,8 +5,10 @@
  * 기기가 어느 나라에 있든 한국 시각으로 0시에 하루가 넘어간다.
  * 화면과 저장소에 의존하지 않는 순수한 값과 함수만 둔다. 저장은 daily-store.ts가 맡는다.
  *
- * 기록은 이 기기에만 남는다. 오늘의 랭킹(online/)에는 올리지 않는다: 오늘의 랭킹이 있는 게임의 목록
- * (protocol.ts의 DAILY_BOARD)은 서버가 함께 쓰는 약속이라, 거기에 이 게임을 넣고 서버를 다시 올려야 받는다.
+ * 그날의 최고 기록과 이어 온 날 수는 이 기기에 남는다. 그날의 판에서 낸 점수는 오늘의 랭킹(online/)에도 올라가서
+ * 같은 운으로 한 다른 사람과 견줄 수 있다(rank.ts, rank-view.ts). 이 게임은 오늘의 랭킹이 있는 게임의 목록
+ * (protocol.ts의 DAILY_BOARD)에 들어 있고, 그 목록은 서버가 함께 쓰는 약속이라 서버도 같이 올라가야 받는다.
+ * 랭킹의 날은 판의 씨앗에 적힌 날(dailySeed)이고, 그것은 dayIndexOf, 곧 서버가 보는 rankDayOf와 같아야 한다.
  */
 import { MAX_SCORE, rankDayOf } from '../../online/protocol';
 import type { ShareOverride } from '../../share/link';

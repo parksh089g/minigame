@@ -44,6 +44,9 @@ import {
   SHARED_DAY_PASSED,
 } from './daily';
 import { slotDailyStore } from './daily-store';
+import { noteDayScore } from '../../online/online';
+import { boardDayOf } from './rank';
+import { addRankPill, openRankView } from './rank-view';
 import {
   buy,
   buyBlock,
@@ -192,6 +195,11 @@ const DAILY_SWITCH = { width: 96, height: 24, gap: 6 } as const;
 const DAILY_INFO = { height: 16, gap: 4 } as const;
 /** 오늘의 판을 하는 동안 점수 아래에 띄워 두는 표시의 한가운데 높이와 그 높이 */
 const DAILY_BADGE = { y: 46, height: 14 } as const;
+/**
+ * 오늘의 판을 골랐을 때 판을 바꾸는 버튼의 오른쪽에 놓는 랭킹 버튼: 그 버튼과의 틈, 폭과 높이.
+ * 두 버튼을 한 덩어리로 가운데에 놓으려고, 판을 바꾸는 버튼은 shift만큼 왼쪽으로 비켜 놓는다.
+ */
+const RANK_PILL = { gap: 6, width: 42, height: 22, shift: 24 } as const;
 
 const DEPTH = {
   machine: 1,
@@ -466,6 +474,8 @@ export class CandySlotScene extends MiniGameScene {
   private dailySwitch: SoftButton | null = null;
   /** 오늘의 판을 골랐을 때 그 버튼 위에 적는 한 줄 */
   private dailyNote: { back: Graphics; text: Text } | null = null;
+  /** 오늘의 판을 골랐을 때 그 버튼 옆에 놓는 랭킹 버튼 */
+  private rankPill: Disposable | null = null;
   /** 오늘의 판을 하는 동안 점수 아래에 떠 있는 표시 */
   private dailyBadge: { back: Graphics; text: Text } | null = null;
   /** 공유받은 주소로 들어왔는데 그날이 이미 지났으면 true. 시작 화면에 한 줄로 알린다. */
@@ -1678,6 +1688,7 @@ export class CandySlotScene extends MiniGameScene {
     this.dailyStart = data ?? {};
     this.dailySwitch = null;
     this.dailyNote = null;
+    this.rankPill = null;
     this.dailyBadge = null;
     this.sharedDayPassed = false;
     this.friendScore = null;
@@ -1731,7 +1742,7 @@ export class CandySlotScene extends MiniGameScene {
     const { width, height, gap } = DAILY_SWITCH;
     // 도움말 카드의 위쪽 끝은 기계의 한가운데에서 23만큼 위다(showHints).
     const box = {
-      x: Math.round(GAME_WIDTH / 2 - width / 2),
+      x: Math.round(GAME_WIDTH / 2 - width / 2) - (daily ? RANK_PILL.shift : 0),
       y: Math.round(this.machineMiddle - 23 - gap - height),
       width,
       height,
@@ -1750,6 +1761,7 @@ export class CandySlotScene extends MiniGameScene {
       }).setDepth(DEPTH.hint + 0.5),
     };
     this.refreshDailyNote();
+    this.showRankPill(box);
   }
 
   /** 판을 바꾸는 버튼과 그 위의 한 줄을 치운다. 첫 스핀을 돌리면 도움말과 함께 사라진다. */
@@ -1759,6 +1771,7 @@ export class CandySlotScene extends MiniGameScene {
     this.dailyNote?.back.destroy();
     this.dailyNote?.text.destroy();
     this.dailyNote = null;
+    this.hideRankPill();
   }
 
   /** 버튼 위의 한 줄을 지금의 기록대로 적는다: 지난 날의 주소로 왔다는 것, 넘어 볼 친구 기록, 아니면 오늘의 최고 기록. */
@@ -1836,6 +1849,7 @@ export class CandySlotScene extends MiniGameScene {
     const result = { score: scoreOf(this.run), rounds: clearedRounds(this.run) };
     const outcome = addDailyRun(slotDailyStore.data, today, result);
     slotDailyStore.set(outcome.record);
+    this.noteDailyScore(result.score);
     const stats: ResultStat[] = [[DAILY_LABEL.name, dailyVerdict(outcome)]];
     if (this.friendScore !== null) stats.push([DAILY_LABEL.friend, friendVerdict(this.friendScore, result.score)]);
     return { stats, share: dailyShare(today, result, outcome.record.streak) };
@@ -1847,6 +1861,50 @@ export class CandySlotScene extends MiniGameScene {
     if (day === null) return undefined;
     if (this.friendScore === null) return { daily: true };
     return { daily: true, sharedDay: day, sharedScore: this.friendScore };
+  }
+
+  // ───────── 오늘의 판 랭킹 ─────────
+
+  /**
+   * 방금 마친 오늘의 판의 점수를 그날의 랭킹에 올릴 기록으로 적어 둔다(닉네임을 정하기 전이어도 적어 둔다).
+   * 서버에는 판을 마칠 때(finishMiniGame) 다른 기록과 함께 올라가고, 인터넷이 없으면 다음에 올라간다.
+   * 어느 날의 랭킹인지는 판의 씨앗에 적힌 날에서 읽는다. 오늘의 판이 아니거나 그 날이 오늘이 아니면 적지 않는다.
+   */
+  private noteDailyScore(score: number): void {
+    const day = boardDayOf(this.run.seed, Date.now());
+    if (day !== null) noteDayScore(this.gameId, score, day);
+  }
+
+  /** 시작 화면에서 오늘의 판을 골랐을 때, 판을 바꾸는 버튼(beside)의 오른쪽에 랭킹 버튼을 놓는다. */
+  private showRankPill(beside: Box): void {
+    this.hideRankPill();
+    const { gap, width, height } = RANK_PILL;
+    const box = { x: beside.x + beside.width + gap, y: beside.y, width, height };
+    this.rankPill = addRankPill(this, box, DEPTH.hint, () => this.openRank());
+  }
+
+  /** 랭킹 버튼을 치운다. 판을 바꾸는 버튼과 함께 사라진다. */
+  private hideRankPill(): void {
+    this.rankPill?.destroy();
+    this.rankPill = null;
+  }
+
+  /**
+   * 오늘의 판 랭킹 창을 연다. 도감과 같은 자리(this.book)에 둔다: 창은 한 번에 하나만 뜨고,
+   * 뒤로 가기로 닫히는 것과 판이 끝날 때 닫히는 것, 떠 있는 동안 키보드로 돌리지 못하는 것이 도감과 같다(closeBook).
+   */
+  private openRank(): void {
+    if (this.book || this.ended) return;
+    this.hideBubble();
+    const view = openRankView(this, {
+      depth: BOOK_DEPTH,
+      today: dayIndexOf(new Date()),
+      button: (box, tone, label, onTap) => new SoftButton(this, box, tone, BOOK_DEPTH, label, onTap),
+      onClose: () => this.closeBook(),
+    });
+    this.book = [view];
+    if (this.input.keyboard) this.input.keyboard.enabled = false;
+    sfx.pop();
   }
 
   // ───────── 붙인 부적 ─────────

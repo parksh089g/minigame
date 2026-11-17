@@ -379,6 +379,31 @@ describe('오늘의 랭킹', () => {
     expect(sql.exec<{ game: string }>('SELECT game FROM daily').toArray()).toEqual([{ game: GAME }]);
   });
 
+  it('오늘의 판이 있는 게임마다 랭킹이 따로다. 닉네임을 바꾸면 모든 게임의 오늘 줄이 바뀌고, 지우면 모두 빠진다', () => {
+    const SLOT = 'candy-slot';
+    const db = new BoardDb(memorySql());
+    db.submit(device(1), '하나', {}, 1000, null, { day: DAY, scores: { [GAME]: 300, [SLOT]: 45 } });
+    db.submit(device(2), '둘', {}, 2000, null, { day: DAY, scores: { [SLOT]: 80 } });
+    expect(db.dayBoard(GAME, null, DAY).top.map((row) => [row.name, row.score])).toEqual([['하나', 300]]);
+    expect(db.dayBoard(SLOT, device(1), DAY)).toEqual({
+      top: [
+        { rank: 1, name: '둘', score: 80, mine: false },
+        { rank: 2, name: '하나', score: 45, mine: true },
+      ],
+      me: { rank: 2, score: 45, name: '하나' },
+      day: DAY,
+    });
+    // 한 게임의 점수만 올려도 닉네임은 다른 게임의 오늘 줄에서 같이 바뀐다.
+    db.submit(device(1), '새이름', {}, 3000, null, { day: DAY, scores: { [GAME]: 301 } });
+    expect(db.dayBoard(SLOT, null, DAY).top[1]).toMatchObject({ name: '새이름', score: 45 });
+    db.forget(device(1));
+    expect(db.dayBoard(SLOT, device(1), DAY).me).toBeNull();
+    expect(db.dayBoard(SLOT, null, DAY).top.map((row) => row.name)).toEqual(['둘']);
+    expect(db.dayBoard(GAME, null, DAY).top).toEqual([]);
+    // 날이 바뀌면 두 게임 모두 빈 랭킹에서 새로 시작한다.
+    expect(db.dayBoard(SLOT, device(2), DAY + 1)).toEqual({ top: [], me: null, day: DAY + 1 });
+  });
+
   it('닉네임을 바꾸면 오늘의 줄에서도 바뀌고, 기록을 지우면 오늘의 랭킹에서도 빠진다', () => {
     const db = new BoardDb(memorySql());
     db.submit(device(1), '하나', {}, 1000, null, { day: DAY, scores: { [GAME]: 300 } });
