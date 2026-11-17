@@ -10,8 +10,10 @@ import type Phaser from 'phaser';
 import { THEME, THEME_CSS } from '../../config';
 import { bakeShape } from '../../core/bake';
 import {
+  baseOf,
   CENTER,
   charmOf,
+  isUpgraded,
   LINES,
   SIZE,
   SYMBOLS,
@@ -83,6 +85,8 @@ export const LOOK = {
     line: { edge: THEME.skyDeep, face: THEME.skySoft },
     trick: { edge: THEME.butterDeep, face: THEME.butterSoft },
   } satisfies Record<CharmKind, { edge: number; face: number }>,
+  /** 강화한 부적의 귀퉁이에 붙는 별: 금빛 면과 그것을 두르는 짙은 테두리 */
+  upgrade: { face: 0xffd24a, edge: 0x7a4a08, shine: THEME.white },
   /** 부적이 붙지 않은 빈자리 */
   emptySlot: { edge: 0x12573b, face: 0x186848 },
   /** 도감에서 아직 찾지 못한 부적의 칸 */
@@ -556,6 +560,31 @@ const TRICKS: Readonly<Record<string, (g: Graphics) => void>> = {
   },
 };
 
+/** 꼭짓점이 다섯인 별의 둘레. r은 바깥 반지름이고, 첫 꼭짓점이 위를 본다. */
+function star(r: number): Point[] {
+  return Array.from({ length: 10 }, (_, index) => {
+    const angle = -Math.PI / 2 + (index * Math.PI) / 5;
+    const reach = index % 2 === 0 ? r : r * 0.48;
+    return { x: Math.cos(angle) * reach, y: Math.sin(angle) * reach };
+  });
+}
+
+/**
+ * 강화한 부적의 표시: 짙은 테두리를 두른 금빛 별. (x, y)가 한가운데, r이 별의 바깥 반지름이다.
+ * 테두리가 있어서 부적의 옅은 바탕 위에서도, 초록 천 위에서도 또렷하다.
+ */
+export function drawUpgradeMark(g: Graphics, x: number, y: number, r: number): void {
+  const look = LOOK.upgrade;
+  const shape = star(r);
+  rim(g, shape, x, y, Math.max(0.9, r * 0.24), look.edge);
+  fillShape(g, shape, x, y, look.face);
+  g.fillStyle(look.shine, 0.8);
+  g.fillCircle(x - r * 0.2, y - r * 0.22, Math.max(0.5, r * 0.16));
+}
+
+/** 부적 그림에서 강화한 표시가 놓이는 자리(왼쪽 위 귀퉁이)와 별의 크기. 부적의 한가운데가 원점이다. */
+const CHARM_MARK = { x: -9, y: -8.8, r: 5 } as const;
+
 /** 줄 부적의 작은 판에서 짙게 칠할 칸들. 가로와 세로는 가운데 줄 하나로 방향을 보여 주고, 대각선은 두 줄을 다 칠한다. */
 function lineCells(kind: LineKind): number[] {
   const cells = new Set<number>();
@@ -588,11 +617,13 @@ function drawCharm(g: Graphics, charm: CharmInfo): void {
   } else if (effect.lineTimes) {
     drawMiniGrid(g, lineCells(effect.lineTimes[0]));
   } else {
-    TRICKS[charm.id]?.(g);
+    // 강화한 부적도 원래 부적의 그림을 쓴다.
+    TRICKS[baseOf(charm.id)]?.(g);
   }
+  if (isUpgraded(charm.id)) drawUpgradeMark(g, CHARM_MARK.x, CHARM_MARK.y, CHARM_MARK.r);
 }
 
-/** 부적의 그림. 없는 id면 빈자리의 그림을 돌려준다. */
+/** 부적의 그림. 강화한 부적(id 끝에 표시가 붙은 것)은 귀퉁이에 별이 붙는다. 없는 id면 빈자리의 그림을 돌려준다. */
 export function charmTexture(scene: Phaser.Scene, id: string): string {
   const charm = charmOf(id);
   if (!charm) return emptySlotTexture(scene);
@@ -612,6 +643,15 @@ export function charmChipTexture(scene: Phaser.Scene, id: string): string | null
     g.scaleCanvas(CHIP_BOX / CHARM_BOX, CHIP_BOX / CHARM_BOX);
     drawCharm(g, charm);
   });
+}
+
+/** 글 옆에 놓는 강화 표시(별)의 크기 */
+export const UPGRADE_MARK_BOX = 12;
+
+/** 강화한 부적의 이름 옆에 놓는 작은 별 */
+export function upgradeMarkTexture(scene: Phaser.Scene): string {
+  const box = { width: UPGRADE_MARK_BOX, height: UPGRADE_MARK_BOX };
+  return bakeShape(scene, 'candy-slot-upgrade-mark', box, (g) => drawUpgradeMark(g, 0, 0.4, 4.4));
 }
 
 /** 부적이 붙지 않은 빈자리 */
