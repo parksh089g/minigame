@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { CHARMS } from '../games/candy-slot/rules';
 import { GAMES as REGISTERED_GAMES } from '../games/registry';
 import {
   ACHIEVEMENTS,
@@ -28,6 +29,7 @@ const EMPTY: AchievementStats = {
   stagesCleared: 0,
   stageBest: 0,
   stageGames: 0,
+  slotCharms: 0,
 };
 const stats = (patch: Partial<AchievementStats>): AchievementStats => ({ ...EMPTY, ...patch });
 const must = (id: string) => {
@@ -83,6 +85,11 @@ describe('업적 목록', () => {
   it('모두 모으기의 목표는 살 수 있는 꾸미기의 수와 같다', () => {
     const paid = CATALOG.filter((item) => item.price > 0).length;
     expect(must('collect-all').goal).toBe(paid);
+  });
+
+  it('부적 모두 찾기의 목표는 행운 슬롯의 부적의 수와 같고, 절반 업적은 그보다 먼저 달성된다', () => {
+    expect(must('slot-charms-all').goal).toBe(CHARMS.length);
+    expect(must('slot-charms-12').goal).toBeLessThan(CHARMS.length);
   });
 });
 
@@ -146,6 +153,23 @@ describe('단계 업적', () => {
   });
 });
 
+describe('부적 도감 업적', () => {
+  it('찾은 부적의 수로 달성한다', () => {
+    const half = must('slot-charms-12');
+    expect(progressOf(half, stats({ slotCharms: 11 }))).toEqual({ current: 11, goal: 12, complete: false });
+    expect(progressOf(half, stats({ slotCharms: 12 })).complete).toBe(true);
+    const all = must('slot-charms-all');
+    expect(progressOf(all, stats({ slotCharms: CHARMS.length - 1 })).complete).toBe(false);
+    expect(progressOf(all, stats({ slotCharms: CHARMS.length })).complete).toBe(true);
+  });
+
+  it('행운 슬롯의 점수만으로는 달성되지 않는다', () => {
+    const rich = stats({ totalPlays: 500, best: { 'candy-slot': 99999 }, played: { 'candy-slot': 500 } });
+    expect(progressOf(must('slot-charms-12'), rich).complete).toBe(false);
+    expect(progressOf(must('slot-charms-all'), rich).complete).toBe(false);
+  });
+});
+
 describe('statsOf', () => {
   const source: AchievementSource = {
     games: {
@@ -156,6 +180,7 @@ describe('statsOf', () => {
     daily: { totalCleared: 5, bestStreak: 3 },
     cosmetics: { owned: ['runner-drop', 'orb-green'] },
     stages: { 'color-sort': 12, 'pin-pull': 3 },
+    slot: { found: ['wide', 'piggy', 'more-seven'] },
   };
 
   it('세이브에서 업적이 보는 숫자를 뽑는다', () => {
@@ -170,7 +195,12 @@ describe('statsOf', () => {
       stagesCleared: 15,
       stageBest: 12,
       stageGames: 2,
+      slotCharms: 3,
     });
+  });
+
+  it('찾은 부적이 없으면 도감의 숫자는 0이다', () => {
+    expect(statsOf({ ...source, slot: { found: [] } }).slotCharms).toBe(0);
   });
 
   it('깬 단계가 없으면 단계의 숫자는 모두 0이다', () => {

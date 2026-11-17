@@ -10,6 +10,8 @@
  * 여기서 말하는 금화는 이 게임 안에서만 쓰는 것이고, 앱의 코인과는 상관없다.
  */
 
+import { seededRandom } from '../../core/stages';
+
 // ───────── 그림 ─────────
 
 export const SIZE = 3;
@@ -132,41 +134,45 @@ const HORSESHOE = 3;
 const DIAMOND = 4;
 
 /** 저금통: 남은 금화 이만큼마다 한 개를 덤으로 받는다. */
-export const SAVINGS_PER = 5;
+export const SAVINGS_PER = 3;
 
 /**
  * 부적의 목록. 가게에는 이 가운데 아직 붙이지 않은 것 세 장이 고르게 뽑혀 나온다.
  * 한 줄을 더하면 가게에 나오고, 그림은 art.ts가 갈래와 효과를 보고 그린다(trick은 id마다 따로 그린다).
+ *
+ * 숫자는 열 잠그기를 쓰는 자동 플레이로 맞췄다. 값은 쓸모를 따른다:
+ * 혼자서는 힘이 없고 짝이 있어야 듣는 것(체리·클로버 듬뿍, 비싼 그림의 황금)과 초반에만 든든한 것(가로·세로 두 배,
+ * 덤 스핀, 저금통, 위로 금화)은 싸고, 끝까지 들고 가는 것(쌍둥이 줄, 7 듬뿍, 가운데 7, 막판 한 방, 오뚝이)은 비싸다.
  */
 export const CHARMS: readonly CharmInfo[] = [
   // 확률: 그림이 나올 확률을 바꾼다.
-  { id: 'more-cherry', name: '체리 듬뿍', description: '체리가 더 자주 나와요', kind: 'odds', price: 5, effect: { weight: [CHERRY, 36] } },
-  { id: 'more-clover', name: '클로버 듬뿍', description: '클로버가 더 자주 나와요', kind: 'odds', price: 5, effect: { weight: [CLOVER, 30] } },
-  { id: 'more-bell', name: '종 듬뿍', description: '종이 더 자주 나와요', kind: 'odds', price: 6, effect: { weight: [BELL, 26] } },
-  { id: 'more-horseshoe', name: '말굽 듬뿍', description: '말굽이 더 자주 나와요', kind: 'odds', price: 7, effect: { weight: [HORSESHOE, 22] } },
-  { id: 'more-diamond', name: '다이아 듬뿍', description: '다이아가 더 자주 나와요', kind: 'odds', price: 8, effect: { weight: [DIAMOND, 20] } },
-  { id: 'more-seven', name: '7 듬뿍', description: '7이 더 자주 나와요', kind: 'odds', price: 8, effect: { weight: [WILD, 4] } },
-  { id: 'less-cherry', name: '체리 덜기', description: '체리가 덜 나와요', kind: 'odds', price: 5, effect: { weight: [CHERRY, -18] } },
-  { id: 'less-clover', name: '클로버 덜기', description: '클로버가 덜 나와요', kind: 'odds', price: 5, effect: { weight: [CLOVER, -15] } },
+  { id: 'more-cherry', name: '체리 듬뿍', description: '체리가 더 자주 나와요', kind: 'odds', price: 3, effect: { weight: [CHERRY, 32] } },
+  { id: 'more-clover', name: '클로버 듬뿍', description: '클로버가 더 자주 나와요', kind: 'odds', price: 3, effect: { weight: [CLOVER, 27] } },
+  { id: 'more-bell', name: '종 듬뿍', description: '종이 더 자주 나와요', kind: 'odds', price: 5, effect: { weight: [BELL, 29] } },
+  { id: 'more-horseshoe', name: '말굽 듬뿍', description: '말굽이 더 자주 나와요', kind: 'odds', price: 5, effect: { weight: [HORSESHOE, 25] } },
+  { id: 'more-diamond', name: '다이아 듬뿍', description: '다이아가 더 자주 나와요', kind: 'odds', price: 6, effect: { weight: [DIAMOND, 23] } },
+  { id: 'more-seven', name: '7 듬뿍', description: '7이 더 자주 나와요', kind: 'odds', price: 11, effect: { weight: [WILD, 6] } },
+  { id: 'less-cherry', name: '체리 덜기', description: '체리가 덜 나와요', kind: 'odds', price: 7, effect: { weight: [CHERRY, -19] } },
+  { id: 'less-clover', name: '클로버 덜기', description: '클로버가 덜 나와요', kind: 'odds', price: 6, effect: { weight: [CLOVER, -17] } },
   // 상금: 그림의 상금을 올린다.
-  { id: 'gold-cherry', name: '황금 체리', description: '체리 줄의 상금 +3', kind: 'prize', price: 5, effect: { value: [CHERRY, 3] } },
-  { id: 'gold-clover', name: '황금 클로버', description: '클로버 줄의 상금 +4', kind: 'prize', price: 5, effect: { value: [CLOVER, 4] } },
-  { id: 'gold-bell', name: '황금 종', description: '종 줄의 상금 +6', kind: 'prize', price: 6, effect: { value: [BELL, 6] } },
-  { id: 'gold-horseshoe', name: '황금 말굽', description: '말굽 줄의 상금 +10', kind: 'prize', price: 7, effect: { value: [HORSESHOE, 10] } },
-  { id: 'gold-diamond', name: '황금 다이아', description: '다이아 줄의 상금 +16', kind: 'prize', price: 8, effect: { value: [DIAMOND, 16] } },
+  { id: 'gold-cherry', name: '황금 체리', description: '체리 줄의 상금 +4', kind: 'prize', price: 6, effect: { value: [CHERRY, 4] } },
+  { id: 'gold-clover', name: '황금 클로버', description: '클로버 줄의 상금 +5', kind: 'prize', price: 6, effect: { value: [CLOVER, 5] } },
+  { id: 'gold-bell', name: '황금 종', description: '종 줄의 상금 +6', kind: 'prize', price: 5, effect: { value: [BELL, 6] } },
+  { id: 'gold-horseshoe', name: '황금 말굽', description: '말굽 줄의 상금 +10', kind: 'prize', price: 4, effect: { value: [HORSESHOE, 10] } },
+  { id: 'gold-diamond', name: '황금 다이아', description: '다이아 줄의 상금 +16', kind: 'prize', price: 4, effect: { value: [DIAMOND, 16] } },
   // 줄: 줄의 갈래마다 상금을 곱한다.
-  { id: 'wide', name: '가로 두 배', description: '가로줄의 상금이 두 배', kind: 'line', price: 8, effect: { lineTimes: ['row', 2] } },
-  { id: 'tall', name: '세로 두 배', description: '세로줄의 상금이 두 배', kind: 'line', price: 8, effect: { lineTimes: ['col', 2] } },
-  { id: 'slant', name: '대각선 세 배', description: '대각선의 상금이 세 배', kind: 'line', price: 8, effect: { lineTimes: ['diag', 3] } },
+  { id: 'wide', name: '가로 두 배', description: '가로줄의 상금이 두 배', kind: 'line', price: 4, effect: { lineTimes: ['row', 2] } },
+  { id: 'tall', name: '세로 두 배', description: '세로줄의 상금이 두 배', kind: 'line', price: 5, effect: { lineTimes: ['col', 2] } },
+  { id: 'slant', name: '대각선 세 배', description: '대각선의 상금이 세 배', kind: 'line', price: 9, effect: { lineTimes: ['diag', 3] } },
   // 재주: 판의 흐름을 바꾼다.
-  { id: 'extra', name: '덤 스핀', description: '라운드마다 한 번 더 돌려요', kind: 'trick', price: 7, effect: { spins: 1 } },
-  { id: 'piggy', name: '저금통', description: '남긴 금화 5개마다 +1', kind: 'trick', price: 6, effect: { savingsCap: 8 } },
-  { id: 'comfort', name: '위로 금화', description: '꽝이면 금화를 2개 더 받아요', kind: 'trick', price: 5, effect: { consolation: 2 } },
-  { id: 'twins', name: '쌍둥이 줄', description: '두 줄 넘게 맞으면 두 배', kind: 'trick', price: 9, effect: { combo: [2, 2] } },
-  { id: 'crown', name: '왕관', description: '세 줄 넘게 맞으면 두 배', kind: 'trick', price: 6, effect: { combo: [3, 2] } },
-  { id: 'middle', name: '가운데 7', description: '가운데에 7이 자주 떠요', kind: 'trick', price: 9, effect: { centerWild: 0.25 } },
-  { id: 'finale', name: '막판 한 방', description: '마지막 스핀의 상금이 세 배', kind: 'trick', price: 6, effect: { lastTimes: 3 } },
-  { id: 'rebound', name: '오뚝이', description: '꽝 다음 스핀의 상금이 두 배', kind: 'trick', price: 6, effect: { reboundTimes: 2 } },
+  { id: 'extra', name: '덤 스핀', description: '라운드마다 세 번 더 돌려요', kind: 'trick', price: 6, effect: { spins: 3 } },
+  { id: 'piggy', name: '저금통', description: '남긴 3개마다 +1, 20까지', kind: 'trick', price: 4, effect: { savingsCap: 20 } },
+  { id: 'comfort', name: '위로 금화', description: '꽝이면 금화를 4개 더 받아요', kind: 'trick', price: 4, effect: { consolation: 4 } },
+  { id: 'twins', name: '쌍둥이 줄', description: '두 줄 이상 맞으면 두 배', kind: 'trick', price: 13, effect: { combo: [2, 2] } },
+  { id: 'crown', name: '왕관', description: '세 줄 이상 맞으면 두 배', kind: 'trick', price: 7, effect: { combo: [3, 2] } },
+  { id: 'middle', name: '가운데 7', description: '가운데 칸이 셋에 한 번 7', kind: 'trick', price: 11, effect: { centerWild: 0.35 } },
+  { id: 'finale', name: '막판 한 방', description: '마지막 스핀의 상금이 네 배', kind: 'trick', price: 10, effect: { lastTimes: 4 } },
+  { id: 'rebound', name: '오뚝이', description: '같은 라운드의 꽝 다음 세 배', kind: 'trick', price: 10, effect: { reboundTimes: 3 } },
 ];
 
 const CHARM_BY_ID: ReadonlyMap<string, CharmInfo> = new Map(CHARMS.map((charm) => [charm.id, charm]));
@@ -356,8 +362,9 @@ export const START_COIN = 3;
 /**
  * 라운드마다 내야 하는 금화. 적힌 것보다 뒤의 라운드는 앞 라운드의 한 배 반씩 오른다(정수로만 셈한다).
  * 부적 다섯 장으로 벌 수 있는 금화에는 끝이 있어서, 아무리 잘 골라도 판은 언젠가 끝난다.
+ * 열을 잠글 수 있게 되면서 벌이가 늘어서, 넷째 라운드부터는 앞 라운드의 한 배 반쯤으로 가파르게 오른다.
  */
-const TARGETS: readonly number[] = [5, 10, 16, 24, 34, 48, 66, 90, 122, 165, 222, 300];
+const TARGETS: readonly number[] = [5, 10, 16, 25, 38, 60, 92, 140, 210, 310, 450, 660];
 
 export function targetOf(round: number): number {
   const at = Math.max(1, Math.floor(round));
@@ -429,9 +436,23 @@ export interface RunState {
   afterMiss: boolean;
   /** 한 번의 스핀으로 받은 가장 많은 금화 */
   bestSpin: number;
+  /** 이 라운드에서 바로 앞 스핀에 나온 판. 라운드의 첫 스핀을 돌리기 전에는 null이다. 열을 잠글 때 쓴다. */
+  lastGrid: number[] | null;
+  /** 이 라운드에 남은 잠그기 횟수 */
+  holdsLeft: number;
+  /** 정해진 운으로 하는 판(오늘의 판)의 씨앗. 여느 판은 null이고, 그때는 운을 밖에서 준 대로 쓴다. */
+  seed: string | null;
+  /** 이 판에서 지금까지 돌린 횟수. 정해진 운에서 몇 번째 스핀인지 세는 데 쓴다. */
+  spinCount: number;
+  /** 이 판에서 지금까지 가게의 부적을 뽑은 횟수(라운드를 넘길 때와 다시 뽑을 때). 정해진 운의 차례를 센다. */
+  drawCount: number;
 }
 
-export function newRun(): RunState {
+/** 라운드마다 열을 잠글 수 있는 횟수 */
+export const HOLDS_PER_ROUND = 1;
+
+/** 새 판. seed를 주면 정해진 운으로 하는 판이 된다(randomOf를 보라). */
+export function newRun(seed: string | null = null): RunState {
   return {
     phase: 'spin',
     round: 1,
@@ -442,7 +463,32 @@ export function newRun(): RunState {
     shop: null,
     afterMiss: false,
     bestSpin: 0,
+    lastGrid: null,
+    holdsLeft: HOLDS_PER_ROUND,
+    seed,
+    spinCount: 0,
+    drawCount: 0,
   };
+}
+
+/** 운을 쓰는 두 가지 일: 스핀과, 가게의 부적 뽑기 */
+export type LuckKind = 'spin' | 'shop';
+
+/**
+ * 이번에 쓸 운. 여느 판(seed가 null)은 fallback을 그대로 돌려준다.
+ * 정해진 운의 판은 씨앗과 차례(몇 번째 스핀인지, 몇 번째 뽑기인지)로 운을 만든다. 그래서 같은 씨앗이면
+ * 누구에게나 같은 차례에 같은 수들이 나오고, 판을 저장했다가 이어 해도 달라지지 않는다.
+ * 스핀과 가게는 차례를 따로 세어서, 가게에서 다시 뽑아도 스핀의 운은 그대로다.
+ */
+export function randomOf(run: RunState, kind: LuckKind, fallback: () => number): () => number {
+  if (run.seed === null) return fallback;
+  const count = kind === 'spin' ? run.spinCount : run.drawCount;
+  return seededRandom(`${run.seed}:${kind}:${count}`);
+}
+
+/** 지금 열을 잠글 수 있는지: 이 라운드에 한 번은 돌렸고, 스핀과 잠그기 횟수가 남아 있어야 한다. */
+export function canHold(run: RunState): boolean {
+  return run.phase === 'spin' && run.spinsLeft > 0 && run.holdsLeft > 0 && run.lastGrid !== null;
 }
 
 /** 넘긴 라운드의 수. 가게가 열려 있으면 지금 라운드까지 넘긴 것이다. */
@@ -453,10 +499,20 @@ export function clearedRounds(run: RunState): number {
 /**
  * 한 번 돌린다. 돌릴 수 없는 때(가게, 끝난 판, 스핀이 없을 때)에는 null을 돌려준다.
  * 마지막 스핀까지 돌려도 라운드는 저절로 넘어가지 않는다. 화면이 결과를 다 보여 준 뒤 settleRound를 부른다.
+ *
+ * hold에 열의 번호(0부터)를 주면 그 열의 세 칸은 바로 앞 스핀의 그림 그대로 두고 나머지만 새로 돌린다.
+ * 잠글 수 없는 때(canHold가 false)나 없는 열이면 잠그지 않고 그냥 돌린다.
  */
-export function spin(run: RunState, random: () => number): { run: RunState; outcome: SpinOutcome } | null {
+export function spin(
+  run: RunState,
+  random: () => number,
+  hold: number | null = null,
+): { run: RunState; outcome: SpinOutcome } | null {
   if (run.phase !== 'spin' || run.spinsLeft <= 0) return null;
-  const grid = rollGrid(run.charms, random);
+  const last = run.lastGrid;
+  const held = hold !== null && last !== null && canHold(run) && Number.isInteger(hold) && hold >= 0 && hold < SIZE;
+  const rolled = rollGrid(run.charms, random);
+  const grid = held && last ? rolled.map((symbol, cell) => (cell % SIZE === hold ? last[cell] : symbol)) : rolled;
   const outcome = scoreSpin(grid, run.charms, { last: run.spinsLeft === 1, afterMiss: run.afterMiss });
   return {
     outcome,
@@ -467,6 +523,9 @@ export function spin(run: RunState, random: () => number): { run: RunState; outc
       earned: run.earned + outcome.total,
       afterMiss: outcome.wins.length === 0,
       bestSpin: Math.max(run.bestSpin, outcome.total),
+      lastGrid: grid,
+      holdsLeft: held ? run.holdsLeft - 1 : run.holdsLeft,
+      spinCount: run.spinCount + 1,
     },
   };
 }
@@ -504,6 +563,7 @@ export function settleRound(run: RunState, random: () => number): Settlement | n
       earned: run.earned + savings,
       afterMiss: false,
       shop: { offers: drawOffers(run.charms, random), rerollCost: REROLL_COST },
+      drawCount: run.drawCount + 1,
     },
   };
 }
@@ -517,8 +577,9 @@ export function buyBlock(run: RunState, offer: number): BuyBlock | null {
   const charm = id ? charmOf(id) : undefined;
   if (!charm) return 'sold';
   if (run.charms.includes(charm.id)) return 'sold';
-  if (run.charms.length >= SLOTS) return 'full';
+  // 금화부터 따진다. 자리부터 따지면 부적을 떼고 나서야 금화가 모자란 줄 알게 된다.
   if (run.coin < charm.price) return 'coin';
+  if (run.charms.length >= SLOTS) return 'full';
   return null;
 }
 
@@ -544,6 +605,7 @@ export function reroll(run: RunState, random: () => number): RunState {
     ...run,
     coin: run.coin - run.shop.rerollCost,
     shop: { offers: drawOffers(run.charms, random), rerollCost: run.shop.rerollCost + REROLL_STEP },
+    drawCount: run.drawCount + 1,
   };
 }
 
@@ -563,6 +625,8 @@ export function nextRound(run: RunState): RunState {
     spinsLeft: spinsOf(run.charms),
     shop: null,
     afterMiss: false,
+    lastGrid: null,
+    holdsLeft: HOLDS_PER_ROUND,
   };
 }
 
