@@ -7,9 +7,9 @@ import { mascotTexture } from '../../art/cosmetics';
 import { GAME_WIDTH, THEME_CSS } from '../../config';
 import { addText } from '../../core/ui';
 import { store } from '../../core/store';
-import { allySpot, cellSpot, starOf, type Ally } from './allies';
+import { allySpot, cellCorner, shapeCells, shapeSize, starOf, type Ally } from './allies';
 import { ALLY_SHOT, allyTexture, ENEMY_TINT, enemyTexture, LOOK, TEX } from './art';
-import { ALLIES, CELL_COUNT, ENEMIES, GARDEN_CELLS, HOP, SHOOTER, type EnemyKind } from './data';
+import { ALLIES, CELL_COUNT, ENEMIES, GARDEN_CELLS, HOP, SHOOTER, type AllyId, type EnemyKind } from './data';
 import { toScreenY, type FieldLayout } from './layout';
 import { chargePhase, isBuried, type Enemy, type RunState, type SimEvent } from './sim';
 
@@ -40,8 +40,11 @@ interface BugView {
 
 /** 울타리 아래에 선 동료 하나의 그림과 별 */
 interface AllyView {
-  /** 이 그림이 그리는 판의 동료. 다시 늘어놓아 칸이 바뀌면 그림도 따라 걸어간다. */
+  /** 이 그림이 그리는 판의 동료. 옮겨서 칸이 바뀌면 그림도 따라 걸어간다. */
   ally: Ally;
+  /** 차지한 칸을 옅게 칠한 것(모양이 보이게)과, 그때의 첫 칸 */
+  plot: Phaser.GameObjects.Graphics;
+  plotCell: number;
   image: Phaser.GameObjects.Image;
   stars: Phaser.GameObjects.Text;
   star: number;
@@ -49,14 +52,23 @@ interface AllyView {
   kick: number;
 }
 
-/** 동료의 그림을 줄이는 배율. 칸을 많이 차지하는 동료일수록 크게 그린다(1칸, 2칸, 3칸). */
-export function allyScale(cells: number): number {
-  return cells >= 3 ? 1.12 : cells === 2 ? 0.94 : 0.72;
+/**
+ * 동료의 그림을 줄이는 배율. 칸을 많이 차지하는 동료일수록 크게 그리되(1칸, 2칸, 3칸),
+ * 한 줄짜리 모양은 위아래 줄을 너무 가리지 않게 줄인다.
+ */
+export function allyScale(id: AllyId): number {
+  const size = Math.min(1.08, 0.54 + ALLIES[id].cells * 0.18);
+  const rows = shapeSize(id).height;
+  return Math.min(size, (rows * GARDEN_CELLS.cell + 14) / 38);
 }
 /** 다시 늘어놓아 칸이 바뀐 동료가 새 자리로 걸어가는 빠르기(화면 px/초) */
 const ALLY_WALK = 160;
-/** 동료가 선 자리(시뮬레이션 y)보다 그림의 발끝이 이만큼 아래다(화면 px). */
-const ALLY_FOOT = 8;
+/** 동료의 그림은 차지한 칸을 감싼 네모의 아래쪽 끝보다 이만큼 위에 발을 딛는다(화면 px). */
+const ALLY_FOOT = 3;
+/** 동료 그림의 세로 길이(배율 1) */
+const ALLY_ART_HEIGHT = 38;
+/** 동료가 차지한 칸을 칠하는 색과 짙기 */
+const PLOT = { color: 0xfff0c9, alpha: 0.75, inset: 1.5 } as const;
 
 /** 흙의 색: 땅강아지가 파고들고 나올 때와 장수풍뎅이가 내달릴 때 튄다. */
 const DIRT = 0xd9b48f;
@@ -125,18 +137,16 @@ export class FieldView {
     // 울타리 아래의 텃밭: 흙과 이랑, 그 위의 새싹
     g.fillStyle(LOOK.soil, 1);
     g.fillRect(0, layout.fenceY + 4, GAME_WIDTH, layout.height - layout.fenceY);
-    g.fillStyle(LOOK.furrow, 1);
-    for (let row = 1; row < 3; row += 1) {
-      g.fillRoundedRect(8, layout.fenceY + 26 + row * 20, GAME_WIDTH - 16, 5, 2.5);
-    }
-    // 동료가 서는 칸: 물총의 양옆에 넷씩, 칸마다 북돋운 두둑
-    const plotY = toScreenY(layout, GARDEN_CELLS.y) + 3;
+    // 동료가 서는 칸: 물총의 양옆에 넷씩, 세 줄. 칸마다 북돋운 두둑
+    const size = GARDEN_CELLS.cell;
     for (let cell = 0; cell < CELL_COUNT; cell += 1) {
-      const x = cellSpot(cell, 1).x - GARDEN_CELLS.cell / 2;
+      const corner = cellCorner(cell);
+      const x = corner.x;
+      const y = toScreenY(layout, corner.y);
       g.fillStyle(LOOK.furrow, 1);
-      g.fillRoundedRect(x + 2, plotY, GARDEN_CELLS.cell - 4, 9, 4);
+      g.fillRoundedRect(x + 1.5, y + 1.5, size - 3, size - 3, 5);
       g.fillStyle(LOOK.soil, 1);
-      g.fillRoundedRect(x + 5, plotY + 2, GARDEN_CELLS.cell - 10, 3, 1.5);
+      g.fillRoundedRect(x + 4, y + 4, size - 8, size - 9, 3.5);
     }
   }
 
@@ -256,17 +266,21 @@ export class FieldView {
             for (const view of this.allies.values()) if (view.ally.cell === event.cell) view.kick = 0.12;
           }
           break;
-        case 'buy': {
+        case 'buy':
+        case 'join': {
           // 새로 온 동료는 그림이 생길 때 튀어나오고, 합쳐서 별이 오른 동료는 반짝인다.
-          const y = toScreenY(layout, GARDEN_CELLS.y) - 6;
-          const big = event.mode === 'merge' && event.star > 1;
+          const y = toScreenY(layout, event.y);
+          const big = (event.type === 'join' || event.mode === 'merge') && event.star > 1;
           this.burst(event.x, y, LOOK.crit, big ? 12 : 5, big ? 90 : 60, 2.4);
           if (big) this.ring(event.x, y, LOOK.crit, 18, 0.4);
           break;
         }
+        case 'move':
+          this.burst(event.x, toScreenY(layout, event.y) + 8, DIRT, 4, 40, 1.8);
+          break;
         case 'dismiss':
           // 내보낸 동료는 흙먼지와 함께 사라진다.
-          this.burst(event.x, toScreenY(layout, GARDEN_CELLS.y), DIRT, 8, 60, 2.2);
+          this.burst(event.x, toScreenY(layout, event.y), DIRT, 8, 60, 2.2);
           break;
         default:
           break;
@@ -416,33 +430,61 @@ export class FieldView {
     for (const [ally, view] of this.allies) {
       if (state.allies.includes(ally)) continue;
       this.allies.delete(ally);
+      view.plot.destroy();
       scene.tweens.killTweensOf(view.image);
-      scene.tweens.add({ targets: [view.image, view.stars], scale: 0, alpha: 0, duration: 200, onComplete: () => {
-        view.image.destroy();
-        view.stars.destroy();
-      } });
+      scene.tweens.add({
+        targets: [view.image, view.stars],
+        scale: 0,
+        alpha: 0,
+        duration: 200,
+        onComplete: () => {
+          view.image.destroy();
+          view.stars.destroy();
+        },
+      });
     }
     state.allies.forEach((ally, index) => {
       const spot = allySpot(ally);
-      const foot = toScreenY(layout, spot.y) + ALLY_FOOT;
-      const scale = allyScale(ALLIES[ally.id].cells);
+      const { height } = shapeSize(ally.id);
+      const bottom = toScreenY(layout, spot.y) + (height * GARDEN_CELLS.cell) / 2;
+      const scale = allyScale(ally.id);
+      // 세로로 긴 모양은 그림을 차지한 칸의 가운데쯤에 세운다.
+      const room = height * GARDEN_CELLS.cell - ALLY_FOOT - ALLY_ART_HEIGHT * scale;
+      const foot = bottom - ALLY_FOOT - Math.max(0, room / 2);
       let view = this.allies.get(ally);
       if (!view) {
+        const plot = scene.add.graphics().setDepth(this.depth + 0.5);
         const image = scene.add
           .image(spot.x, foot, allyTexture(ally.id))
           .setOrigin(0.5, 1)
           .setScale(scale)
           .setDepth(this.depth + 4);
-        const stars = addText(scene, spot.x, foot + 2, '', {
-          size: 10,
+        const stars = addText(scene, spot.x, foot + ALLY_FOOT - 2, '', {
+          size: 9,
           color: THEME_CSS.accent,
           originX: 0.5,
           originY: 0.5,
           stroke: THEME_CSS.white,
         }).setDepth(this.depth + 4.6);
-        view = { ally, image, stars, star: 0, kick: 0 };
+        view = { ally, plot, plotCell: -1, image, stars, star: 0, kick: 0 };
         this.allies.set(ally, view);
         scene.tweens.add({ targets: image, scale: { from: 0.2, to: scale }, duration: 260, ease: 'Back.Out' });
+      }
+      if (view.plotCell !== ally.cell) {
+        // 차지한 칸을 옅게 칠해서 모양이 보이게 한다.
+        view.plotCell = ally.cell;
+        view.plot.clear();
+        view.plot.fillStyle(PLOT.color, PLOT.alpha);
+        for (const cell of shapeCells(ally.id, ally.cell) ?? []) {
+          const corner = cellCorner(cell);
+          view.plot.fillRoundedRect(
+            corner.x + PLOT.inset,
+            toScreenY(layout, corner.y) + PLOT.inset,
+            GARDEN_CELLS.cell - PLOT.inset * 2,
+            GARDEN_CELLS.cell - PLOT.inset * 2,
+            5,
+          );
+        }
       }
       const star = starOf(ally.copies);
       if (star !== view.star) {
@@ -451,12 +493,14 @@ export class FieldView {
         scene.tweens.add({ targets: view.stars, scale: { from: 1.6, to: 1 }, duration: 260, ease: 'Back.Out' });
       }
       if (view.kick > 0) view.kick = Math.max(0, view.kick - dt);
-      // 다시 늘어놓아 칸이 바뀌었으면 새 자리로 걸어간다.
-      const gap = spot.x - view.image.x;
-      const x = Math.abs(gap) <= ALLY_WALK * dt ? spot.x : view.image.x + Math.sign(gap) * ALLY_WALK * dt;
+      // 옮겨서 칸이 바뀌었으면 새 자리로 걸어간다.
+      const step = ALLY_WALK * dt;
+      const toward = (from: number, to: number): number => (Math.abs(to - from) <= step ? to : from + Math.sign(to - from) * step);
+      const x = toward(view.image.x, spot.x);
+      const baseY = toward(view.stars.y + 2 - ALLY_FOOT, foot);
       const sway = Math.sin(this.clock * 2.4 + index * 2) * (4 / Math.max(1, ALLIES[ally.id].cells * 0.7));
-      view.image.setAngle(sway).setPosition(x, foot - (view.kick / 0.12) * 2.5);
-      view.stars.setPosition(x, foot + 2);
+      view.image.setAngle(sway).setPosition(x, baseY - (view.kick / 0.12) * 2.5);
+      view.stars.setPosition(x, baseY + ALLY_FOOT - 2);
     });
   }
 

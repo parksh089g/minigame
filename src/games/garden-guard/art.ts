@@ -96,6 +96,8 @@ export const TEX = {
   spray: 'gg-spray',
   grain: 'gg-grain',
   spine: 'gg-spine',
+  /** 호박덩굴이 던지는 작은 호박 */
+  pumpkin: 'gg-pumpkin',
 } as const;
 
 /** 동료의 그림. 해바라기는 예전부터 있던 그림을 그대로 쓴다. */
@@ -109,6 +111,8 @@ export const ALLY_SHOT: Readonly<Record<AllyId, string>> = {
   can: TEX.spray,
   sparrow: TEX.grain,
   cactus: TEX.spine,
+  pumpkin: TEX.pumpkin,
+  hedgehog: TEX.spine,
 };
 
 // ───────── 그리기 도구 ─────────
@@ -540,6 +544,17 @@ const ITEM_ART: Readonly<Record<string, Art>> = {
       fill(c, 'M4 3L5 15H3Z', '#d9f5e6');
     },
   },
+  [TEX.pumpkin]: {
+    width: 12,
+    height: 12,
+    view: [24, 24],
+    draw(c) {
+      stroke(c, 'M12 6Q13 2 16 1.500', LEAF_DEEP, 2);
+      oval(c, 12, 14, 10, 8.5, '#e98a4a');
+      oval(c, 12, 14, 4.5, 8.5, '#f2a65a');
+      stroke(c, 'M7 8Q5 14 7 20M17 8Q19 14 17 20', '#d9743a', 1.2);
+    },
+  },
   [TEX.mound]: {
     width: 26,
     height: 20,
@@ -837,6 +852,40 @@ const ALLY_ART: Readonly<Record<Exclude<AllyId, 'sunflower'>, Art>> = {
       oval(c, 15, 5.5, 1.3, 1.1, '#ffcf5c');
       face(c, 15, 15.5, 5, 1.2);
       pot(c, 15, 27, 16, 10);
+    },
+  },
+  /** 호박덩굴: 덩굴 잎 사이에 앉은 얼굴 있는 호박 */
+  pumpkin: {
+    ...ALLY_SIZE,
+    draw(c) {
+      stroke(c, 'M1 30Q6 22 12 26M29 30Q24 22 18 26', LEAF_DEEP, 2);
+      oval(c, 4.5, 26, 4.2, 3, LEAF, -0.5);
+      oval(c, 25.5, 26, 4.2, 3, LEAF, 0.5);
+      stroke(c, 'M15 14Q15 9 19 7.500', LEAF_DEEP, 2.4);
+      oval(c, 20, 9, 3.6, 2.2, LEAF, -0.4);
+      oval(c, 15, 26, 13, 10, '#e98a4a');
+      oval(c, 15, 26, 8.5, 10, '#f2a65a');
+      oval(c, 15, 26, 4, 9.5, '#f7b874');
+      stroke(c, 'M7.500 18Q4.500 26 7.500 34M22.500 18Q25.500 26 22.500 34', '#d9743a', 1.3);
+      face(c, 15, 26, 6, 1.4);
+    },
+  },
+  /** 고슴도치: 등에 가시가 돋은 동그란 고슴도치 */
+  hedgehog: {
+    ...ALLY_SIZE,
+    draw(c) {
+      for (let at = 0; at < 9; at += 1) {
+        const angle = Math.PI * (0.95 + (at / 8) * 1.1);
+        const x = 15 + Math.cos(angle) * 11;
+        const y = 25 + Math.sin(angle) * 11;
+        fill(c, `M${15 + Math.cos(angle - 0.25) * 7} ${25 + Math.sin(angle - 0.25) * 7}L${x + Math.cos(angle) * 4} ${y + Math.sin(angle) * 4}L${15 + Math.cos(angle + 0.25) * 7} ${25 + Math.sin(angle + 0.25) * 7}Z`, '#8a6a52');
+      }
+      oval(c, 15, 26, 11.5, 9.5, '#a9845f');
+      oval(c, 17, 29, 8, 6.5, '#f3d9bd');
+      oval(c, 9, 35.5, 3, 1.8, '#8a6a52');
+      oval(c, 20, 35.5, 3, 1.8, '#8a6a52');
+      oval(c, 25.5, 28.5, 1.6, 1.4, INK);
+      face(c, 17, 27.5, 5, 1.2);
     },
   },
 };

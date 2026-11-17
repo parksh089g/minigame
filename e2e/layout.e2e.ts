@@ -19,8 +19,8 @@ import {
   type WeaponId,
 } from '../src/games/lantern-keeper/data';
 import { CHARMS, HOLDS_PER_ROUND, REROLL_COST, SLOTS, type RunState } from '../src/games/candy-slot/rules';
-import type { ShopCard } from '../src/games/garden-guard/allies';
-import { ALLIES, GARDEN_CELLS, GARDEN_SCENE, SHOP, UPGRADE_ORDER, UPGRADES } from '../src/games/garden-guard/data';
+import { cellCorner, type ShopCard } from '../src/games/garden-guard/allies';
+import { ALLIES, CELL_COUNT, FIELD, GARDEN_CELLS, GARDEN_SCENE, SHOP, UPGRADE_ORDER, UPGRADES } from '../src/games/garden-guard/data';
 import { SHOP_TEXT } from '../src/games/garden-guard/shop-text';
 import { iconKey } from '../src/games/lantern-keeper/icons';
 import { NEWS_GAP, newsLine, normalizeMeta, unknownNews } from '../src/games/lantern-keeper/meta';
@@ -1650,7 +1650,7 @@ it('텃밭 지키기: 이미 있는 동료의 카드는 합치거나 새로 놓�
     scene.run.shop = [0, 1, 2].map(() => ({ id: 'sunflower', sold: false }));
     scene.shop.refresh(scene.run);
   }, GARDEN_SCENE);
-  await expect.poll(() => textPoint(page, GARDEN_SCENE, SHOP_TEXT.purse(30, 8)), WAIT).not.toBeNull();
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, SHOP_TEXT.purse(30, CELL_COUNT)), WAIT).not.toBeNull();
   /** 그 글자(아직 사지 않은 카드에만 적힌 말)가 적힌 카드를, want가 보일 때까지 누른다. 이미 보이면 누르지 않는다. */
   const openCard = async (label: string, want: string): Promise<{ x: number; y: number } | null> => {
     if (!(await textPoint(page, GARDEN_SCENE, want))) {
@@ -1693,11 +1693,14 @@ it('텃밭 지키기: 이미 있는 동료의 카드는 합치거나 새로 놓�
     const scene = window.__pocketArcade?.scene.getScene(key) as unknown as { layout: { fenceY: number } };
     return { fenceY: scene.layout.fenceY };
   }, GARDEN_SCENE);
-  // 4번 칸(물총 오른쪽 첫 칸)의 한가운데
-  const cellX = GARDEN_CELLS.right + GARDEN_CELLS.cell / 2;
+  /** 밭의 그 칸의 한가운데(화면의 논리 좌표) */
+  const cellPoint = (cell: number): { x: number; y: number } => {
+    const corner = cellCorner(cell);
+    return { x: corner.x + GARDEN_CELLS.cell / 2, y: spot.fenceY + (corner.y - FIELD.depth) + GARDEN_CELLS.cell / 2 };
+  };
   await expect
     .poll(async () => {
-      if (!(await textPoint(page, GARDEN_SCENE, SHOP_TEXT.dismiss))) await tapAt(page, cellX, spot.fenceY + 20);
+      if (!(await textPoint(page, GARDEN_SCENE, SHOP_TEXT.dismiss))) await tapAt(page, cellPoint(4).x, cellPoint(4).y);
       return textPoint(page, GARDEN_SCENE, SHOP_TEXT.dismiss);
     }, { ...WAIT, message: '내보내기 단추' })
     .not.toBeNull();
@@ -1706,7 +1709,62 @@ it('텃밭 지키기: 이미 있는 동료의 카드는 합치거나 새로 놓�
   await expect.poll(async () => (await team()).allies, WAIT).toEqual([{ id: 'sunflower', copies: 2, cell: 3 }]);
   expect((await team()).fruit).toBe(before.fruit + Math.floor(ALLIES.sunflower.price / 2));
   expect(await textPoint(page, GARDEN_SCENE, SHOP_TEXT.reroll)).not.toBeNull();
+
+  // 카드를 밭으로 끌어다 놓으면 놓은 자리에 선다. 끄는 그림은 손가락보다 조금 위에 있고, 그 그림이 가리키는 칸에 놓인다.
+  await page.evaluate((key) => {
+    const scene = window.__pocketArcade?.scene.getScene(key) as unknown as {
+      run: { fruit: number; shop: Array<{ id: string; sold: boolean }> };
+      shop: { refresh(run: unknown): void };
+    };
+    scene.run.fruit = 30;
+    scene.run.shop = [
+      { id: 'cactus', sold: false },
+      { id: 'sunflower', sold: false },
+      { id: 'frog', sold: false },
+    ];
+    scene.shop.refresh(scene.run);
+  }, GARDEN_SCENE);
+  const lift = (point: { x: number; y: number }): { x: number; y: number } => ({ x: point.x, y: point.y + 26 });
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, ALLIES.cactus.name), WAIT).not.toBeNull();
+  // 세로 세 칸짜리 선인장은 가운데 칸을 잡는다: 8번 칸을 가리키면 0, 8, 16번 칸에 선다.
+  await dragOnCanvas(page, (await textPoint(page, GARDEN_SCENE, ALLIES.cactus.name))!, lift(cellPoint(8)));
+  await expect.poll(async () => (await team()).allies, { ...WAIT, message: '끌어다 놓은 선인장' }).toEqual([
+    { id: 'cactus', copies: 1, cell: 0 },
+    { id: 'sunflower', copies: 2, cell: 3 },
+  ]);
+  // 같은 동료 위에 놓으면 합쳐진다.
+  await dragOnCanvas(page, (await textPoint(page, GARDEN_SCENE, ALLIES.sunflower.name))!, lift(cellPoint(3)));
+  await expect.poll(async () => (await team()).allies[1], { ...WAIT, message: '끌어다 합친 해바라기' }).toEqual({
+    id: 'sunflower',
+    copies: 3,
+    cell: 3,
+  });
+  // 밭의 동료도 끌어서 옮긴다: 선인장의 가운데 칸(8번)을 잡아 9번 칸으로 옮기면 1, 9, 17번 칸에 선다.
+  await dragOnCanvas(page, cellPoint(8), lift(cellPoint(9)));
+  await expect.poll(async () => (await team()).allies[0], { ...WAIT, message: '옮긴 선인장' }).toEqual({ id: 'cactus', copies: 1, cell: 1 });
+  expect(await hiddenTexts(page, GARDEN_SCENE), '끌어다 놓은 뒤의 가게').toEqual([]);
 });
+
+/** 캔버스의 논리 좌표 from에서 to까지 손가락으로 끈다(터치를 누르고, 여러 번 나눠 옮기고, 뗀다). */
+async function dragOnCanvas(page: Page, from: { x: number; y: number }, to: { x: number; y: number }): Promise<void> {
+  const box = await page.locator('canvas').boundingBox();
+  if (!box) throw new Error('캔버스가 보이지 않는다');
+  const scale = box.width / GAME_WIDTH;
+  const at = (x: number, y: number): { x: number; y: number } => ({ x: box.x + x * scale, y: box.y + y * scale });
+  const client = await page.context().newCDPSession(page);
+  await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [at(from.x, from.y)] });
+  const steps = 10;
+  for (let step = 1; step <= steps; step += 1) {
+    const t = step / steps;
+    await client.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [at(from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t)],
+    });
+    await page.waitForTimeout(20);
+  }
+  await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await client.detach();
+}
 
 it('텃밭 지키기: 하던 판을 두고 나가거나 앱이 꺼져도 준비 화면에서 그 자리부터 이어 하고, 새 판을 고르면 그 판을 마친다', async ({ page }) => {
   await openApp(page);

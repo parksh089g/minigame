@@ -3,7 +3,7 @@
  * 같은 동료를 또 사면 합쳐서 별을 올리거나(칸은 그대로) 빈칸에 하나 더 놓는다.
  * 화면이 없는 규칙이라서 시뮬레이션(sim.ts)과 자동 플레이(bot.ts)가 함께 쓴다.
  */
-import { ALLIES, ALLY_ORDER, ALLY_STARS, CELL_COUNT, GARDEN_CELLS, SHOP, TEAM_HEAT, type AllyId } from './data';
+import { ALLIES, ALLY_ORDER, ALLY_STARS, CELL_COUNT, GARDEN_CELLS, SHOOTER, SHOP, TEAM_HEAT, type AllyId } from './data';
 import { isBossDay, nextRandom } from './rules';
 import type { RunState } from './sim';
 
@@ -62,51 +62,79 @@ export function allyDamage(id: AllyId, star: number, damage: number, power: numb
 
 // ------------------------------------------------------------ 텃밭의 칸
 
-/** 그 칸이 물총의 오른쪽인지 */
-function rightSide(cell: number): boolean {
-  return cell >= GARDEN_CELLS.half;
+/** 한 줄의 칸 수(왼쪽과 오른쪽을 합친 것) */
+const ROW = GARDEN_CELLS.cols * 2;
+
+/** 칸의 가로 자리(0~7)와 줄(0부터) */
+export function cellAt(cell: number): { col: number; row: number } {
+  return { col: cell % ROW, row: Math.floor(cell / ROW) };
 }
 
-/** 첫 칸이 cell이고 cells칸을 차지한 동료가 서는 자리(시뮬레이션 좌표). 차지한 칸들의 한가운데다. */
-export function cellSpot(cell: number, cells: number): { x: number; y: number } {
-  const side = rightSide(cell);
+/** 그 가로 자리가 물총의 오른쪽인지 */
+function rightSide(col: number): boolean {
+  return col >= GARDEN_CELLS.cols;
+}
+
+/** 칸 하나의 왼쪽 위 끝(시뮬레이션 좌표). 울타리 아래는 화면에서도 같은 크기다. */
+export function cellCorner(cell: number): { x: number; y: number } {
+  const { col, row } = cellAt(cell);
+  const side = rightSide(col);
   const left = side ? GARDEN_CELLS.right : GARDEN_CELLS.left;
-  const index = side ? cell - GARDEN_CELLS.half : cell;
-  return { x: left + (index + cells / 2) * GARDEN_CELLS.cell, y: GARDEN_CELLS.y };
+  return { x: left + (side ? col - GARDEN_CELLS.cols : col) * GARDEN_CELLS.cell, y: GARDEN_CELLS.top + row * GARDEN_CELLS.cell };
+}
+
+/** 그 동료의 모양이 차지하는 가로 칸 수와 세로 칸 수 */
+export function shapeSize(id: AllyId): { width: number; height: number } {
+  const shape = ALLIES[id].shape;
+  return { width: Math.max(...shape.map(([x]) => x)) + 1, height: Math.max(...shape.map(([, y]) => y)) + 1 };
+}
+
+/**
+ * 첫 칸이 cell인 그 동료가 차지하는 칸들. 밭 밖으로 나가거나 물총을 넘어 양쪽에 걸치면 null
+ */
+export function shapeCells(id: AllyId, cell: number): number[] | null {
+  if (!Number.isInteger(cell) || cell < 0 || cell >= CELL_COUNT) return null;
+  const { col, row } = cellAt(cell);
+  const cells: number[] = [];
+  for (const [dx, dy] of ALLIES[id].shape) {
+    const x = col + dx;
+    const y = row + dy;
+    if (x >= ROW || y >= GARDEN_CELLS.rows || rightSide(x) !== rightSide(col)) return null;
+    cells.push(y * ROW + x);
+  }
+  return cells;
+}
+
+/** 첫 칸이 cell인 그 동료가 서는 자리(시뮬레이션 좌표). 모양을 감싼 네모의 한가운데다. */
+export function cellSpot(cell: number, id: AllyId): { x: number; y: number } {
+  const corner = cellCorner(cell);
+  const { width, height } = shapeSize(id);
+  return { x: corner.x + (width * GARDEN_CELLS.cell) / 2, y: corner.y + (height * GARDEN_CELLS.cell) / 2 };
 }
 
 /** 동료가 서는 자리(시뮬레이션 좌표) */
 export function allySpot(ally: Pick<Ally, 'id' | 'cell'>): { x: number; y: number } {
-  return cellSpot(ally.cell, ALLIES[ally.id].cells);
-}
-
-/** 그 칸들(첫 칸 cell부터 cells칸)이 한쪽 안에 들어가는지 */
-export function fitsSide(cell: number, cells: number): boolean {
-  if (!Number.isInteger(cell) || cell < 0 || cells < 1) return false;
-  const end = cell + cells - 1;
-  return end < CELL_COUNT && rightSide(cell) === rightSide(end);
+  return cellSpot(ally.cell, ally.id);
 }
 
 /** 칸마다 서 있는 동료의 차례(state.allies의 자리). 빈칸은 -1 */
 export function cellMap(allies: readonly Pick<Ally, 'id' | 'cell'>[]): number[] {
   const map = new Array<number>(CELL_COUNT).fill(-1);
   allies.forEach((ally, index) => {
-    for (let at = 0; at < ALLIES[ally.id].cells; at += 1) {
-      if (ally.cell + at < CELL_COUNT) map[ally.cell + at] = index;
-    }
+    for (const cell of shapeCells(ally.id, ally.cell) ?? []) map[cell] = index;
   });
   return map;
 }
 
-/** 동료들이 칸을 겹치지 않고 한쪽 안에 제대로 서 있는지(저장된 판을 읽을 때 본다) */
+/** 동료들이 칸을 겹치지 않고 밭 안에 제대로 서 있는지(저장된 판을 읽을 때 본다) */
 export function cellsValid(allies: readonly Pick<Ally, 'id' | 'cell'>[]): boolean {
   const used = new Array<boolean>(CELL_COUNT).fill(false);
   for (const ally of allies) {
-    const cells = ALLIES[ally.id].cells;
-    if (!fitsSide(ally.cell, cells)) return false;
-    for (let at = 0; at < cells; at += 1) {
-      if (used[ally.cell + at]) return false;
-      used[ally.cell + at] = true;
+    const cells = shapeCells(ally.id, ally.cell);
+    if (!cells) return false;
+    for (const cell of cells) {
+      if (used[cell]) return false;
+      used[cell] = true;
     }
   }
   return true;
@@ -117,68 +145,27 @@ export function freeCells(allies: readonly Pick<Ally, 'id'>[]): number {
   return CELL_COUNT - allies.reduce((sum, ally) => sum + ALLIES[ally.id].cells, 0);
 }
 
-/**
- * cells칸을 차지할 동료를 놓을 첫 칸. 물총에 가까운 쪽부터 찾고, 같은 거리면 왼쪽이 먼저다.
- * 이어진 빈칸이 없으면 null
- */
-function findCell(allies: readonly Pick<Ally, 'id' | 'cell'>[], cells: number): number | null {
+/** 그 동료를 첫 칸 cell에 놓을 수 있는지. ignore(state.allies의 차례)인 동료가 선 칸은 빈 것으로 친다(옮길 때). */
+export function fitsAt(allies: readonly Pick<Ally, 'id' | 'cell'>[], id: AllyId, cell: number, ignore = -1): boolean {
+  const cells = shapeCells(id, cell);
+  if (!cells) return false;
   const map = cellMap(allies);
-  const starts: Array<{ cell: number; gap: number }> = [];
-  for (let cell = 0; cell + cells <= CELL_COUNT; cell += 1) {
-    if (!fitsSide(cell, cells)) continue;
-    const gap = rightSide(cell) ? cell - GARDEN_CELLS.half : GARDEN_CELLS.half - (cell + cells);
-    starts.push({ cell, gap });
-  }
-  starts.sort((a, b) => a.gap - b.gap || a.cell - b.cell);
-  for (const { cell } of starts) {
-    let free = true;
-    for (let at = 0; at < cells; at += 1) if (map[cell + at] !== -1) free = false;
-    if (free) return cell;
-  }
-  return null;
+  return cells.every((at) => map[at] === -1 || map[at] === ignore);
 }
 
 /**
- * 동료들을 다시 늘어놓아 cells칸이 이어진 빈자리를 만든다. 칸 수는 남는데 이쪽저쪽에 흩어져 있을 때 쓴다.
- * 한쪽에 설 동료를 나누는 모든 가짓수 가운데 쪽을 옮기는 동료가 가장 적은 것을 고르고,
- * 각 쪽은 물총 옆부터 원래 차례대로 붙여 세운다. 새로 놓을 자리는 바깥 끝에 남는다.
- * 그렇게 해도 자리가 없으면 아무것도 바꾸지 않고 null을, 있으면 새 동료의 첫 칸을 돌려준다.
+ * 그 동료를 저절로 놓을 첫 칸. 물총에 가까운 자리부터 찾고, 같은 거리면 번호가 작은 칸이 먼저다. 자리가 없으면 null
+ * (가게에서 카드를 누르기만 했을 때와 자동 플레이가 쓴다. 끌어다 놓으면 놓은 자리에 선다.)
  */
-function repack(allies: Ally[], cells: number): number | null {
-  const size = (index: number): number => (index < allies.length ? ALLIES[allies[index].id].cells : cells);
-  const count = allies.length + 1;
-  let best: { mask: number; moved: number } | null = null;
-  for (let mask = 0; mask < 1 << count; mask += 1) {
-    let leftCells = 0;
-    let rightCells = 0;
-    let moved = 0;
-    for (let index = 0; index < count; index += 1) {
-      const right = (mask >> index) & 1;
-      if (right) rightCells += size(index);
-      else leftCells += size(index);
-      if (index < allies.length && rightSide(allies[index].cell) !== (right === 1)) moved += 1;
-    }
-    if (leftCells > GARDEN_CELLS.half || rightCells > GARDEN_CELLS.half) continue;
-    if (!best || moved < best.moved) best = { mask, moved };
+export function findCell(allies: readonly Pick<Ally, 'id' | 'cell'>[], id: AllyId): number | null {
+  let best: { cell: number; distance: number } | null = null;
+  for (let cell = 0; cell < CELL_COUNT; cell += 1) {
+    if (!fitsAt(allies, id, cell)) continue;
+    const spot = cellSpot(cell, id);
+    const distance = Math.hypot(spot.x - SHOOTER.x, spot.y - SHOOTER.y);
+    if (!best || distance < best.distance - 1e-9) best = { cell, distance };
   }
-  if (!best) return null;
-  // 왼쪽은 물총 옆(3번 칸)부터 바깥으로, 오른쪽은 물총 옆(4번 칸)부터 바깥으로 붙여 세운다.
-  const inner = (index: number): number =>
-    rightSide(allies[index].cell) ? allies[index].cell - GARDEN_CELLS.half : GARDEN_CELLS.half - allies[index].cell;
-  let leftEdge = GARDEN_CELLS.half;
-  let rightEdge = GARDEN_CELLS.half;
-  const order = allies.map((_, index) => index).sort((a, b) => inner(a) - inner(b));
-  for (const index of order) {
-    const cellsOf = size(index);
-    if ((best.mask >> index) & 1) {
-      allies[index].cell = rightEdge;
-      rightEdge += cellsOf;
-    } else {
-      leftEdge -= cellsOf;
-      allies[index].cell = leftEdge;
-    }
-  }
-  return (best.mask >> allies.length) & 1 ? rightEdge : leftEdge - cells;
+  return best ? best.cell : null;
 }
 
 /** 칸의 차례대로 동료를 늘어놓는다. 쏘는 차례와 그리는 차례가 늘 같게 한다. */
@@ -186,27 +173,49 @@ function sortByCell(allies: Ally[]): void {
   allies.sort((a, b) => a.cell - b.cell);
 }
 
-/** 그 동료를 새로 놓을 빈칸이 있는지(흩어진 빈칸은 다시 늘어놓아 모은다) */
+/** 그 동료를 새로 놓을 자리가 있는지 */
 export function canPlace(state: Pick<RunState, 'allies'>, id: AllyId): boolean {
-  const cells = ALLIES[id].cells;
-  if (freeCells(state.allies) < cells) return false;
-  if (findCell(state.allies, cells) !== null) return true;
-  // 다시 늘어놓아 볼 뿐 바꾸지는 않는다.
-  return repack(state.allies.map((ally) => ({ ...ally })), cells) !== null;
+  return findCell(state.allies, id) !== null;
 }
 
 /**
- * 동료를 빈칸에 새로 놓는다. 새로 선 동료는 조금 기다렸다가 쏘기 시작한다. 놓았으면 그 동료를, 자리가 없으면 null
+ * 동료를 빈칸에 새로 놓는다. cell을 주면 그 칸(첫 칸)에, 주지 않으면 물총에 가까운 빈자리에 놓는다.
+ * 새로 선 동료는 조금 기다렸다가 쏘기 시작한다. 놓았으면 그 동료를, 자리가 없으면 null
  */
-export function placeAlly(state: Pick<RunState, 'allies'>, id: AllyId, copies = 1): Ally | null {
-  if (!canPlace(state, id)) return null;
-  const cells = ALLIES[id].cells;
-  const cell = findCell(state.allies, cells) ?? repack(state.allies, cells);
-  if (cell === null) return null;
-  const ally: Ally = { id, copies: Math.min(copiesFor(ALLY_STARS.max), copies), fireIn: 0.5, cell };
+export function placeAlly(state: Pick<RunState, 'allies'>, id: AllyId, copies = 1, cell?: number): Ally | null {
+  const at = cell ?? findCell(state.allies, id);
+  if (at === null || !fitsAt(state.allies, id, at)) return null;
+  const ally: Ally = { id, copies: Math.min(copiesFor(ALLY_STARS.max), copies), fireIn: 0.5, cell: at };
   state.allies.push(ally);
   sortByCell(state.allies);
   return ally;
+}
+
+/** 가게가 열려 있을 때 그 동료(state.allies의 차례)를 다른 칸으로 옮긴다. 옮겼으면 그 동료, 못 옮겼으면 null */
+export function moveAlly(state: RunState, index: number, cell: number): Ally | null {
+  const ally = state.allies[index];
+  if (!state.shopping || !ally || ally.cell === cell || !fitsAt(state.allies, ally.id, cell, index)) return null;
+  ally.cell = cell;
+  sortByCell(state.allies);
+  return ally;
+}
+
+/** 같은 동료 둘을 하나로 합칠 수 있는지(from을 to에 합친다). 합친 수가 다 모은 수를 넘으면 안 된다. */
+export function canJoin(state: RunState, from: number, to: number): boolean {
+  const a = state.allies[from];
+  const b = state.allies[to];
+  return state.shopping && !!a && !!b && from !== to && a.id === b.id && a.copies + b.copies <= copiesFor(ALLY_STARS.max);
+}
+
+/** 가게가 열려 있을 때 밭의 같은 동료 둘을 합친다(from이 to에 합쳐져 칸이 빈다). 합친 동료와 오른 별(오르지 않았으면 0), 못 합쳤으면 null */
+export function joinAllies(state: RunState, from: number, to: number): { ally: Ally; star: number } | null {
+  if (!canJoin(state, from, to)) return null;
+  const target = state.allies[to];
+  const before = starOf(target.copies);
+  target.copies += state.allies[from].copies;
+  state.allies.splice(from, 1);
+  const after = starOf(target.copies);
+  return { ally: target, star: after > before ? after : 0 };
 }
 
 /** 같은 동료를 합칠 대상. 아직 다 올리지 않은 것 가운데 가장 많이 모은 것이다. 없으면 undefined */
@@ -231,14 +240,22 @@ export function allyOf(state: Pick<RunState, 'allies'>, id: AllyId): Ally | unde
   return found;
 }
 
-/** 같은 동료에 합친다. 별이 올랐으면 그 별을, 아니면 0을, 합칠 대상이 없으면 null을 돌려준다. */
-export function mergeAlly(state: Pick<RunState, 'allies'>, id: AllyId, copies = 1): number | null {
-  const ally = mergeTarget(state, id);
-  if (!ally) return null;
+/**
+ * 같은 동료에 합친다. target(state.allies의 차례)을 주면 그 동료에, 주지 않으면 mergeTarget에 합친다.
+ * 합친 동료와 오른 별(오르지 않았으면 0)을, 합칠 수 없으면 null을 돌려준다.
+ */
+export function mergeAlly(
+  state: Pick<RunState, 'allies'>,
+  id: AllyId,
+  copies = 1,
+  target?: number,
+): { ally: Ally; star: number } | null {
+  const ally = target === undefined ? mergeTarget(state, id) : state.allies[target];
+  if (!ally || ally.id !== id || maxed(ally.copies)) return null;
   const before = starOf(ally.copies);
   ally.copies = Math.min(copiesFor(ALLY_STARS.max), ally.copies + copies);
   const after = starOf(ally.copies);
-  return after > before ? after : 0;
+  return { ally, star: after > before ? after : 0 };
 }
 
 /** 내보내면 돌려받는 열매: 모은 수만큼의 값의 절반(내림) */
@@ -287,11 +304,25 @@ export function openShop(state: RunState): void {
   state.shop = drawShop(state);
 }
 
+/**
+ * 카드를 어디에 사는지. 새로 놓을 때 cell은 첫 칸(끌어다 놓은 자리)이고, 합칠 때 ally는 합칠 동료(state.allies의 차례)다.
+ * 주지 않으면 물총에 가까운 빈자리에 놓거나 가장 많이 모은 동료에 합친다.
+ */
+export interface BuyAt {
+  cell?: number;
+  ally?: number;
+}
+
 /** 그 카드를 그 방법(합치기, 새로 놓기)으로 지금 살 수 있는지 */
-export function canBuyCard(state: RunState, index: number, mode: BuyMode): boolean {
+export function canBuyCard(state: RunState, index: number, mode: BuyMode, at: BuyAt = {}): boolean {
   const card = state.shop[index];
   if (!state.shopping || !card || card.sold || state.fruit < ALLIES[card.id].price) return false;
-  return mode === 'merge' ? mergeTarget(state, card.id) !== undefined : canPlace(state, card.id);
+  if (mode === 'merge') {
+    if (at.ally === undefined) return mergeTarget(state, card.id) !== undefined;
+    const ally = state.allies[at.ally];
+    return !!ally && ally.id === card.id && !maxed(ally.copies);
+  }
+  return at.cell === undefined ? canPlace(state, card.id) : fitsAt(state.allies, card.id, at.cell);
 }
 
 /** 그 카드를 어떻게든 살 수 있는지(합치거나 새로 놓거나) */
@@ -308,19 +339,20 @@ export interface Bought {
 }
 
 /** 카드를 산다. 합치면 칸은 그대로 별이 오르고, 새로 놓으면 빈칸에 하나 더 선다. 사지 못했으면 null */
-export function buyCard(state: RunState, index: number, mode: BuyMode): Bought | null {
-  if (!canBuyCard(state, index, mode)) return null;
+export function buyCard(state: RunState, index: number, mode: BuyMode, at: BuyAt = {}): Bought | null {
+  if (!canBuyCard(state, index, mode, at)) return null;
   const card = state.shop[index];
-  let ally: Ally | null | undefined;
-  let star: number | null;
+  let ally: Ally | null;
+  let star: number;
   if (mode === 'merge') {
-    ally = mergeTarget(state, card.id);
-    star = mergeAlly(state, card.id);
+    const merged = mergeAlly(state, card.id, 1, at.ally);
+    ally = merged?.ally ?? null;
+    star = merged?.star ?? 0;
   } else {
-    ally = placeAlly(state, card.id);
-    star = ally ? 1 : null;
+    ally = placeAlly(state, card.id, 1, at.cell);
+    star = 1;
   }
-  if (!ally || star === null) return null;
+  if (!ally) return null;
   state.fruit -= ALLIES[card.id].price;
   state.shop = state.shop.map((other, at) => (at === index ? { ...other, sold: true } : other));
   return { id: card.id, mode, star, ally };

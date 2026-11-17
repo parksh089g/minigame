@@ -20,6 +20,8 @@ export const SHOP_TEXT = {
   mergeButton: (star: number) => `합치기 ★${star}`,
   mergeSame: '합치기',
   placeButton: '새로 놓기',
+  /** 가게의 맨 위에 적는 도움말 */
+  dragHint: '밭에 끌어다 놓기 · 같은 동료 위면 합치기',
   /** 고른 동료를 내보내는 단추 */
   dismiss: '내보내기',
   /** 동료가 차지하는 칸 */

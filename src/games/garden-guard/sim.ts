@@ -11,11 +11,14 @@ import {
   dismissAlly,
   fruitFor,
   heatScale,
+  joinAllies,
+  moveAlly,
   openShop,
   placeAlly,
   reroll,
   starOf,
   type Ally,
+  type BuyAt,
   type BuyMode,
   type ShopCard,
 } from './allies';
@@ -26,6 +29,7 @@ import {
   ENEMIES,
   FIELD,
   DAY,
+  GARDEN_CELLS,
   GUN,
   HOP,
   SHOOTER,
@@ -171,8 +175,15 @@ export interface Input {
   aim: { x: number; y: number } | null;
   /** 물벼락 버튼을 눌렀는지 */
   storm: boolean;
-  /** 가게에서 산 카드의 자리(0부터)와, 합칠지(merge) 새로 놓을지(place). 사지 않았으면 적지 않는다. */
-  buy?: { card: number; mode: BuyMode };
+  /**
+   * 가게에서 산 카드의 자리(0부터)와, 합칠지(merge) 새로 놓을지(place). 사지 않았으면 적지 않는다.
+   * 끌어다 놓았으면 놓은 첫 칸(cell)이나 합칠 동료(ally, state.allies의 차례)도 적는다.
+   */
+  buy?: { card: number; mode: BuyMode } & BuyAt;
+  /** 가게에서 밭의 동료(state.allies의 차례)를 다른 칸(첫 칸)으로 옮긴다. */
+  move?: { ally: number; cell: number };
+  /** 가게에서 밭의 같은 동료 둘을 합친다(from이 to에 합쳐진다). */
+  join?: { from: number; to: number };
   /** 가게에서 내보낸 동료의 자리(state.allies의 차례) */
   dismiss?: number;
   /** 가게의 카드를 다시 뽑는지 */
@@ -201,11 +212,18 @@ export type SimEvent =
    * 동료를 샀다. 합쳤으면(merge) star는 오른 별이고 오르지 않았으면 0이다. 새로 놓았으면(place) star는 1이다.
    * x는 그 동료가 선 자리다.
    */
-  | { type: 'buy'; id: AllyId; star: number; mode: BuyMode; x: number }
+  | { type: 'buy'; id: AllyId; star: number; mode: BuyMode; x: number; y: number }
+  /** 밭의 동료를 다른 칸으로 옮겼다. */
+  | { type: 'move'; id: AllyId; x: number; y: number }
+  /** 밭의 같은 동료 둘을 합쳤다. star는 오른 별이고 오르지 않았으면 0이다. x는 합친 동료가 선 자리다. */
+  | { type: 'join'; id: AllyId; star: number; x: number; y: number }
   /** 동료를 내보내고 열매를 돌려받았다. x는 그 동료가 섰던 자리다. */
-  | { type: 'dismiss'; id: AllyId; refund: number; x: number }
+  | { type: 'dismiss'; id: AllyId; refund: number; x: number; y: number }
   | { type: 'reroll' }
   | { type: 'over' };
+
+/** 텃밭의 맨 아래(시뮬레이션 y). 이보다 아래로 간 물방울은 버린다. */
+const GARDEN_BOTTOM = GARDEN_CELLS.top + GARDEN_CELLS.rows * GARDEN_CELLS.cell + 8;
 
 /** 한 프레임에 한꺼번에 살아 있을 수 있는 벌레 수. 대장이 부하를 끝없이 불러도 넘지 않는다. */
 const MAX_ENEMIES = 90;
@@ -630,7 +648,8 @@ function moveShots(state: RunState, dt: number, events: SimEvent[]): void {
       }
       shot.pierce -= 1;
     }
-    const outside = shot.y < -24 || shot.x < -12 || shot.x > FIELD.width + 12 || shot.y > SHOOTER.y + 8;
+    // 텃밭의 맨 아래 줄에 선 동료가 쏜 것도 날아갈 수 있게, 아래쪽 끝은 텃밭의 맨 아래다.
+    const outside = shot.y < -24 || shot.x < -12 || shot.x > FIELD.width + 12 || shot.y > GARDEN_BOTTOM;
     if (!spent && !outside) kept.push(shot);
   }
   state.shots = kept;
@@ -661,17 +680,24 @@ export function step(state: RunState, dt: number, input: Input = NO_INPUT): SimE
 
   if (state.shopping) {
     if (input.reroll && reroll(state)) events.push({ type: 'reroll' });
+    if (input.move) {
+      const moved = moveAlly(state, input.move.ally, input.move.cell);
+      if (moved) events.push({ type: 'move', id: moved.id, ...allySpot(moved) });
+    }
+    if (input.join) {
+      const joined = joinAllies(state, input.join.from, input.join.to);
+      if (joined) events.push({ type: 'join', id: joined.ally.id, star: joined.star, ...allySpot(joined.ally) });
+    }
     if (input.dismiss !== undefined) {
       const ally = state.allies[input.dismiss];
-      const x = ally ? allySpot(ally).x : 0;
+      const spot = ally ? allySpot(ally) : { x: 0, y: 0 };
       const refund = dismissAlly(state, input.dismiss);
-      if (ally && refund !== null) events.push({ type: 'dismiss', id: ally.id, refund, x });
+      if (ally && refund !== null) events.push({ type: 'dismiss', id: ally.id, refund, ...spot });
     }
     if (input.buy !== undefined) {
-      const bought = buyCard(state, input.buy.card, input.buy.mode);
+      const bought = buyCard(state, input.buy.card, input.buy.mode, { cell: input.buy.cell, ally: input.buy.ally });
       if (bought) {
-        const x = allySpot(bought.ally).x;
-        events.push({ type: 'buy', id: bought.id, star: bought.star, mode: bought.mode, x });
+        events.push({ type: 'buy', id: bought.id, star: bought.star, mode: bought.mode, ...allySpot(bought.ally) });
       }
     }
     if (input.ready) {

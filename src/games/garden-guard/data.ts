@@ -21,7 +21,7 @@ export const FIELD = {
 } as const;
 
 /** 물총을 쏘는 자리. 울타리 아래 한가운데다. */
-export const SHOOTER = { x: FIELD.width / 2, y: FIELD.depth + 38 } as const;
+export const SHOOTER = { x: FIELD.width / 2, y: FIELD.depth + 26 } as const;
 
 // ------------------------------------------------------------ 벌레
 
@@ -378,13 +378,44 @@ export const FENCE_BASE = 100;
  * 같은 동료를 또 사면 합쳐져서 별이 오른다(ALLY_STARS). 동료의 피해는 물총 한 발의 피해(Stats.damage)에 비율을 곱해서,
  * 영구 강화와 새 밭으로 물총이 세지는 만큼 동료도 같이 세진다. 값은 여기만 고치면 된다.
  */
-export type AllyId = 'sunflower' | 'frog' | 'mint' | 'can' | 'sparrow' | 'cactus';
+export type AllyId = 'sunflower' | 'frog' | 'mint' | 'can' | 'sparrow' | 'cactus' | 'pumpkin' | 'hedgehog';
 
 /**
  * 동료가 겨누는 벌레. near는 제게 가까운 것, boss는 체력이 가장 많은 것(대장이 먼저), front는 울타리에 가장 가까운 것,
  * crowd는 둘레에 벌레가 가장 많이 몰린 것, far는 판 위쪽에서 가장 먼 것이다.
  */
 export type AllyAim = 'near' | 'boss' | 'front' | 'crowd' | 'far';
+
+/** 동료가 차지하는 칸의 모양. [가로, 세로]의 목록이고 [0, 0]이 첫 칸이다. */
+export type AllyShape = ReadonlyArray<readonly [number, number]>;
+
+/** 동료의 모양들: 한 칸, 가로 두 칸, 세로 두 칸, 세로 세 칸, 가로 세 칸, ㄴ자 세 칸 */
+export const SHAPES = {
+  dot: [[0, 0]],
+  row2: [
+    [0, 0],
+    [1, 0],
+  ],
+  col2: [
+    [0, 0],
+    [0, 1],
+  ],
+  col3: [
+    [0, 0],
+    [0, 1],
+    [0, 2],
+  ],
+  row3: [
+    [0, 0],
+    [1, 0],
+    [2, 0],
+  ],
+  ell3: [
+    [0, 0],
+    [0, 1],
+    [1, 1],
+  ],
+} as const satisfies Record<string, AllyShape>;
 
 export interface AllyDef {
   name: string;
@@ -401,8 +432,10 @@ export interface AllyDef {
   aim: AllyAim;
   /** 쏜 것이 날아가는 빠르기 */
   shotSpeed: number;
-  /** 텃밭에서 차지하는 칸 수. 클수록 세다. */
+  /** 텃밭에서 차지하는 칸 수(shape의 칸 수). 클수록 세다. */
   cells: number;
+  /** 차지하는 칸의 모양: 첫 칸에서 오른쪽(가로)과 아래쪽(세로)으로 몇 칸 떨어졌는지 */
+  shape: AllyShape;
   /** 맞은 벌레를 느리게 하는 정도(0~1)와 시간(초). 대장은 반만 느려진다. */
   chill?: { slow: number; seconds: number };
   /** 맞은 자리 둘레(반지름)의 벌레도 이 비율의 피해를 받는다. */
@@ -424,6 +457,7 @@ export const ALLIES: Readonly<Record<AllyId, AllyDef>> = {
     aim: 'near',
     shotSpeed: 380,
     cells: 1,
+    shape: SHAPES.dot,
   },
   frog: {
     name: '개구리',
@@ -436,6 +470,7 @@ export const ALLIES: Readonly<Record<AllyId, AllyDef>> = {
     shotSpeed: 560,
     pierceShell: true,
     cells: 2,
+    shape: SHAPES.row2,
   },
   mint: {
     name: '박하',
@@ -448,6 +483,7 @@ export const ALLIES: Readonly<Record<AllyId, AllyDef>> = {
     shotSpeed: 330,
     chill: { slow: 0.35, seconds: 1.6 },
     cells: 1,
+    shape: SHAPES.dot,
   },
   can: {
     name: '물뿌리개',
@@ -460,6 +496,7 @@ export const ALLIES: Readonly<Record<AllyId, AllyDef>> = {
     shotSpeed: 300,
     splash: { radius: 32, ratio: 1 },
     cells: 2,
+    shape: SHAPES.col2,
   },
   sparrow: {
     name: '참새',
@@ -471,6 +508,7 @@ export const ALLIES: Readonly<Record<AllyId, AllyDef>> = {
     aim: 'far',
     shotSpeed: 460,
     cells: 1,
+    shape: SHAPES.dot,
   },
   cactus: {
     name: '선인장',
@@ -484,20 +522,48 @@ export const ALLIES: Readonly<Record<AllyId, AllyDef>> = {
     reach: 70,
     pierceShell: true,
     cells: 3,
+    shape: SHAPES.col3,
+  },
+  pumpkin: {
+    name: '호박덩굴',
+    blurb: '큰 호박을 던져 둘레를 쳐요',
+    fromDay: 20,
+    price: 7,
+    interval: 2.1,
+    damage: 1.9,
+    aim: 'crowd',
+    shotSpeed: 260,
+    splash: { radius: 38, ratio: 0.7 },
+    cells: 3,
+    shape: SHAPES.row3,
+  },
+  hedgehog: {
+    name: '고슴도치',
+    blurb: '가시를 쉬지 않고 쏘아요',
+    fromDay: 24,
+    price: 7,
+    interval: 0.4,
+    damage: 0.62,
+    aim: 'near',
+    shotSpeed: 480,
+    pierceShell: true,
+    cells: 3,
+    shape: SHAPES.ell3,
   },
 };
 
 /** 가게에 나오는 차례 */
-export const ALLY_ORDER: readonly AllyId[] = ['sunflower', 'frog', 'mint', 'can', 'sparrow', 'cactus'];
+export const ALLY_ORDER: readonly AllyId[] = ['sunflower', 'frog', 'mint', 'can', 'sparrow', 'cactus', 'pumpkin', 'hedgehog'];
 
 /**
- * 동료가 서는 텃밭의 칸. 물총의 왼쪽에 half칸, 오른쪽에 half칸이 있고 칸마다 너비가 cell이다.
- * 0~3번 칸은 왼쪽(left부터), 4~7번 칸은 오른쪽(right부터)이다. 동료 하나는 한쪽 안에서 이어진 칸에만 선다.
- * 물벼락 버튼은 이 줄 아래 오른쪽 끝에 놓인다.
+ * 동료가 서는 텃밭의 칸. 물총의 왼쪽과 오른쪽에 cols칸씩, 세로로 rows줄이고 칸마다 크기가 cell이다.
+ * 칸의 번호는 줄마다 왼쪽부터 0~7(0~3은 물총 왼쪽의 left부터, 4~7은 오른쪽의 right부터)이고, 다음 줄은 8부터다.
+ * 동료 하나는 한쪽 안에서만 선다. top은 첫 줄의 위쪽 끝(시뮬레이션 y)이다.
+ * 물벼락 버튼은 물총 아래, 두 쪽 사이에 놓인다.
  */
-export const GARDEN_CELLS = { half: 4, cell: 24, left: 4, right: 140, y: FIELD.depth + 26 } as const;
+export const GARDEN_CELLS = { cols: 4, rows: 3, cell: 22, left: 10, right: 142, top: FIELD.depth + 6 } as const;
 /** 텃밭의 칸 수 */
-export const CELL_COUNT = GARDEN_CELLS.half * 2;
+export const CELL_COUNT = GARDEN_CELLS.cols * 2 * GARDEN_CELLS.rows;
 
 /**
  * 같은 동료를 모은 수에 따른 별. 두 마리가 모이면 ★2, 넷이면 ★3, 여덟이면 ★4, 열여섯이면 ★5다.
@@ -523,7 +589,7 @@ export const SHOP = {
  * 동료가 늘어 판이 세지는 만큼 벌레도 따라 세져서, 영구 강화의 값어치가 줄지 않는다.
  * 판을 앞쪽 날에서 시작해 동료를 미리 모아도, 벌레도 같이 세져 있어서 득이 없다.
  */
-export const TEAM_HEAT = { heat: 1.1, days: 8 } as const;
+export const TEAM_HEAT = { heat: 1.12, days: 8 } as const;
 
 // ------------------------------------------------------------ 유물
 

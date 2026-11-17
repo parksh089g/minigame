@@ -55,10 +55,10 @@ const AIM_DOTS = { from: 26, to: 150, gap: 12 } as const;
 const DEPTH = { field: -20, aim: -12, hudBack: -2, hud: 1, banner: 10, picks: 20 } as const;
 /** 그날 쫓아낸 벌레의 비율을 보여 주는 막대 */
 const DAY_BAR = { x: 70, y: 31, width: 100, height: 6 } as const;
-/** 울타리 체력 막대. 화면 맨 아래에 놓이고, 오른쪽 끝(물벼락 단추의 자리)을 비운다. */
-const FENCE_BAR = { x: 10, right: 46, height: 12, bottom: 8 } as const;
-/** 물벼락 버튼 */
-const STORM_BUTTON = { size: 32, right: 6, bottom: 6 } as const;
+/** 울타리 체력 막대. 화면 맨 아래, 텃밭의 칸 아래에 놓인다. */
+const FENCE_BAR = { x: 10, height: 12, bottom: 8 } as const;
+/** 물벼락 버튼. 물총 바로 아래, 텃밭의 두 쪽 사이에 놓인다. top은 울타리에서 버튼 위쪽 끝까지다. */
+const STORM_BUTTON = { size: 32, top: 42 } as const;
 /** 판이 끝난 뒤 결과 화면이 뜨기까지 무너진 장면을 보여 주는 시간(ms) */
 const ENDING_MS = 1500;
 /** 판을 시작할 때 화면 아래에 뜨는 조작 안내가 보이는 시간(초)과, 이만큼 해 본 사람에게는 띄우지 않는 판 수 */
@@ -142,7 +142,7 @@ export class GardenGuardScene extends MiniGameScene {
   private stormAsked = false;
   /** 동료 가게 창과, 거기서 누른 것. 누른 것은 다음 걸음에 시뮬레이션으로 넘긴다. */
   private shop: ShopPanel | null = null;
-  private shopAsked: Pick<Input, 'buy' | 'reroll' | 'ready' | 'dismiss'> = {};
+  private shopAsked: Pick<Input, 'buy' | 'reroll' | 'ready' | 'dismiss' | 'move' | 'join'> = {};
   /** 동료 가게를 띄울 때(판 안의 초). 판의 첫날 앞과 이어 한 판은 0이라 바로 뜬다. */
   private shopAt = 0;
   /** 방금 지킨 날의 알림. 가운데에 띄우는 대신 가게 창의 맨 위에 적는다. */
@@ -349,7 +349,7 @@ export class GardenGuardScene extends MiniGameScene {
       originX: 1,
       originY: 0.5,
     }).setDepth(DEPTH.hud);
-    const barWidth = GAME_WIDTH - FENCE_BAR.x - (state.stats.stormCooldown > 0 ? FENCE_BAR.right : FENCE_BAR.x);
+    const barWidth = GAME_WIDTH - FENCE_BAR.x * 2;
     this.fenceText = addText(this, FENCE_BAR.x + barWidth / 2, height - FENCE_BAR.bottom - FENCE_BAR.height / 2, '', {
       size: 10,
       color: THEME_CSS.inkDeep,
@@ -359,9 +359,7 @@ export class GardenGuardScene extends MiniGameScene {
     }).setDepth(DEPTH.hud);
 
     if (state.stats.stormCooldown > 0) {
-      const { size, right, bottom } = STORM_BUTTON;
-      const x = GAME_WIDTH - right - size;
-      const y = height - bottom - size;
+      const { x, y, size } = this.stormSpot();
       this.stormButton = new PixelButton(this, {
         x,
         y,
@@ -386,10 +384,15 @@ export class GardenGuardScene extends MiniGameScene {
   /** 물벼락 버튼이 놓인 자리인지. 그 위를 누른 것은 겨누는 것으로 치지 않는다. */
   private onStormButton(x: number, y: number): boolean {
     if (!this.stormButton) return false;
-    const { size, right, bottom } = STORM_BUTTON;
-    const left = GAME_WIDTH - right - size - 4;
-    const top = this.scale.height - bottom - size - 4;
-    return x >= left && y >= top && y <= top + size + 8;
+    const spot = this.stormSpot();
+    const pad = 4;
+    return x >= spot.x - pad && x <= spot.x + spot.size + pad && y >= spot.y - pad && y <= spot.y + spot.size + pad;
+  }
+
+  /** 물벼락 버튼의 왼쪽 위 끝과 크기 */
+  private stormSpot(): { x: number; y: number; size: number } {
+    const { size, top } = STORM_BUTTON;
+    return { x: GAME_WIDTH / 2 - size / 2, y: this.layout.fenceY + top, size };
   }
 
   private listenForAim(): void {
@@ -580,6 +583,24 @@ export class GardenGuardScene extends MiniGameScene {
           this.saveRun();
           break;
         }
+        case 'move':
+          sfx.pop();
+          this.shop?.refresh(this.run as RunState);
+          this.saveRun();
+          break;
+        case 'join': {
+          const name = ALLIES[event.id].name;
+          if (event.star > 1) {
+            sfx.fanfare();
+            vibrate([10, 30, 10]);
+          } else {
+            sfx.pop();
+          }
+          this.shopToast(event.star > 0 ? TEXT.merged(name, event.star) : TEXT.gathered(name));
+          this.shop?.refresh(this.run as RunState);
+          this.saveRun();
+          break;
+        }
         case 'dismiss':
           sfx.click();
           this.shopToast(TEXT.left(ALLIES[event.id].name, event.refund));
@@ -648,8 +669,14 @@ export class GardenGuardScene extends MiniGameScene {
       state,
       this.cleared,
       {
-        buy: (index, mode) => {
-          this.shopAsked = { ...this.shopAsked, buy: { card: index, mode } };
+        buy: (index, mode, at) => {
+          this.shopAsked = { ...this.shopAsked, buy: { card: index, mode, ...at } };
+        },
+        move: (ally, cell) => {
+          this.shopAsked = { ...this.shopAsked, move: { ally, cell } };
+        },
+        join: (from, to) => {
+          this.shopAsked = { ...this.shopAsked, join: { from, to } };
         },
         dismiss: (index) => {
           this.shopAsked = { ...this.shopAsked, dismiss: index };
@@ -712,7 +739,7 @@ export class GardenGuardScene extends MiniGameScene {
     // 울타리 체력
     const ratio = Math.max(0, state.fence / state.stats.fenceMax);
     const top = height - FENCE_BAR.bottom - FENCE_BAR.height;
-    const width = GAME_WIDTH - FENCE_BAR.x - (this.stormButton ? FENCE_BAR.right : FENCE_BAR.x);
+    const width = GAME_WIDTH - FENCE_BAR.x * 2;
     g.fillStyle(LOOK.barBack, 1);
     g.fillRoundedRect(FENCE_BAR.x, top, width, FENCE_BAR.height, FENCE_BAR.height / 2);
     if (ratio > 0) {
