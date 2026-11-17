@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { playCareer } from './bot';
 import { createMeta } from './rules';
 import { readRunRecord, RUN_VERSION, runRecord, settleSavedRun, type SavedRun } from './saved-run';
-import { createRun, step, type RunState } from './sim';
+import { botInput } from './bot';
+import { createRun, runScore, step, type RunState } from './sim';
 
 const STEP = 1 / 60;
 const T = 1_700_000_000_000;
@@ -93,4 +95,64 @@ describe('하던 판의 저장', () => {
     const settled = settleSavedRun(meta, { state, banked: 100, bankedShards: 0 });
     expect(settled).toMatchObject({ seeds: 120, runs: 3, kills: 140, best: 6, startDay: 6 });
   });
+});
+
+describe('하던 판의 저장에 적힌 값의 범위 (10차 검토 G11)', () => {
+  /** 한창인 판을 적은 것을 고쳐서 읽어 본다. */
+  const readWith = (change: (state: Record<string, any>) => void): SavedRun | null => {
+    const record = throughDisk(runRecord({ state: busyRun(), banked: 0, bankedShards: 0 }, T)) as {
+      run: { state: Record<string, any> };
+    };
+    change(record.run.state);
+    return readRunRecord(record).run;
+  };
+
+  it('판에서 나올 수 없는 값이 적힌 판은 버린다', () => {
+    expect(readWith(() => undefined)).not.toBeNull();
+    const broken: Array<[string, (state: Record<string, any>) => void]> = [
+      ['물줄기 200만 갈래', (state) => (state.stats.streams = 2e6)],
+      ['물줄기 0갈래', (state) => (state.stats.streams = 0)],
+      ['쏘는 간격 0', (state) => (state.stats.interval = 0)],
+      ['음수 피해', (state) => (state.stats.damage = -5)],
+      ['너무 큰 피해', (state) => (state.stats.damage = 1e300)],
+      ['너무 큰 날', (state) => (state.day = 1e6)],
+      ['0일째', (state) => (state.day = 0)],
+      ['오늘보다 늦은 시작 날', (state) => (state.startDay = state.day + 1)],
+      ['오늘보다 늦은 지킨 날', (state) => (state.lastCleared = 1e9)],
+      ['음수 울타리', (state) => (state.fence = -1)],
+      ['가득보다 높은 울타리', (state) => (state.fence = state.stats.fenceMax + 1)],
+      ['넘치는 씨앗', (state) => (state.seeds = 1e15)],
+      ['나온 것보다 많이 쫓아냄', (state) => (state.dayKilled = state.dayTotal + 1)],
+      ['너무 많은 물방울', (state) => (state.shots = Array.from({ length: 5000 }, () => state.shots[0]))],
+      ['넷을 내놓은 강화', (state) => (state.offer = ['jet', 'jet', 'jet', 'jet'])],
+      ['너무 큰 날의 벌레', (state) => (state.enemies[0].day = 1e6)],
+    ];
+    for (const [label, change] of broken) expect(readWith(change), label).toBeNull();
+  });
+
+  it('강화를 다 올린 사람의 뒤쪽 날 판도 저장했다가 그대로 읽는다', () => {
+    // 자동 플레이로 20판을 해서 키운 진행으로, 가장 멀리 간 날 근처에서 한 판을 하며 10초마다 적었다가 읽어 본다.
+    const { meta } = playCareer(createMeta(), 20, 'active', 3, 4, 'keen', true);
+    const { state } = createRun({
+      seed: 77,
+      startDay: Math.max(1, meta.best - 9),
+      levels: meta.levels,
+      bestBefore: meta.best,
+      fields: meta.fields,
+      relics: meta.relics,
+    });
+    let checked = 0;
+    // 판이 끝났는지는 step이 바꾸므로 그때마다 새로 본다.
+    const live = (): boolean => state.phase !== 'over';
+    for (let t = 0; live() && t < 900; t += STEP) {
+      step(state, STEP, botInput(state, 'active'));
+      if (live() && Math.round(state.t * 60) % 600 === 0) {
+        const saved = readRunRecord(throughDisk(runRecord({ state, banked: 0, bankedShards: 0 }, T))).run;
+        expect(saved?.state, `${Math.round(state.t)}초의 판`).toEqual(state);
+        checked += 1;
+      }
+    }
+    expect(checked).toBeGreaterThan(10);
+    expect(runScore(state)).toBeGreaterThan(0);
+  }, 60_000);
 });

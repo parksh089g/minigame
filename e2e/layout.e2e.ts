@@ -18,7 +18,7 @@ import {
   WEAPONS,
   type WeaponId,
 } from '../src/games/lantern-keeper/data';
-import { CHARMS, REROLL_COST, SLOTS, type RunState } from '../src/games/candy-slot/rules';
+import { CHARMS, HOLDS_PER_ROUND, REROLL_COST, SLOTS, type RunState } from '../src/games/candy-slot/rules';
 import { BOON_PICKS, BOONS, GARDEN_SCENE, UPGRADE_ORDER, UPGRADES, type BoonId } from '../src/games/garden-guard/data';
 import { iconKey } from '../src/games/lantern-keeper/icons';
 import { NEWS_GAP, newsLine, normalizeMeta, unknownNews } from '../src/games/lantern-keeper/meta';
@@ -288,6 +288,109 @@ it('허브: 꾸준히 하는 게임과 짧게 즐기는 게임이 탭으로 나�
   await expect.poll(() => textPoint(page, SCENE.hub, '퍼즐 단계'), WAIT).not.toBeNull();
   await walkQuick('가장 짧은 화면');
   await checkSteady('가장 짧은 화면');
+});
+
+it('허브: 두고 간 판이 있으면 텃밭 지키기와 행운 슬롯의 카드에 "이어하기"가 뜨고, 가장 작은 글자 크기보다 작게 줄지 않는다', async ({
+  page,
+}) => {
+  // 10차 검토 C3, S11: 텃밭 지키기는 두 자리 날의 "이어하기 66일째"가 10px 밑으로 줄었고, 행운 슬롯 카드에는 두고 간 판이 보이지 않았다.
+  // 두 게임 모두 이름이 길어서 날이나 라운드를 붙이면 큰 화면에서 10px 밑으로 줄어, "이어하기"만 적는다.
+  await openApp(page);
+  await seedGardenMeta(page, {
+    version: 4,
+    seeds: 0,
+    levels: Object.fromEntries(UPGRADE_ORDER.map((id) => [id, UPGRADES[id].maxLevel])),
+    best: 68,
+    runs: 30,
+    kills: 9000,
+    startDay: 66,
+    fields: 0,
+    bestEver: 68,
+    shards: 0,
+    relics: {},
+    savedAt: Date.now() + 60_000,
+  });
+  await page.reload();
+  await openApp(page);
+
+  // 텃밭 지키기: 66일째에서 출발해 판을 멈추면 그 판이 남는다.
+  await startScene(page, GARDEN_SCENE);
+  await tapText(page, GARDEN_SCENE, '출발!');
+  await expect
+    .poll(() => page.evaluate((key) => (window.__pocketArcade?.scene.getScene(key) as unknown as GardenView).run?.day ?? 0, GARDEN_SCENE), WAIT)
+    .toBe(66);
+  await page.evaluate((key) => window.__pocketArcade?.scene.pause(key), GARDEN_SCENE);
+
+  // 행운 슬롯: 12라운드의 가게까지 온 판을 두고 간다.
+  await startScene(page, SCENE.candySlot);
+  const run: RunState = {
+    phase: 'shop',
+    round: 12,
+    spinsLeft: 0,
+    coin: 99,
+    earned: 120,
+    charms: [],
+    shop: { offers: CHARMS.slice(0, 3).map((charm) => charm.id), rerollCost: REROLL_COST },
+    afterMiss: false,
+    bestSpin: 20,
+    lastGrid: [0, 1, 2, 3, 4, 5, 1, 2, 0],
+    holdsLeft: HOLDS_PER_ROUND,
+    seed: null,
+    spinCount: 70,
+    drawCount: 12,
+    perks: [],
+    relics: {},
+  };
+  await page.evaluate(
+    ([key, next]) => {
+      const scene = window.__pocketArcade?.scene.getScene(key) as unknown as {
+        run: RunState;
+        openShop(): void;
+        keepRun(): void;
+      };
+      scene.run = next;
+      scene.openShop();
+      // 판을 바꾼 것은 화면에서 한 일이 아니라서, 씬이 판을 바꿀 때마다 하는 저장을 여기서 한 번 부른다.
+      scene.keepRun();
+    },
+    [SCENE.candySlot, run] as const,
+  );
+  await expect.poll(() => textPoint(page, SCENE.candySlot, '부적 가게'), WAIT).not.toBeNull();
+  // 저장이 기기에 들어갈 틈을 두고 앱을 새로 연다.
+  await page.waitForTimeout(800);
+  await page.reload();
+  await openApp(page);
+
+  const LINE = '이어하기';
+  /** 허브에 보이는 "이어하기"마다 실제 글자 크기(px). 카드에 맞추려고 줄인 만큼을 친다. */
+  const sizes = (): Promise<number[]> =>
+    page.evaluate(
+      ([key, wanted]) => {
+        const scene = window.__pocketArcade?.scene.getScene(key);
+        const found: number[] = [];
+        const walk = (list: Phaser.GameObjects.GameObject[], scale: number): void => {
+          for (const item of list) {
+            if (item.type === 'Container') {
+              const box = item as Phaser.GameObjects.Container;
+              walk(box.list, scale * box.scaleY);
+              continue;
+            }
+            const text = item as Phaser.GameObjects.Text;
+            if (item.type === 'Text' && text.visible && text.text === wanted) {
+              found.push(parseFloat(String(text.style.fontSize)) * text.scaleY * scale);
+            }
+          }
+        };
+        walk(scene?.children.list ?? [], 1);
+        return found;
+      },
+      [SCENE.hub, LINE] as const,
+    );
+  await expect.poll(async () => (await sizes()).length, { ...WAIT, message: '두 카드에 이어하기가 떠야 한다' }).toBe(2);
+  for (const size of await sizes()) {
+    expect(size, '"이어하기"의 글자 크기').toBeGreaterThanOrEqual(FONT_SIZE.small - 0.01);
+  }
+  expect(await hiddenTexts(page, SCENE.hub), '이어하기가 뜬 허브').toEqual([]);
 });
 
 it('등불지기 잔치의 밤: 고르는 창, 강화권 카드 넷~여섯 장(진화 카드 포함), 일시정지 빌드, 레벨업 창, 골라내기 화면이 가려지지 않는다', async ({ page }) => {
