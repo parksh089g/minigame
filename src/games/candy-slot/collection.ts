@@ -3,7 +3,7 @@
  * 찾은 부적의 id만 남기고, 무엇이 실리는지는 rules.ts의 CHARMS에서 그때그때 읽는다. 그래서 부적이 늘면 도감도 따라 늘어난다.
  * 화면과 저장소 어느 쪽에도 기대지 않는 순수 함수들이다.
  */
-import { CHARMS, charmOf, type CharmInfo } from './rules';
+import { baseOf, CHARMS, charmOf, isUpgraded, type CharmInfo } from './rules';
 
 /** 도감에 실리는 부적의 수 */
 export const COLLECTION_SIZE = CHARMS.length;
@@ -29,14 +29,15 @@ export function normalizeFound(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   const found: string[] = [];
   for (const id of raw) {
-    if (typeof id === 'string' && charmOf(id) && !found.includes(id)) found.push(id);
+    // 도감에는 강화하지 않은 id만 적는다. 강화한 부적은 addFound가 원래 부적으로 적는다.
+    if (typeof id === 'string' && charmOf(id) && !isUpgraded(id) && !found.includes(id)) found.push(id);
   }
   return found;
 }
 
 /** 그 부적을 찾은 적이 있는지 */
 export function isFound(found: readonly string[], id: string): boolean {
-  return found.includes(id);
+  return found.includes(baseOf(id));
 }
 
 /**
@@ -44,8 +45,9 @@ export function isFound(found: readonly string[], id: string): boolean {
  * 이미 찾았거나 없는 부적이면 받은 목록 그대로다(같은 배열).
  */
 export function addFound(found: readonly string[], id: string): readonly string[] {
-  if (!charmOf(id) || found.includes(id)) return found;
-  return [...found, id];
+  const base = baseOf(id);
+  if (!charmOf(base) || found.includes(base)) return found;
+  return [...found, base];
 }
 
 /** 찾은 부적의 수. 지금 있는 부적만, 겹치지 않게 센다. */

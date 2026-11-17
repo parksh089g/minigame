@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { MAX_SCORE } from '../../online/protocol';
 import {
   BASE_SPINS,
+  type Box,
   buy,
   buyBlock,
+  canHold,
   CELL_MAX,
   CELL_MIN,
   CELLS,
@@ -15,6 +17,7 @@ import {
   discard,
   drawOffers,
   drawSymbol,
+  HOLDS_PER_ROUND,
   JACKPOT_TIMES,
   layoutFor,
   lineOdds,
@@ -24,19 +27,19 @@ import {
   MACHINE_FRAME,
   MIN_WEIGHT,
   MISS_COIN,
-  HOLDS_PER_ROUND,
-  canHold,
-  randomOf,
   newRun,
   nextRound,
   oddsOf,
   OFFERS,
+  randomOf,
+  refundOf,
   reroll,
   REROLL_COST,
   REROLL_STEP,
   rollGrid,
-  savingsFor,
+  type RunState,
   SAVINGS_PER,
+  savingsFor,
   scoreOf,
   scoreSpin,
   settleRound,
@@ -45,6 +48,7 @@ import {
   SIZE,
   SLOTS,
   spin,
+  type SpinContext,
   spinsOf,
   START_COIN,
   SYMBOLS,
@@ -52,9 +56,6 @@ import {
   valuesOf,
   weightsOf,
   WILD,
-  type Box,
-  type RunState,
-  type SpinContext,
 } from './rules';
 
 /** 테스트마다 같은 순서의 수를 내는 작은 난수기 */
@@ -151,7 +152,7 @@ describe('부적의 목록', () => {
     const known = fontSyllables();
     expect(known.size).toBe(2350);
     const texts = [
-      ...CHARMS.flatMap((charm) => [charm.name, charm.description]),
+      ...CHARMS.flatMap((charm) => [charm.name, charm.description, charm.upgrade.description]),
       ...SYMBOLS.map((symbol) => symbol.name),
     ];
     for (const text of texts) {
@@ -162,6 +163,7 @@ describe('부적의 목록', () => {
     for (const charm of CHARMS) {
       expect(charm.name.length, charm.name).toBeLessThanOrEqual(7);
       expect(charm.description.length, charm.description).toBeLessThanOrEqual(16);
+      expect(charm.upgrade.description.length, charm.upgrade.description).toBeLessThanOrEqual(16);
     }
   });
 
@@ -664,7 +666,8 @@ describe('가게', () => {
     // 한 장을 떼면 살 수 있다.
     const freed = discard(full, 2);
     expect(freed.charms).toEqual(['twins', 'crown', 'extra', 'comfort']);
-    expect(freed.coin).toBe(99);
+    // 뗀 부적의 값은 얼마쯤 돌려받는다(upgrade.test.ts).
+    expect(freed.coin).toBe(99 + refundOf('piggy'));
     expect(buy(freed, 0).charms).toEqual(['twins', 'crown', 'extra', 'comfort', 'wide']);
 
     expect(buyBlock(shopping(99, ['wide', null, null]), 7)).toBe('sold');

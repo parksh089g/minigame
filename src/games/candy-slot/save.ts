@@ -11,11 +11,15 @@ import { normalizeFound, addFound } from './collection';
 import {
   CELLS,
   charmOf,
-  HOLDS_PER_ROUND,
+  holdsOf,
+  isUpgraded,
   OFFERS,
-  SLOTS,
+  ownsCharm,
+  PERK_IDS,
+  slotsOf,
   spinsOf,
   SYMBOLS,
+  type PerkId,
   type RunState,
   type Shop,
 } from './rules';
@@ -83,15 +87,33 @@ const isCount = (value: unknown): value is number =>
 /** 씨앗으로 받아 주는 가장 긴 글자 수. 깨진 세이브가 끝없이 커지지 않게 막는 값이다. */
 const SEED_MAX = 64;
 
-/** 붙인 부적: 있는 부적만, 겹치지 않게, SLOTS장까지. 맞지 않으면 null. */
-function readCharms(raw: unknown): string[] | null {
-  if (!Array.isArray(raw) || raw.length > SLOTS) return null;
+/**
+ * 붙인 부적: 있는 부적만(강화한 것도 받는다), 같은 부적이 겹치지 않게, limit장까지. 맞지 않으면 null.
+ */
+function readCharms(raw: unknown, limit: number): string[] | null {
+  if (!Array.isArray(raw) || raw.length > limit) return null;
   const charms: string[] = [];
   for (const id of raw) {
-    if (typeof id !== 'string' || !charmOf(id) || charms.includes(id)) return null;
+    if (typeof id !== 'string' || !charmOf(id) || ownsCharm(charms, id)) return null;
     charms.push(id);
   }
   return charms;
+}
+
+/**
+ * 판을 시작할 때 켜져 있던 영구 해금: 있는 해금만, 겹치지 않게. 맞지 않으면 null.
+ * 해금이 생기기 전에 저장된 판에는 이 값이 없다. 그때는 해금 없이 시작한 판이다.
+ */
+function readPerks(raw: unknown): PerkId[] | null {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) return null;
+  const perks: PerkId[] = [];
+  for (const id of raw) {
+    const perk = PERK_IDS.find((known) => known === id);
+    if (!perk || perks.includes(perk)) return null;
+    perks.push(perk);
+  }
+  return perks;
 }
 
 /** 가게: 팔린 자리는 null이고, 남은 자리는 서로 다른 있는 부적이다. 맞지 않으면 null. */
@@ -105,7 +127,8 @@ function readShop(raw: unknown): Shop | null {
       offers.push(null);
       continue;
     }
-    if (typeof id !== 'string' || !charmOf(id) || offers.includes(id)) return null;
+    // 가게에는 강화하지 않은 부적만 나온다.
+    if (typeof id !== 'string' || !charmOf(id) || isUpgraded(id) || offers.includes(id)) return null;
     offers.push(id);
   }
   return { offers, rerollCost: raw.rerollCost };
@@ -131,14 +154,17 @@ export function readRun(raw: unknown): RunState | null {
   const from = raw.run;
   const { phase, seed } = from;
   if (phase !== 'spin' && phase !== 'shop') return null;
-  const charms = readCharms(from.charms);
+  const perks = readPerks(from.perks);
+  // 정해진 운의 판(오늘의 판)은 누구나 같은 조건이라 해금이 켜져 있을 수 없다.
+  if (!perks || (seed !== null && perks.length > 0)) return null;
+  const charms = readCharms(from.charms, slotsOf({ perks }));
   if (!charms) return null;
 
   const { round, spinsLeft, coin, earned, bestSpin, holdsLeft, spinCount, drawCount, afterMiss } = from;
   if (!isCount(round) || round < 1) return null;
   if (!isCount(coin) || !isCount(earned) || !isCount(bestSpin)) return null;
   if (!isCount(spinCount) || !isCount(drawCount)) return null;
-  if (!isCount(holdsLeft) || holdsLeft > HOLDS_PER_ROUND) return null;
+  if (!isCount(holdsLeft) || holdsLeft > holdsOf({ perks })) return null;
   if (typeof afterMiss !== 'boolean') return null;
   if (seed !== null && (typeof seed !== 'string' || seed.length > SEED_MAX)) return null;
 
@@ -174,6 +200,7 @@ export function readRun(raw: unknown): RunState | null {
     seed,
     spinCount,
     drawCount,
+    perks,
   };
 }
 

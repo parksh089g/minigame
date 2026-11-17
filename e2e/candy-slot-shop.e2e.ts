@@ -51,6 +51,7 @@ function shopRun(coin: number, charms: readonly string[], offers: readonly strin
     seed: null,
     spinCount: 6,
     drawCount: 1,
+    perks: [],
   };
 }
 
