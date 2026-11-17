@@ -2,7 +2,8 @@
  * 자동 플레이. 테스트에서 "강화 없이는 며칠째에 막히고, 강화를 사면 얼마나 더 가는지"를 숫자로 확인한다.
  * 화면에서 하는 판과 같은 step을 돌린다.
  */
-import { ENEMIES, RELIC_ORDER, SHOOTER, UPGRADE_ORDER, type BoonId } from './data';
+import { allyOf, canBuyCard, canReroll } from './allies';
+import { ENEMIES, RELIC_ORDER, SHOOTER, SHOP, UPGRADE_ORDER } from './data';
 import {
   applyRun,
   bankSeeds,
@@ -27,44 +28,31 @@ export type BotStyle = 'idle' | 'active';
 const STEP = 1 / 60;
 
 /**
- * 내놓은 강화를 고르는 법. keen은 울타리가 반 넘게 깎였으면 먼저 고치고 아니면 물총이 세지는 것부터 고르는,
- * 무엇이 좋은지 아는 사람이고, first는 맨 앞의 것을 고르는(아무거나 고르는) 사람이다.
+ * 동료 가게에서 사는 법. keen은 이미 있는 동료를 먼저 사서 합치고, 열매가 남으면 새 동료를 들이고,
+ * 살 것이 없으면 한 번 다시 뽑아 보는 사람이다. first는 놓인 차례대로 살 수 있는 것을 사는(아무거나 사는) 사람이다.
  */
 export type PickStyle = 'keen' | 'first';
 
-const KEEN_ORDER: readonly BoonId[] = [
-  'jet',
-  'quick',
-  'needle',
-  'lance',
-  'bloom',
-  'spray',
-  'plank',
-  'frost',
-  'cloud',
-  'bramble',
-  'patch',
-  'sack',
-];
-
-/** 내놓은 강화 가운데 고를 것의 자리. 내놓은 것이 없으면 undefined */
-export function botPick(state: RunState, picks: PickStyle = 'keen'): number | undefined {
-  if (state.offer.length === 0) return undefined;
-  if (picks === 'first') return 0;
-  const patch = state.offer.indexOf('patch');
-  if (patch >= 0 && state.fence < state.stats.fenceMax * 0.5) return patch;
-  let best = 0;
-  for (let index = 1; index < state.offer.length; index += 1) {
-    if (KEEN_ORDER.indexOf(state.offer[index]) < KEEN_ORDER.indexOf(state.offer[best])) best = index;
+/** 가게가 열려 있으면 이번 걸음에 할 일(살 카드, 다시 뽑기, 다음 날). 열려 있지 않으면 빈 것 */
+export function botShop(state: RunState, picks: PickStyle = 'keen'): Pick<Input, 'buy' | 'reroll' | 'ready'> {
+  if (!state.shopping) return {};
+  const open = state.shop.map((_, index) => index).filter((index) => canBuyCard(state, index));
+  if (open.length > 0) {
+    if (picks === 'first') return { buy: open[0] };
+    const owned = open.find((index) => allyOf(state, state.shop[index].id));
+    return { buy: owned ?? open[0] };
   }
-  return best;
+  // 산 카드가 하나도 없는데 열매가 넉넉하면 한 번 다시 뽑는다.
+  const untouched = state.shop.every((card) => !card.sold);
+  if (picks === 'keen' && untouched && state.fruit >= SHOP.reroll + 3 && canReroll(state)) return { reroll: true };
+  return { ready: true };
 }
 
 export function botInput(state: RunState, style: BotStyle, picks: PickStyle = 'keen'): Input {
-  const pick = botPick(state, picks);
-  if (style === 'idle') return { aim: null, storm: false, pick };
+  const shop = botShop(state, picks);
+  if (style === 'idle') return { aim: null, storm: false, ...shop };
   const crowded = state.enemies.length >= 6 || state.enemies.some((enemy) => ENEMIES[enemy.kind].boss);
-  return { aim: autoAim(state, SHOOTER), storm: crowded && stormReady(state), pick };
+  return { aim: autoAim(state, SHOOTER), storm: crowded && stormReady(state), ...shop };
 }
 
 /** 한 판을 끝까지(또는 maxSeconds까지) 돌린다. */

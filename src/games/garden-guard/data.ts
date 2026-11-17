@@ -22,11 +22,6 @@ export const FIELD = {
 
 /** 물총을 쏘는 자리. 울타리 아래 한가운데다. */
 export const SHOOTER = { x: FIELD.width / 2, y: FIELD.depth + 38 } as const;
-/** 해바라기 도우미가 서는 자리. 첫째가 왼쪽, 둘째가 오른쪽이다. */
-export const HELPER_SPOTS = [
-  { x: 56, y: FIELD.depth + 30 },
-  { x: FIELD.width - 56, y: FIELD.depth + 30 },
-] as const;
 
 // ------------------------------------------------------------ 벌레
 
@@ -279,9 +274,6 @@ export const GUN = {
   minLift: 0.16,
 } as const;
 
-/** 해바라기 도우미가 쏘는 간격(초) */
-export const HELPER_INTERVAL = 0.9;
-
 /** 물벼락: 판의 벌레를 한꺼번에 적신다. 느려지는 정도와 시간(초) */
 export const STORM = { slow: 0.5, slowSeconds: 3 } as const;
 
@@ -317,7 +309,7 @@ export interface UpgradeDef {
 
 export const UPGRADES: Readonly<Record<UpgradeId, UpgradeDef>> = {
   power: { name: '센 물줄기', blurb: '물방울 하나의 피해가 커져요', maxLevel: 99, cost: 12, growth: 1.15 },
-  rapid: { name: '빠른 손', blurb: '물방울을 더 빨리 쏴요', maxLevel: 12, cost: 20, growth: 1.6 },
+  rapid: { name: '빠른 손', blurb: '물총과 동료가 더 빨리 쏴요', maxLevel: 12, cost: 20, growth: 1.6 },
   fence: { name: '튼튼한 울타리', blurb: '울타리가 더 오래 버텨요', maxLevel: 60, cost: 10, growth: 1.2 },
   mend: { name: '울타리 손보기', blurb: '날이 바뀔 때 울타리를 더 많이 고쳐요', maxLevel: 8, cost: 20, growth: 1.7 },
   crit: { name: '콕 찌르기', blurb: '가끔 크게 맞혀요. 풍뎅이 껍데기도 뚫어요', maxLevel: 10, cost: 25, growth: 1.7 },
@@ -325,8 +317,8 @@ export const UPGRADES: Readonly<Record<UpgradeId, UpgradeDef>> = {
   chill: { name: '찬물', blurb: '맞은 벌레가 잠깐 느려져요', maxLevel: 5, cost: 40, growth: 2 },
   thorn: { name: '가시 울타리', blurb: '울타리를 갉는 벌레가 가시에 찔려요', maxLevel: 10, cost: 20, growth: 1.6 },
   harvest: { name: '풍년', blurb: '씨앗을 더 많이 받아요', maxLevel: 10, cost: 30, growth: 1.7 },
-  helper: { name: '해바라기', blurb: '해바라기가 옆에서 알아서 씨를 쏴요', maxLevel: 2, cost: 150, growth: 10 },
-  compost: { name: '해바라기 거름', blurb: '해바라기가 쏘는 씨가 세져요', maxLevel: 6, cost: 80, growth: 2, needs: 'helper' },
+  helper: { name: '해바라기 모종', blurb: '판을 해바라기와 함께 시작해요', maxLevel: 2, cost: 150, growth: 10 },
+  compost: { name: '동료 거름', blurb: '모든 동료의 피해가 커져요', maxLevel: 6, cost: 80, growth: 2 },
   pierce: { name: '뚫는 물줄기', blurb: '물방울이 벌레를 뚫고 뒤의 벌레도 맞혀요', maxLevel: 3, cost: 300, growth: 6 },
   fork: { name: '갈래 물총', blurb: '물방울을 여러 갈래로 한꺼번에 쏴요', maxLevel: 3, cost: 500, growth: 6 },
   storm: { name: '물벼락', blurb: '버튼을 누르면 판의 벌레를 모두 적셔요', maxLevel: 5, cost: 100, growth: 2.2 },
@@ -370,8 +362,8 @@ export const STEP = {
   thorn: 0.3,
   /** 풍년: 받는 씨앗 + */
   harvest: 0.08,
-  /** 해바라기 거름: 도우미의 피해 비율(처음에는 base) + */
-  compost: { base: 0.4, step: 0.15 },
+  /** 동료 거름: 동료의 피해 + */
+  compost: 0.15,
   /** 물벼락: 다시 쓸 때까지의 시간(초)과 물방울 피해의 몇 배를 주는지 */
   storm: { cooldown: 38, cooldownStep: 3, damage: 4, damageStep: 1.5 },
 } as const;
@@ -379,109 +371,155 @@ export const STEP = {
 /** 강화 없이 시작하는 울타리의 체력 */
 export const FENCE_BASE = 100;
 
-// ------------------------------------------------------------ 판마다 고르는 강화
+// ------------------------------------------------------------ 동료
 
 /**
- * 날을 지킬 때마다 셋 가운데 하나를 골라 그 판에서만 쓰는 강화. 판이 끝나면 사라진다.
- * 값은 BOON_STEP에 있고, 효과는 boons.ts의 applyBoon이 판의 능력치(Stats)에 바로 더한다.
+ * 동료: 판 안에서 열리는 동료 가게(allies.ts)에서 열매로 사서 울타리 아래에 세운다. 판이 끝나면 떠난다.
+ * 같은 동료를 또 사면 합쳐져서 별이 오른다(ALLY_STARS). 동료의 피해는 물총 한 발의 피해(Stats.damage)에 비율을 곱해서,
+ * 영구 강화와 새 밭으로 물총이 세지는 만큼 동료도 같이 세진다. 값은 여기만 고치면 된다.
  */
-export type BoonId =
-  | 'jet'
-  | 'quick'
-  | 'needle'
-  | 'lance'
-  | 'spray'
-  | 'frost'
-  | 'plank'
-  | 'patch'
-  | 'bramble'
-  | 'bloom'
-  | 'cloud'
-  | 'sack';
+export type AllyId = 'sunflower' | 'frog' | 'mint' | 'can' | 'sparrow' | 'cactus';
 
-export interface BoonDef {
+/**
+ * 동료가 겨누는 벌레. near는 제게 가까운 것, boss는 체력이 가장 많은 것(대장이 먼저), front는 울타리에 가장 가까운 것,
+ * crowd는 둘레에 벌레가 가장 많이 몰린 것, far는 판 위쪽에서 가장 먼 것이다.
+ */
+export type AllyAim = 'near' | 'boss' | 'front' | 'crowd' | 'far';
+
+export interface AllyDef {
   name: string;
-  /** 무엇을 하는지 한 줄. 고르는 카드에 적는다. */
+  /** 무엇을 하는지 한 줄. 가게의 카드에 적는다. */
   blurb: string;
-  /** 카드에 그리는 그림. 닮은 영구 강화의 그림을 빌려 쓴다. */
-  icon: UpgradeId;
-  /** 한 판에 고를 수 있는 횟수 */
-  max: number;
-  /** 뽑히는 무게. 클수록 자주 나온다. */
-  weight: number;
+  /** 이 날부터 가게에 나온다. 날이 갈수록 새 동료가 나온다. */
+  fromDay: number;
+  /** 가게에서 한 마리의 값(열매) */
+  price: number;
+  /** ★1이 쏘는 간격(초) */
+  interval: number;
+  /** ★1의 한 발 피해: 물총 한 발의 피해에 곱하는 비율 */
+  damage: number;
+  aim: AllyAim;
+  /** 쏜 것이 날아가는 빠르기 */
+  shotSpeed: number;
+  /** 맞은 벌레를 느리게 하는 정도(0~1)와 시간(초). 대장은 반만 느려진다. */
+  chill?: { slow: number; seconds: number };
+  /** 맞은 자리 둘레(반지름)의 벌레도 이 비율의 피해를 받는다. */
+  splash?: { radius: number; ratio: number };
+  /** 울타리에서 이만큼 안으로 들어온 벌레만 겨눈다(선인장의 가시가 닿는 거리). */
+  reach?: number;
+  /** 껍데기를 뚫는지(풍뎅이에게도 다 들어간다) */
+  pierceShell?: boolean;
 }
 
-/** 한 판에 고르는 횟수. 이만큼 고른 뒤로는 날을 지켜도 더 나오지 않는다. */
-export const BOON_PICKS = 8;
-/** 한 번에 내놓는 수 */
-export const BOON_CHOICES = 3;
-/**
- * 고른 강화만큼 벌레도 세진다: 그 판에서 지킨 날마다(많아야 BOON_PICKS번) 벌레의 체력에 이 값을 곱한다.
- * 강화를 고르는 만큼 물총이 세지므로, 이것이 없으면 판마다 훨씬 멀리 가서 영구 강화의 값어치가 줄어든다.
- * 고른 강화의 힘과 얼추 맞춰 두어서, 잘 고르면 전보다 조금 더 가고 아무렇게나 고르면 전과 비슷하게 간다
- * (자동 플레이 100판, 네 씨앗: 60일째까지 강화가 없을 때 232분, 맨 앞의 것만 고르면 236분, 골라서 고르면 210분).
- * 판을 앞쪽 날에서 시작해 강화를 미리 모아도, 벌레도 같이 세져 있어서 득이 없다.
- */
-export const BOON_HEAT = 1.08;
-
-/** 고를 때마다 바뀌는 값 */
-export const BOON_STEP = {
-  /** 센 물살: 물총의 피해 × */
-  jet: 1.12,
-  /** 날랜 손: 쏘는 빠르기 × (쏘는 간격은 이만큼으로 나눈다) */
-  quick: 1.1,
-  /** 콕콕 찌르기: 치명타 확률 + */
-  needle: 0.08,
-  /** 긴 물줄기: 뚫고 지나가는 벌레 수 + */
-  lance: 1,
-  /** 큰 물보라: 물보라가 없으면 first를 주고, 있으면 반지름과 피해 비율을 더한다. */
-  spray: { radius: 19, ratio: 0.3, radiusStep: 4, ratioStep: 0.1 },
-  /** 얼음물: 찬물이 없으면 first를 주고, 있으면 느려지는 정도를 더한다(많아도 max). */
-  frost: { slow: 0.18, seconds: 1.4, slowStep: 0.08, max: 0.6 },
-  /** 덧댄 울타리: 울타리 체력 + (지금의 가장 큰 체력에 대한 비율). 늘어난 만큼 바로 찬다. */
-  plank: 0.2,
-  /** 급한 수리: 울타리를 가장 큰 체력의 이만큼 바로 고친다. 울타리가 below 아래로 깎였을 때만 나온다. */
-  patch: { heal: 0.5, below: 0.75 },
-  /** 가시덤불: 갉을 때마다 물방울 피해의 이만큼을 더 되돌려 준다. */
-  bramble: 0.5,
-  /** 활짝 핀 꽃: 해바라기의 피해 × */
-  bloom: 1.3,
-  /** 먹구름: 물벼락을 다시 쓸 때까지의 시간 × */
-  cloud: 0.75,
-  /** 씨앗 주머니: 이 판에서 받는 씨앗 × */
-  sack: 1.25,
-} as const;
-
-export const BOONS: Readonly<Record<BoonId, BoonDef>> = {
-  jet: { name: '센 물살', blurb: '물총의 피해 +12%', icon: 'power', max: 4, weight: 3 },
-  quick: { name: '날랜 손', blurb: '쏘는 빠르기 +10%', icon: 'rapid', max: 4, weight: 3 },
-  needle: { name: '콕콕 찌르기', blurb: '크게 맞힐 확률 +8%', icon: 'crit', max: 3, weight: 2 },
-  lance: { name: '긴 물줄기', blurb: '물방울이 벌레 하나를 더 뚫어요', icon: 'pierce', max: 1, weight: 1 },
-  spray: { name: '큰 물보라', blurb: '물보라가 더 크게 튀어요', icon: 'splash', max: 2, weight: 2 },
-  frost: { name: '얼음물', blurb: '맞은 벌레가 더 느려져요', icon: 'chill', max: 2, weight: 2 },
-  plank: { name: '덧댄 울타리', blurb: '울타리 체력 +20%', icon: 'fence', max: 3, weight: 3 },
-  patch: { name: '급한 수리', blurb: '울타리를 절반만큼 바로 고쳐요', icon: 'mend', max: BOON_PICKS, weight: 3 },
-  bramble: { name: '가시덤불', blurb: '갉는 벌레가 가시에 더 찔려요', icon: 'thorn', max: 3, weight: 2 },
-  bloom: { name: '활짝 핀 꽃', blurb: '해바라기의 씨가 30% 세져요', icon: 'compost', max: 3, weight: 2 },
-  cloud: { name: '먹구름', blurb: '물벼락을 더 자주 써요', icon: 'storm', max: 2, weight: 2 },
-  sack: { name: '씨앗 주머니', blurb: '이 판에서 받는 씨앗 +25%', icon: 'harvest', max: 3, weight: 2 },
+export const ALLIES: Readonly<Record<AllyId, AllyDef>> = {
+  sunflower: {
+    name: '해바라기',
+    blurb: '가까운 벌레에게 씨를 쏴요',
+    fromDay: 1,
+    price: 3,
+    interval: 0.9,
+    damage: 0.36,
+    aim: 'near',
+    shotSpeed: 380,
+  },
+  frog: {
+    name: '개구리',
+    blurb: '튼튼한 벌레를 혀로 세게 쳐요',
+    fromDay: 1,
+    price: 4,
+    interval: 2.2,
+    damage: 1.6,
+    aim: 'boss',
+    shotSpeed: 560,
+    pierceShell: true,
+  },
+  mint: {
+    name: '박하',
+    blurb: '찬 잎을 날려 벌레를 늦춰요',
+    fromDay: 4,
+    price: 4,
+    interval: 1.1,
+    damage: 0.22,
+    aim: 'front',
+    shotSpeed: 330,
+    chill: { slow: 0.35, seconds: 1.6 },
+  },
+  can: {
+    name: '물뿌리개',
+    blurb: '몰린 벌레에게 물을 뿌려요',
+    fromDay: 8,
+    price: 5,
+    interval: 1.7,
+    damage: 0.4,
+    aim: 'crowd',
+    shotSpeed: 300,
+    splash: { radius: 30, ratio: 1 },
+  },
+  sparrow: {
+    name: '참새',
+    blurb: '멀리 있는 벌레부터 쪼아요',
+    fromDay: 12,
+    price: 5,
+    interval: 0.5,
+    damage: 0.24,
+    aim: 'far',
+    shotSpeed: 460,
+  },
+  cactus: {
+    name: '선인장',
+    blurb: '울타리에 붙은 벌레를 찔러요',
+    fromDay: 16,
+    price: 4,
+    interval: 0.6,
+    damage: 0.75,
+    aim: 'front',
+    shotSpeed: 420,
+    reach: 60,
+    pierceShell: true,
+  },
 };
 
-/** 뽑을 때 살펴보는 차례. 저장한 판을 읽을 때 아는 강화인지도 이것으로 본다. */
-export const BOON_ORDER: readonly BoonId[] = [
-  'jet',
-  'quick',
-  'needle',
-  'lance',
-  'spray',
-  'frost',
-  'plank',
-  'patch',
-  'bramble',
-  'bloom',
-  'cloud',
-  'sack',
-];
+/** 가게에 나오는 차례이자 울타리 아래에 서는 자리의 차례 */
+export const ALLY_ORDER: readonly AllyId[] = ['sunflower', 'frog', 'mint', 'can', 'sparrow', 'cactus'];
+
+/**
+ * 동료가 서는 자리(시뮬레이션 좌표). ALLY_ORDER의 차례대로 물총의 왼쪽에 셋, 오른쪽에 셋이 선다.
+ * 물벼락 버튼은 이 줄 아래 오른쪽 끝에 놓인다.
+ */
+export const ALLY_SPOTS: Readonly<Record<AllyId, { x: number; y: number }>> = {
+  sunflower: { x: 84, y: FIELD.depth + 26 },
+  frog: { x: 156, y: FIELD.depth + 26 },
+  mint: { x: 52, y: FIELD.depth + 26 },
+  can: { x: 188, y: FIELD.depth + 26 },
+  sparrow: { x: 20, y: FIELD.depth + 26 },
+  cactus: { x: 220, y: FIELD.depth + 26 },
+};
+
+/**
+ * 같은 동료를 모은 수에 따른 별. 두 마리가 모이면 ★2, 넷이면 ★3, 여덟이면 ★4, 열여섯이면 ★5다.
+ * 별이 하나 오를 때마다 피해는 damage배, 쏘는 간격은 interval배가 된다.
+ */
+export const ALLY_STARS = { max: 5, damage: 1.75, interval: 0.9 } as const;
+
+/** 동료 가게 */
+export const SHOP = {
+  /** 한 번에 내놓는 카드 수 */
+  cards: 3,
+  /** 판을 시작할 때 가진 열매 */
+  purse: 4,
+  /** 날을 지킬 때 받는 열매. 대장의 날에는 boss를 더 받는다. */
+  income: 4,
+  boss: 3,
+  /** 다시 뽑는 값(열매) */
+  reroll: 1,
+} as const;
+
+/**
+ * 동료를 들일수록 벌레도 세진다: 그 판에서 지킨 날마다(많아야 heatDays번) 벌레의 체력에 heat를 곱한다.
+ * 동료가 늘어 판이 세지는 만큼 벌레도 따라 세져서, 영구 강화의 값어치가 줄지 않는다.
+ * 판을 앞쪽 날에서 시작해 동료를 미리 모아도, 벌레도 같이 세져 있어서 득이 없다.
+ */
+export const TEAM_HEAT = { heat: 1.08, days: 8 } as const;
 
 // ------------------------------------------------------------ 유물
 

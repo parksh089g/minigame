@@ -4,10 +4,12 @@
  */
 import Phaser from 'phaser';
 import { mascotTexture } from '../../art/cosmetics';
-import { GAME_WIDTH } from '../../config';
+import { GAME_WIDTH, THEME_CSS } from '../../config';
+import { addText } from '../../core/ui';
 import { store } from '../../core/store';
-import { ENEMY_TINT, enemyTexture, LOOK, TEX } from './art';
-import { ENEMIES, HELPER_SPOTS, HOP, SHOOTER, type EnemyKind } from './data';
+import { starOf } from './allies';
+import { ALLY_SHOT, allyTexture, ENEMY_TINT, enemyTexture, LOOK, TEX } from './art';
+import { ALLY_ORDER, ALLY_SPOTS, ENEMIES, HOP, SHOOTER, type AllyId, type EnemyKind } from './data';
 import { toScreenY, type FieldLayout } from './layout';
 import { chargePhase, isBuried, type Enemy, type RunState, type SimEvent } from './sim';
 
@@ -36,6 +38,20 @@ interface BugView {
   buried: boolean;
 }
 
+/** 울타리 아래에 선 동료 하나의 그림과 별 */
+interface AllyView {
+  image: Phaser.GameObjects.Image;
+  stars: Phaser.GameObjects.Text;
+  star: number;
+  /** 방금 쏘아서 통통 튀는 남은 시간(초) */
+  kick: number;
+}
+
+/** 동료의 그림을 줄이는 배율. 여섯이 물총 양옆에 나란히 서야 한다. */
+export const ALLY_SCALE = 0.78;
+/** 동료가 선 자리(시뮬레이션 y)보다 그림의 발끝이 이만큼 아래다(화면 px). */
+const ALLY_FOOT = 8;
+
 /** 흙의 색: 땅강아지가 파고들고 나올 때와 장수풍뎅이가 내달릴 때 튄다. */
 const DIRT = 0xd9b48f;
 
@@ -50,7 +66,7 @@ export class FieldView {
   private readonly fence: Phaser.GameObjects.Graphics;
   private readonly gun: Phaser.GameObjects.Image;
   private readonly shooter: Phaser.GameObjects.Image;
-  private readonly helpers: Phaser.GameObjects.Image[] = [];
+  private readonly allies = new Map<AllyId, AllyView>();
   private readonly particles: Particle[] = [];
   private clock = 0;
   /** 울타리가 갉혀서 흔들리는 남은 시간(초)과 갉힌 자리 */
@@ -61,7 +77,6 @@ export class FieldView {
     private readonly scene: Phaser.Scene,
     readonly layout: FieldLayout,
     private readonly depth: number,
-    helperCount: number,
   ) {
     this.drawGround();
     this.fence = scene.add.graphics().setDepth(depth + 3);
@@ -69,15 +84,6 @@ export class FieldView {
     this.sparks = scene.add.graphics().setDepth(depth + 5);
 
     const shooterY = toScreenY(layout, SHOOTER.y);
-    for (let index = 0; index < helperCount; index += 1) {
-      const spot = HELPER_SPOTS[index];
-      this.helpers.push(
-        scene.add
-          .image(spot.x, toScreenY(layout, spot.y) + 10, TEX.sunflower)
-          .setOrigin(0.5, 1)
-          .setDepth(depth + 4),
-      );
-    }
     this.shooter = scene.add
       .image(SHOOTER.x, shooterY + 14, mascotTexture(store.data.cosmetics.equipped.runner, 'idle'))
       .setOrigin(0.5, 1)
@@ -230,8 +236,20 @@ export class FieldView {
           }
           break;
         case 'fire':
-          if (!event.helper) this.recoil = 0.08;
+          if (event.ally === null) this.recoil = 0.08;
+          else {
+            const ally = this.allies.get(event.ally);
+            if (ally) ally.kick = 0.12;
+          }
           break;
+        case 'buy': {
+          // 새로 온 동료는 그림이 생길 때 튀어나오고, 합쳐서 별이 오른 동료는 반짝인다.
+          const spot = ALLY_SPOTS[event.id];
+          const y = toScreenY(layout, spot.y) - 6;
+          this.burst(spot.x, y, LOOK.crit, event.star > 1 ? 12 : 5, event.star > 1 ? 90 : 60, 2.4);
+          if (event.star > 1) this.ring(spot.x, y, LOOK.crit, 18, 0.4);
+          break;
+        }
         default:
           break;
       }
@@ -243,6 +261,7 @@ export class FieldView {
     this.clock += dt;
     this.syncBugs(state);
     this.syncShots(state);
+    this.syncAllies(state, dt);
     this.syncGun(state, dt);
     this.drawBars(state);
     this.drawParticles(dt);
@@ -343,7 +362,7 @@ export class FieldView {
       seen.add(shot.id);
       let image = this.shots.get(shot.id);
       if (!image) {
-        image = this.take(shot.helper ? TEX.pip : shot.crit ? TEX.dropCrit : TEX.drop).setDepth(this.depth + 2);
+        image = this.take(shot.ally ? ALLY_SHOT[shot.ally] : shot.crit ? TEX.dropCrit : TEX.drop).setDepth(this.depth + 2);
         // 화면에서 날아가는 쪽으로 뾰족한 끝을 돌린다(그림은 위를 보고 있다).
         image.setRotation(Math.atan2(shot.vy * layout.scaleY, shot.vx) + Math.PI / 2);
         this.shots.set(shot.id, image);
@@ -371,7 +390,42 @@ export class FieldView {
       .setFlipY(Math.cos(angle) < 0);
     const bob = Math.sin(this.clock * 3) * 0.015;
     this.shooter.setScale(0.6 * (1 + bob), 0.6 * (1 - bob));
-    this.helpers.forEach((helper, index) => helper.setAngle(Math.sin(this.clock * 2.4 + index * 2) * 4));
+  }
+
+  /** 판에 선 동료를 자리에 세우고 별을 적는다. 새로 온 동료는 튀어나온다. */
+  private syncAllies(state: RunState, dt: number): void {
+    const { scene, layout } = this;
+    for (const ally of state.allies) {
+      const spot = ALLY_SPOTS[ally.id];
+      const foot = toScreenY(layout, spot.y) + ALLY_FOOT;
+      let view = this.allies.get(ally.id);
+      if (!view) {
+        const image = scene.add
+          .image(spot.x, foot, allyTexture(ally.id))
+          .setOrigin(0.5, 1)
+          .setScale(ALLY_SCALE)
+          .setDepth(this.depth + 4);
+        const stars = addText(scene, spot.x, foot + 2, '', {
+          size: 10,
+          color: THEME_CSS.accent,
+          originX: 0.5,
+          originY: 0.5,
+          stroke: THEME_CSS.white,
+        }).setDepth(this.depth + 4.6);
+        view = { image, stars, star: 0, kick: 0 };
+        this.allies.set(ally.id, view);
+        scene.tweens.add({ targets: image, scale: { from: 0.2, to: ALLY_SCALE }, duration: 260, ease: 'Back.Out' });
+      }
+      const star = starOf(ally.copies);
+      if (star !== view.star) {
+        view.star = star;
+        view.stars.setText(`★${star}`);
+        scene.tweens.add({ targets: view.stars, scale: { from: 1.6, to: 1 }, duration: 260, ease: 'Back.Out' });
+      }
+      if (view.kick > 0) view.kick = Math.max(0, view.kick - dt);
+      const sway = Math.sin(this.clock * 2.4 + ALLY_ORDER.indexOf(ally.id) * 2) * 4;
+      view.image.setAngle(sway).setY(foot - (view.kick / 0.12) * 2.5);
+    }
   }
 
   private drawBars(state: RunState): void {
