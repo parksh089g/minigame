@@ -7,6 +7,8 @@
  * - 찍지 않고 한 줄씩 따져서 풀 수 있어야 한다. 그래야 숫자에 맞는 그림이 하나뿐이다.
  * - 가로는 8칸, 세로는 10칸까지. 비어 있는 줄이 없고, 한 줄에 숫자가 네 개를 넘지 않는다.
  * - 작은 그림부터 큰 그림으로 놓는다. 이미 깬 단계의 그림이 바뀌지 않게, 새 그림은 되도록 자리를 지켜 넣는다.
+ * - 마지막 세 장은 앞의 어느 그림보다 여러 바퀴를 따져야 풀리는 그림으로 둔다. 크기가 바뀔 때마다 쉬운 그림으로
+ *   돌아가는 것은 그대로 두되, 끝맺음은 가장 깊어야 한다.
  * - 이름은 글꼴에 들어 있는 완성형 한글만 쓴다.
  */
 
@@ -1291,13 +1293,13 @@ export const PICTURES: readonly Picture[] = [
   picture(
     '풍차',
     `
+    kk....k.
+    .kk..kk.
+    ..kkkk..
     ...kk...
-    ...kk...
-    kkkkkkkk
-    ...kk...
-    ...kk...
-    ..ssss..
-    ..ssss..
+    ..kkkk..
+    .kkssk..
+    .k.ss.kk
     ..ssss..
     ..snns..
     .ssnnss.
@@ -1307,30 +1309,30 @@ export const PICTURES: readonly Picture[] = [
     '사과나무',
     `
     ..gggg..
-    .ggrggg.
-    gggggrgg
-    grgggggg
-    ggggrggg
-    .gggggg.
+    .ggrgg..
+    gggggrg.
+    ggrgggg.
+    .ggggrgg
+    ..gggggg
+    ...nn.r.
     ...nn...
-    ...nn...
-    ...nn...
+    ..nnn...
     .nnnnnn.
     `,
   ),
   picture(
     '로봇',
     `
-    ...kk...
+    y..k....
     ..ssss..
     .sbssbs.
     .ssssss.
     .sskkss.
     ..ssss..
-    ssrrrrss
-    s.rrrr.s
-    ..s..s..
-    .ss..ss.
+    .srrrrss
+    s.rrrr..
+    ..s.ss..
+    .s...ss.
     `,
   ),
 ];

@@ -114,6 +114,17 @@ describe('네모 로직의 그림', () => {
     for (let at = 1; at < chunks.length; at += 1) expect(chunks[at]).toBeGreaterThan(chunks[at - 1]);
   });
 
+  it('마지막 세 장은 앞의 어느 그림보다 여러 바퀴를 따져야 풀리고, 끝으로 갈수록 깊다', () => {
+    const sweeps = PICTURES.map((picture) => solve(picturePuzzle(picture)).sweeps);
+    const finale = sweeps.slice(-3);
+    const before = Math.max(...sweeps.slice(0, -3));
+    expect(finale[0]).toBeGreaterThanOrEqual(before);
+    expect(finale[1]).toBeGreaterThan(before);
+    expect(finale[2]).toBeGreaterThan(finale[1]);
+    // 가장 큰 판의 크기 그대로다.
+    for (const picture of PICTURES.slice(-3)) expect(areaOf(picture.rows)).toBe(MAX_COLS * MAX_ROWS);
+  });
+
   it('가장 작은 화면에도 누를 만한 크기의 칸으로 다 들어간다', () => {
     PICTURES.forEach((picture, index) => {
       const puzzle = picturePuzzle(picture);
