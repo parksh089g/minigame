@@ -208,9 +208,9 @@ describe('효과를 적는 줄', () => {
     expect(effectLine('seal', 0)).toBe('돌려받는 몫 50% → 52%');
     expect(effectLine('seal', 2)).toBe('돌려받는 몫 54% → 56%');
     expect(effectLine('seal', RELIC_MAX)).toBe('돌려받는 몫 70%');
-    expect(effectLine('hammer', 0)).toBe('강화 값 0% → -2%');
-    expect(effectLine('hammer', 3)).toBe('강화 값 -6% → -8%');
-    expect(effectLine('hammer', RELIC_MAX)).toBe('강화 값 -20%');
+    expect(effectLine('hammer', 0)).toBe('강화 값 0% → -1%');
+    expect(effectLine('hammer', 3)).toBe('강화 값 -3% → -4%');
+    expect(effectLine('hammer', RELIC_MAX)).toBe('강화 값 -10%');
     expect(effectLine('jar', 0)).toBe('남은 금화의 0% → 0.2%');
     expect(effectLine('jar', 2)).toBe('남은 금화의 0.4% → 0.6%');
     expect(effectLine('jar', RELIC_MAX)).toBe('남은 금화의 2%');

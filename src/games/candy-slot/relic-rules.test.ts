@@ -153,6 +153,13 @@ describe('유물이 판에서 하는 일', () => {
       // 플레이어 쪽으로 내림한다. 그래서 1단계부터 어느 부적이든 적어도 한 개는 싸다.
       expect(upgradeCostOf(charm.id, withRelics({ hammer: 1 }))).toBeLessThan(upgradeCostOf(charm.id));
     }
+    // 둘째, 셋째 단계의 강화 값에도 똑같이 듣는다.
+    for (const id of ['wide+', 'wide++', 'rebound+', 'rebound++']) {
+      const full = upgradeCostOf(id);
+      const cut = upgradeCostOf(id, withRelics({ hammer: RELIC_MAX }));
+      expect(cut, id).toBe(Math.floor((full * (100 - RELIC_STEP.hammer * RELIC_MAX)) / 100));
+      expect(cut, id).toBeLessThan(full);
+    }
     // 단계마다 어딘가의 부적은 더 싸진다.
     for (let level = 1; level <= RELIC_MAX; level += 1) {
       const cheaper = CHARMS.filter(
