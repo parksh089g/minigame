@@ -3,6 +3,7 @@
  * 목록이 화면보다 길면 쪽을 넘긴다. 강화를 누르면 목록 아래에 그 강화의 설명이 보인다.
  * 두고 간 판이 있으면 맨 아래 줄이 "새 판"과 "이어하기"로 바뀐다.
  * 지금 밭에서 PLOW_FROM일째까지 지켰으면 기록 칸에 "새 밭 일구기" 버튼이 생기고, 누르면 잃는 것과 얻는 것을 보여 주는 쪽이 열린다.
+ * 대장을 물리친 적이 있으면 기록 칸에 "유물" 버튼이 생기고, 누르면 유물 화면(relic-page.ts)이 열린다.
  */
 import Phaser from 'phaser';
 import { GAME_WIDTH, THEME, THEME_CSS } from '../../config';
@@ -11,9 +12,11 @@ import { sfx } from '../../core/sfx';
 import { addBackdrop, addTapZone, addText, drawPanel, Pager, PAGER_HEIGHT, PixelButton } from '../../core/ui';
 import { TEX, upgradeTexture } from './art';
 import { UPGRADE_ORDER, UPGRADES, type UpgradeId } from './data';
+import { buildRelicPage, RELIC_LABEL } from './relic-page';
 import {
   buyUpgrade,
   canBuy,
+  canBuyAnyRelic,
   canPlow,
   costLabel,
   effectLine,
@@ -23,10 +26,12 @@ import {
   neededFor,
   plowField,
   PLOW_FROM,
+  relicsOpen,
   startDays,
   upgradeCost,
   type GardenMeta,
 } from './rules';
+import { BUY, drawBuyButton, FOOT, INFO_HEIGHT, LIST_TOP, MARGIN, PillCounter, ROW, WIDTH } from './shop-row';
 
 export interface LobbyHooks {
   /** 처음 열 때 설명 칸에 적을 알림(새 출발점이 열린 것 같은). 없으면 null */
@@ -48,18 +53,12 @@ export interface LobbyHooks {
   onBack: () => void;
 }
 
-const MARGIN = 8;
-const WIDTH = GAME_WIDTH - MARGIN * 2;
-/** 강화 한 줄의 높이와 줄 사이 */
-const ROW = { height: 36, gap: 4 } as const;
-const BUY = { width: 60, height: 26 } as const;
-/** 목록의 위쪽 끝 */
-const LIST_TOP = 76;
-/** 목록 아래의 설명 칸. 글씨 10의 두 줄(높이 27)이 위아래로 조금 남게 들어간다. */
-const INFO_HEIGHT = 30;
-/** 맨 아래의 시작 줄: 시작하는 날을 고르는 칸과 출발 버튼 */
-const FOOT = { height: 36, bottom: 8 } as const;
+/** 맨 아래의 시작 줄에서 시작하는 날을 고르는 칸의 폭. 그 오른쪽이 출발 버튼이다. */
 const STEPPER_WIDTH = 116;
+/** 기록 칸의 오른쪽에 놓이는 버튼들: 새 밭 일구기와 유물 */
+const RECORD_BUTTON = { top: 44, height: 24, gap: 4, plow: 88, relic: 42 } as const;
+/** 기록 칸에서 왼쪽의 기록과 오른쪽의 판 수 사이에 남기는 틈 */
+const RECORD_NOTE_GAP = 6;
 
 /** 처음 하는 사람에게 기록 대신 보여 주는 두 줄 */
 export const INTRO_LINES = '벌레 떼가 울타리를 넘지 못하게 물총으로 지켜요.\n판이 끝나도 씨앗과 강화는 그대로 남아요.';
@@ -110,41 +109,13 @@ interface RowView {
   level: Phaser.GameObjects.Text;
   effect: Phaser.GameObjects.Text;
   button: Phaser.GameObjects.Graphics;
-  seed: Phaser.GameObjects.Image;
+  /** 값 단추의 씨앗 그림 */
+  icon: Phaser.GameObjects.Image;
   cost: Phaser.GameObjects.Text;
   nameRight: number;
   top: number;
   pressed: boolean;
   objects: Phaser.GameObjects.GameObject[];
-}
-
-/** 가진 씨앗을 보여 주는 알약 모양 칸. 오른쪽 끝이 right에 맞춰진다. */
-class SeedCounter {
-  private readonly panel: Phaser.GameObjects.Graphics;
-  private readonly icon: Phaser.GameObjects.Image;
-  private readonly amount: Phaser.GameObjects.Text;
-
-  constructor(
-    scene: Phaser.Scene,
-    private readonly right: number,
-    private readonly y: number,
-    seeds: number,
-  ) {
-    this.panel = scene.add.graphics();
-    this.icon = scene.add.image(0, y + 11, TEX.seed).setOrigin(0, 0.5);
-    this.amount = addText(scene, 0, y + 11, '', { originY: 0.5 });
-    this.set(seeds);
-  }
-
-  set(seeds: number): void {
-    this.amount.setText(String(seeds));
-    const width = Math.ceil(this.amount.width) + 30;
-    const left = this.right - width;
-    this.panel.clear();
-    drawPanel(this.panel, left, this.y, width, 22, { depth: 2 });
-    this.icon.setX(left + 5);
-    this.amount.setX(left + 21);
-  }
 }
 
 export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
@@ -188,36 +159,69 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
     onTap: hooks.onBack,
   });
   addText(scene, 42, 21, '텃밭 지키기', { size: 16, originY: 0.5 });
-  const seeds = new SeedCounter(scene, GAME_WIDTH - MARGIN, 10, meta.seeds);
+  const seeds = new PillCounter(scene, GAME_WIDTH - MARGIN, 10, TEX.seed, meta.seeds);
 
   // 기록 칸: 해 본 사람에게는 가장 멀리 지킨 날을, 처음 하는 사람에게는 무엇을 하는 게임인지를 보여 준다.
   drawPanel(scene.add.graphics(), MARGIN, 40, WIDTH, 30, { depth: 2, radius: 10 });
   // 새 밭을 일굴 수 있으면 오른쪽에 그 버튼을 둔다. 두고 간 판이 있으면 그 판을 마친 뒤에 일굴 수 있다.
   const plowable = canPlow(meta) && !hooks.saved;
+  // 대장을 물리친 적이 있으면 유물로 가는 버튼도 둔다.
+  const relics = relicsOpen(meta);
   if (meta.runs > 0 || meta.fields > 0) {
-    addText(scene, MARGIN + 10, 55, meta.best > 0 ? `최고 ${meta.best}일째` : '아직 하루도 못 지켰어요', {
+    const best = addText(scene, MARGIN + 10, 55, meta.best > 0 ? `최고 ${meta.best}일째` : '아직 하루도 못 지켰어요', {
       color: THEME_CSS.accent,
       originY: 0.5,
     });
+    // 오른쪽 끝에서부터 버튼을 놓고, 남은 자리에 판 수를 적는다.
+    let right = GAME_WIDTH - MARGIN - 6;
     if (plowable) {
+      right -= RECORD_BUTTON.plow;
       new PixelButton(scene, {
-        x: GAME_WIDTH - MARGIN - 6 - 92,
-        y: 44,
-        width: 92,
-        height: 24,
+        x: right,
+        y: RECORD_BUTTON.top,
+        width: RECORD_BUTTON.plow,
+        height: RECORD_BUTTON.height,
         label: PLOW_LABEL,
         style: 'green',
         onTap: () => openPlow(),
       });
-    } else {
-      // 새 밭을 일궜으면 벌레 수 대신 몇째 밭인지 적는다.
-      const right = meta.fields > 0 ? `${fieldName(meta.fields)} · ${meta.runs}판` : `${meta.runs}판 · 벌레 ${meta.kills}마리`;
-      addText(scene, GAME_WIDTH - MARGIN - 10, 55, right, {
+      right -= RECORD_BUTTON.gap;
+    }
+    if (relics) {
+      right -= RECORD_BUTTON.relic;
+      new PixelButton(scene, {
+        x: right,
+        y: RECORD_BUTTON.top,
+        width: RECORD_BUTTON.relic,
+        height: RECORD_BUTTON.height,
+        label: RELIC_LABEL,
+        style: 'blue',
+        onTap: () => openRelics(),
+      });
+      // 지금 올릴 수 있는 유물이 있으면 버튼의 귀퉁이에 점을 찍어 알린다.
+      if (canBuyAnyRelic(meta)) {
+        const dot = scene.add.graphics();
+        dot.fillStyle(THEME.card, 1);
+        dot.fillCircle(right + RECORD_BUTTON.relic - 2, RECORD_BUTTON.top + 2, 5);
+        dot.fillStyle(THEME.coral, 1);
+        dot.fillCircle(right + RECORD_BUTTON.relic - 2, RECORD_BUTTON.top + 2, 3.5);
+      }
+      right -= RECORD_BUTTON.gap;
+    }
+    if (!plowable) {
+      // 새 밭을 일궜으면 벌레 수 대신 몇째 밭인지 적는다. 유물 버튼이 자리를 차지해서 다 들어가지 않으면 줄여 적는다.
+      const runs = `${meta.runs}판`;
+      const field = fieldName(meta.fields);
+      const labels = meta.fields > 0 ? [`${field} · ${runs}`, field] : [`${runs} · 벌레 ${meta.kills}마리`, runs];
+      const note = addText(scene, right - (relics ? 2 : 4), 55, '', {
         size: 10,
         color: THEME_CSS.sub,
         originX: 1,
         originY: 0.5,
       });
+      // 왼쪽의 기록과 RECORD_NOTE_GAP만큼은 떨어지는 가장 긴 것을 적는다.
+      const room = note.x - (best.x + best.width) - RECORD_NOTE_GAP;
+      if (!labels.some((label) => note.setText(label).width <= room)) note.destroy();
     }
   } else {
     addText(scene, GAME_WIDTH / 2, 55, INTRO_LINES, {
@@ -284,30 +288,7 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
     row.level.setText(level >= def.maxLevel ? '끝' : `${level}단계`).setX(row.nameRight + 5);
     row.effect.setText(needs ? needLine(needs) : effectLine(row.id, level, meta.fields));
 
-    const x = MARGIN + WIDTH - BUY.width - 6;
-    const y = row.top + (ROW.height - BUY.height) / 2;
-    const offset = row.pressed && affordable ? 2 : 0;
-    row.button.clear();
-    if (cost === null) {
-      row.seed.setVisible(false);
-      row.cost.setText('다 올림').setColor(THEME_CSS.good).setPosition(x + BUY.width / 2, y + BUY.height / 2);
-      row.cost.setOrigin(0.5, 0.5);
-      return;
-    }
-    row.button.fillStyle(affordable ? THEME.pinkDeep : THEME.shadow, 1);
-    row.button.fillRoundedRect(x, y + 3, BUY.width, BUY.height - 3, 10);
-    row.button.fillStyle(affordable ? THEME.pink : THEME.dim, 1);
-    row.button.fillRoundedRect(x, y + offset, BUY.width, BUY.height - 3, 10);
-    const middle = y + offset + (BUY.height - 3) / 2;
-    row.cost
-      .setText(costLabel(cost))
-      .setColor(affordable ? THEME_CSS.inkDeep : THEME_CSS.faint)
-      .setOrigin(0, 0.5);
-    // 씨앗 그림과 값을 한 덩어리로 가운데에 놓는다.
-    const span = 14 + 2 + row.cost.width;
-    const left = x + (BUY.width - span) / 2;
-    row.seed.setVisible(true).setPosition(left + 7, middle).setAlpha(affordable ? 1 : 0.55);
-    row.cost.setPosition(Math.round(left + 16), Math.round(middle));
+    drawBuyButton(row, row.top, cost === null ? null : costLabel(cost), affordable, row.pressed);
   };
 
   const buy = (id: UpgradeId): void =>
@@ -327,16 +308,36 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
       for (const row of rows) drawRow(row);
     });
 
-  /**
-   * 새 밭 쪽: 준비 화면을 감추고, 두고 가는 것과 얻는 것과 남는 것을 적은 뒤 두 번 물어서 일군다.
-   * 그만두면 준비 화면을 처음부터 다시 연다.
-   */
-  function openPlow(): void {
+  /** 준비 화면에 놓인 것을 바탕만 남기고 모두 감춘다. 그 위에 다른 쪽(새 밭, 유물)을 그린다. */
+  const hideLobby = (): void => {
     for (const object of [...scene.children.list]) {
       if (object instanceof Phaser.GameObjects.TileSprite) continue;
       (object as unknown as Phaser.GameObjects.Components.Visible).setVisible?.(false);
       if (object.input) object.disableInteractive();
     }
+  };
+
+  /** 유물 화면: 준비 화면을 감추고 유물을 강화하는 목록을 연다. 돌아가면 준비 화면을 처음부터 다시 연다. */
+  function openRelics(): void {
+    hideLobby();
+    buildRelicPage(scene, meta, {
+      change: (apply) =>
+        withFresh(() => {
+          const next = apply(meta);
+          if (next === meta) return;
+          meta = next;
+          hooks.setMeta(next);
+        }),
+      onClose: () => scene.scene.restart({}),
+    });
+  }
+
+  /**
+   * 새 밭 쪽: 준비 화면을 감추고, 두고 가는 것과 얻는 것과 남는 것을 적은 뒤 두 번 물어서 일군다.
+   * 그만두면 준비 화면을 처음부터 다시 연다.
+   */
+  function openPlow(): void {
+    hideLobby();
     buildPlowPage(scene, meta, {
       onCancel: () => scene.scene.restart({}),
       onPlow: () =>
@@ -371,7 +372,7 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
         level,
         effect,
         button,
-        seed,
+        icon: seed,
         cost,
         nameRight: name.x + name.width,
         top,
@@ -536,7 +537,7 @@ export function plowBlocks(meta: GardenMeta): PlowBlock[] {
     },
     {
       title: '그대로 남는 것',
-      lines: [`판 수, 벌레 수, 모든 밭의 최고 ${Math.max(meta.bestEver, meta.best)}일째`],
+      lines: [`유물, 판 수, 모든 밭의 최고 ${Math.max(meta.bestEver, meta.best)}일째`],
       border: THEME.shadow,
       fill: THEME.card,
       color: THEME_CSS.sub,

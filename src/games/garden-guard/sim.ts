@@ -32,8 +32,10 @@ import {
   recordBonus,
   scoreFor,
   seedScale,
+  shardsFor,
   statsFor,
   type Levels,
+  type RelicLevels,
   type Spawn,
   type Stats,
 } from './rules';
@@ -123,6 +125,10 @@ export interface RunState {
   boons: BoonId[];
   /** 지금 내놓은 강화. 비어 있지 않으면 하나를 고를 때까지 다음 날이 시작되지 않는다. */
   offer: BoonId[];
+  /** 이 판에서 받은 유물 조각 */
+  shards: number;
+  /** 오늘 울타리가 그냥 막아 낼 수 있는 남은 갉기의 수(울타리 방울). 날이 바뀌면 다시 찬다. */
+  guardLeft: number;
 }
 
 export interface RunConfig {
@@ -132,6 +138,8 @@ export interface RunConfig {
   bestBefore: number;
   /** 일군 새 밭의 수(rules.ts의 GardenMeta.fields). 물총 피해와 받는 씨앗을 늘린다. 없으면 0 */
   fields?: number;
+  /** 유물마다의 단계(rules.ts의 GardenMeta.relics). 없으면 유물이 없는 판이다. */
+  relics?: RelicLevels;
 }
 
 export interface Input {
@@ -147,12 +155,14 @@ export const NO_INPUT: Input = { aim: null, storm: false };
 
 export type SimEvent =
   | { type: 'dayStart'; day: number; boss: boolean }
-  | { type: 'dayClear'; day: number; seeds: number; record: boolean; mended: number }
+  | { type: 'dayClear'; day: number; seeds: number; record: boolean; mended: number; shards: number }
   | { type: 'spawn'; kind: EnemyKind; x: number }
   | { type: 'fire'; helper: boolean }
   | { type: 'hit'; x: number; y: number; crit: boolean; shell: boolean }
   | { type: 'kill'; x: number; y: number; kind: EnemyKind; seeds: number }
   | { type: 'bite'; x: number; damage: number }
+  /** 울타리 방울이 갉기를 막았다. */
+  | { type: 'guard'; x: number }
   | { type: 'storm' }
   | { type: 'offer'; choices: BoonId[] }
   | { type: 'boon'; id: BoonId }
@@ -174,11 +184,12 @@ function beginDay(state: RunState, day: number, events: SimEvent[]): void {
   state.queue = planDay(day, () => roll(state));
   state.dayTotal = state.queue.length;
   state.dayKilled = 0;
+  state.guardLeft = state.stats.guard;
   events.push({ type: 'dayStart', day, boss: isBossDay(day) });
 }
 
 export function createRun(config: RunConfig): { state: RunState; events: SimEvent[] } {
-  const stats = statsFor(config.levels, config.fields ?? 0);
+  const stats = statsFor(config.levels, config.fields ?? 0, config.relics);
   const state: RunState = {
     rng: config.seed | 0,
     startDay: config.startDay,
@@ -206,6 +217,8 @@ export function createRun(config: RunConfig): { state: RunState; events: SimEven
     lastCleared: 0,
     boons: [],
     offer: [],
+    shards: 0,
+    guardLeft: 0,
   };
   const events: SimEvent[] = [];
   beginDay(state, config.startDay, events);
@@ -275,11 +288,11 @@ function gaitPace(enemy: Enemy): number {
   return phase === 'rush' ? CHARGE.speed : phase === 'windup' ? 0 : 1;
 }
 
-/** 벌레가 지금 한 초에 내려오는 거리(느려진 것까지 셈해서). 뛰는 벌레는 평균으로 친다. */
-function paceOf(enemy: Enemy): number {
+/** 벌레가 지금 한 초에 내려오는 거리(느려진 것까지 셈해서). 뛰는 벌레는 평균으로 친다. pace는 Stats.pace다. */
+function paceOf(enemy: Enemy, pace: number): number {
   if (enemy.biting) return 0;
   const slow = enemy.slowLeft > 0 ? 1 - enemy.slow : 1;
-  return ENEMIES[enemy.kind].speed * slow * gaitPace(enemy);
+  return ENEMIES[enemy.kind].speed * pace * slow * gaitPace(enemy);
 }
 
 function moveEnemy(state: RunState, enemy: Enemy, dt: number, events: SimEvent[]): void {
@@ -291,12 +304,14 @@ function moveEnemy(state: RunState, enemy: Enemy, dt: number, events: SimEvent[]
 
   if (!enemy.biting) {
     enemy.clock += dt * slow;
-    let step = def.speed * slow * gaitPace(enemy) * dt;
+    // 허수아비(Stats.pace)는 걸음만 늦춘다. 흔들리고 뛰는 박자와 대장의 솜씨는 그대로다.
+    const speed = def.speed * state.stats.pace;
+    let step = speed * slow * gaitPace(enemy) * dt;
     if (def.gait === 'hop') {
       // 쉬는 동안에는 서 있다가, 뛰는 짧은 동안에 한 박자의 거리를 한꺼번에 간다.
       const beat = HOP.rest + HOP.leap;
       const leaping = enemy.clock % beat >= HOP.rest;
-      step = leaping ? (def.speed * beat * slow * dt) / HOP.leap : 0;
+      step = leaping ? (speed * beat * slow * dt) / HOP.leap : 0;
     } else if (def.gait === 'weave') {
       const swing = Math.sin((enemy.clock / WEAVE.period) * Math.PI * 2) * WEAVE.reach;
       enemy.x = Math.min(FIELD.width - def.radius, Math.max(def.radius, enemy.homeX + swing));
@@ -310,10 +325,16 @@ function moveEnemy(state: RunState, enemy: Enemy, dt: number, events: SimEvent[]
     enemy.biteIn -= dt;
     if (enemy.biteIn <= 0) {
       enemy.biteIn += def.biteEvery;
-      const damage = def.bite * biteScale(enemy.day);
-      state.fence = Math.max(0, state.fence - damage);
-      events.push({ type: 'bite', x: enemy.x, damage });
-      if (state.stats.thorns > 0) hurt(enemy, state.stats.thorns, false);
+      if (state.guardLeft > 0) {
+        // 울타리 방울이 막았다. 울타리는 깎이지 않지만 가시에는 그대로 찔린다.
+        state.guardLeft -= 1;
+        events.push({ type: 'guard', x: enemy.x });
+      } else {
+        const damage = def.bite * biteScale(enemy.day);
+        state.fence = Math.max(0, state.fence - damage);
+        events.push({ type: 'bite', x: enemy.x, damage });
+      }
+      if (state.stats.thorns > 0) hurt(state.stats, enemy, state.stats.thorns, false);
     }
   }
 
@@ -334,11 +355,17 @@ function moveEnemy(state: RunState, enemy: Enemy, dt: number, events: SimEvent[]
   }
 }
 
-/** 벌레에게 피해를 준다. 껍데기가 있는 벌레는 치명타가 아니면 덜 받는다. 껍데기에 막혔으면 true */
-function hurt(enemy: Enemy, amount: number, crit: boolean): boolean {
-  const shell = ENEMIES[enemy.kind].shell;
-  const blocked = shell !== undefined && !crit;
-  enemy.hp -= blocked ? amount * shell : amount;
+/**
+ * 벌레에게 피해를 준다. 껍데기가 있는 벌레는 치명타가 아니면 덜 받는다. 껍데기에 막혔으면 true.
+ * 유물의 덤도 여기서 붙는다: 대장에게는 bossDamage배, 아직 안 다친(체력이 가득한) 벌레에게는 freshDamage배.
+ */
+function hurt(stats: Stats, enemy: Enemy, amount: number, crit: boolean): boolean {
+  const def = ENEMIES[enemy.kind];
+  const blocked = def.shell !== undefined && !crit;
+  let dealt = blocked ? amount * (def.shell as number) : amount;
+  if (def.boss) dealt *= stats.bossDamage;
+  if (enemy.hp >= enemy.maxHp) dealt *= stats.freshDamage;
+  enemy.hp -= dealt;
   enemy.flash = 0.12;
   return blocked;
 }
@@ -369,7 +396,7 @@ export function autoAim(state: RunState, from: { x: number; y: number }, nearest
   if (!target) return null;
   const time = Math.hypot(target.x - from.x, target.y - from.y) / GUN.shotSpeed;
   const stopY = FIELD.depth - ENEMIES[target.kind].radius;
-  return { x: target.x, y: Math.min(stopY, target.y + paceOf(target) * time) };
+  return { x: target.x, y: Math.min(stopY, target.y + paceOf(target, state.stats.pace) * time) };
 }
 
 function addShot(
@@ -414,7 +441,7 @@ function fireGun(state: RunState, input: Input, dt: number, events: SimEvent[]):
     // 가운데 줄기 하나에, 곁가지가 좌우로 번갈아 벌어진다.
     const order = Math.ceil(stream / 2) * (stream % 2 === 0 ? 1 : -1);
     const side = stream > 0;
-    const damage = stats.damage * (side ? GUN.forkDamage : 1) * (crit ? GUN.critMult : 1);
+    const damage = stats.damage * (side ? GUN.forkDamage : 1) * (crit ? stats.critMult : 1);
     addShot(state, SHOOTER, state.aim + order * GUN.forkAngle, damage, crit, false);
   }
   events.push({ type: 'fire', helper: false });
@@ -440,7 +467,7 @@ function castStorm(state: RunState, events: SimEvent[]): void {
   state.stormIn = state.stats.stormCooldown;
   for (const enemy of state.enemies) {
     if (enemy.y < -ENEMIES[enemy.kind].radius || isBuried(enemy)) continue;
-    hurt(enemy, state.stats.stormDamage, true);
+    hurt(state.stats, enemy, state.stats.stormDamage, true);
     // 대장은 덩치가 커서 반만 느려진다.
     const slow = ENEMIES[enemy.kind].boss ? STORM.slow / 2 : STORM.slow;
     if (enemy.slowLeft <= 0 || slow >= enemy.slow) enemy.slow = slow;
@@ -460,7 +487,7 @@ function moveShots(state: RunState, dt: number, events: SimEvent[]): void {
       if (enemy.hp <= 0 || shot.hit.includes(enemy.id) || isBuried(enemy)) continue;
       const reach = ENEMIES[enemy.kind].radius + GUN.shotRadius;
       if (Math.hypot(enemy.x - shot.x, enemy.y - shot.y) > reach) continue;
-      const shell = hurt(enemy, shot.damage, shot.crit);
+      const shell = hurt(stats, enemy, shot.damage, shot.crit);
       events.push({ type: 'hit', x: shot.x, y: shot.y, crit: shot.crit, shell });
       if (!shot.helper) {
         if (stats.chill > 0) {
@@ -472,7 +499,7 @@ function moveShots(state: RunState, dt: number, events: SimEvent[]): void {
           for (const other of state.enemies) {
             if (other === enemy || other.hp <= 0 || isBuried(other)) continue;
             const span = stats.splashRadius + ENEMIES[other.kind].radius;
-            if (Math.hypot(other.x - shot.x, other.y - shot.y) <= span) hurt(other, shot.damage * stats.splashRatio, false);
+            if (Math.hypot(other.x - shot.x, other.y - shot.y) <= span) hurt(stats, other, shot.damage * stats.splashRatio, false);
           }
         }
       }
@@ -558,14 +585,19 @@ export function step(state: RunState, dt: number, input: Input = NO_INPUT): SimE
   }
   if (state.phase === 'fight' && state.queue.length === 0 && state.enemies.length === 0) {
     const record = state.day > state.bestBefore;
-    const seeds = (clearBonus(state.day) + (record ? recordBonus(state.day) : 0)) * state.stats.seedMult;
+    // 오래된 달력(clearSeeds)은 날을 지킨 몫만 늘린다. 새 기록의 덤은 그대로다.
+    const seeds =
+      (clearBonus(state.day) * state.stats.clearSeeds + (record ? recordBonus(state.day) : 0)) * state.stats.seedMult;
     const before = state.fence;
     state.fence = Math.min(state.stats.fenceMax, state.fence + state.stats.fenceMax * state.stats.mend);
     state.seeds += seeds;
+    // 대장의 날을 지켰으면 유물 조각을 받는다.
+    const shards = shardsFor(state.day);
+    state.shards += shards;
     state.lastCleared = state.day;
     state.phase = 'rest';
     state.restLeft = DAY.rest;
-    events.push({ type: 'dayClear', day: state.day, seeds, record, mended: state.fence - before });
+    events.push({ type: 'dayClear', day: state.day, seeds, record, mended: state.fence - before, shards });
     state.offer = drawOffer(state);
     if (state.offer.length > 0) events.push({ type: 'offer', choices: [...state.offer] });
   }

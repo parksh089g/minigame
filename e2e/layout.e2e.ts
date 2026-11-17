@@ -1605,7 +1605,9 @@ it('텃밭 지키기: 50일째를 지키면 새 밭을 일굴 수 있고, 잃는
   await expect.poll(() => textPoint(page, GARDEN_SCENE, '출발!'), { ...WAIT, message: '새 밭의 준비 화면' }).not.toBeNull();
   const after = await gardenTexts(page);
   expect(after).toContain('2번째 밭을 일궜어요!\n물총 피해와 씨앗이 +30%예요.');
-  expect(after).toContain('2번째 밭 · 88판');
+  // 유물 버튼이 기록 칸의 자리를 차지해서, "아직 하루도 못 지켰어요" 옆에는 판 수를 빼고 몇째 밭인지만 적는다.
+  expect(after).toContain('2번째 밭');
+  expect(after).toContain('유물');
   expect(after).toContain('아직 하루도 못 지켰어요');
   expect(after, '시작하는 날을 고르는 칸이 없어진다').not.toContain('61일째');
   expect(after, '새 밭 버튼은 다시 50일째를 지켜야 생긴다').not.toContain(PLOW_LABEL);

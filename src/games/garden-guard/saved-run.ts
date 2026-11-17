@@ -5,18 +5,22 @@
  * 날마다 넣어 둔 씨앗과 기록은 진행(meta)에 이미 들어 있어서 잃지 않는다.
  *
  * RunState, Enemy, Shot, Spawn, Stats에 필드를 더하면 아래의 *_SHAPE에도 적어야 타입 검사를 통과한다.
- * 필드를 더했으면 RUN_VERSION도 올린다. 옛 저장에는 새 필드가 없어서 어차피 버려지지만, 숫자로 남겨 두면 알아보기 쉽다.
+ * 필드를 더했으면 RUN_VERSION도 올린다. 옛 저장에는 새 필드가 없어서 그대로는 버려지므로,
+ * 빠진 값을 채워서 이어 할 수 있으면 readRunRecord에서 채운다(버전 2의 판에 유물의 값을 채우는 fillRelicFields처럼).
  */
-import { BOONS, ENEMIES, type BoonId, type EnemyKind } from './data';
-import { applyRun, bankSeeds, type GardenMeta, type Spawn, type Stats } from './rules';
+import { BOONS, ENEMIES, GUN, type BoonId, type EnemyKind } from './data';
+import { applyRun, bankSeeds, bankShards, type GardenMeta, type Spawn, type Stats } from './rules';
 import type { Enemy, Phase, RunState, Shot } from './sim';
 
-export const RUN_VERSION = 2;
+/** 3: 유물이 생겼다(판의 shards, guardLeft와 능력치의 유물 값들, 저장의 bankedShards). */
+export const RUN_VERSION = 3;
 
 export interface SavedRun {
   state: RunState;
   /** 이 판에서 번 씨앗 가운데 이미 진행(meta.seeds)에 넣은 양 */
   banked: number;
+  /** 이 판에서 받은 유물 조각 가운데 이미 진행(meta.shards)에 넣은 양 */
+  bankedShards: number;
 }
 
 /** 기기에 적는 모양. run이 null이면 이어 할 판이 없다는 뜻이다. */
@@ -56,6 +60,8 @@ const STATE_SHAPE: Record<keyof RunState, Kind> = {
   lastCleared: 'number',
   boons: 'array',
   offer: 'array',
+  shards: 'number',
+  guardLeft: 'number',
 };
 
 const ENEMY_SHAPE: Record<keyof Enemy, Kind> = {
@@ -109,6 +115,12 @@ const STATS_SHAPE: Record<keyof Stats, Kind> = {
   helperDamage: 'number',
   stormCooldown: 'number',
   stormDamage: 'number',
+  critMult: 'number',
+  bossDamage: 'number',
+  freshDamage: 'number',
+  pace: 'number',
+  guard: 'number',
+  clearSeeds: 'number',
 };
 
 /** 이어 할 수 있는 판의 때. 끝난 판('over')은 저장하지 않는다. */
@@ -148,6 +160,25 @@ function isRunState(value: unknown): value is RunState {
   );
 }
 
+/**
+ * 유물이 생기기 전(버전 2)에 적은 판에 유물의 값을 채운다: 유물이 없는 판이고, 받은 조각도 없다.
+ * 그 판은 유물 없이 시작했으니 끝까지 유물 없이 간다. 모양이 맞는지는 채운 뒤에 본다.
+ */
+function fillRelicFields(run: Record<string, unknown>): Record<string, unknown> {
+  const state = run.state;
+  if (!isObject(state) || !isObject(state.stats)) return run;
+  return {
+    ...run,
+    bankedShards: 0,
+    state: {
+      ...state,
+      shards: 0,
+      guardLeft: 0,
+      stats: { ...state.stats, critMult: GUN.critMult, bossDamage: 1, freshDamage: 1, pace: 1, guard: 0, clearSeeds: 1 },
+    },
+  };
+}
+
 /** 기기에 적을 모양으로 바꾼다. */
 export function runRecord(run: SavedRun | null, savedAt: number): RunRecord {
   return { version: RUN_VERSION, savedAt, run };
@@ -160,17 +191,19 @@ export function runRecord(run: SavedRun | null, savedAt: number): RunRecord {
 export function readRunRecord(raw: unknown): { savedAt: number; run: SavedRun | null } {
   if (!isObject(raw)) return { savedAt: 0, run: null };
   const savedAt = kindOf(raw.savedAt) === 'number' && (raw.savedAt as number) > 0 ? (raw.savedAt as number) : 0;
-  const run = raw.run;
-  if (raw.version !== RUN_VERSION || !isObject(run) || !isRunState(run.state)) return { savedAt, run: null };
-  const banked = kindOf(run.banked) === 'number' ? Math.max(0, Math.floor(run.banked as number)) : 0;
-  return { savedAt, run: { state: run.state, banked } };
+  const known = raw.version === RUN_VERSION || raw.version === 2;
+  const run = raw.version === 2 && isObject(raw.run) ? fillRelicFields(raw.run) : raw.run;
+  if (!known || !isObject(run) || !isRunState(run.state)) return { savedAt, run: null };
+  const whole = (value: unknown): number => (kindOf(value) === 'number' ? Math.max(0, Math.floor(value as number)) : 0);
+  return { savedAt, run: { state: run.state, banked: whole(run.banked), bankedShards: whole(run.bankedShards) } };
 }
 
 /**
- * 이어 하지 않기로 한 판을 마친다. 아직 넣지 않은 씨앗을 넣고 판 수와 쫓아낸 벌레를 더한다.
+ * 이어 하지 않기로 한 판을 마친다. 아직 넣지 않은 씨앗과 유물 조각을 넣고 판 수와 쫓아낸 벌레를 더한다.
  * 가장 멀리 지킨 날은 날을 넘길 때마다 이미 넣었다.
  */
 export function settleSavedRun(meta: GardenMeta, saved: SavedRun): GardenMeta {
   const { state } = saved;
-  return applyRun(bankSeeds(meta, Math.floor(state.seeds) - saved.banked), state.lastCleared, state.kills);
+  const banked = bankShards(bankSeeds(meta, Math.floor(state.seeds) - saved.banked), state.shards - saved.bankedShards);
+  return applyRun(banked, state.lastCleared, state.kills);
 }

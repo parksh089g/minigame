@@ -6,7 +6,7 @@
 import type Phaser from 'phaser';
 import { THEME, THEME_CSS } from '../../config';
 import { addHiResCanvas, renderScale } from '../../core/hidpi';
-import type { EnemyKind, UpgradeId } from './data';
+import type { EnemyKind, RelicId, UpgradeId } from './data';
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -75,6 +75,7 @@ export const ENEMY_TINT: Readonly<Record<EnemyKind, number>> = {
 
 export const enemyTexture = (kind: EnemyKind): string => `gg-${kind}`;
 export const upgradeTexture = (id: UpgradeId): string => `gg-up-${id}`;
+export const relicTexture = (id: RelicId): string => `gg-relic-${id}`;
 export const TEX = {
   drop: 'gg-drop',
   dropCrit: 'gg-drop-crit',
@@ -85,6 +86,8 @@ export const TEX = {
   storm: 'gg-storm',
   /** 땅강아지가 땅속에 숨어 지나가는 동안 보이는 흙더미 */
   mound: 'gg-mound',
+  /** 유물 조각 */
+  shard: 'gg-shard',
 } as const;
 
 // ───────── 그리기 도구 ─────────
@@ -428,6 +431,21 @@ const ITEM_ART: Readonly<Record<string, Art>> = {
       oval(c, 11, 15.5, 2.4, 1.4, 'rgba(255, 255, 255, 0.7)', -0.4);
     },
   },
+  /** 유물 조각: 비스듬히 깨진 보랏빛 돌 조각. 씨앗 그림과 같은 크기다. */
+  [TEX.shard]: {
+    width: 14,
+    height: 14,
+    view: [28, 28],
+    draw(c) {
+      const d = 'M15 2.500L24.500 11L19.500 25.500L7.500 24L3.500 12.500Z';
+      fill(c, d, '#9684e0');
+      stroke(c, d, '#9684e0', 2);
+      fill(c, 'M15 2.500L24.500 11L14.500 13.500Z', '#e9e3ff');
+      fill(c, 'M15 2.500L14.500 13.500L3.500 12.500Z', '#c9bcf8');
+      fill(c, 'M14.500 13.500L24.500 11L19.500 25.500Z', '#b3a3f0');
+      oval(c, 10, 8.5, 2.2, 1.2, 'rgba(255, 255, 255, 0.8)', -0.7);
+    },
+  },
   [TEX.sunflower]: {
     width: 30,
     height: 38,
@@ -631,6 +649,102 @@ const UPGRADE_ART: Readonly<Record<UpgradeId, Art>> = {
   },
 };
 
+// ───────── 유물의 아이콘 ─────────
+
+const RELIC_ART: Readonly<Record<RelicId, Art>> = {
+  /** 두더지 발톱: 끈에 꿴 굽은 발톱 */
+  claw: {
+    ...UP_SIZE,
+    draw(c) {
+      stroke(c, 'M5 6.500Q12 2 19 6.500', '#c98a4e', 1.6);
+      const d = 'M8 7.500Q17.500 8 17.500 15.500Q17.500 20 13 22.500Q14.500 17 12 13.500Q10 11 6.500 11.500Z';
+      fill(c, d, '#fff0c9');
+      stroke(c, d, '#d9a878', 1.4);
+      oval(c, 8.2, 8.6, 3, 2.6, '#b79f93');
+      oval(c, 13.2, 12, 1, 2.2, 'rgba(255, 255, 255, 0.8)', -0.5);
+    },
+  },
+  /** 아침 이슬: 잎 위에 맺힌 물방울 */
+  dew: {
+    ...UP_SIZE,
+    draw(c) {
+      const leaf = 'M2.500 19Q4 8.500 21.500 7.500Q20.500 20.500 6 21.500Z';
+      fill(c, leaf, LEAF);
+      stroke(c, leaf, LEAF_DEEP, 1.4);
+      stroke(c, 'M4.500 20Q11 14 19.500 9', LEAF_DEEP, 1.2);
+      drop(c, 11.5, 13, 4.2, WATER);
+      star(c, 19.5, 4.5, 2.4, '#ffcf5c');
+    },
+  },
+  /** 네잎클로버 */
+  clover: {
+    ...UP_SIZE,
+    draw(c) {
+      stroke(c, 'M12 12Q13 18 17.500 22', LEAF_DEEP, 2);
+      for (const [x, y] of [
+        [7.5, 7.5],
+        [16.5, 7.5],
+        [7.5, 16],
+        [16.5, 16],
+      ] as const) {
+        oval(c, x, y, 4.6, 4.4, LEAF_DEEP);
+        oval(c, x, y, 3.6, 3.4, LEAF);
+      }
+      oval(c, 12, 11.8, 1.6, 1.6, LEAF_DEEP);
+      oval(c, 6.2, 6.2, 1.4, 0.9, 'rgba(255, 255, 255, 0.7)', -0.6);
+    },
+  },
+  /** 허수아비: 밀짚모자를 쓴 얼굴과 벌린 팔 */
+  scarecrow: {
+    ...UP_SIZE,
+    draw(c) {
+      stroke(c, 'M12 13V23', WOOD_DEEP, 2.4);
+      stroke(c, 'M3 17H21', WOOD_DEEP, 2.4);
+      box(c, 7.5, 15, 9, 6.5, 2, '#ff9fb5');
+      oval(c, 12, 11, 5.2, 4.8, '#fff0c9');
+      oval(c, 12, 7.6, 9, 2.4, '#f2cf73');
+      fill(c, 'M7.500 7.500Q8 2 12 2Q16 2 16.500 7.500Z', '#ffcf5c');
+      box(c, 7.6, 5.6, 8.8, 1.6, 0.8, '#e97f99');
+      oval(c, 10.2, 11.4, 0.9, 0.9, INK);
+      oval(c, 13.8, 11.4, 0.9, 0.9, INK);
+      stroke(c, 'M10.800 13.400Q12 14.400 13.200 13.400', INK, 0.8);
+    },
+  },
+  /** 울타리 방울: 리본을 단 금빛 방울 */
+  bell: {
+    ...UP_SIZE,
+    draw(c) {
+      oval(c, 12, 13.5, 8, 8, '#f2cf73');
+      oval(c, 12, 13, 7.2, 7.2, '#ffcf5c');
+      stroke(c, 'M4.500 14.500H19.500', '#d9a23c', 1.4);
+      oval(c, 12, 17.6, 1.5, 1.5, '#8a5a2b');
+      stroke(c, 'M12 17.500V20.500', '#8a5a2b', 1.3);
+      oval(c, 9, 9.6, 2.2, 1.3, 'rgba(255, 255, 255, 0.8)', -0.6);
+      fill(c, 'M12 5.500L6.500 2.500V8Z', '#ff9fb5');
+      fill(c, 'M12 5.500L17.500 2.500V8Z', '#ff9fb5');
+      oval(c, 12, 5.4, 1.7, 1.7, '#e97f99');
+    },
+  },
+  /** 오래된 달력: 고리 달린 종이에 동그라미 친 날 */
+  calendar: {
+    ...UP_SIZE,
+    draw(c) {
+      box(c, 3, 4.5, 18, 17.5, 3, '#d9a878');
+      box(c, 3, 4.5, 18, 16, 3, '#fff0c9');
+      box(c, 3, 4.5, 18, 5.5, 2.5, '#ff8f8f');
+      box(c, 3, 8, 18, 2, 0, '#ff8f8f');
+      stroke(c, 'M8 2.500V6.500M16 2.500V6.500', '#9db0c4', 1.8);
+      for (const x of [7, 12, 17]) oval(c, x, 13.5, 1.1, 1.1, '#d9a878');
+      for (const x of [7, 17]) oval(c, x, 17.5, 1.1, 1.1, '#d9a878');
+      c.strokeStyle = '#57b98f';
+      c.lineWidth = 1.5;
+      c.beginPath();
+      c.arc(12, 17.5, 2.4, 0, Math.PI * 2);
+      c.stroke();
+    },
+  },
+};
+
 /** 이 게임의 텍스처를 등록한다. 여러 번 불러도 한 번만 만든다. */
 export function registerGardenTextures(scene: Phaser.Scene): void {
   const density = renderScale();
@@ -649,4 +763,5 @@ export function registerGardenTextures(scene: Phaser.Scene): void {
   for (const [kind, art] of Object.entries(ENEMY_ART)) add(enemyTexture(kind as EnemyKind), art);
   for (const [key, art] of Object.entries(ITEM_ART)) add(key, art);
   for (const [id, art] of Object.entries(UPGRADE_ART)) add(upgradeTexture(id as UpgradeId), art);
+  for (const [id, art] of Object.entries(RELIC_ART)) add(relicTexture(id as RelicId), art);
 }
