@@ -259,6 +259,9 @@ describe('벽돌 깨기: 속도', () => {
     expect(creepSpeed(100_000)).toBe(CREEP_TOP);
     // 처음에는 한 줄이 내려오는 데 8초가 넘게 걸린다.
     expect(CELL_HEIGHT / creepSpeed(0)).toBeGreaterThan(8);
+    // 잘 겨누는 사람이 버티는 5분에서 10분 사이에도 계속 빨라져서, 제자리걸음으로 판을 끌 수 없다.
+    for (let t = 300; t < 600; t += 30) expect(creepSpeed(t + 30)).toBeGreaterThan(creepSpeed(t));
+    expect(CELL_HEIGHT / CREEP_TOP).toBeLessThan(1);
   });
 });
 

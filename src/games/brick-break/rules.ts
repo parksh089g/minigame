@@ -84,8 +84,12 @@ export const CREEP_MAX = 5;
 export const CREEP_FULL_SECONDS = 120;
 /** CREEP_MAX에 닿은 뒤로도 초마다 이만큼씩 더 빨라진다. 아무리 잘 받아도 판이 끝나게 한다. */
 export const LATE_CREEP_GAIN = 0.03;
-/** 아무리 오래 버텨도 이보다 빨리 내려오지는 않는다. 한 줄에 1.4초다. */
-export const CREEP_TOP = 10;
+/**
+ * 아무리 오래 버텨도 이보다 빨리 내려오지는 않는다. 한 줄에 0.7초이고, 10분 20초쯤에 닿는다.
+ * 겨누어 치는 손도 따라잡지 못하는 빠르기라서(이 빠르기에서는 빈 판으로 시작해도 10초를 못 버틴다),
+ * 들어오는 만큼만 깨면서 제자리걸음으로 판을 끝없이 끄는 일이 없다.
+ */
+export const CREEP_TOP = 20;
 
 export function creepSpeed(elapsed: number): number {
   const at = Math.max(0, elapsed);
