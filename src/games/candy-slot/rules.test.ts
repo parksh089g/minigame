@@ -60,6 +60,7 @@ import {
   targetFor,
   targetOf,
   upgrade,
+  UPGRADE_MAX,
   upgradeCostOf,
   upgradedOf,
   valuesOf,
@@ -955,23 +956,40 @@ const HOMES: Readonly<Record<string, readonly string[]>> = {
 };
 
 /**
- * 살 수 있는 것을 보이는 대로 사고, 남는 금화로는 붙여 둔 것을 앞에서부터 강화하는 사람.
- * 다음 라운드의 목표를 낼 금화는 남겨 둔다(그것까지 털어 강화하면 강화하지 않느니만 못하다).
+ * 살 수 있는 것을 보이는 대로 사고, 남는 금화로는 붙여 둔 것을 앞에서부터 한 단계씩 강화하는 사람.
+ * keep만큼의 금화는 남겨 둔다.
  */
-function buyAndUpgradeAnything(run: RunState): RunState {
+function upgradeAnything(run: RunState, keep: number): RunState {
   let next = buyAnything(run);
-  const keep = targetFor(next, next.round + 1);
   for (let slot = 0; slot < next.charms.length; slot += 1) {
     if (next.coin - upgradeCostOf(next.charms[slot], next) >= keep) next = upgrade(next, slot);
   }
   return next;
 }
 
-/** 조합의 부적을 모두 강화한 것 */
-const allUpgraded = (charms: readonly string[]): string[] => charms.map((id) => upgradedOf(id));
+/** 그렇게 사고 강화하되, 다음 라운드의 목표를 낼 금화는 남겨 두는 사람 */
+function buyAndUpgradeAnything(run: RunState): RunState {
+  return upgradeAnything(run, targetFor(run, run.round + 1));
+}
+
+/** 그렇게 사고 강화하되, 다음 목표를 낼 금화까지 털어 넣는 사람 */
+function buyAndUpgradeEverything(run: RunState): RunState {
+  return upgradeAnything(run, 0);
+}
+
+/** 그 부적을 level단계까지 강화한 것 */
+function leveled(id: string, level: number): string {
+  let next = id;
+  for (let step = 0; step < level; step += 1) next = upgradedOf(next);
+  return next;
+}
+
+/** 조합의 부적을 모두 level단계까지 강화한 것. 단계를 주지 않으면 한 단계씩만 강화한다. */
+const allUpgraded = (charms: readonly string[], level = 1): string[] => charms.map((id) => leveled(id, level));
 
 /**
  * 자동 플레이로 찾은, 끝까지 들고 가는 센 조합들(강화하기 전의 것). 쌍둥이 줄이 든 것과 들지 않은 것을 따로 적는다.
+ * 끝의 넷은 끝까지 강화했을 때 가장 센 조합들이다(다섯 장 조합을 모두 끝까지 강화해서 견줘 찾았다).
  * 부적의 숫자를 고쳐서 센 조합이 바뀌면 여기도 고친다.
  */
 const STRONG_WITHOUT_TWINS: readonly (readonly string[])[] = [
@@ -983,12 +1001,17 @@ const STRONG_WITHOUT_TWINS: readonly (readonly string[])[] = [
   ['more-diamond', 'gold-diamond', 'slant', 'extra', 'rebound'],
   ['more-bell', 'gold-bell', 'less-cherry', 'less-clover', 'crown'],
   ['more-horseshoe', 'gold-horseshoe', 'less-cherry', 'less-clover', 'crown'],
+  ['more-seven', 'middle', 'slant', 'crown', 'finale'],
+  ['more-cherry', 'gold-cherry', 'tall', 'crown', 'finale'],
+  ['more-clover', 'gold-clover', 'less-cherry', 'tall', 'crown'],
+  ['more-bell', 'gold-bell', 'tall', 'crown', 'finale'],
 ];
 const STRONG_WITH_TWINS: readonly (readonly string[])[] = [
   ['more-diamond', 'gold-diamond', 'wide', 'twins', 'rebound'],
   ['more-horseshoe', 'gold-horseshoe', 'twins', 'finale', 'rebound'],
   ['more-diamond', 'gold-diamond', 'extra', 'twins', 'rebound'],
 ];
+const STRONG: readonly (readonly string[])[] = [...STRONG_WITHOUT_TWINS, ...STRONG_WITH_TWINS];
 
 describe('밸런스', () => {
   it('부적 없이도 첫 라운드는 거의 언제나 넘긴다', () => {
@@ -1048,53 +1071,101 @@ describe('밸런스', () => {
     }
   }, 60_000);
 
-  it('강화하는 값은 가운데 라운드에 남는 금화로 치를 만한 크기다', () => {
-    const costs = CHARMS.map((charm) => upgradeCostOf(charm.id));
+  it('강화하는 값은 단계마다 그 무렵에 남는 금화로 치를 만한 크기다', () => {
     for (const charm of CHARMS) {
       // 새 부적보다 열 배는 넘게 비싸다: 자리가 남았을 때는 새 부적을 사는 쪽이 싸다.
       expect(upgradeCostOf(charm.id), charm.id).toBeGreaterThanOrEqual(charm.price * 10);
     }
-    // 첫 서너 라운드에는 엄두를 내기 어렵다: 가장 싼 강화도 다섯째 라운드의 목표보다 비싸다.
-    expect(Math.min(...costs)).toBeGreaterThan(targetOf(5));
-    // 가운데 라운드에는 손이 닿는다: 가장 비싼 강화도 아홉째 라운드의 목표보다 싸다.
-    expect(Math.max(...costs)).toBeLessThan(targetOf(9));
-    // 다섯 장을 다 강화하려면 여러 라운드에 걸쳐 모아야 한다.
-    for (const charms of [...STRONG_WITHOUT_TWINS, ...STRONG_WITH_TWINS]) {
-      const all = charms.reduce((sum, id) => sum + upgradeCostOf(id), 0);
-      expect(all, charms.join(' ')).toBeGreaterThan(targetOf(9));
-      expect(all, charms.join(' ')).toBeLessThan(targetOf(12));
+    // 단계마다 값이 닿는 무렵: 가장 싼 값도 앞 라운드의 목표보다 비싸고, 가장 비싼 값도 뒤 라운드의 목표보다 싸다.
+    // 첫 단계는 다섯째~아홉째, 둘째 단계는 일곱째~열한째, 셋째 단계는 열째~열다섯째 라운드다.
+    const reach: readonly (readonly [number, number])[] = [[5, 9], [7, 11], [10, 15]];
+    expect(reach).toHaveLength(UPGRADE_MAX);
+    reach.forEach(([early, late], level) => {
+      const costs = CHARMS.map((charm) => upgradeCostOf(leveled(charm.id, level)));
+      expect(Math.min(...costs), `${level + 1}단계`).toBeGreaterThan(targetOf(early));
+      expect(Math.max(...costs), `${level + 1}단계`).toBeLessThan(targetOf(late));
+    });
+    for (const charms of STRONG) {
+      const costOf = (level: number): number => charms.reduce((sum, id) => sum + upgradeCostOf(leveled(id, level)), 0);
+      // 다섯 장을 한 단계씩 다 강화하려면 여러 라운드에 걸쳐 모아야 한다.
+      expect(costOf(0), charms.join(' ')).toBeGreaterThan(targetOf(9));
+      expect(costOf(0), charms.join(' ')).toBeLessThan(targetOf(12));
+      // 끝까지 다 강화하는 값은 열여섯째 라운드의 목표보다도 많다. 판이 끝날 때까지 다 올리기는 어렵다.
+      const all = costOf(0) + costOf(1) + costOf(2);
+      expect(all, charms.join(' ')).toBeGreaterThan(targetOf(16));
+      expect(all, charms.join(' ')).toBeLessThan(targetOf(19));
     }
   });
 
-  it('강화는 제 몫을 하지만 꼭 해야 하는 강화는 없고, 같은 금화로는 새 부적이 더 번다', () => {
+  it('일곱째 라운드부터 남는 금화는 둘째·셋째 단계에 다 넣어도 모자란다', () => {
+    for (const charms of STRONG) {
+      // 한 단계씩 다 강화한 조합이 일곱째부터 열두째 라운드까지 목표를 내고 남기는 금화.
+      // 강화가 한 단계뿐이던 때에는 이 금화가 쓸 곳 없이 쌓였다.
+      const earned = averageRound(allUpgraded(charms), 2_000, seeded(114));
+      let spare = 0;
+      for (let round = 7; round <= 12; round += 1) spare += earned - targetOf(round);
+      const sink = charms.reduce((sum, id) => sum + upgradeCostOf(leveled(id, 1)) + upgradeCostOf(leveled(id, 2)), 0);
+      expect(spare, charms.join(' ')).toBeGreaterThan(500);
+      expect(sink, charms.join(' ')).toBeGreaterThan(spare * 2);
+      // 그렇다고 닿지 못할 값은 아니다: 끝까지 강화한 조합이 너덧 라운드에 버는 금화보다 적다.
+      expect(sink, charms.join(' ')).toBeLessThan(averageRound(allUpgraded(charms, UPGRADE_MAX), 2_000, seeded(114)) * 5);
+    }
+  }, 60_000);
+
+  it('다음 목표를 낼 금화까지 털어 강화하면 판이 짧아진다', () => {
+    const mean = (rounds: readonly number[]): number => rounds.reduce((sum, cleared) => sum + cleared, 0) / rounds.length;
+    const careful = roundsOf(1_000, 115, buyAndUpgradeAnything);
+    const reckless = roundsOf(1_000, 115, buyAndUpgradeEverything);
+    expect(mean(reckless)).toBeLessThan(mean(careful) - 0.3);
+    expect(middleOf(reckless)).toBeLessThanOrEqual(middleOf(careful));
+  }, 60_000);
+
+  it('강화는 단계마다 제 몫을 하지만 꼭 해야 하는 강화는 없고, 금화 한 개마다의 벌이는 단계가 오를수록 준다', () => {
     const rounds = 4_000;
     for (const charm of CHARMS) {
       const home = HOMES[charm.id];
-      const strong = upgradedOf(charm.id);
       if (charm.effect.savingsCap !== undefined) {
-        expect(savingsFor(1000, [strong]), charm.id).toBeGreaterThan(savingsFor(1000, [charm.id]));
+        // 저금통은 한도가 오른다: 남긴 금화가 넉넉하면 단계마다 더 받는다.
+        const rich = SAVINGS_PER * 10_000;
+        for (let level = 1; level <= UPGRADE_MAX; level += 1) {
+          expect(savingsFor(rich, [leveled(charm.id, level)]), charm.id).toBeGreaterThan(
+            savingsFor(rich, [leveled(charm.id, level - 1)]),
+          );
+        }
         continue;
       }
       const without = averageRound(home, rounds, seeded(109));
-      const withIt = averageRound([...home, charm.id], rounds, seeded(109));
-      const withStrong = averageRound([...home, strong], rounds, seeded(109));
-      // 강화하면 벌이가 스물에 하나는 넘게 늘지만 한 배 반까지는 늘지 않는다.
-      expect(withStrong / withIt, charm.id).toBeGreaterThan(1.05);
-      expect(withStrong / withIt, charm.id).toBeLessThan(1.5);
-      // 금화 한 개마다 느는 벌이는 새로 붙일 때가 강화할 때보다 크다.
-      expect((withStrong - withIt) / upgradeCostOf(charm.id), charm.id).toBeLessThan((withIt - without) / charm.price);
+      let earned = averageRound([...home, charm.id], rounds, seeded(109));
+      // 금화 한 개마다 느는 벌이: 새로 붙일 때가 가장 크고, 강화는 단계가 오를수록 작다.
+      let perCoin = (earned - without) / charm.price;
+      for (let level = 1; level <= UPGRADE_MAX; level += 1) {
+        const id = leveled(charm.id, level);
+        const strong = averageRound([...home, id], rounds, seeded(109));
+        const gain = (strong - earned) / upgradeCostOf(leveled(charm.id, level - 1));
+        // 첫 단계는 벌이가 스물에 하나는 넘게, 그 위의 단계는 서른에 하나는 넘게 늘지만, 어느 단계도 한 배 반까지는 늘지 않는다.
+        expect(strong / earned, id).toBeGreaterThan(level === 1 ? 1.05 : 1.03);
+        // 위로 금화는 곱하지 않고 더한다. 부적이 없는 제자리는 벌이가 작아서 비율이 크게 나오므로, 윗단계의 비율은 따지지 않는다.
+        if (charm.effect.consolation === undefined || level === 1) expect(strong / earned, id).toBeLessThan(1.5);
+        expect(gain, id).toBeLessThan(perCoin);
+        perCoin = gain;
+        earned = strong;
+      }
     }
   }, 60_000);
 
   it('쌍둥이 줄은 여러 길 가운데 하나다: 없이도 센 조합이 여럿이고, 넣은 조합도 뒤지지 않는다', () => {
-    const average = (charms: readonly string[]): number => averageRound(allUpgraded(charms), 6_000, seeded(107));
-    const withTwins = Math.max(...STRONG_WITH_TWINS.map(average));
-    const without = STRONG_WITHOUT_TWINS.map(average);
-    // 쌍둥이 줄 없이도 그만큼 버는 조합이 셋은 넘는다.
-    expect(without.filter((earned) => earned > withTwins * 0.9).length).toBeGreaterThanOrEqual(3);
-    // 쌍둥이 줄을 넣은 조합이 가장 센 조합보다 한참 처지지도, 한참 앞서지도 않는다.
-    expect(withTwins / Math.max(...without)).toBeGreaterThan(0.85);
-    expect(withTwins / Math.max(...without)).toBeLessThan(1.15);
+    const average = (charms: readonly string[], level = 1): number =>
+      averageRound(allUpgraded(charms, level), 6_000, seeded(107));
+    // 한 단계씩만 강화했을 때에도, 끝까지 강화했을 때에도 그렇다.
+    for (const level of [1, UPGRADE_MAX]) {
+      const withTwins = Math.max(...STRONG_WITH_TWINS.map((charms) => average(charms, level)));
+      const without = STRONG_WITHOUT_TWINS.map((charms) => average(charms, level));
+      // 쌍둥이 줄 없이도 그만큼 버는 조합이 셋은 넘는다.
+      expect(without.filter((earned) => earned > withTwins * 0.9).length, `${level}단계`).toBeGreaterThanOrEqual(3);
+      // 쌍둥이 줄을 넣은 조합이 가장 센 조합보다 한참 처지지도, 한참 앞서지도 않는다.
+      expect(withTwins / Math.max(...without), `${level}단계`).toBeGreaterThan(0.85);
+      expect(withTwins / Math.max(...without), `${level}단계`).toBeLessThan(1.15);
+    }
     // 쌍둥이 줄과 왕관은 맡는 줄의 수가 달라서, 함께 붙여도 곱이 겹쳐 터지지 않는다.
     const cherry = ['more-cherry', 'gold-cherry', 'less-clover'];
     const both = average([...cherry, 'twins', 'crown']) / average(cherry);
@@ -1102,12 +1173,38 @@ describe('밸런스', () => {
     expect(both).toBeLessThan(each);
   }, 60_000);
 
-  it('다섯 장을 다 강화하면 벌이가 두 배를 넘지만 다섯 배까지는 아니다', () => {
-    for (const charms of [...STRONG_WITHOUT_TWINS, ...STRONG_WITH_TWINS]) {
-      const plain = averageRound(charms, 4_000, seeded(110));
-      const strong = averageRound(allUpgraded(charms), 4_000, seeded(110));
-      expect(strong / plain, charms.join(' ')).toBeGreaterThan(2);
-      expect(strong / plain, charms.join(' ')).toBeLessThan(5);
+  it('끝까지 강화해도 꼭 있어야 하는 부적은 없다: 어느 부적을 빼도 가장 센 조합에 버금가는 조합이 남는다', () => {
+    const earned = STRONG.map((charms) => averageRound(allUpgraded(charms, UPGRADE_MAX), 4_000, seeded(116)));
+    const best = Math.max(...earned);
+    for (const charm of CHARMS) {
+      const without = earned.filter((_, index) => !STRONG[index].includes(charm.id));
+      expect(Math.max(...without) / best, charm.id).toBeGreaterThan(0.9);
+    }
+    // 가운데 칸이 언제나 7이 되는 가운데 7도 그렇다: 그것이 든 조합이 가장 센 조합들을 한참 앞서지 않는다.
+    const middle = earned.filter((_, index) => STRONG[index].includes('middle'));
+    expect(middle.length).toBeGreaterThan(0);
+    expect(Math.max(...middle) / Math.max(...earned.filter((_, index) => !STRONG[index].includes('middle')))).toBeLessThan(1.1);
+  }, 60_000);
+
+  it('다섯 장을 한 단계씩 다 강화하면 벌이가 두 배를 넘지만 다섯 배까지는 아니고, 그 위의 단계는 갈수록 덜 올린다', () => {
+    for (const charms of STRONG) {
+      const label = charms.join(' ');
+      const earned = Array.from({ length: UPGRADE_MAX + 1 }, (_, level) =>
+        averageRound(allUpgraded(charms, level), 4_000, seeded(110)),
+      );
+      expect(earned[1] / earned[0], label).toBeGreaterThan(2);
+      expect(earned[1] / earned[0], label).toBeLessThan(5);
+      // 둘째 단계를 다 올리면 한 배 반에서 두 배 반 남짓, 셋째 단계까지 다 올리면 거기서 다시 한 배 반에서 두 배 남짓이 된다.
+      expect(earned[2] / earned[1], label).toBeGreaterThan(1.5);
+      expect(earned[2] / earned[1], label).toBeLessThan(2.7);
+      expect(earned[3] / earned[2], label).toBeGreaterThan(1.5);
+      expect(earned[3] / earned[2], label).toBeLessThan(2.4);
+      // 끝까지 강화한 조합은 한 단계씩만 강화한 조합의 세 배에서 여섯 배를 번다.
+      expect(earned[3] / earned[1], label).toBeGreaterThan(3);
+      expect(earned[3] / earned[1], label).toBeLessThan(6);
+      // 단계가 오를수록 덜 올린다.
+      expect(earned[2] / earned[1], label).toBeLessThan(earned[1] / earned[0]);
+      expect(earned[3] / earned[2], label).toBeLessThan(earned[2] / earned[1]);
     }
   }, 60_000);
 
@@ -1138,21 +1235,32 @@ describe('밸런스', () => {
     expect(score(blessed) / score(plain)).toBeLessThan(1.3);
   }, 60_000);
 
-  it('가장 센 조합으로도 판은 끝나고, 점수는 랭킹이 받는 범위 안이다', () => {
-    // 자동 플레이로 찾은 가장 센 조합들을 처음부터 모두 강화해서 거저 붙여 준다.
-    const random = seeded(105);
-    let far = 0;
-    let top = 0;
-    for (const plain of [...STRONG_WITHOUT_TWINS, ...STRONG_WITH_TWINS]) {
-      const charms = allUpgraded(plain);
-      for (let n = 0; n < 120; n += 1) {
-        const run = playRun(random, (state) => state, { ...newRun(), charms: [...charms], spinsLeft: spinsOf(charms) });
-        far = Math.max(far, clearedRounds(run));
-        top = Math.max(top, scoreOf(run));
-        expect(run.phase, charms.join(' ')).toBe('over');
-        expect(clearedRounds(run), charms.join(' ')).toBeLessThanOrEqual(20);
-        expect(scoreOf(run)).toBeLessThan(MAX_SCORE / 10);
+  it('가장 센 조합을 거저 줘도 판은 끝나고, 점수는 랭킹이 받는 범위 안이다', () => {
+    // 자동 플레이로 찾은 가장 센 조합들을 첫 라운드부터 강화해서 거저 붙여 준다. 실제 판에서는 그만큼 갖추는 데에 여러 라운드가
+    // 들어서(한 단계씩은 여섯째 라운드쯤, 끝까지는 열두째 라운드를 넘겨야 한다) 이보다 덜 간다.
+    const farthest = (level: number): { rounds: number; score: number } => {
+      const random = seeded(105);
+      let rounds = 0;
+      let score = 0;
+      for (const plain of STRONG) {
+        const charms = allUpgraded(plain, level);
+        for (let n = 0; n < 120; n += 1) {
+          const run = playRun(random, (state) => state, { ...newRun(), charms: [...charms], spinsLeft: spinsOf(charms) });
+          expect(run.phase, charms.join(' ')).toBe('over');
+          rounds = Math.max(rounds, clearedRounds(run));
+          score = Math.max(score, scoreOf(run));
+        }
       }
-    }
+      return { rounds, score };
+    };
+    // 한 단계씩만 강화한 조합은 스무 라운드를 넘기지 못한다. 강화가 한 단계뿐이던 때부터 지켜 온 선이다.
+    const once = farthest(1);
+    expect(once.rounds).toBeLessThanOrEqual(20);
+    expect(once.score).toBeLessThan(MAX_SCORE / 10);
+    // 끝까지 강화한 조합은 벌이가 그 서너 배지만, 목표가 라운드마다 한 배 반씩 올라서 두세 라운드를 더 갈 뿐이다.
+    const maxed = farthest(UPGRADE_MAX);
+    expect(maxed.rounds).toBeGreaterThan(once.rounds);
+    expect(maxed.rounds).toBeLessThanOrEqual(23);
+    expect(maxed.score).toBeLessThan(MAX_SCORE / 5);
   }, 60_000);
 });

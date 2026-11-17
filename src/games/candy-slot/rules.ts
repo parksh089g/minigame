@@ -166,10 +166,17 @@ export const SAVINGS_PER = 3;
  * 듬뿍 부적은 그 그림의 무게만 올린다. 무게는 모두 더해서 나누므로 다른 그림은 그만큼 덜 나오고, 서로 다른 듬뿍을
  * 둘 붙이면 줄이 맞을 확률이 오히려 내려가는 짝이 많다. 그래서 설명에 "다른 그림 줄어요"를 적는다.
  *
- * 강화한 효과(upgrade)는 제자리에서 벌이를 넷에 하나쯤(열에 하나에서 열에 넷) 올린다. 줄과 재주의 곱은 한 배씩
- * (쌍둥이 줄과 막판 한 방은 두 배씩) 오르고, 반 배는 쓰지 않는다. 다섯 장을 다 강화하면 벌이는 세 배 남짓이 되고,
- * 잘 고르는 판이 강화하지 않을 때보다 두세 라운드 더 간다. 강화한 부적들끼리의 힘은 고르게 맞춰서, 끝까지 가는 조합이
- * 여러 갈래로 나뉜다.
+ * 강화는 부적마다 세 단계다(upgrades). 첫 단계는 제자리에서 벌이를 넷에 하나쯤(스물에 하나에서 열에 넷) 올리고,
+ * 둘째와 셋째 단계는 그보다 작게(스물에 하나에서 다섯에 하나) 올린다. 값은 단계마다 훨씬 비싸져서, 금화 한 개마다
+ * 느는 벌이는 단계가 오를수록 준다. 줄과 재주의 곱은 한 배씩 오르고(쌍둥이 줄과 막판 한 방은 첫 단계에만 두 배),
+ * 반 배는 쓰지 않는다. 곱은 더 잘게 나눌 수 없어서, 듬뿍과 황금과 덤 스핀의 윗단계를 작게 잡아 전체의 힘을 맞췄다.
+ * 덜기는 단계마다 무게를 둘이나 셋씩 더 덜어서, 끝까지 올리면 그 그림의 무게가 바닥(MIN_WEIGHT)에 닿는다.
+ *
+ * 다섯 장을 한 단계씩 다 강화하면 벌이는 세 배 남짓이 되고, 끝까지 다 강화하면 거기서 다시 서너 배(세 배에서 다섯 배
+ * 반)가 된다. 목표가 라운드마다 한 배 반씩 오르므로 판은 그만큼 길어지지 않는다: 잘 고르는 자동 플레이가 넘기는
+ * 라운드는 강화가 한 단계뿐이던 때에 견주어 가운데 값이 14에서 14~15로, 잘 풀린 판(열에 하나)이 15에서 17로 오르고,
+ * 가장 멀리 간 판도 스무 라운드 안팎이다. 끝까지 강화한 부적들끼리의 힘도 고르게 맞춰서, 가운데 칸이 언제나 7이 되는
+ * 가운데 7을 넣은 조합도 다른 센 조합을 앞서지 않고, 끝까지 가는 조합이 여러 갈래로 나뉜다.
  */
 export const CHARMS: readonly CharmInfo[] = [
   // 확률: 그림이 나올 확률을 바꾼다.
@@ -178,8 +185,8 @@ export const CHARMS: readonly CharmInfo[] = [
     description: '체리 늘고 다른 그림 줄어요', effect: { weight: [CHERRY, 32] },
     upgrades: [
       { description: '체리 더 늘고 나머지 줄어요', effect: { weight: [CHERRY, 48] } },
-      { description: '체리 또 늘고 나머지 줄어요', effect: { weight: [CHERRY, 64] } },
-      { description: '체리 꽉 차고 나머지 줄어요', effect: { weight: [CHERRY, 80] } },
+      { description: '체리 또 늘고 나머지 줄어요', effect: { weight: [CHERRY, 53] } },
+      { description: '체리 꽉 차고 나머지 줄어요', effect: { weight: [CHERRY, 57] } },
     ],
   },
   {
@@ -187,8 +194,8 @@ export const CHARMS: readonly CharmInfo[] = [
     description: '클로버 늘고 다른 그림 줄어요', effect: { weight: [CLOVER, 27] },
     upgrades: [
       { description: '클로버 더 늘고 나머지 줄어요', effect: { weight: [CLOVER, 37] } },
-      { description: '클로버 또 늘고 나머지 줄어요', effect: { weight: [CLOVER, 47] } },
-      { description: '클로버 꽉 차고 나머지 줄어요', effect: { weight: [CLOVER, 57] } },
+      { description: '클로버 또 늘고 나머지 줄어요', effect: { weight: [CLOVER, 42] } },
+      { description: '클로버 꽉 차고 나머지 줄어요', effect: { weight: [CLOVER, 46] } },
     ],
   },
   {
@@ -196,8 +203,8 @@ export const CHARMS: readonly CharmInfo[] = [
     description: '종 늘고 다른 그림 줄어요', effect: { weight: [BELL, 29] },
     upgrades: [
       { description: '종 더 늘고 나머지 줄어요', effect: { weight: [BELL, 38] } },
-      { description: '종 또 늘고 나머지 줄어요', effect: { weight: [BELL, 47] } },
-      { description: '종 꽉 차고 나머지 줄어요', effect: { weight: [BELL, 56] } },
+      { description: '종 또 늘고 나머지 줄어요', effect: { weight: [BELL, 46] } },
+      { description: '종 꽉 차고 나머지 줄어요', effect: { weight: [BELL, 52] } },
     ],
   },
   {
@@ -205,8 +212,8 @@ export const CHARMS: readonly CharmInfo[] = [
     description: '말굽 늘고 다른 그림 줄어요', effect: { weight: [HORSESHOE, 25] },
     upgrades: [
       { description: '말굽 더 늘고 나머지 줄어요', effect: { weight: [HORSESHOE, 33] } },
-      { description: '말굽 또 늘고 나머지 줄어요', effect: { weight: [HORSESHOE, 41] } },
-      { description: '말굽 꽉 차고 나머지 줄어요', effect: { weight: [HORSESHOE, 49] } },
+      { description: '말굽 또 늘고 나머지 줄어요', effect: { weight: [HORSESHOE, 39] } },
+      { description: '말굽 꽉 차고 나머지 줄어요', effect: { weight: [HORSESHOE, 44] } },
     ],
   },
   {
@@ -214,8 +221,8 @@ export const CHARMS: readonly CharmInfo[] = [
     description: '다이아 늘고 다른 그림 줄어요', effect: { weight: [DIAMOND, 23] },
     upgrades: [
       { description: '다이아 더 늘고 나머지 줄어요', effect: { weight: [DIAMOND, 30] } },
-      { description: '다이아 또 늘고 나머지 줄어요', effect: { weight: [DIAMOND, 37] } },
-      { description: '다이아 꽉 차고 나머지 줄어요', effect: { weight: [DIAMOND, 44] } },
+      { description: '다이아 또 늘고 나머지 줄어요', effect: { weight: [DIAMOND, 34] } },
+      { description: '다이아 꽉 차고 나머지 줄어요', effect: { weight: [DIAMOND, 37] } },
     ],
   },
   {
@@ -223,8 +230,8 @@ export const CHARMS: readonly CharmInfo[] = [
     description: '7 늘고 다른 그림 줄어요', effect: { weight: [WILD, 6] },
     upgrades: [
       { description: '7 더 늘고 나머지 줄어요', effect: { weight: [WILD, 12] } },
-      { description: '7 또 늘고 나머지 줄어요', effect: { weight: [WILD, 18] } },
-      { description: '7 꽉 차고 나머지 줄어요', effect: { weight: [WILD, 24] } },
+      { description: '7 또 늘고 나머지 줄어요', effect: { weight: [WILD, 15] } },
+      { description: '7 꽉 차고 나머지 줄어요', effect: { weight: [WILD, 17] } },
     ],
   },
   {
@@ -238,10 +245,10 @@ export const CHARMS: readonly CharmInfo[] = [
   },
   {
     id: 'less-clover', name: '클로버 덜기', kind: 'odds', price: 6,
-    description: '클로버가 덜 나와요', effect: { weight: [CLOVER, -17] },
+    description: '클로버가 덜 나와요', effect: { weight: [CLOVER, -15] },
     upgrades: [
-      { description: '클로버가 훨씬 덜 나와요', effect: { weight: [CLOVER, -19] } },
-      { description: '클로버가 아주 드물게 나와요', effect: { weight: [CLOVER, -21] } },
+      { description: '클로버가 훨씬 덜 나와요', effect: { weight: [CLOVER, -18] } },
+      { description: '클로버가 아주 드물게 나와요', effect: { weight: [CLOVER, -20] } },
       { description: '클로버가 거의 안 나와요', effect: { weight: [CLOVER, -22] } },
     ],
   },
@@ -251,8 +258,8 @@ export const CHARMS: readonly CharmInfo[] = [
     description: '체리 줄의 상금 +4', effect: { value: [CHERRY, 4] },
     upgrades: [
       { description: '체리 줄의 상금 +6', effect: { value: [CHERRY, 6] } },
-      { description: '체리 줄의 상금 +9', effect: { value: [CHERRY, 9] } },
-      { description: '체리 줄의 상금 +12', effect: { value: [CHERRY, 12] } },
+      { description: '체리 줄의 상금 +7', effect: { value: [CHERRY, 7] } },
+      { description: '체리 줄의 상금 +8', effect: { value: [CHERRY, 8] } },
     ],
   },
   {
@@ -260,8 +267,8 @@ export const CHARMS: readonly CharmInfo[] = [
     description: '클로버 줄의 상금 +5', effect: { value: [CLOVER, 5] },
     upgrades: [
       { description: '클로버 줄의 상금 +9', effect: { value: [CLOVER, 9] } },
+      { description: '클로버 줄의 상금 +11', effect: { value: [CLOVER, 11] } },
       { description: '클로버 줄의 상금 +13', effect: { value: [CLOVER, 13] } },
-      { description: '클로버 줄의 상금 +18', effect: { value: [CLOVER, 18] } },
     ],
   },
   {
@@ -269,8 +276,8 @@ export const CHARMS: readonly CharmInfo[] = [
     description: '종 줄의 상금 +6', effect: { value: [BELL, 6] },
     upgrades: [
       { description: '종 줄의 상금 +9', effect: { value: [BELL, 9] } },
-      { description: '종 줄의 상금 +13', effect: { value: [BELL, 13] } },
-      { description: '종 줄의 상금 +18', effect: { value: [BELL, 18] } },
+      { description: '종 줄의 상금 +12', effect: { value: [BELL, 12] } },
+      { description: '종 줄의 상금 +15', effect: { value: [BELL, 15] } },
     ],
   },
   {
@@ -278,8 +285,8 @@ export const CHARMS: readonly CharmInfo[] = [
     description: '말굽 줄의 상금 +10', effect: { value: [HORSESHOE, 10] },
     upgrades: [
       { description: '말굽 줄의 상금 +16', effect: { value: [HORSESHOE, 16] } },
-      { description: '말굽 줄의 상금 +23', effect: { value: [HORSESHOE, 23] } },
-      { description: '말굽 줄의 상금 +30', effect: { value: [HORSESHOE, 30] } },
+      { description: '말굽 줄의 상금 +21', effect: { value: [HORSESHOE, 21] } },
+      { description: '말굽 줄의 상금 +25', effect: { value: [HORSESHOE, 25] } },
     ],
   },
   {
@@ -287,8 +294,8 @@ export const CHARMS: readonly CharmInfo[] = [
     description: '다이아 줄의 상금 +16', effect: { value: [DIAMOND, 16] },
     upgrades: [
       { description: '다이아 줄의 상금 +24', effect: { value: [DIAMOND, 24] } },
-      { description: '다이아 줄의 상금 +34', effect: { value: [DIAMOND, 34] } },
-      { description: '다이아 줄의 상금 +45', effect: { value: [DIAMOND, 45] } },
+      { description: '다이아 줄의 상금 +30', effect: { value: [DIAMOND, 30] } },
+      { description: '다이아 줄의 상금 +35', effect: { value: [DIAMOND, 35] } },
     ],
   },
   // 줄: 줄의 갈래마다 상금을 곱한다.
@@ -325,8 +332,8 @@ export const CHARMS: readonly CharmInfo[] = [
     description: '라운드마다 세 번 더 돌려요', effect: { spins: 3 },
     upgrades: [
       { description: '라운드마다 다섯 번 더 돌려요', effect: { spins: 5 } },
+      { description: '라운드마다 여섯 번 더 돌려요', effect: { spins: 6 } },
       { description: '라운드마다 일곱 번 더 돌려요', effect: { spins: 7 } },
-      { description: '라운드마다 아홉 번 더 돌려요', effect: { spins: 9 } },
     ],
   },
   {
@@ -343,8 +350,8 @@ export const CHARMS: readonly CharmInfo[] = [
     description: '꽝이면 금화를 4개 더 받아요', effect: { consolation: 4 },
     upgrades: [
       { description: '꽝이면 금화를 9개 더 받아요', effect: { consolation: 9 } },
-      { description: '꽝이면 금화 15개 더 받아요', effect: { consolation: 15 } },
-      { description: '꽝이면 금화 25개 더 받아요', effect: { consolation: 25 } },
+      { description: '꽝이면 금화 20개 더 받아요', effect: { consolation: 20 } },
+      { description: '꽝이면 금화 45개 더 받아요', effect: { consolation: 45 } },
     ],
   },
   {
@@ -352,8 +359,8 @@ export const CHARMS: readonly CharmInfo[] = [
     description: '딱 두 줄 맞으면 두 배', effect: { comboExact: [2, 2] },
     upgrades: [
       { description: '딱 두 줄 맞으면 네 배', effect: { comboExact: [2, 4] } },
+      { description: '딱 두 줄 맞으면 다섯 배', effect: { comboExact: [2, 5] } },
       { description: '딱 두 줄 맞으면 여섯 배', effect: { comboExact: [2, 6] } },
-      { description: '딱 두 줄 맞으면 여덟 배', effect: { comboExact: [2, 8] } },
     ],
   },
   {
@@ -379,8 +386,8 @@ export const CHARMS: readonly CharmInfo[] = [
     description: '마지막 스핀의 상금이 세 배', effect: { lastTimes: 3 },
     upgrades: [
       { description: '마지막 스핀의 상금이 다섯 배', effect: { lastTimes: 5 } },
+      { description: '마지막 스핀의 상금이 여섯 배', effect: { lastTimes: 6 } },
       { description: '마지막 스핀의 상금이 일곱 배', effect: { lastTimes: 7 } },
-      { description: '마지막 스핀의 상금이 아홉 배', effect: { lastTimes: 9 } },
     ],
   },
   {
@@ -1012,16 +1019,24 @@ export function reroll(run: RunState, random: () => number): RunState {
 
 /**
  * 뗄 때 돌려받는 몫(치른 값에 견준 비율)과, 강화하는 값(부적의 값에 견준 비율).
- * 강화는 부적 값의 열다섯 배다(45~150개). 첫 두어 가게에서는 엄두를 낼 수 없고 새 부적을 붙이는 쪽이 싸고 세다.
- * 자리가 차고 금화가 남기 시작하는 셋째~여섯째 라운드에 한 라운드에 한두 장씩 강화하게 되고, 그동안은 남던 금화가
- * 여기로 들어간다(잘 고르는 자동 플레이에서 가게를 나설 때 남는 금화의 가운데 값: 넷째 라운드 186 → 14개, 다섯째
- * 309 → 61개). 다섯 장을 다 강화한 일곱째 라운드쯤부터는 벌이가 커져서 금화가 다시 쌓이고, 그 금화가 끝의 큰 목표를
- * 버티는 밑천이 된다. 다음 목표를 낼 금화까지 털어 강화하면 강화하지 않느니만 못해서, 무엇을 언제 강화할지가 고민이 된다.
+ * 강화는 단계마다 부적 값의 열다섯 배, 마흔 배, 백쉰 배다(45~150개, 120~400개, 450~1500개). 첫 두어 가게에서는
+ * 엄두를 낼 수 없고 새 부적을 붙이는 쪽이 싸고 세다. 자리가 차고 금화가 남기 시작하면 한 라운드에 한두 장씩 강화하게
+ * 된다. 잘 고르는 자동 플레이는 첫 단계를 셋째~일곱째 라운드에, 둘째 단계를 다섯째~열째 라운드에, 셋째 단계를 일곱째~
+ * 열두째 라운드에 올린다.
+ *
+ * 강화가 한 단계뿐이던 때에는 다섯 장을 다 강화한 일곱째 라운드부터 금화가 쓸 곳 없이 쌓였다. 이제는 그 금화가 윗단계로
+ * 들어간다(잘 고르는 자동 플레이에서 가게를 나설 때 남는 금화의 가운데 값: 일곱째 라운드 834 → 86개, 여덟째 1252 →
+ * 144개, 아홉째 1602 → 244개, 열째 1843 → 425개). 열두째 라운드부터는 남기는 금화가 다시 천 개를 넘지만, 그때는 다음
+ * 목표도 천 개를 넘어서 그 금화가 곧 목표를 버티는 밑천이다. 다섯 장을 끝까지 다 강화하려면 5700~8400개가 들어서,
+ * 잘 고르는 판도 절반 넘게는 다 올리지 못하고 끝난다.
+ *
+ * 값이 가파르게 올라서 윗단계일수록 같은 금화로 느는 벌이가 작다. 다음 목표를 낼 금화까지 털어 강화하면 판이 오히려
+ * 짧아져서, 무엇을 언제 어디까지 강화할지가 고민이 된다.
  * 돌려받는 몫은 절반이라, 사서 떼거나 강화해서 떼면 언제나 손해다.
  */
 export const REFUND_RATE = 0.5;
 /** 강화하는 값: 단계마다 부적의 값에 이 수를 곱한다. 단계가 오를수록 훨씬 비싸진다. */
-export const UPGRADE_RATES: readonly number[] = [15, 40, 100];
+export const UPGRADE_RATES: readonly number[] = [15, 40, 150];
 
 /** 그 부적(강화하기 전의 것)을 level단계에서 한 단계 더 올리는 값. 올릴 단계가 없으면 0이다. */
 function stepCost(charm: CharmInfo, level: number, run?: Pick<RunState, 'relics'>): number {
