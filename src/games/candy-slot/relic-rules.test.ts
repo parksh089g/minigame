@@ -1,0 +1,238 @@
+import { describe, expect, it } from 'vitest';
+import {
+  CHARMS,
+  cleanRelics,
+  discard,
+  interestFor,
+  newRun,
+  REFUND_RATE,
+  refundOf,
+  RELIC_IDS,
+  RELIC_MAX,
+  RELIC_STEP,
+  relicLevel,
+  REROLL_COST,
+  settleRound,
+  targetFor,
+  targetOf,
+  upgrade,
+  upgradeCostOf,
+  upgradedOf,
+  type RelicLevels,
+  type RunState,
+} from './rules';
+
+const steady = (): number => 0.37;
+const FULL: RelicLevels = Object.fromEntries(RELIC_IDS.map((id) => [id, RELIC_MAX]));
+const withRelics = (relics: RelicLevels): Pick<RunState, 'relics'> => ({ relics });
+
+describe('유물이 판에서 하는 일', () => {
+  it('유물이 없으면 여느 판 그대로다', () => {
+    const run = newRun();
+    expect(run.relics).toEqual({});
+    for (let round = 1; round <= 16; round += 1) expect(targetFor(run, round)).toBe(targetOf(round));
+    expect(interestFor(500, run)).toBe(0);
+    for (const charm of CHARMS) {
+      expect(upgradeCostOf(charm.id, run)).toBe(upgradeCostOf(charm.id));
+      expect(refundOf(charm.id, run)).toBe(refundOf(charm.id));
+      expect(refundOf(upgradedOf(charm.id), run)).toBe(refundOf(upgradedOf(charm.id)));
+    }
+  });
+
+  it('단계는 0에서 RELIC_MAX까지의 정수로만 본다', () => {
+    expect(relicLevel(withRelics({ scale: 3 }), 'scale')).toBe(3);
+    expect(relicLevel(withRelics({ scale: 3 }), 'jar')).toBe(0);
+    expect(relicLevel(withRelics({ scale: 99 }), 'scale')).toBe(RELIC_MAX);
+    expect(relicLevel(withRelics({ scale: -2 }), 'scale')).toBe(0);
+    expect(relicLevel(withRelics({ scale: 2.9 }), 'scale')).toBe(2);
+    expect(relicLevel(withRelics({ scale: Number.NaN }), 'scale')).toBe(0);
+    expect(relicLevel(undefined, 'scale')).toBe(0);
+    expect(cleanRelics({ scale: 0, seal: 4, jar: 50, nope: 3 } as RelicLevels)).toEqual({ seal: 4, jar: RELIC_MAX });
+  });
+
+  it('판을 시작할 때의 단계가 판에 적히고, 정해진 운의 판(오늘의 판)에는 듣지 않는다', () => {
+    expect(newRun(null, [], { scale: 2, hammer: 0 }).relics).toEqual({ scale: 2 });
+    const daily = newRun('candy-slot:daily:1', [], FULL);
+    expect(daily.relics).toEqual({});
+    expect(targetFor(daily, 8)).toBe(targetOf(8));
+  });
+
+  it('낡은 저울: 목표가 단계마다 조금씩 낮아지고, 다 올려도 스무 번에 한 번쯤만큼만 낮다', () => {
+    for (let round = 1; round <= 16; round += 1) {
+      let last = targetOf(round);
+      for (let level = 1; level <= RELIC_MAX; level += 1) {
+        const target = targetFor(withRelics({ scale: level }), round);
+        expect(target).toBeLessThanOrEqual(last);
+        expect(target).toBeGreaterThanOrEqual(1);
+        last = target;
+      }
+      // 깎는 금화는 반올림한다: 적힌 비율에서 반 개 넘게 벗어나지 않는다.
+      const cut = (RELIC_STEP.scale * RELIC_MAX) / 1000;
+      expect(Math.abs(targetOf(round) - last - targetOf(round) * cut)).toBeLessThanOrEqual(0.5);
+      expect(last).toBeGreaterThanOrEqual(targetOf(round) * 0.9);
+    }
+    // 낮은 단계도 판에서 만나는 목표를 바꾼다: 1단계는 여덟째 라운드부터, 2단계는 여섯째 라운드부터 낮아진다.
+    const firstLower = (level: number): number => {
+      for (let round = 1; round <= 30; round += 1) {
+        if (targetFor(withRelics({ scale: level }), round) < targetOf(round)) return round;
+      }
+      return Infinity;
+    };
+    expect(firstLower(1)).toBeLessThanOrEqual(8);
+    expect(firstLower(2)).toBeLessThanOrEqual(6);
+    for (let level = 1; level <= RELIC_MAX; level += 1) {
+      // 단계가 오르면 더 이른 라운드까지 닿고, 한번 낮아진 뒤의 라운드는 모두 낮다.
+      expect(firstLower(level)).toBeLessThanOrEqual(firstLower(level - 1));
+      for (let round = firstLower(level); round <= 20; round += 1) {
+        expect(targetFor(withRelics({ scale: level }), round)).toBeLessThan(targetOf(round));
+      }
+      // 단계마다 열두 라운드 가운데 어딘가의 목표는 더 낮아진다.
+      const lower = Array.from({ length: 12 }, (_, index) => index + 1).filter(
+        (round) => targetFor(withRelics({ scale: level }), round) < targetFor(withRelics({ scale: level - 1 }), round),
+      );
+      expect(lower.length, `${level}단계`).toBeGreaterThan(0);
+    }
+    // 큰 목표에서는 한 단계가 눈에 보인다.
+    expect(targetFor(withRelics({ scale: 1 }), 12)).toBeLessThan(targetOf(12));
+  });
+
+  it('낡은 저울로 낮아진 목표만큼만 내고 라운드를 넘긴다', () => {
+    const relics = { scale: RELIC_MAX };
+    const target = targetFor(withRelics(relics), 8);
+    expect(target).toBeLessThan(targetOf(8));
+    const done: RunState = { ...newRun(null, [], relics), round: 8, spinsLeft: 0, coin: target };
+    const settled = settleRound(done, steady);
+    expect(settled?.cleared).toBe(true);
+    expect(settled?.paid).toBe(target);
+    expect(settled?.run.coin).toBe(0);
+    // 유물이 없으면 같은 금화로는 넘기지 못한다.
+    expect(settleRound({ ...done, relics: {} }, steady)?.cleared).toBe(false);
+  });
+
+  it('금화 항아리: 라운드를 넘길 때 남은 금화의 얼마쯤을 덤으로 받고, 점수에도 든다', () => {
+    const relics = { jar: RELIC_MAX };
+    expect(interestFor(0, withRelics(relics))).toBe(0);
+    expect(interestFor(-5, withRelics(relics))).toBe(0);
+    // 플레이어 쪽으로 올림한다. 그래서 1단계에도 금화가 남기만 하면 한 개는 받는다.
+    expect(interestFor(100, withRelics({ jar: 1 }))).toBe(Math.ceil((100 * RELIC_STEP.jar) / 1000));
+    expect(interestFor(200, withRelics(relics))).toBe(Math.ceil((200 * RELIC_STEP.jar * RELIC_MAX) / 1000));
+    expect(interestFor(1, withRelics({ jar: 1 }))).toBe(1);
+    expect(interestFor(30, withRelics({ jar: 1 }))).toBe(1);
+    // 단계가 오르면 덤이 줄지 않고, 금화가 많이 남은 판에서는 단계마다 는다.
+    for (let level = 1; level <= RELIC_MAX; level += 1) {
+      for (const left of [1, 30, 100, 500, 1000]) {
+        expect(interestFor(left, withRelics({ jar: level }))).toBeGreaterThanOrEqual(
+          interestFor(left, withRelics({ jar: level - 1 })),
+        );
+      }
+      expect(interestFor(1000, withRelics({ jar: level }))).toBeGreaterThan(interestFor(1000, withRelics({ jar: level - 1 })));
+    }
+    // 다 올려도 남은 금화의 열에 하나를 넘지 않는다.
+    expect(interestFor(1000, withRelics(relics))).toBeLessThanOrEqual(100);
+
+    const done: RunState = { ...newRun(null, [], relics), spinsLeft: 0, coin: targetOf(1) + 200, earned: 300 };
+    const settled = settleRound(done, steady)!;
+    const interest = interestFor(200, withRelics(relics));
+    expect(interest).toBeGreaterThan(0);
+    expect(settled.interest).toBe(interest);
+    expect(settled.savings).toBe(0);
+    expect(settled.run.coin).toBe(200 + interest);
+    expect(settled.run.earned).toBe(300 + interest);
+  });
+
+  it('대장장이 망치: 강화하는 값이 단계마다 조금씩 싸지고, 공짜가 되지는 않는다', () => {
+    for (const charm of CHARMS) {
+      let last = upgradeCostOf(charm.id);
+      for (let level = 1; level <= RELIC_MAX; level += 1) {
+        const cost = upgradeCostOf(charm.id, withRelics({ hammer: level }));
+        expect(cost).toBeLessThanOrEqual(last);
+        expect(cost).toBeGreaterThanOrEqual(1);
+        last = cost;
+      }
+      expect(last).toBeGreaterThanOrEqual(upgradeCostOf(charm.id) * 0.7);
+      // 플레이어 쪽으로 내림한다. 그래서 1단계부터 어느 부적이든 적어도 한 개는 싸다.
+      expect(upgradeCostOf(charm.id, withRelics({ hammer: 1 }))).toBeLessThan(upgradeCostOf(charm.id));
+    }
+    // 둘째, 셋째 단계의 강화 값에도 똑같이 듣는다.
+    for (const id of ['wide+', 'wide++', 'rebound+', 'rebound++']) {
+      const full = upgradeCostOf(id);
+      const cut = upgradeCostOf(id, withRelics({ hammer: RELIC_MAX }));
+      expect(cut, id).toBe(Math.floor((full * (100 - RELIC_STEP.hammer * RELIC_MAX)) / 100));
+      expect(cut, id).toBeLessThan(full);
+    }
+    // 단계마다 어딘가의 부적은 더 싸진다.
+    for (let level = 1; level <= RELIC_MAX; level += 1) {
+      const cheaper = CHARMS.filter(
+        (charm) =>
+          upgradeCostOf(charm.id, withRelics({ hammer: level })) < upgradeCostOf(charm.id, withRelics({ hammer: level - 1 })),
+      );
+      expect(cheaper.length, `${level}단계`).toBeGreaterThan(0);
+    }
+    const relics = { hammer: RELIC_MAX };
+    const cost = upgradeCostOf('finale', withRelics(relics));
+    expect(cost).toBeLessThan(upgradeCostOf('finale'));
+    const shop: RunState = {
+      ...newRun(null, [], relics),
+      phase: 'shop',
+      spinsLeft: 0,
+      coin: cost,
+      charms: ['finale'],
+      shop: { offers: [], rerollCost: REROLL_COST },
+    };
+    const next = upgrade(shop, 0);
+    expect(next.charms).toEqual(['finale+']);
+    expect(next.coin).toBe(0);
+  });
+
+  it('상인의 도장: 뗄 때 돌려받는 몫이 단계마다 조금씩 늘고, 그래도 치른 값보다는 적다', () => {
+    for (const relics of [{ seal: RELIC_MAX }, FULL]) {
+      const run = withRelics(relics);
+      for (const charm of CHARMS) {
+        const strong = upgradedOf(charm.id);
+        expect(refundOf(charm.id, run)).toBeGreaterThanOrEqual(refundOf(charm.id));
+        expect(refundOf(charm.id, run)).toBeLessThan(charm.price);
+        expect(refundOf(strong, run)).toBeLessThan(charm.price + upgradeCostOf(charm.id, run));
+      }
+    }
+    const percent = Math.round(REFUND_RATE * 100) + RELIC_STEP.seal * RELIC_MAX;
+    expect(percent).toBeLessThan(100);
+    // 여느 몫은 내림하고 도장의 덤은 올림한다.
+    const price = CHARMS.find((charm) => charm.id === 'twins')!.price;
+    expect(refundOf('twins', withRelics({ seal: RELIC_MAX }))).toBe(
+      Math.floor(price * REFUND_RATE) + Math.ceil((price * RELIC_STEP.seal * RELIC_MAX) / 100),
+    );
+    // 1단계부터 듣는다: 어느 부적을 떼든 적어도 한 개는 더 받는다.
+    for (const charm of CHARMS) {
+      expect(refundOf(charm.id, withRelics({ seal: 1 })), charm.id).toBeGreaterThan(refundOf(charm.id));
+    }
+    // 단계마다 어딘가의 부적(강화한 것까지)은 더 받는다.
+    for (let level = 1; level <= RELIC_MAX; level += 1) {
+      const more = CHARMS.flatMap((charm) => [charm.id, upgradedOf(charm.id)]).filter(
+        (id) => refundOf(id, withRelics({ seal: level })) > refundOf(id, withRelics({ seal: level - 1 })),
+      );
+      expect(more.length, `${level}단계`).toBeGreaterThan(0);
+    }
+    // 도장과 망치를 어떤 단계로 함께 올려도, 사서 떼거나 강화해서 떼면 언제나 손해다.
+    for (let seal = 0; seal <= RELIC_MAX; seal += 1) {
+      for (let hammer = 0; hammer <= RELIC_MAX; hammer += 1) {
+        const run = withRelics({ seal, hammer });
+        for (const charm of CHARMS) {
+          expect(refundOf(charm.id, run)).toBeLessThan(charm.price);
+          expect(refundOf(upgradedOf(charm.id), run)).toBeLessThan(charm.price + upgradeCostOf(charm.id, run));
+        }
+      }
+    }
+
+    const relics = { seal: RELIC_MAX };
+    const shop: RunState = {
+      ...newRun(null, [], relics),
+      phase: 'shop',
+      spinsLeft: 0,
+      coin: 5,
+      charms: ['twins'],
+      shop: { offers: [], rerollCost: REROLL_COST },
+    };
+    expect(discard(shop, 0).coin).toBe(5 + refundOf('twins', shop));
+    expect(refundOf('twins', shop)).toBeGreaterThan(refundOf('twins'));
+  });
+});

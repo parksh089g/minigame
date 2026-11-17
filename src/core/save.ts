@@ -52,7 +52,7 @@ import {
 import { clearLevel, normalizeStages, type StageProgress } from './stages';
 import { createSlotSave, normalizeSlotSave, type SlotSave } from '../games/candy-slot/save';
 
-export const SAVE_VERSION = 11;
+export const SAVE_VERSION = 12;
 
 /**
  * 점수 세는 법이 바뀐 게임과, 새 규칙이 들어온 세이브 버전(since). 그보다 앞선 세이브에 적힌 그 게임의 최고 점수는
@@ -109,7 +109,7 @@ export interface SaveData {
   weekly: WeeklyState;
   /** 퍼즐 단계 모드: 게임마다 깬 가장 높은 단계 */
   stages: StageProgress;
-  /** 행운 슬롯: 찾은 부적(도감)과, 도중에 두고 간 판 */
+  /** 행운 슬롯: 찾은 부적(도감), 도중에 두고 간 판, 행운 조각과 그것으로 연 영구 해금과 올린 유물 */
   slot: SlotSave;
   createdAt: number;
   updatedAt: number;
@@ -559,7 +559,7 @@ export function claimWeeklyMission(
 }
 
 /**
- * 기록, 코인, 산 꾸미기, 받은 업적 보상, 행운 슬롯의 도감과 하던 판을 지우고 설정과 닉네임은 남긴다.
+ * 기록, 코인, 산 꾸미기, 받은 업적 보상, 행운 슬롯의 도감과 하던 판, 조각과 영구 해금과 유물을 지우고 설정과 닉네임은 남긴다.
  * 이 기기 안의 기록만 지운다. 온라인 랭킹에 올라간 기록은 랭킹 화면에서 따로 뺀다.
  */
 export function resetProgress(save: SaveData, now: number = Date.now()): SaveData {

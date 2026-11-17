@@ -10,8 +10,10 @@ import type Phaser from 'phaser';
 import { THEME, THEME_CSS } from '../../config';
 import { bakeShape } from '../../core/bake';
 import {
+  baseOf,
   CENTER,
   charmOf,
+  levelOf,
   LINES,
   SIZE,
   SYMBOLS,
@@ -19,6 +21,8 @@ import {
   type CharmInfo,
   type CharmKind,
   type LineKind,
+  type PerkId,
+  type RelicId,
   type SymbolKey,
 } from './rules';
 
@@ -83,10 +87,29 @@ export const LOOK = {
     line: { edge: THEME.skyDeep, face: THEME.skySoft },
     trick: { edge: THEME.butterDeep, face: THEME.butterSoft },
   } satisfies Record<CharmKind, { edge: number; face: number }>,
+  /** 강화한 부적의 귀퉁이에 붙는 별: 금빛 면과 그것을 두르는 짙은 테두리 */
+  upgrade: { face: 0xffd24a, edge: 0x7a4a08, shine: THEME.white },
   /** 부적이 붙지 않은 빈자리 */
   emptySlot: { edge: 0x12573b, face: 0x186848 },
   /** 도감에서 아직 찾지 못한 부적의 칸 */
   unknownCharm: { edge: THEME.shadow, face: THEME.dim },
+  /** 행운 조각: 보랏빛 수정 조각. 금화(노랑)나 그림들과 색이 겹치지 않는다. */
+  piece: { face: 0xa98cf5, lip: 0x6a52c4, facet: 0xd9ccff, shine: THEME.white },
+  /** 영구 해금의 그림이 놓이는 칸 */
+  perk: { edge: THEME.lilacDeep, face: THEME.lilacSoft },
+  /** 유물의 그림이 놓이는 칸과, 그림에 쓰는 나무, 쇠, 인주, 질그릇의 색 */
+  relic: {
+    edge: THEME.butterDeep,
+    face: THEME.butterSoft,
+    wood: 0xa9713c,
+    woodDark: 0x74481f,
+    metal: 0x9aa7bd,
+    metalDark: 0x5f6b84,
+    wax: 0xc92a3c,
+    clay: 0xcf8448,
+    clayDark: 0x94552a,
+    shine: THEME.white,
+  },
   /** 부적 그림 위의 표시: 더하기, 빼기 */
   plus: THEME.good,
   minus: THEME.bad,
@@ -556,6 +579,48 @@ const TRICKS: Readonly<Record<string, (g: Graphics) => void>> = {
   },
 };
 
+/** 꼭짓점이 다섯인 별의 둘레. r은 바깥 반지름이고, 첫 꼭짓점이 위를 본다. */
+function star(r: number): Point[] {
+  return Array.from({ length: 10 }, (_, index) => {
+    const angle = -Math.PI / 2 + (index * Math.PI) / 5;
+    const reach = index % 2 === 0 ? r : r * 0.48;
+    return { x: Math.cos(angle) * reach, y: Math.sin(angle) * reach };
+  });
+}
+
+/**
+ * 강화한 부적의 표시: 짙은 테두리를 두른 금빛 별. (x, y)가 한가운데, r이 별의 바깥 반지름이다.
+ * 테두리가 있어서 부적의 옅은 바탕 위에서도, 초록 천 위에서도 또렷하다.
+ */
+export function drawUpgradeMark(g: Graphics, x: number, y: number, r: number): void {
+  const look = LOOK.upgrade;
+  const shape = star(r);
+  rim(g, shape, x, y, Math.max(0.9, r * 0.24), look.edge);
+  fillShape(g, shape, x, y, look.face);
+  g.fillStyle(look.shine, 0.8);
+  g.fillCircle(x - r * 0.2, y - r * 0.22, Math.max(0.5, r * 0.16));
+}
+
+/**
+ * 부적 그림에서 강화한 표시가 놓이는 자리(왼쪽 위 귀퉁이)와 별의 크기. 부적의 한가운데가 원점이다.
+ * 강화한 단계만큼 별이 왼쪽 위에서 오른쪽으로 나란히 놓인다. 단계가 오르면 별이 조금씩 작아져서,
+ * 세 개가 놓여도 오른쪽 위의 표시(더하기, 빼기)를 가리지 않는다.
+ */
+const CHARM_MARK = { x: -9, y: -8.8, r: [5, 4.5, 3.9], step: [0, 6.4, 5.2] } as const;
+
+/** 부적의 귀퉁이에 강화한 단계만큼 별을 그린다. */
+function drawCharmMarks(g: Graphics, level: number): void {
+  const count = Math.min(level, CHARM_MARK.r.length);
+  if (count <= 0) return;
+  const r = CHARM_MARK.r[count - 1];
+  const step = CHARM_MARK.step[count - 1];
+  // 작아진 별도 왼쪽 위 모서리에 같은 만큼 붙어 있게 한다.
+  const shift = CHARM_MARK.r[0] - r;
+  for (let index = 0; index < count; index += 1) {
+    drawUpgradeMark(g, CHARM_MARK.x - shift + index * step, CHARM_MARK.y - shift, r);
+  }
+}
+
 /** 줄 부적의 작은 판에서 짙게 칠할 칸들. 가로와 세로는 가운데 줄 하나로 방향을 보여 주고, 대각선은 두 줄을 다 칠한다. */
 function lineCells(kind: LineKind): number[] {
   const cells = new Set<number>();
@@ -588,11 +653,13 @@ function drawCharm(g: Graphics, charm: CharmInfo): void {
   } else if (effect.lineTimes) {
     drawMiniGrid(g, lineCells(effect.lineTimes[0]));
   } else {
-    TRICKS[charm.id]?.(g);
+    // 강화한 부적도 원래 부적의 그림을 쓴다.
+    TRICKS[baseOf(charm.id)]?.(g);
   }
+  drawCharmMarks(g, levelOf(charm.id));
 }
 
-/** 부적의 그림. 없는 id면 빈자리의 그림을 돌려준다. */
+/** 부적의 그림. 강화한 부적(id 끝에 표시가 붙은 것)은 귀퉁이에 단계만큼 별이 붙는다. 없는 id면 빈자리의 그림을 돌려준다. */
 export function charmTexture(scene: Phaser.Scene, id: string): string {
   const charm = charmOf(id);
   if (!charm) return emptySlotTexture(scene);
@@ -611,6 +678,33 @@ export function charmChipTexture(scene: Phaser.Scene, id: string): string | null
   return bakeShape(scene, `candy-slot-chip-${id}`, box, (g) => {
     g.scaleCanvas(CHIP_BOX / CHARM_BOX, CHIP_BOX / CHARM_BOX);
     drawCharm(g, charm);
+  });
+}
+
+/** 글 옆에 놓는 강화 표시(별)의 크기 */
+export const UPGRADE_MARK_BOX = 12;
+
+/** 강화한 부적의 이름 옆에 놓는 작은 별 */
+export function upgradeMarkTexture(scene: Phaser.Scene): string {
+  const box = { width: UPGRADE_MARK_BOX, height: UPGRADE_MARK_BOX };
+  return bakeShape(scene, 'candy-slot-upgrade-mark', box, (g) => drawUpgradeMark(g, 0, 0.4, 4.4));
+}
+
+/** 지금 강화할 수 있는 부적의 아래에 다는 표시의 크기 */
+export const UPGRADE_READY_BOX = 14;
+
+/** 지금 강화할 수 있는 부적의 아래에 다는 표시: 금빛 동그라미 안의 위로 향한 화살표 */
+export function upgradeReadyTexture(scene: Phaser.Scene): string {
+  const box = { width: UPGRADE_READY_BOX, height: UPGRADE_READY_BOX };
+  return bakeShape(scene, 'candy-slot-upgrade-ready', box, (g) => {
+    const look = LOOK.upgrade;
+    g.fillStyle(look.edge, 1);
+    g.fillCircle(0, 0, 6.2);
+    g.fillStyle(look.face, 1);
+    g.fillCircle(0, 0, 5);
+    g.fillStyle(look.edge, 1);
+    g.fillTriangle(0, -3.6, -3.3, 0.2, 3.3, 0.2);
+    g.fillRoundedRect(-1.2, -0.6, 2.4, 4, 0.8);
   });
 }
 
@@ -788,4 +882,168 @@ export function drawFelt(g: Graphics, width: number, height: number, focus: Poin
 export function symbolColor(symbol: number): number {
   if (symbol === WILD) return LOOK.sevenTrim.face;
   return LOOK.symbols[SYMBOLS[symbol].key].face;
+}
+
+// ───────── 행운 조각과 영구 해금 ─────────
+
+/** 행운 조각 하나를 (x, y)를 한가운데로 그린다. r은 반쯤 되는 크기다. 비스듬히 선 마름모꼴의 수정 조각이다. */
+function drawPiece(g: Graphics, x: number, y: number, r: number): void {
+  const look = LOOK.piece;
+  const top = { x: r * 0.16, y: -r };
+  const right = { x: r * 0.84, y: -r * 0.1 };
+  const bottom = { x: -r * 0.16, y: r * 0.92 };
+  const left = { x: -r * 0.84, y: r * 0.02 };
+  const shape = [top, right, bottom, left];
+  fillShape(g, shape, x, y + r * 0.2, look.lip);
+  fillShape(g, shape, x, y, look.face);
+  // 깎인 면: 왼쪽 위가 밝다.
+  fillShape(g, [top, { x: 0, y: -r * 0.04 }, left], x, y, look.facet);
+  g.fillStyle(look.shine, 0.9);
+  g.fillCircle(x - r * 0.2, y - r * 0.36, Math.max(0.6, r * 0.14));
+}
+
+/** 조각 아이콘의 크기 */
+export const PIECE_ICON = { width: 12, height: 12 } as const;
+
+/** 조각의 수 옆에 놓는 작은 조각 */
+export function pieceTexture(scene: Phaser.Scene): string {
+  return bakeShape(scene, 'candy-slot-piece', PIECE_ICON, (g) => drawPiece(g, 0, -0.6, 5));
+}
+
+/** 해금 그림의 크기 */
+export const PERK_BOX = 26;
+
+/** 해금마다의 그림. 원점이 한가운데다. */
+const PERK_ART: Readonly<Record<PerkId, (g: Graphics) => void>> = {
+  /** 두둑한 시작: 겹쳐 놓인 금화 */
+  purse: (g) => {
+    drawCoin(g, -3.4, 2.6, 5.6);
+    drawCoin(g, 3.2, -2.4, 5.6);
+  },
+  /** 첫 뽑기 공짜: 한 바퀴 도는 화살표 */
+  reroll: (g) => {
+    g.lineStyle(2.6, LOOK.perk.edge, 1);
+    g.beginPath();
+    g.arc(0, 0.6, 5.6, -Math.PI * 0.35, Math.PI * 1.25);
+    g.strokePath();
+    g.fillStyle(LOOK.perk.edge, 1);
+    g.fillTriangle(1, -8.2, 1, -1.6, 6.6, -4.6);
+  },
+  /** 잠그기 한 번 더: 자물쇠와 더하기 */
+  hold: (g) => {
+    drawLock(g, -1.4, 0.4, 6.4, LOOK.hold.lock, LOOK.hold.frame);
+    drawBadge(g, 7, -6.6, 'plus');
+  },
+  /** 여섯째 자리: 빈자리와 더하기 */
+  slot: (g) => {
+    g.fillStyle(LOOK.emptySlot.edge, 1);
+    g.fillRoundedRect(-8, -6.4, 14.4, 14.4, 4);
+    g.fillStyle(LOOK.emptySlot.face, 1);
+    g.fillRoundedRect(-6.4, -4.8, 11.2, 11.2, 3);
+    drawBadge(g, 7, -6.6, 'plus');
+  },
+};
+
+/** 해금 창의 줄에 놓는 그림 */
+export function perkTexture(scene: Phaser.Scene, id: PerkId): string {
+  return bakeShape(scene, `candy-slot-perk-${id}`, { width: PERK_BOX, height: PERK_BOX }, (g) => {
+    const half = PERK_BOX / 2;
+    g.fillStyle(LOOK.perk.edge, 1);
+    g.fillRoundedRect(-half, -half, PERK_BOX, PERK_BOX, 7);
+    g.fillStyle(LOOK.perk.face, 1);
+    g.fillRoundedRect(-half + 2, -half + 2, PERK_BOX - 4, PERK_BOX - 4, 5);
+    PERK_ART[id](g);
+  });
+}
+
+// ───────── 유물 ─────────
+
+/** 유물 그림의 크기. 해금 그림과 같아서 두 쪽의 줄이 같은 자리에서 시작한다. */
+export const RELIC_BOX = PERK_BOX;
+
+/** 네모의 네 모서리 */
+function corners(x: number, y: number, width: number, height: number): Point[] {
+  return [
+    { x, y },
+    { x: x + width, y },
+    { x: x + width, y: y + height },
+    { x, y: y + height },
+  ];
+}
+
+/** 유물마다의 그림. 원점이 한가운데다. */
+const RELIC_ART: Readonly<Record<RelicId, (g: Graphics) => void>> = {
+  /** 낡은 저울: 한쪽으로 살짝 기운 접시저울 */
+  scale: (g) => {
+    const look = LOOK.relic;
+    // 받침과 기둥
+    g.fillStyle(look.woodDark, 1);
+    g.fillRoundedRect(-5, 7, 10, 2.6, 1.2);
+    g.fillStyle(look.wood, 1);
+    g.fillRect(-1.2, -6, 2.4, 13.4);
+    // 기운 가로대와 접시를 다는 줄
+    g.lineStyle(2, look.metalDark, 1);
+    g.lineBetween(-7.6, -4.4, 7.6, -6.4);
+    g.lineStyle(1, look.metalDark, 1);
+    g.lineBetween(-7.6, -4.4, -7.6, 2.6);
+    g.lineBetween(7.6, -6.4, 7.6, 0.2);
+    // 접시: 왼쪽이 무거워서 내려가 있다.
+    for (const pan of [
+      { x: -7.6, y: 2.6 },
+      { x: 7.6, y: 0.2 },
+    ]) {
+      fillShape(g, [{ x: -3.4, y: 0 }, { x: 3.4, y: 0 }, { x: 2, y: 2.6 }, { x: -2, y: 2.6 }], pan.x, pan.y, look.metal);
+    }
+    g.fillStyle(look.metal, 1);
+    g.fillCircle(0, -6.2, 2);
+  },
+  /** 상인의 도장: 둥근 손잡이가 달린 나무 도장과 붉은 인주 */
+  seal: (g) => {
+    const look = LOOK.relic;
+    g.fillStyle(look.wood, 1);
+    g.fillRect(-2, -3.4, 4, 6);
+    g.fillCircle(0, -5, 4);
+    g.fillStyle(look.shine, 0.7);
+    g.fillCircle(-1.4, -6.4, 1.1);
+    g.fillStyle(look.woodDark, 1);
+    g.fillRoundedRect(-6.6, 1.6, 13.2, 4.8, 1.6);
+    g.fillStyle(look.wax, 1);
+    g.fillRoundedRect(-6.6, 5.6, 13.2, 3, 1.2);
+  },
+  /** 대장장이 망치: 비스듬히 든 쇠망치 */
+  hammer: (g) => {
+    const look = LOOK.relic;
+    const tilt = -Math.PI / 4.4;
+    fillShape(g, turned(corners(-1.5, -3, 3, 12.6), tilt), -0.8, 0.8, look.wood);
+    fillShape(g, turned(corners(-6.6, -8.6, 13.2, 6.6), tilt), -0.8, 0.8, look.metalDark);
+    fillShape(g, turned(corners(-6.6, -8.6, 13.2, 4.4), tilt), -0.8, 0.8, look.metal);
+    fillShape(g, turned(corners(-5.4, -7.8, 4, 1.4), tilt), -0.8, 0.8, look.shine);
+  },
+  /** 금화 항아리: 금화가 넘치는 질항아리 */
+  jar: (g) => {
+    const look = LOOK.relic;
+    drawCoin(g, -2.4, -7, 3);
+    drawCoin(g, 2.6, -7.6, 3);
+    g.fillStyle(look.clayDark, 1);
+    g.fillEllipse(0, 3.2, 17, 13.6);
+    g.fillStyle(look.clay, 1);
+    g.fillEllipse(0, 2.4, 17, 12.6);
+    g.fillRect(-4.6, -5.4, 9.2, 4);
+    g.fillStyle(look.clayDark, 1);
+    g.fillRoundedRect(-6.2, -6.6, 12.4, 3, 1.4);
+    g.fillStyle(look.shine, 0.55);
+    g.fillEllipse(-4.4, 0.6, 2.4, 4.4);
+  },
+};
+
+/** 유물 쪽의 줄에 놓는 그림 */
+export function relicTexture(scene: Phaser.Scene, id: RelicId): string {
+  return bakeShape(scene, `candy-slot-relic-${id}`, { width: RELIC_BOX, height: RELIC_BOX }, (g) => {
+    const half = RELIC_BOX / 2;
+    g.fillStyle(LOOK.relic.edge, 1);
+    g.fillRoundedRect(-half, -half, RELIC_BOX, RELIC_BOX, 7);
+    g.fillStyle(LOOK.relic.face, 1);
+    g.fillRoundedRect(-half + 2, -half + 2, RELIC_BOX - 4, RELIC_BOX - 4, 5);
+    RELIC_ART[id](g);
+  });
 }

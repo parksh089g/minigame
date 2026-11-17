@@ -84,6 +84,8 @@ function shopRun(offers: readonly string[]): RunState {
     seed: null,
     spinCount: 6,
     drawCount: 1,
+    perks: [],
+    relics: {},
   };
 }
 
