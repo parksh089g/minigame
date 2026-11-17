@@ -606,7 +606,7 @@ export function drawUpgradeMark(g: Graphics, x: number, y: number, r: number): v
  * 강화한 단계만큼 별이 왼쪽 위에서 오른쪽으로 나란히 놓인다. 단계가 오르면 별이 조금씩 작아져서,
  * 세 개가 놓여도 오른쪽 위의 표시(더하기, 빼기)를 가리지 않는다.
  */
-const CHARM_MARK = { x: -9, y: -8.8, r: [5, 4.5, 4.1], step: [0, 6.4, 5.6] } as const;
+const CHARM_MARK = { x: -9, y: -8.8, r: [5, 4.5, 3.9], step: [0, 6.4, 5.2] } as const;
 
 /** 부적의 귀퉁이에 강화한 단계만큼 별을 그린다. */
 function drawCharmMarks(g: Graphics, level: number): void {
@@ -688,6 +688,24 @@ export const UPGRADE_MARK_BOX = 12;
 export function upgradeMarkTexture(scene: Phaser.Scene): string {
   const box = { width: UPGRADE_MARK_BOX, height: UPGRADE_MARK_BOX };
   return bakeShape(scene, 'candy-slot-upgrade-mark', box, (g) => drawUpgradeMark(g, 0, 0.4, 4.4));
+}
+
+/** 지금 강화할 수 있는 부적의 아래에 다는 표시의 크기 */
+export const UPGRADE_READY_BOX = 14;
+
+/** 지금 강화할 수 있는 부적의 아래에 다는 표시: 금빛 동그라미 안의 위로 향한 화살표 */
+export function upgradeReadyTexture(scene: Phaser.Scene): string {
+  const box = { width: UPGRADE_READY_BOX, height: UPGRADE_READY_BOX };
+  return bakeShape(scene, 'candy-slot-upgrade-ready', box, (g) => {
+    const look = LOOK.upgrade;
+    g.fillStyle(look.edge, 1);
+    g.fillCircle(0, 0, 6.2);
+    g.fillStyle(look.face, 1);
+    g.fillCircle(0, 0, 5);
+    g.fillStyle(look.edge, 1);
+    g.fillTriangle(0, -3.6, -3.3, 0.2, 3.3, 0.2);
+    g.fillRoundedRect(-1.2, -0.6, 2.4, 4, 0.8);
+  });
 }
 
 /** 부적이 붙지 않은 빈자리 */

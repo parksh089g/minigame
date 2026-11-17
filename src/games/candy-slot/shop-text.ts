@@ -77,6 +77,19 @@ export function spinLabel({ skippable, holding, times }: SpinLabelState): string
   return times > 1 ? `${base} ${timesText(times)}` : base;
 }
 
+// ───────── 가게의 안내 ─────────
+
+/** 붙인 부적이 있을 때 가게의 맨 아래에 적는 한 줄. 부적을 눌러야 강화와 떼기가 나온다는 것을 알린다. */
+export const SHOP_HINT = '붙인 부적을 눌러 강화하거나 떼요';
+
+/**
+ * 지금 강화할 수 있는 자리들(금화가 닿고, 끝까지 강화하지 않은 부적). 가게에서 그 부적의 아래에 표시를 단다.
+ * 가게가 아니면 비어 있다.
+ */
+export function upgradableSlots(run: RunState): number[] {
+  return run.charms.flatMap((_, slot) => (upgradeBlock(run, slot) === null ? [slot] : []));
+}
+
 // ───────── 붙인 부적의 설명 창 ─────────
 
 export const BUBBLE_TEXT = {

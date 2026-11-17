@@ -118,7 +118,7 @@ import {
   type PerkButton,
   type PerkNote,
 } from './perk-views';
-import { UPGRADE_MARK_BOX, upgradeMarkTexture } from './art';
+import { UPGRADE_MARK_BOX, upgradeMarkTexture, upgradeReadyTexture } from './art';
 import { nextSpinTimes, upgrade } from './rules';
 import {
   BUBBLE_TEXT,
@@ -127,6 +127,8 @@ import {
   bubbleShop,
   CHIP,
   chipPlace,
+  SHOP_HINT,
+  upgradableSlots,
   upgradeMarks,
   offerChip,
   REFUND_SIGN,
@@ -184,6 +186,10 @@ const BIG_WIN_RATIO = 0.5;
 /** 가게의 창이 길 때 부적 한 줄이 더 커질 수 있는 높이와, 줄 아래에 안내를 적으려면 남아야 하는 높이 */
 const SHOP_ROW_GROW = 8;
 const SHOP_FOOT_MIN = 20;
+
+/** 지금 강화할 수 있다는 표시가 부적의 아래 끝에서 내려와 놓이는 거리와, 오르내리는 폭 */
+const READY_MARK_DROP = 2;
+const READY_MARK_BOB = 1.5;
 
 /** 가게의 줄에서 값이 적힌 알약의 왼쪽 끝이 줄의 오른쪽 끝에서 떨어진 거리(drawOfferRow가 그리는 자리와 같다) */
 const OFFER_PILL_INSET = 45;
@@ -257,6 +263,9 @@ const BUTTON_TONES = {
 } as const;
 
 type ButtonTone = keyof typeof BUTTON_TONES;
+
+/** 버튼의 글이 양 끝에서 떨어져 있어야 하는 거리. 글이 이보다 길면 줄인다. */
+const BUTTON_PAD = 5;
 
 /**
  * 눌리는 느낌이 나는 둥근 버튼. 공용 버튼(core/ui.ts의 PixelButton)과 같은 모양이지만,
@@ -357,14 +366,16 @@ class SoftButton {
     g.fillStyle(colors.face, 1);
     g.fillRoundedRect(x, y + offset, width, face, radius);
 
-    // 글과 금화 값을 한 덩어리로 가운데에 놓는다.
+    // 글과 금화 값을 한 덩어리로 가운데에 놓는다. 값이 네 자리쯤 되어 버튼보다 길어지면 덩어리를 통째로 줄인다.
     const centerY = Math.round(y + offset + face / 2);
     const extra = this.price === null ? 0 : 4 + COIN_ICON.width + 2 + Math.ceil(this.amount.width);
-    let left = Math.round(x + (width - Math.ceil(this.label.width) - extra) / 2);
+    const fit = Math.min(1, (width - BUTTON_PAD * 2) / Math.max(1, Math.ceil(this.label.width) + extra));
+    for (const part of [this.label, this.coin, this.amount]) part.setScale(fit);
+    let left = Math.round(x + (width - (Math.ceil(this.label.width) + extra) * fit) / 2);
     this.label.setPosition(left, centerY);
-    left += Math.ceil(this.label.width) + 4;
-    this.coin.setPosition(left + COIN_ICON.width / 2, centerY);
-    this.amount.setPosition(left + COIN_ICON.width + 2, centerY);
+    left += (Math.ceil(this.label.width) + 4) * fit;
+    this.coin.setPosition(left + (COIN_ICON.width / 2) * fit, centerY);
+    this.amount.setPosition(left + (COIN_ICON.width + 2) * fit, centerY);
   }
 }
 
@@ -444,6 +455,10 @@ export class CandySlotScene extends MiniGameScene {
   private goalText!: Text;
   private spinsText!: Text;
   private slotImages: Image[] = [];
+  /** 부적 자리마다의, 지금 강화할 수 있다는 표시. 가게에서 강화할 수 있는 부적의 아래에만 보인다. */
+  private readyMarks: Image[] = [];
+  /** 가게의 맨 아래에 적힌 한 줄. 가게의 창이 짧아서 자리가 없으면 null이다. */
+  private shopFoot: Text | null = null;
   private oddsTexts: Array<{ value: Text; chance: Text }> = [];
   /** 확률 줄에 지금 적혀 있는 값. 바뀐 칸만 톡 튀게 하려고 기억해 둔다. */
   private shownOdds: number[] = [];
@@ -586,6 +601,8 @@ export class CandySlotScene extends MiniGameScene {
     this.busy = false;
     this.cells = [];
     this.slotImages = [];
+    this.readyMarks = [];
+    this.shopFoot = null;
     this.oddsTexts = [];
     this.shownOdds = [];
     this.shownValues = [];
@@ -696,8 +713,18 @@ export class CandySlotScene extends MiniGameScene {
         (pressed) => image.setScale(pressed && index < this.run.charms.length ? 0.92 : 1),
         () => this.onSlotTap(index),
       ).setDepth(DEPTH.panel);
-      this.slotViews.push(image, zone);
+      // 지금 강화할 수 있는 부적의 아래 끝에 걸리는 표시. 부적의 그림은 가리지 않는다.
+      const ready = this.add
+        .image(slot.x + slotSize / 2, slot.y + slotSize + READY_MARK_DROP, upgradeReadyTexture(this))
+        .setDepth(DEPTH.panel)
+        .setVisible(false);
+      this.readyMarks.push(ready);
+      this.slotViews.push(image, zone, ready);
     });
+    // 표시가 가만히 오르내려서 눈에 띈다. 움직임을 줄인 기기에서는 가만히 있는다.
+    if (!reducedMotion()) {
+      this.tweens.add({ targets: this.readyMarks, y: `-=${READY_MARK_BOB}`, duration: 520, ease: 'Sine.InOut', yoyo: true, repeat: -1 });
+    }
   }
 
   private addOdds(): void {
@@ -763,6 +790,18 @@ export class CandySlotScene extends MiniGameScene {
       const id = this.run.charms[index];
       image.setTexture(id ? charmTexture(this, id) : emptySlotTexture(this)).setScale(1);
     });
+    this.refreshReadyMarks();
+  }
+
+  /** 가게에서 지금 강화할 수 있는 부적에만 표시를 단다. 금화나 부적이 바뀔 때마다 부른다. */
+  private refreshReadyMarks(): void {
+    const ready = this.ended ? [] : upgradableSlots(this.run);
+    this.readyMarks.forEach((mark, slot) => mark.setVisible(ready.includes(slot)));
+  }
+
+  /** 가게의 맨 아래 한 줄: 붙인 부적이 있으면 눌러서 강화하거나 뗄 수 있다고, 없으면 몇 장까지 붙일 수 있는지를 적는다. */
+  private refreshShopFoot(): void {
+    this.shopFoot?.setText(this.run.charms.length > 0 ? SHOP_HINT : slotsNote(slotsOf(this.run)));
   }
 
   /** 그림마다의 상금과 확률을 적는다. bounce면 바뀐 칸이 톡 튄다(부적을 붙이거나 뗐을 때). */
@@ -1429,6 +1468,7 @@ export class CandySlotScene extends MiniGameScene {
     // 가게에서 끝내면 알림이 가게의 글 위에 겹치므로, 가게를 걷고 기계 위에 알린다.
     for (const view of this.shopViews) view.destroy();
     this.shopViews = [];
+    this.shopFoot = null;
     this.offerRows = [];
     this.rerollButton = null;
     vibrate([20, 40, 20]);
@@ -1525,9 +1565,10 @@ export class CandySlotScene extends MiniGameScene {
     this.shopViews.push(panel, blocker, title, guide);
     this.addShopBook(title, guide);
 
-    // 창이 길면 줄을 조금 키우고, 그래도 남는 자리에는 한 줄 안내를 적는다.
+    // 창에 남는 자리가 있으면 먼저 맨 아래에 한 줄 안내를 적을 자리를 떼고, 그래도 남으면 줄을 조금 키운다.
     const spare = shop.height - SHOP_HEAD - OFFERS * SHOP_ROW - 4;
-    const pitch = SHOP_ROW + Phaser.Math.Clamp(Math.floor(spare / OFFERS), 0, SHOP_ROW_GROW);
+    const foot = spare >= SHOP_FOOT_MIN ? SHOP_FOOT_MIN : 0;
+    const pitch = SHOP_ROW + Phaser.Math.Clamp(Math.floor((spare - foot) / OFFERS), 0, SHOP_ROW_GROW);
     const top = shop.y + SHOP_HEAD;
     this.offerRows = [];
     for (let offer = 0; offer < OFFERS; offer += 1) {
@@ -1537,15 +1578,15 @@ export class CandySlotScene extends MiniGameScene {
     }
     const rowsBottom = top + OFFERS * pitch;
     const footRoom = shop.y + shop.height - rowsBottom;
+    this.shopFoot = null;
     if (footRoom >= SHOP_FOOT_MIN) {
-      this.shopViews.push(
-        addText(this, shop.x + shop.width / 2, rowsBottom + (footRoom - 4) / 2, slotsNote(slotsOf(this.run)), {
-          size: FONT_SIZE.small,
-          color: LOOK.text.faint,
-          originX: 0.5,
-          originY: 0.5,
-        }).setDepth(DEPTH.shop),
-      );
+      this.shopFoot = addText(this, shop.x + shop.width / 2, rowsBottom + (footRoom - 4) / 2, '', {
+        size: FONT_SIZE.small,
+        color: LOOK.text.faint,
+        originX: 0.5,
+        originY: 0.5,
+      }).setDepth(DEPTH.shop);
+      this.shopViews.push(this.shopFoot);
     }
 
     const gap = 8;
@@ -1646,6 +1687,8 @@ export class CandySlotScene extends MiniGameScene {
   private refreshShop(): void {
     for (let offer = 0; offer < OFFERS; offer += 1) this.drawOfferRow(offer);
     this.refreshOfferChips();
+    this.refreshReadyMarks();
+    this.refreshShopFoot();
     const cost = this.run.shop?.rerollCost ?? 0;
     // 공짜일 때는 금화 0개라고 적는 대신 공짜라고 적는다.
     this.rerollButton
@@ -1711,10 +1754,12 @@ export class CandySlotScene extends MiniGameScene {
     this.hideBubble();
     for (const view of this.shopViews) view.destroy();
     this.shopViews = [];
+    this.shopFoot = null;
     this.offerRows = [];
     this.rerollButton = null;
     this.run = nextRound(this.run);
     this.keepRun();
+    this.refreshReadyMarks();
     this.spinButton.setVisible(true).setEnabled(true);
     this.refreshNumbers();
     showBanner(this, this.machineMiddle, `라운드 ${this.run.round}`, LOOK.text.good, 700, DEPTH.banner, FONT_SIZE.large);
@@ -2602,9 +2647,11 @@ export class CandySlotScene extends MiniGameScene {
     if (count !== this.layout.slots.length) {
       this.hideBubble();
       this.layout = layoutFor(this.playArea, count);
+      this.tweens.killTweensOf(this.readyMarks);
       for (const view of this.slotViews) view.destroy();
       this.slotViews = [];
       this.slotImages = [];
+      this.readyMarks = [];
       this.addSlots();
       this.refreshSlots();
     }

@@ -61,6 +61,7 @@ import {
   type RunState,
 } from '../src/games/candy-slot/rules';
 import { RESUME_TEXT, type SlotSave } from '../src/games/candy-slot/save';
+import { SHOP_HINT } from '../src/games/candy-slot/shop-text';
 import { hiddenTexts, it, openApp, startScene, tapAt, tapText, textPoint, waitForScene } from './app';
 
 const KEY = SCENE.candySlot;
@@ -427,6 +428,9 @@ it('행운 슬롯 해금: 판이 끝나면 넘긴 라운드만큼 조각을 받�
 
   // 가게에서 기록하고 끝낸 판: 방금 넘긴 둘째 라운드까지 조각 둘을 받아 다섯이 된다.
   await openShopWith(page, shopRun(2));
+  // 붙인 부적이 없는 가게의 맨 아래에는 붙일 수 있는 수가 적힌다.
+  expect(await shown(page, slotsNote(SLOTS)), '다섯 장까지').toBe(true);
+  expect(await shown(page, SHOP_HINT), '붙인 부적이 없으면 눌러 보라는 안내는 없다').toBe(false);
   await page.evaluate((key) => (window.__pocketArcade?.scene.getScene(key) as unknown as SlotView).finishFromPause(), KEY);
   await waitForScene(page, SCENE.result);
   await expect.poll(() => shown(page, piecesVerdict(2, 5), SCENE.result), WAIT).toBe(true);
@@ -629,8 +633,9 @@ it('행운 슬롯 해금: 가게에서 여섯째 부적을 붙일 수 있고, �
   expect(await shown(page, rerollLabel(0)), '공짜라고 적힌다').toBe(true);
   expect(await shown(page, rerollLabel(REROLL_COST)), '값이 있을 때의 글은 없다').toBe(false);
   expect(await shown(page, slotsNote(SLOTS)), '다섯 장까지라는 글은 없다').toBe(false);
-  // 가게의 창이 긴 화면에서는 맨 아래에 붙일 수 있는 수가 적힌다.
-  if ((await view(page)).height > 500) expect(await shown(page, slotsNote(SLOTS_MAX)), '여섯 장까지').toBe(true);
+  // 붙인 부적이 있으면 맨 아래의 한 줄은 부적을 눌러 강화하거나 떼라는 안내다.
+  expect(await shown(page, slotsNote(SLOTS_MAX)), '붙인 부적이 있으면 붙일 수 있는 수는 적지 않는다').toBe(false);
+  expect(await shown(page, SHOP_HINT), '부적을 눌러 보라는 안내').toBe(true);
   expect(await hiddenTexts(page, KEY, { from: '부적 가게' }), '첫 다시 뽑기가 공짜인 가게').toEqual([]);
 
   // 여섯째 부적이 붙는다.

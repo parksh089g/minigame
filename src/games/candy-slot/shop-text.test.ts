@@ -27,6 +27,8 @@ import {
   SPIN_TEXT,
   spinLabel,
   timesText,
+  SHOP_HINT,
+  upgradableSlots,
   upgradeMarks,
   type BubbleKind,
 } from './shop-text';
@@ -108,6 +110,18 @@ describe('돌리기 버튼의 글', () => {
     );
   });
 });
+
+/** 주아 글꼴에 들어 있는 한글: KS X 1001의 완성형 2,350자 */
+function fontSyllables(): Set<string> {
+  const decoder = new TextDecoder('euc-kr');
+  const syllables = new Set<string>();
+  for (let lead = 0xb0; lead <= 0xc8; lead += 1) {
+    for (let trail = 0xa1; trail <= 0xfe; trail += 1) {
+      syllables.add(decoder.decode(new Uint8Array([lead, trail])));
+    }
+  }
+  return syllables;
+}
 
 describe('붙인 부적의 설명 창', () => {
   it('가게가 아니거나 빈자리면 더 적을 것이 없다', () => {
@@ -324,5 +338,33 @@ describe('작은 표의 자리', () => {
       expect(place.back.x + place.back.width).toBeLessThanOrEqual(177 + 1e-9);
       expect(place.textX + 64 * place.scale).toBeLessThanOrEqual(177 - CHIP.padX + 1e-9);
     }
+  });
+});
+
+describe('가게의 안내', () => {
+  it('지금 강화할 수 있는 자리는 금화가 닿고 끝까지 강화하지 않은 부적의 자리다', () => {
+    const charms = ['wide', 'twins+', 'crown+++', 'rebound'];
+    // 금화가 넉넉하면 끝까지 강화한 것만 빠진다.
+    expect(upgradableSlots(shopping(99_999, charms))).toEqual([0, 1, 3]);
+    // 가장 싼 강화 값만큼만 있으면 그 부적만 남는다.
+    const costs = charms.map((id) => upgradeCostOf(id));
+    const cheapest = Math.min(...costs.filter((cost) => cost > 0));
+    expect(upgradableSlots(shopping(cheapest, charms))).toEqual([costs.indexOf(cheapest)]);
+    expect(upgradableSlots(shopping(cheapest - 1, charms))).toEqual([]);
+    // 돌리는 동안에는 없다.
+    expect(upgradableSlots({ ...newRun(), coin: 99_999, charms })).toEqual([]);
+    expect(upgradableSlots(shopping(99_999, []))).toEqual([]);
+  });
+
+  it('안내와 설명 창의 글은 글꼴에 들어 있는 한글만 쓴다', () => {
+    const known = fontSyllables();
+    expect(known.size).toBe(2350);
+    for (const text of [SHOP_HINT, ...Object.values(BUBBLE_TEXT), ...Object.values(SPIN_TEXT), ...Object.values(HIT_CHIP_TEXT)]) {
+      for (const letter of String(text).match(/[ㄱ-ㆎ가-힣]/g) ?? []) {
+        expect(known.has(letter), `"${letter}" in "${text}"`).toBe(true);
+      }
+    }
+    // 가게의 창 안에 한 줄로 들어가는 길이다.
+    expect(SHOP_HINT.length).toBeLessThanOrEqual(18);
   });
 });
