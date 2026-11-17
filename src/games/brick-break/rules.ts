@@ -48,12 +48,18 @@ export function steerPaddle(x: number, target: number, dt: number): number {
 /**
  * 막대에 맞은 공이 튀어 나가는 각도(라디안). 위쪽이 0이고 오른쪽으로 기울면 +다.
  * offset은 막대 가운데에서 맞은 자리까지의 거리를 막대 절반 너비로 나눈 것(-1~1)이다.
- * 가운데에 맞으면 곧게 오르고 끝에 맞을수록 그쪽으로 눕는다. 맞히는 자리로 공을 보낼 곳을 고르게 하려는 것이다.
+ * 끝에 맞을수록 그쪽으로 눕는다. 맞히는 자리로 공을 보낼 곳을 고르게 하려는 것이다.
+ * 가운데에 맞아도 곧게 오르지는 않고 MIN_BOUNCE_ANGLE만큼은 기운다. 곧게 오르내리는 공은 한 열만 깨고
+ * 나머지 열을 그대로 내려오게 해서, 막대 가운데로 잘 받을수록 오히려 판이 빨리 끝나기 때문이다.
+ * 한가운데(offset 0)에 맞으면 공이 오던 쪽(incomingVx)으로 계속 간다.
  */
 export const MAX_BOUNCE_ANGLE = Math.PI / 3;
+export const MIN_BOUNCE_ANGLE = 0.18;
 
-export function bounceAngle(offset: number): number {
-  return Math.min(1, Math.max(-1, offset)) * MAX_BOUNCE_ANGLE;
+export function bounceAngle(offset: number, incomingVx = 0): number {
+  const at = Math.min(1, Math.max(-1, offset));
+  const side = at !== 0 ? Math.sign(at) : incomingVx < 0 ? -1 : 1;
+  return side * (MIN_BOUNCE_ANGLE + (MAX_BOUNCE_ANGLE - MIN_BOUNCE_ANGLE) * Math.abs(at));
 }
 
 // ───────── 속도 ─────────
@@ -248,7 +254,7 @@ export type GameEvent =
   | { kind: 'paddle'; x: number; offset: number }
   /** 단단한 벽돌이 맞아서 금이 갔다 */
   | { kind: 'crack'; row: number; col: number; x: number; y: number }
-  /** 벽돌이 깨졌다. x, y는 벽돌의 한가운데, streak는 그 공이 이어서 깬 수 */
+  /** 벽돌이 깨졌다. x, y는 벽돌에서 판 안에 보이는 부분의 한가운데(visibleMiddle), streak는 그 공이 이어서 깬 수 */
   | { kind: 'break'; row: number; col: number; x: number; y: number; brick: BrickKind; points: number; streak: number }
   /** 공이 든 벽돌에서 공이 나왔다(extra가 false면 공이 가득 차서 점수로 받았다) */
   | { kind: 'gift'; x: number; y: number; extra: boolean; points: number }
@@ -438,7 +444,7 @@ function moveBall(game: Draft, ball: Ball, seconds: number, events: GameEvent[])
     ) {
       const offset = Math.min(1, Math.max(-1, (ball.x - game.paddleX) / PADDLE_HALF));
       const speed = Math.hypot(ball.vx, ball.vy);
-      const angle = bounceAngle(offset);
+      const angle = bounceAngle(offset, ball.vx);
       ball.vx = Math.sin(angle) * speed;
       ball.vy = -Math.cos(angle) * speed;
       ball.y = PADDLE_Y - BALL_RADIUS;
@@ -458,12 +464,20 @@ function moveBall(game: Draft, ball: Ball, seconds: number, events: GameEvent[])
   return true;
 }
 
+/**
+ * 윗변이 rowY인 줄에서 판 안에 보이는 부분의 한가운데 높이. 다 들어온 줄이면 벽돌의 한가운데다.
+ * 천장에서 들어오는 중인 줄은 보이는 부분만 셈해서, 깨지는 그림과 새 공이 천장 위에 나타나지 않는다.
+ */
+export function visibleMiddle(rowY: number): number {
+  return (Math.max(0, rowY) + rowY + CELL_HEIGHT) / 2;
+}
+
 /** 공에 맞은 벽돌을 한 번 깎는다. 다 깎였으면 깨지고 점수가 붙는다. */
 function hitBrick(game: Draft, ball: Ball, touch: Touch, events: GameEvent[]): void {
   const brick = touch.row.cells[touch.col];
   if (!brick) return;
   const x = cellLeft(touch.col) + CELL_WIDTH / 2;
-  const y = touch.row.y + CELL_HEIGHT / 2;
+  const y = visibleMiddle(touch.row.y);
   brick.hits -= 1;
   if (brick.hits > 0) {
     events.push({ kind: 'crack', row: touch.row.id, col: touch.col, x, y });
@@ -485,7 +499,7 @@ function hitBrick(game: Draft, ball: Ball, touch: Touch, events: GameEvent[]): v
     return;
   }
   // 새 공은 맞힌 공과 반대쪽으로, 위를 향해 떠난다. 두 공이 한꺼번에 떨어져서 하나를 놓치는 일을 줄인다.
-  game.balls.push({ x, y, vx: -ball.vx, vy: -Math.abs(ball.vy), streak: 0 });
+  game.balls.push({ x, y: Math.max(y, BALL_RADIUS), vx: -ball.vx, vy: -Math.abs(ball.vy), streak: 0 });
   events.push({ kind: 'gift', x, y, extra: true, points: 0 });
 }
 
