@@ -31,6 +31,7 @@ import { wholePercents } from './percent';
 import {
   addDailyRun,
   DAILY_LABEL,
+  DAILY_OFF_RECORD,
   dailyDayOf,
   dailyInfo,
   dailySeed,
@@ -44,7 +45,7 @@ import {
   SHARED_DAY_PASSED,
 } from './daily';
 import { slotDailyStore } from './daily-store';
-import { noteDayScore } from '../../online/online';
+import { noteDayScore, syncScores } from '../../online/online';
 import { boardDayOf } from './rank';
 import { addRankPill, openRankView } from './rank-view';
 import {
@@ -1926,7 +1927,7 @@ export class CandySlotScene extends MiniGameScene {
 
   /**
    * 끝난 판이 오늘의 판이면 그날의 기록에 보태고, 결과 화면에 적을 줄과 공유할 것을 돌려준다. 여느 판이면 null.
-   * 오늘 시작한 오늘의 판만 그날의 기록에 남는다. 날이 넘어간 뒤에 끝낸 판은 여느 판으로 친다.
+   * 오늘 시작한 오늘의 판만 그날의 기록에 남는다. 날이 넘어간 뒤에 끝낸 판은 그날의 기록에도, 최고 기록에도 남지 않는다(offRecordNote).
    */
   private recordDaily(): { stats: ResultStat[]; share: ShareOverride } | null {
     const today = dayIndexOf(new Date());
@@ -1938,6 +1939,16 @@ export class CandySlotScene extends MiniGameScene {
     const stats: ResultStat[] = [[DAILY_LABEL.name, dailyVerdict(outcome)]];
     if (this.friendScore !== null) stats.push([DAILY_LABEL.friend, friendVerdict(this.friendScore, result.score)]);
     return { stats, share: dailyShare(today, result, outcome.record.streak) };
+  }
+
+  /**
+   * 운이 정해진 판(오늘의 판)은 최고 기록과 랭킹에 넣지 않는다. 같은 운으로 몇 번이든 다시 할 수 있어서 여느 판과 견줄 수 없다.
+   * 두었다가 날이 넘어간 뒤에 마친 판도 운을 아는 판이기는 마찬가지라 넣지 않는다.
+   */
+  protected override offRecordNote(): string | null {
+    const day = this.dailyDay;
+    if (day === null) return null;
+    return day === dayIndexOf(new Date()) ? DAILY_OFF_RECORD.today : DAILY_OFF_RECORD.past;
   }
 
   /** 오늘의 판을 마쳤으면 결과 화면의 "다시 하기"가 오늘의 판을 다시 연다. 넘어 볼 친구 기록도 이어서 넘긴다. */
@@ -1952,12 +1963,15 @@ export class CandySlotScene extends MiniGameScene {
 
   /**
    * 방금 마친 오늘의 판의 점수를 그날의 랭킹에 올릴 기록으로 적어 둔다(닉네임을 정하기 전이어도 적어 둔다).
-   * 서버에는 판을 마칠 때(finishMiniGame) 다른 기록과 함께 올라가고, 인터넷이 없으면 다음에 올라간다.
+   * 오늘의 판은 최고 기록과 전체 랭킹에 들지 않아서(offRecordNote) 판을 마칠 때의 올리기가 없다. 그래서 여기서 바로 올린다.
+   * 인터넷이 없으면 다음에 올라간다.
    * 어느 날의 랭킹인지는 판의 씨앗에 적힌 날에서 읽는다. 오늘의 판이 아니거나 그 날이 오늘이 아니면 적지 않는다.
    */
   private noteDailyScore(score: number): void {
     const day = boardDayOf(this.run.seed, Date.now());
-    if (day !== null) noteDayScore(this.gameId, score, day);
+    if (day === null) return;
+    noteDayScore(this.gameId, score, day);
+    void syncScores();
   }
 
   /** 시작 화면에서 오늘의 판을 골랐을 때, 판을 바꾸는 버튼(beside)의 오른쪽에 랭킹 버튼을 놓는다. */

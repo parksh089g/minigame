@@ -363,6 +363,33 @@ describe('applyPlayResult', () => {
     expect(original).toEqual(snapshot);
   });
 
+  it('기록에 넣지 않는 판(ranked가 false)은 한 판으로 세고 코인은 주되, 최고 기록과 이번 주 랭킹의 기록은 그대로 둔다', () => {
+    // 행운 슬롯의 오늘의 판처럼 운이 정해져 있어서 여느 판과 견줄 수 없는 판이다(10차 검토 S10).
+    const first = applyPlayResult(createDefaultSave(NOW), 'candy-slot', 300, 6, NOW).save;
+    expect(first.online.week?.bests).toEqual({ 'candy-slot': 300 });
+    const daily = applyPlayResult(first, 'candy-slot', 6000, 120, NOW + 10, null, null, false);
+    expect(daily.ranked).toBe(false);
+    expect(daily.isNewBest).toBe(false);
+    expect(daily.best).toBe(300);
+    expect(daily.previousBest).toBe(300);
+    expect(daily.coinsEarned).toBe(120);
+    expect(daily.save.coins).toBe(126);
+    expect(daily.save.games['candy-slot']).toEqual({ best: 300, plays: 2, lastPlayedAt: NOW + 10 });
+    expect(daily.save.online).toEqual(first.online);
+    // 여느 판은 그대로 기록한다.
+    const normal = applyPlayResult(daily.save, 'candy-slot', 400, 8, NOW + 20);
+    expect(normal.ranked).toBe(true);
+    expect(normal.isNewBest).toBe(true);
+    expect(normal.save.online.week?.bests).toEqual({ 'candy-slot': 400 });
+  });
+
+  it('기록에 넣지 않는 판도 오늘의 도전은 따진다', () => {
+    const challenge: DailyChallenge = { dateKey: '2023-11-15', gameId: 'candy-slot', target: 100, reward: 25 };
+    const result = applyPlayResult(createDefaultSave(NOW), 'candy-slot', 150, 3, NOW, challenge, null, false);
+    expect(result.daily?.cleared).toBe(true);
+    expect(result.best).toBe(0);
+  });
+
   it('게임마다 기록을 따로 둔다', () => {
     let save = createDefaultSave(NOW);
     save = applyPlayResult(save, 'a', 10, 0, NOW).save;

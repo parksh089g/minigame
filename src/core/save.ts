@@ -133,6 +133,11 @@ export interface PlayResult {
   best: number;
   previousBest: number;
   isNewBest: boolean;
+  /**
+   * 이 판의 점수를 최고 기록과 이번 주 랭킹의 기록에 넣었는지. 운이 정해져 있어서 여느 판과 견줄 수 없는 판
+   * (행운 슬롯의 오늘의 판)은 false다. 그런 판도 한 판으로 세고 코인은 준다.
+   */
+  ranked: boolean;
   /** 점수로 얻은 코인. 오늘의 도전 보상은 daily.reward에 따로 있다. */
   coinsEarned: number;
   /** 이 게임이 오늘의 도전이고 아직 달성하기 전이었을 때만 있다. */
@@ -284,6 +289,8 @@ export function getRecord(save: SaveData, gameId: string): GameRecord {
  * 이미 달성한 날이거나 기기 시계가 마지막 달성일보다 앞으로 돌아가 있으면 도전은 따지지 않는다.
  * week에 이번 주의 미션을 넘기면, 이 판을 주간 기록에 더하고 이 판으로 다 채운 미션을 알려 준다.
  * week에 게임 목록까지 있고 주가 바뀐 뒤 첫 판이면, 지난주에 받지 않은 미션 보상을 먼저 넣어 준다.
+ * ranked가 false면 점수를 최고 기록과 이번 주 랭킹의 기록에 넣지 않는다(여느 판과 견줄 수 없는 판).
+ * 그래도 한 판으로 세고, 코인과 오늘의 도전, 주간 미션은 여느 판처럼 따진다.
  */
 export function applyPlayResult(
   save: SaveData,
@@ -293,6 +300,7 @@ export function applyPlayResult(
   now: number = Date.now(),
   challenge: DailyChallenge | null = null,
   week: WeekContext | null = null,
+  ranked = true,
 ): PlayResult {
   // 주가 바뀐 뒤 첫 판이면 지난주에 다 채우고도 받지 않은 미션 보상부터 넣어 준다.
   // 허브는 열릴 때 넣어 주지만, 허브를 거치지 않고 판을 이어 하는 사이 주가 바뀌면
@@ -303,8 +311,8 @@ export function applyPlayResult(
   const coinsEarned =
     score > 0 ? Math.max(MIN_COINS_PER_PLAY, toCount(rawCoins)) : toCount(rawCoins);
   const previous = getRecord(base, gameId);
-  const isNewBest = score > previous.best;
-  const best = Math.max(previous.best, score);
+  const isNewBest = ranked && score > previous.best;
+  const best = ranked ? Math.max(previous.best, score) : previous.best;
 
   let daily: DailyOutcome | null = null;
   let dailyState = base.daily;
@@ -355,7 +363,7 @@ export function applyPlayResult(
     daily: dailyState,
     weekly,
     // 이번 주 랭킹에 올릴 기록. 닉네임을 정하기 전이어도 적어 둔다.
-    online: withWeekScore(base.online, gameId, score, rankWeekOf(now)),
+    online: ranked ? withWeekScore(base.online, gameId, score, rankWeekOf(now)) : base.online,
     updatedAt: now,
   };
 
@@ -368,6 +376,7 @@ export function applyPlayResult(
     best,
     previousBest: previous.best,
     isNewBest,
+    ranked,
     coinsEarned,
     daily,
     newAchievements,
