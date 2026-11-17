@@ -17,6 +17,7 @@ import {
   resetProgress,
   settleLastWeek,
   SAVE_VERSION,
+  SCORE_RESETS,
   toggleFavorite,
 } from './save';
 import { createCosmetics } from './shop';
@@ -929,5 +930,97 @@ describe('단계 모드', () => {
   it('진행을 지우면 깬 단계도 지워진다', () => {
     const cleared = applyStageClear(createDefaultSave(NOW), 'color-sort', 1, NOW)!.save;
     expect(resetProgress(cleared, NOW + 1).stages).toEqual({});
+  });
+});
+
+describe('점수 세는 법이 바뀐 게임의 옛 기록', () => {
+  const GARDEN = 'garden-guard';
+  const ID = '01112131-4151-6171-8191-a1b1c1d1e1f1';
+  const WEEK = '2026-11-16';
+  /** 텃밭 지키기의 점수가 "몇째 날까지 갔는지"였던 때의 세이브 */
+  const old = (extra: Record<string, unknown> = {}): Record<string, unknown> => ({
+    version: 9,
+    coins: 100,
+    games: {
+      [GARDEN]: { best: 5000, plays: 12, lastPlayedAt: NOW - 1000 },
+      'stack-tower': { best: 40, plays: 3, lastPlayedAt: NOW - 2000 },
+    },
+    ...extra,
+  });
+
+  it('텃밭 지키기의 새 규칙은 세이브 11부터다', () => {
+    expect(SCORE_RESETS).toEqual([{ since: 11, game: GARDEN }]);
+    expect(SAVE_VERSION).toBeGreaterThanOrEqual(11);
+  });
+
+  it('세이브 10(행운 슬롯의 도감이 들어온 버전)에 적힌 점수도 옛 규칙으로 낸 것이라 비운다', () => {
+    const save = normalizeSave({ ...old(), version: 10 }, NOW);
+    expect(save.games[GARDEN]).toEqual({ best: 0, plays: 12, lastPlayedAt: NOW - 1000 });
+    expect(save.achievements.claimed).toEqual(['garden-1000', 'garden-3000']);
+    expect(save.coins).toBe(170);
+  });
+
+  it('옛 세이브를 읽으면 그 게임의 최고 점수만 비운다. 판 수와 마지막으로 한 때, 다른 게임의 기록은 그대로다', () => {
+    const save = normalizeSave(old(), NOW);
+    expect(save.version).toBe(SAVE_VERSION);
+    expect(save.games[GARDEN]).toEqual({ best: 0, plays: 12, lastPlayedAt: NOW - 1000 });
+    expect(save.games['stack-tower']).toEqual({ best: 40, plays: 3, lastPlayedAt: NOW - 2000 });
+  });
+
+  it('새 규칙으로 저장한 세이브의 기록은 건드리지 않는다', () => {
+    const raw = { ...old(), version: 11, achievements: { claimed: [] } };
+    const save = normalizeSave(raw, NOW);
+    expect(save.games[GARDEN].best).toBe(5000);
+    expect(save.coins).toBe(100);
+    expect(save.achievements.claimed).toEqual([]);
+    // 한 번 고친 세이브를 다시 읽어도 달라지지 않는다.
+    const once = normalizeSave(old(), NOW);
+    expect(normalizeSave(JSON.parse(JSON.stringify(once)), NOW)).toEqual(once);
+  });
+
+  it('옛 점수로 이뤄 놓고 받지 않은 업적은 보상을 넣어 주고 받은 것으로 적는다', () => {
+    // 1000점 업적(20코인)은 이미 받았고, 3000점 업적(50코인)은 이루기만 했다.
+    const save = normalizeSave(old({ achievements: { claimed: ['garden-1000'] } }), NOW);
+    expect(save.coins).toBe(150);
+    expect(save.achievements.claimed).toEqual(['garden-1000', 'garden-3000']);
+    // 다른 게임의 기록으로 이룬 업적은 그대로 받을 수 있는 채로 남는다(여기서 대신 받지 않는다).
+    const tower = normalizeSave(
+      old({ games: { [GARDEN]: { best: 1200, plays: 2, lastPlayedAt: NOW }, 'stack-tower': { best: 9999, plays: 3, lastPlayedAt: NOW } } }),
+      NOW,
+    );
+    expect(tower.achievements.claimed).toEqual(['garden-1000']);
+    expect(tower.coins).toBe(120);
+    expect(tower.games['stack-tower'].best).toBe(9999);
+  });
+
+  it('이미 받은 업적에 새 점수로 다시 닿아도 새로 이룬 것으로 알리지 않는다', () => {
+    const save = normalizeSave(old({ achievements: { claimed: ['garden-1000'] } }), NOW);
+    const result = applyPlayResult(save, GARDEN, 1200, 12, NOW);
+    expect(result.best).toBe(1200);
+    expect(result.isNewBest).toBe(true);
+    expect(result.newAchievements.map((achievement) => achievement.id)).not.toContain('garden-1000');
+    expect(result.save.achievements.claimed).toEqual(['garden-1000', 'garden-3000']);
+  });
+
+  it('서버에 올렸다는 표시와 이번 주에 낸 옛 점수도 지워서, 새 점수가 처음부터 올라가게 한다', () => {
+    const online = {
+      id: ID,
+      name: '등불지기',
+      sentName: '등불지기',
+      sent: { [GARDEN]: 5000, 'stack-tower': 40 },
+      week: { key: WEEK, bests: { [GARDEN]: 5000, 'stack-tower': 40 }, sent: { [GARDEN]: 5000 } },
+    };
+    const save = normalizeSave(old({ online }), NOW);
+    expect(save.online.sent).toEqual({ 'stack-tower': 40 });
+    expect(save.online.week).toEqual({ key: WEEK, bests: { 'stack-tower': 40 }, sent: {} });
+    expect(save.online.name).toBe('등불지기');
+  });
+
+  it('그 게임을 해 본 적이 없는 옛 세이브는 버전만 오른다', () => {
+    const raw = { version: 9, coins: 7, games: { 'stack-tower': { best: 40, plays: 3, lastPlayedAt: NOW } } };
+    const save = normalizeSave(raw, NOW);
+    expect(save.coins).toBe(7);
+    expect(save.games).toEqual({ 'stack-tower': { best: 40, plays: 3, lastPlayedAt: NOW } });
+    expect(save.achievements.claimed).toEqual([]);
   });
 });

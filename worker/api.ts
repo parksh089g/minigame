@@ -6,6 +6,7 @@ import {
   cleanCode,
   cleanName,
   cleanScore,
+  followsRules,
   hasDailyBoard,
   hasWeeklyBoard,
   isDeviceId,
@@ -76,6 +77,14 @@ function readScores(raw: unknown): Scores | null {
     scores[game] = score;
   }
   return scores;
+}
+
+/**
+ * 점수 세는 법이 바뀐 게임의 점수 가운데 지금 규칙으로 냈다고 밝히지 않은 것을 뺀다(protocol.ts의 SCORE_RULES).
+ * 아직 업데이트하지 않은 앱이 옛 규칙으로 낸 점수다. 그 게임의 점수만 흘려보내고 나머지는 그대로 받는다.
+ */
+function dropOutdated(scores: Scores, rules: unknown): void {
+  for (const game of RANKED_GAMES) if (!followsRules(game, rules)) delete scores[game];
 }
 
 /**
@@ -165,6 +174,7 @@ export async function handleApi(request: Request, board: BoardApi): Promise<Resp
     const weekly = readWeekly(body.weekly);
     const daily = readDaily(body.daily);
     if (name === null || scores === null || weekly === 'invalid' || daily === 'invalid') return fail('invalid');
+    for (const group of [scores, weekly?.scores, daily?.scores]) if (group) dropOutdated(group, body.rules);
     const result = await board.submit(ip, body.device, name, scores, weekly, daily);
     return result === TOO_FAST ? fail('slow') : json(result);
   }

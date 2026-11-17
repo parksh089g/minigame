@@ -176,14 +176,19 @@ export class AchievementsScene extends Phaser.Scene {
   private rows(): Row[] {
     if (this.tab !== WEEKLY) {
       const stats = statsOf(store.data);
-      return achievementsIn(this.tab).map((achievement) => ({
-        title: achievement.title,
-        description: achievement.description,
-        reward: achievement.reward,
-        ...progressOf(achievement, stats),
-        claimed: isClaimed(store.data.achievements, achievement.id),
-        claim: () => store.claimAchievement(achievement.id).ok,
-      }));
+      return achievementsIn(this.tab).map((achievement) => {
+        const claimed = isClaimed(store.data.achievements, achievement.id);
+        const progress = progressOf(achievement, stats);
+        return {
+          title: achievement.title,
+          description: achievement.description,
+          reward: achievement.reward,
+          // 보상을 받은 업적은 다 채운 것으로 보여 준다. 점수 세는 법이 바뀌어 기록을 비운 게임에서는 진행이 다시 0부터 찬다.
+          ...(claimed ? { current: progress.goal, goal: progress.goal, complete: true } : progress),
+          claimed,
+          claim: () => store.claimAchievement(achievement.id).ok,
+        };
+      });
     }
     const week = this.week;
     const state = week ? weeklyFor(store.data.weekly, week.weekKey) : null;
@@ -233,7 +238,11 @@ export class AchievementsScene extends Phaser.Scene {
       const until = left <= 1 ? '오늘까지' : `${left}일 남음`;
       this.summary.setText(`이번 주 ${rows.filter((row) => row.complete).length}/${rows.length} · ${until}`);
     } else {
-      const done = ACHIEVEMENTS.filter((achievement) => progressOf(achievement, stats).complete);
+      // 보상을 받은 업적은 이룬 것으로 센다. 점수 세는 법이 바뀌어 기록을 비운 게임에서는 받은 업적의 진행이 다시 0부터 찬다.
+      const done = ACHIEVEMENTS.filter(
+        (achievement) =>
+          progressOf(achievement, stats).complete || isClaimed(store.data.achievements, achievement.id),
+      );
       this.summary.setText(`달성 ${done.length}/${ACHIEVEMENTS.length}`);
     }
     const waiting = ready.length + readyMissions;

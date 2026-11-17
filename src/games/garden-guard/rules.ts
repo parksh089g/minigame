@@ -306,22 +306,30 @@ export function needLine(needs: UpgradeId): string {
 // ------------------------------------------------------------ 점수
 
 /**
- * 한 판의 점수. 지킨 날마다 100점이고, 무너진 날에 쫓아낸 만큼(0~99점)을 더한다.
- * lastCleared는 이 판에서 마지막으로 지킨 날(몇째 날인지)이고, 하루도 못 지켰으면 0이다.
- * 뒤쪽 날부터 시작한 판도 그날을 지켜 내야 그날의 점수를 받는다.
+ * 이 판에서 지킨 날의 수. startDay는 판을 시작한 날이고, lastCleared는 이 판에서 마지막으로 지킨 날(몇째 날인지)이며
+ * 하루도 못 지켰으면 0이다. 31일째에서 시작해 33일째까지 지켰으면 사흘이다.
  */
-export function scoreFor(lastCleared: number, dayKilled: number, dayTotal: number): number {
-  const partial = dayTotal > 0 ? Math.min(99, Math.floor((dayKilled / dayTotal) * 100)) : 0;
-  return Math.max(0, lastCleared) * 100 + partial;
+export function daysKept(startDay: number, lastCleared: number): number {
+  return lastCleared >= startDay ? lastCleared - Math.max(1, startDay) + 1 : 0;
 }
 
-/** 허브 카드의 기록 줄. 점수에서 지킨 날을 꺼내 "최고 9일째"로 적고, 하루도 못 지켰으면 점수를 적는다. */
+/**
+ * 한 판의 점수. 이 판에서 지킨 날마다 100점이고, 무너진 날에 쫓아낸 만큼(0~99점)을 더한다.
+ * 몇째 날까지 갔는지가 아니라 이 판에서 며칠을 지켰는지를 센다. 뒤쪽 날에서 시작해 하루만 지킨 판은 100점이다.
+ * kept는 daysKept()의 값이다.
+ */
+export function scoreFor(kept: number, dayKilled: number, dayTotal: number): number {
+  const partial = dayTotal > 0 ? Math.min(99, Math.floor((dayKilled / dayTotal) * 100)) : 0;
+  return Math.max(0, kept) * 100 + partial;
+}
+
+/** 허브 카드의 기록 줄. 점수에서 지킨 날 수를 꺼내 "한 판에 9일"로 적고, 하루도 못 지켰으면 점수를 적는다. */
 export function recordLabel(best: number): string {
   const days = Math.floor(Math.max(0, best) / 100);
-  return days > 0 ? `최고 ${days}일째` : `최고 ${Math.max(0, Math.floor(best))}`;
+  return days > 0 ? `한 판에 ${days}일` : `최고 ${Math.max(0, Math.floor(best))}`;
 }
 
-/** 점수에 따라 주는 허브 코인. 지킨 날 하나에 하나씩, 한 판에 30개까지 */
+/** 점수에 따라 주는 허브 코인. 이 판에서 지킨 날 하나에 하나씩, 한 판에 30개까지 */
 export function coinsFor(score: number): number {
   return Math.min(30, Math.floor(score / 100));
 }

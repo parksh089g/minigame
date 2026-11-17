@@ -10,7 +10,17 @@ import { LOOK, registerGardenTextures, TEX } from './art';
 import { BOONS, ENEMIES, GARDEN_GAME_ID, GARDEN_SCENE, type EnemyKind } from './data';
 import { buildLobby } from './lobby';
 import { openPickPanel, pickedInfo, type ClearedNote, type PickPanel } from './picks';
-import { applyRun, bankSeeds, bossKind, clampStartDay, isBossDay, openedStart, raiseBest, type GardenMeta } from './rules';
+import {
+  applyRun,
+  bankSeeds,
+  bossKind,
+  clampStartDay,
+  daysKept,
+  isBossDay,
+  openedStart,
+  raiseBest,
+  type GardenMeta,
+} from './rules';
 import { settleSavedRun } from './saved-run';
 import { createRun, runScore, step, stormReady, type Input, type RunState, type SimEvent } from './sim';
 import { gardenStore } from './store';
@@ -719,8 +729,11 @@ export class GardenGuardScene extends MiniGameScene {
         FONT_SIZE.large - 4,
       );
     }
+    // 점수는 이 판에서 지킨 날 수를 센다. 뒤쪽 날에서 시작한 판은 어디까지 갔는지도 함께 적는다.
+    const kept = daysKept(state.startDay, state.lastCleared);
+    const reached = state.startDay > 1 ? ` (${state.lastCleared}일째까지)` : '';
     const stats: ResultStat[] = [
-      ['지킨 날', state.lastCleared > 0 ? `${state.lastCleared}일째` : '없음'],
+      ['지킨 날', kept > 0 ? `${kept}일${reached}` : '없음'],
       ['쫓아낸 벌레', `${state.kills}마리`],
       ['받은 씨앗', `${Math.floor(state.seeds)}개`],
     ];

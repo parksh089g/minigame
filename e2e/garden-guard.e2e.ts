@@ -1,14 +1,15 @@
 /**
  * 텃밭 지키기의 화면 점검 가운데 준비 화면의 저장과 사고팔기를 본다:
  * 띄워 둔 사이에 다른 곳이 저장한 진행을 덮어쓰지 않는지, 살 수 없는 강화와 큰 값이 어떻게 적히는지,
- * 망가진 저장으로도 열리는지. 배치와 판의 흐름은 layout.e2e.ts와 smoke.e2e.ts가 본다.
+ * 망가진 저장으로도 열리는지. 점수와 코인이 이 판에서 지킨 날 수를 따르는지도 본다.
+ * 배치와 판의 흐름은 layout.e2e.ts와 smoke.e2e.ts가 본다.
  */
 import './app-globals';
 import { expect, type Page } from '@playwright/test';
-import { GAME_WIDTH } from '../src/config';
+import { GAME_WIDTH, SCENE } from '../src/config';
 import { GARDEN_SCENE, UPGRADES } from '../src/games/garden-guard/data';
 import { costLabel, MAX_DAY, META_VERSION, needLine, upgradeCost, type GardenMeta } from '../src/games/garden-guard/rules';
-import { hiddenTexts, it, openApp, startScene, tapAt, textPoint } from './app';
+import { hiddenTexts, it, openApp, startScene, tapAt, tapText, textPoint, waitForScene } from './app';
 
 const WAIT = { timeout: 20_000 } as const;
 
@@ -238,4 +239,53 @@ it('텃밭 지키기: 최고 기록이 터무니없이 큰 저장도 준비 화�
   await expect.poll(() => hasText(page, `최고 ${MAX_DAY}일째`), WAIT).toBe(true);
   expect(await hasText(page, INFO_HINT)).toBe(true);
   expect(await hiddenTexts(page, GARDEN_SCENE), '준비 화면').toEqual([]);
+});
+
+/** 허브의 세이브(core/store.ts)에 적힌 코인과 텃밭 지키기의 기록. 저장하는 곳과 이름은 그 파일과 같다. */
+function readHubSave(page: Page): Promise<{ coins: number; best: number; plays: number } | null> {
+  return page.evaluate(
+    () =>
+      new Promise<{ coins: number; best: number; plays: number } | null>((resolve, reject) => {
+        const open = indexedDB.open('pocket-arcade');
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const request = open.result.transaction('kv').objectStore('kv').get('save');
+          request.onsuccess = () => {
+            open.result.close();
+            const save = request.result as { coins: number; games: Record<string, { best: number; plays: number }> } | undefined;
+            const record = save?.games['garden-guard'];
+            resolve(save && record ? { coins: save.coins, best: record.best, plays: record.plays } : null);
+          };
+          request.onerror = () => reject(request.error);
+        };
+      }),
+  );
+}
+
+it('텃밭 지키기: 뒤쪽 날에서 시작해 하루만 지키고 끝낸 판은 100점에 코인 하나다', async ({ page }) => {
+  // 대장을 여섯 넘겨서 31일째에서 시작하는 저장
+  await openLobby(page, { ...BASE, best: 32, runs: 40, startDay: 31, savedAt: Date.now() + 60_000 });
+  await tapText(page, GARDEN_SCENE, '출발!');
+  const day = (): Promise<number | undefined> =>
+    page.evaluate((key) => (window.__pocketArcade?.scene.getScene(key) as unknown as { run: { day: number } | null }).run?.day, GARDEN_SCENE);
+  await expect.poll(day, { ...WAIT, message: '고른 날에서 시작해야 한다' }).toBe(31);
+
+  // 그날을 지킨 것으로 적고 울타리를 무너뜨려 판을 끝낸다.
+  await page.evaluate((key) => {
+    const run = (window.__pocketArcade?.scene.getScene(key) as unknown as { run: { lastCleared: number; fence: number; dayKilled: number } }).run;
+    run.lastCleared = 31;
+    run.dayKilled = 0;
+    run.fence = 0;
+  }, GARDEN_SCENE);
+  await waitForScene(page, SCENE.result);
+
+  // 몇째 날까지 갔는지(31일째)가 아니라 이 판에서 지킨 날 수(하루)로 센다. 전에는 3100점에 코인 30개였다.
+  await expect.poll(() => readHubSave(page), WAIT).toMatchObject({ coins: 1, plays: 1 });
+  // 끝나는 순간에 벌레가 쫓겨나면 그날의 몫이 몇 점 붙는다. 그래도 지킨 하루의 100점대다.
+  const best = (await readHubSave(page))?.best ?? 0;
+  expect(best, '이 판에서 지킨 하루의 점수').toBeGreaterThanOrEqual(100);
+  expect(best).toBeLessThan(200);
+  await expect.poll(() => textPoint(page, SCENE.result, '1일 (31일째까지)'), { ...WAIT, message: '결과 화면의 지킨 날' }).not.toBeNull();
+  expect(await textPoint(page, SCENE.result, '+1'), '받은 코인').not.toBeNull();
+  expect(await hiddenTexts(page, SCENE.result), '결과 화면').toEqual([]);
 });

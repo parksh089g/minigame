@@ -12,6 +12,7 @@ import {
   isRankedGame,
   isRankWeek,
   RANKED_GAMES,
+  rulesFor,
   type SubmitRequest,
 } from './protocol';
 
@@ -138,6 +139,38 @@ export function withoutName(state: OnlineState): OnlineState {
   };
 }
 
+/** 점수 묶음에서 한 게임을 뺀다. 들어 있지 않으면 받은 것을 그대로 돌려준다. */
+function without(scores: Record<string, number>, game: string): Record<string, number> {
+  if (!(game in scores)) return scores;
+  const { [game]: _dropped, ...rest } = scores;
+  return rest;
+}
+
+/**
+ * 한 게임의 점수 세는 법이 바뀌었을 때, 그 게임에서 서버에 올렸다는 표시와 이번 주, 오늘 낸 점수를 지운다.
+ * 옛 규칙으로 낸 점수는 다시 올라가지 않고, 새 규칙으로 낸 점수는 처음부터 올라간다. 바뀌는 것이 없으면 받은 것을 그대로 돌려준다.
+ */
+export function withoutGame(state: OnlineState, game: string): OnlineState {
+  const sent = without(state.sent, game);
+  const week = state.week && {
+    ...state.week,
+    bests: without(state.week.bests, game),
+    sent: without(state.week.sent, game),
+  };
+  const day = state.day && {
+    ...state.day,
+    bests: without(state.day.bests, game),
+    sent: without(state.day.sent, game),
+  };
+  const same =
+    sent === state.sent &&
+    week?.bests === state.week?.bests &&
+    week?.sent === state.week?.sent &&
+    day?.bests === state.day?.bests &&
+    day?.sent === state.day?.sent;
+  return same ? state : { ...state, sent, week, day };
+}
+
 /**
  * 방금 끝난 판의 점수를 이번 주(week)의 기록에 적는다. 적어 둔 것이 다른 주의 것이면 버리고 새로 시작한다.
  * 랭킹이 없는 게임, 주간 랭킹이 없는 게임(점수가 계속 쌓이는 새싹 컴퍼니), 올릴 수 없는 점수(0점)는 적지 않는다.
@@ -219,6 +252,9 @@ export function pendingSubmit(
   const request: SubmitRequest = { device: state.id, name: state.name, scores };
   if (hasWeek) request.weekly = { week, scores: weekScores };
   if (hasDay) request.daily = { day, scores: dayScores };
+  // 점수 세는 법이 바뀐 게임의 점수에는 어느 규칙으로 낸 것인지를 붙인다. 없으면 서버가 받지 않는다.
+  const rules = rulesFor(scores, request.weekly?.scores, request.daily?.scores);
+  if (rules) request.rules = rules;
   return request;
 }
 

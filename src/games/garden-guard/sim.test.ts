@@ -502,8 +502,17 @@ describe('하루', () => {
     expect(count(events, 'spawn')).toBe(1);
   });
 
-  it('점수는 넘긴 날과 무너진 날에 쫓아낸 만큼이다', () => {
+  it('점수는 이 판에서 지킨 날과 무너진 날에 쫓아낸 만큼이다', () => {
     const state = emptied({}, 6);
+    state.lastCleared = 7;
+    state.dayTotal = 8;
+    state.dayKilled = 2;
+    // 6일째에서 시작해 7일째까지 지켰으니 이틀이다. 몇째 날까지 갔는지(7)를 세지 않는다.
+    expect(runScore(state)).toBe(225);
+  });
+
+  it('1일째에서 시작한 판의 점수는 지킨 날의 번호와 같다', () => {
+    const state = emptied({}, 1);
     state.lastCleared = 7;
     state.dayTotal = 8;
     state.dayKilled = 2;
@@ -517,12 +526,13 @@ describe('하루', () => {
     expect(state.phase).toBe('rest');
     expect(state.lastCleared).toBe(3);
     expect(state.dayKilled).toBe(state.dayTotal);
-    expect(runScore(state)).toBe(300);
+    // 3일째에서 시작해 그날을 지켰으니 하루다.
+    expect(runScore(state)).toBe(100);
     step(state, DT, { aim: null, storm: false, pick: 0 });
     while (state.phase === 'rest') step(state, DT);
     expect(state.day).toBe(4);
     expect(state.dayKilled).toBe(0);
-    expect(runScore(state)).toBe(300);
+    expect(runScore(state)).toBe(100);
   });
 });
 
