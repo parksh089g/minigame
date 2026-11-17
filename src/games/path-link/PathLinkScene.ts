@@ -587,15 +587,30 @@ export class PathLinkScene extends MiniGameScene {
 
   private onPause(): void {
     this.finishStroke();
+    this.chargeGrace();
     // 끝난 뒤 결과 화면이 뜰 때는 그리던 판을 그대로 보여 준다. 시간을 재지 않는 단계 모드에서도 가리지 않는다.
     if (this.playing && this.stageLevel === null) this.inkLayer.setVisible(false);
   }
 
   private onResume(): void {
     this.inkLayer.setVisible(true);
-    if (!this.playing || !this.started || this.stageLevel !== null) return;
+    // 시간이 이미 다 되었으면 여유 없이 다음 프레임에 끝낸다.
+    if (!this.playing || !this.started || this.stageLevel !== null || isOver(this.run)) return;
     this.grace = RESUME_GRACE_SECONDS;
     showBanner(this, this.boardBox.y, '준비!', LOOK.text.ready, RESUME_GRACE_SECONDS * 1000, DEPTH.banner);
+  }
+
+  /**
+   * "준비!"가 끝나기 전에 다시 멈추면, 그동안 판을 본 시간을 시계에서 뺀다.
+   * 그러지 않으면 멈추기를 되풀이해 시계를 세워 둔 채 판을 볼 수 있다.
+   */
+  private chargeGrace(): void {
+    if (this.grace <= 0) return;
+    const seen = RESUME_GRACE_SECONDS - this.grace;
+    this.grace = 0;
+    if (!this.playing || !this.started || this.stageLevel !== null) return;
+    this.run = elapse(this.run, seen);
+    this.hud.setTime(this.run.timeLeft, START_SECONDS);
   }
 
   /** 점이나 길 위의 칸을 누르면 그 쌍의 길을 그리기 시작한다. */
