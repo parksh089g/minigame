@@ -4,21 +4,23 @@
  * 자동 플레이(bot.ts)와 테스트도 같은 step을 돌려서, 화면에서 하는 판과 숫자가 같다.
  */
 import {
-  addAlly,
   allyDamage,
   allyInterval,
+  allySpot,
   buyCard,
+  dismissAlly,
   fruitFor,
   heatScale,
   openShop,
+  placeAlly,
   reroll,
   starOf,
   type Ally,
+  type BuyMode,
   type ShopCard,
 } from './allies';
 import {
   ALLIES,
-  ALLY_SPOTS,
   CHARGE,
   DIG,
   ENEMIES,
@@ -125,7 +127,7 @@ export interface RunState {
   fence: number;
   /** 물총이 다음에 쏠 때까지 남은 시간(초) */
   fireIn: number;
-  /** 울타리 아래에 선 동료. 자리의 차례(ALLY_ORDER)대로다. */
+  /** 울타리 아래 텃밭의 칸에 선 동료. 칸의 차례(cell)대로다. */
   allies: Ally[];
   /** 물벼락을 다시 쓸 때까지 남은 시간(초) */
   stormIn: number;
@@ -169,8 +171,10 @@ export interface Input {
   aim: { x: number; y: number } | null;
   /** 물벼락 버튼을 눌렀는지 */
   storm: boolean;
-  /** 가게에서 산 카드의 자리(0부터). 사지 않았으면 적지 않는다. */
-  buy?: number;
+  /** 가게에서 산 카드의 자리(0부터)와, 합칠지(merge) 새로 놓을지(place). 사지 않았으면 적지 않는다. */
+  buy?: { card: number; mode: BuyMode };
+  /** 가게에서 내보낸 동료의 자리(state.allies의 차례) */
+  dismiss?: number;
   /** 가게의 카드를 다시 뽑는지 */
   reroll?: boolean;
   /** 가게를 닫고 다음 날로 가는지 */
@@ -183,8 +187,8 @@ export type SimEvent =
   | { type: 'dayStart'; day: number; boss: boolean }
   | { type: 'dayClear'; day: number; seeds: number; record: boolean; mended: number; shards: number; fruit: number }
   | { type: 'spawn'; kind: EnemyKind; x: number }
-  /** ally는 쏜 동료이고, 물총이 쏘았으면 null이다. */
-  | { type: 'fire'; ally: AllyId | null }
+  /** ally는 쏜 동료이고 cell은 그 동료의 첫 칸이다. 물총이 쏘았으면 ally는 null, cell은 -1이다. */
+  | { type: 'fire'; ally: AllyId | null; cell: number }
   | { type: 'hit'; x: number; y: number; crit: boolean; shell: boolean }
   | { type: 'kill'; x: number; y: number; kind: EnemyKind; seeds: number }
   | { type: 'bite'; x: number; damage: number }
@@ -193,8 +197,13 @@ export type SimEvent =
   | { type: 'storm' }
   /** 동료 가게가 열렸다. */
   | { type: 'shop' }
-  /** 동료를 샀다. star는 합쳐서 오른 별이고, 오르지 않았으면 0이다(처음 산 동료는 1). */
-  | { type: 'buy'; id: AllyId; star: number }
+  /**
+   * 동료를 샀다. 합쳤으면(merge) star는 오른 별이고 오르지 않았으면 0이다. 새로 놓았으면(place) star는 1이다.
+   * x는 그 동료가 선 자리다.
+   */
+  | { type: 'buy'; id: AllyId; star: number; mode: BuyMode; x: number }
+  /** 동료를 내보내고 열매를 돌려받았다. x는 그 동료가 섰던 자리다. */
+  | { type: 'dismiss'; id: AllyId; refund: number; x: number }
   | { type: 'reroll' }
   | { type: 'over' };
 
@@ -254,7 +263,7 @@ export function createRun(config: RunConfig): { state: RunState; events: SimEven
     shards: 0,
     guardLeft: 0,
   };
-  if (sprouts > 0) addAlly(state, 'sunflower', sprouts);
+  if (sprouts > 0) placeAlly(state, 'sunflower', sprouts);
   // 첫날 앞에 가게를 먼저 연다. "다음 날"을 누르면 첫날이 시작된다.
   openShop(state);
   return { state, events: [{ type: 'shop' }] };
@@ -488,7 +497,7 @@ function fireGun(state: RunState, input: Input, dt: number, events: SimEvent[]):
     const damage = stats.damage * (side ? GUN.forkDamage : 1) * (crit ? stats.critMult : 1);
     addShot(state, SHOOTER, state.aim + order * GUN.forkAngle, damage, crit, '');
   }
-  events.push({ type: 'fire', ally: null });
+  events.push({ type: 'fire', ally: null, cell: -1 });
 }
 
 /** 겨눌 수 있는 벌레(판 안에 들어왔고, 살아 있고, 땅속에 숨지 않은 것) */
@@ -509,9 +518,9 @@ function crowdAround(state: RunState, enemy: Enemy, radius: number): number {
  * 동료가 겨눌 벌레. 동료마다 고르는 법(ALLIES의 aim)이 다르다. 겨눌 것이 없으면 null
  * 선인장(reach)은 울타리에서 그만큼 안으로 들어온 벌레만 겨눈다.
  */
-export function allyTarget(state: RunState, id: AllyId): Enemy | null {
-  const def = ALLIES[id];
-  const spot = ALLY_SPOTS[id];
+export function allyTarget(state: RunState, ally: Pick<Ally, 'id' | 'cell'>): Enemy | null {
+  const def = ALLIES[ally.id];
+  const spot = allySpot(ally);
   let target: Enemy | null = null;
   let best = Infinity;
   for (const enemy of state.enemies) {
@@ -550,14 +559,14 @@ function fireAllies(state: RunState, dt: number, events: SimEvent[]): void {
   for (const ally of state.allies) {
     ally.fireIn -= dt;
     if (ally.fireIn > 0) continue;
-    const target = allyTarget(state, ally.id);
+    const target = allyTarget(state, ally);
     if (!target) {
       ally.fireIn = 0;
       continue;
     }
     const def = ALLIES[ally.id];
     const star = starOf(ally.copies);
-    const spot = ALLY_SPOTS[ally.id];
+    const spot = allySpot(ally);
     // 날아가는 동안 벌레가 내려올 만큼 앞을 겨눈다.
     const time = Math.hypot(target.x - spot.x, target.y - spot.y) / def.shotSpeed;
     const stopY = FIELD.depth - ENEMIES[target.kind].radius;
@@ -566,7 +575,7 @@ function fireAllies(state: RunState, dt: number, events: SimEvent[]): void {
     ally.fireIn += allyInterval(ally.id, star) * (state.stats.interval / GUN.interval);
     const damage = allyDamage(ally.id, star, state.stats.damage, state.stats.allyPower);
     addShot(state, spot, clampAim(Math.atan2(y - spot.y, target.x - spot.x)), damage, false, ally.id, def.shotSpeed);
-    events.push({ type: 'fire', ally: ally.id });
+    events.push({ type: 'fire', ally: ally.id, cell: ally.cell });
   }
 }
 
@@ -652,10 +661,18 @@ export function step(state: RunState, dt: number, input: Input = NO_INPUT): SimE
 
   if (state.shopping) {
     if (input.reroll && reroll(state)) events.push({ type: 'reroll' });
+    if (input.dismiss !== undefined) {
+      const ally = state.allies[input.dismiss];
+      const x = ally ? allySpot(ally).x : 0;
+      const refund = dismissAlly(state, input.dismiss);
+      if (ally && refund !== null) events.push({ type: 'dismiss', id: ally.id, refund, x });
+    }
     if (input.buy !== undefined) {
-      const id = state.shop[input.buy]?.id;
-      const star = buyCard(state, input.buy);
-      if (id && star !== null) events.push({ type: 'buy', id, star });
+      const bought = buyCard(state, input.buy.card, input.buy.mode);
+      if (bought) {
+        const x = allySpot(bought.ally).x;
+        events.push({ type: 'buy', id: bought.id, star: bought.star, mode: bought.mode, x });
+      }
     }
     if (input.ready) {
       state.shopping = false;

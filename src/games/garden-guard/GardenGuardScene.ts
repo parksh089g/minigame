@@ -101,6 +101,9 @@ export const TEXT = {
   /** 동료를 처음 들였을 때와, 합쳐서 별이 올랐을 때 */
   joined: (name: string) => `${name} 합류!`,
   merged: (name: string, star: number) => `${name} ★${star}!`,
+  /** 합쳤지만 별은 아직 오르지 않았다. */
+  gathered: (name: string) => `${name} 합쳤어요`,
+  left: (name: string, fruit: number) => `${name} 보냈어요 · 열매 +${fruit}`,
 } as const;
 
 /** 새 출발점이 열린 뒤 처음 여는 준비 화면의 설명 칸에 적는다. */
@@ -139,7 +142,7 @@ export class GardenGuardScene extends MiniGameScene {
   private stormAsked = false;
   /** 동료 가게 창과, 거기서 누른 것. 누른 것은 다음 걸음에 시뮬레이션으로 넘긴다. */
   private shop: ShopPanel | null = null;
-  private shopAsked: Pick<Input, 'buy' | 'reroll' | 'ready'> = {};
+  private shopAsked: Pick<Input, 'buy' | 'reroll' | 'ready' | 'dismiss'> = {};
   /** 동료 가게를 띄울 때(판 안의 초). 판의 첫날 앞과 이어 한 판은 0이라 바로 뜬다. */
   private shopAt = 0;
   /** 방금 지킨 날의 알림. 가운데에 띄우는 대신 가게 창의 맨 위에 적는다. */
@@ -569,12 +572,20 @@ export class GardenGuardScene extends MiniGameScene {
           } else {
             sfx.pop();
           }
-          this.shopToast(event.star > 1 ? TEXT.merged(name, event.star) : event.star === 1 ? TEXT.joined(name) : null);
+          this.shopToast(
+            event.mode === 'place' ? TEXT.joined(name) : event.star > 0 ? TEXT.merged(name, event.star) : TEXT.gathered(name),
+          );
           this.shop?.refresh(this.run as RunState);
           // 산 것이 저장에 남아야 이어 할 때 열매를 두 번 쓰지 않는다.
           this.saveRun();
           break;
         }
+        case 'dismiss':
+          sfx.click();
+          this.shopToast(TEXT.left(ALLIES[event.id].name, event.refund));
+          this.shop?.refresh(this.run as RunState);
+          this.saveRun();
+          break;
         case 'reroll':
           sfx.click();
           this.shop?.refresh(this.run as RunState);
@@ -637,8 +648,11 @@ export class GardenGuardScene extends MiniGameScene {
       state,
       this.cleared,
       {
-        buy: (index) => {
-          this.shopAsked = { ...this.shopAsked, buy: index };
+        buy: (index, mode) => {
+          this.shopAsked = { ...this.shopAsked, buy: { card: index, mode } };
+        },
+        dismiss: (index) => {
+          this.shopAsked = { ...this.shopAsked, dismiss: index };
         },
         reroll: () => {
           this.shopAsked = { ...this.shopAsked, reroll: true };

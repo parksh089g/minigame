@@ -401,6 +401,8 @@ export interface AllyDef {
   aim: AllyAim;
   /** 쏜 것이 날아가는 빠르기 */
   shotSpeed: number;
+  /** 텃밭에서 차지하는 칸 수. 클수록 세다. */
+  cells: number;
   /** 맞은 벌레를 느리게 하는 정도(0~1)와 시간(초). 대장은 반만 느려진다. */
   chill?: { slow: number; seconds: number };
   /** 맞은 자리 둘레(반지름)의 벌레도 이 비율의 피해를 받는다. */
@@ -421,28 +423,31 @@ export const ALLIES: Readonly<Record<AllyId, AllyDef>> = {
     damage: 0.36,
     aim: 'near',
     shotSpeed: 380,
+    cells: 1,
   },
   frog: {
     name: '개구리',
     blurb: '튼튼한 벌레를 혀로 세게 쳐요',
     fromDay: 1,
-    price: 4,
+    price: 5,
     interval: 2.2,
-    damage: 1.6,
+    damage: 2.1,
     aim: 'boss',
     shotSpeed: 560,
     pierceShell: true,
+    cells: 2,
   },
   mint: {
     name: '박하',
     blurb: '찬 잎을 날려 벌레를 늦춰요',
     fromDay: 4,
-    price: 4,
+    price: 3,
     interval: 1.1,
     damage: 0.22,
     aim: 'front',
     shotSpeed: 330,
     chill: { slow: 0.35, seconds: 1.6 },
+    cells: 1,
   },
   can: {
     name: '물뿌리개',
@@ -450,50 +455,49 @@ export const ALLIES: Readonly<Record<AllyId, AllyDef>> = {
     fromDay: 8,
     price: 5,
     interval: 1.7,
-    damage: 0.4,
+    damage: 0.62,
     aim: 'crowd',
     shotSpeed: 300,
-    splash: { radius: 30, ratio: 1 },
+    splash: { radius: 32, ratio: 1 },
+    cells: 2,
   },
   sparrow: {
     name: '참새',
     blurb: '멀리 있는 벌레부터 쪼아요',
     fromDay: 12,
-    price: 5,
+    price: 4,
     interval: 0.5,
-    damage: 0.24,
+    damage: 0.22,
     aim: 'far',
     shotSpeed: 460,
+    cells: 1,
   },
   cactus: {
     name: '선인장',
     blurb: '울타리에 붙은 벌레를 찔러요',
     fromDay: 16,
-    price: 4,
+    price: 7,
     interval: 0.6,
-    damage: 0.75,
+    damage: 1.15,
     aim: 'front',
     shotSpeed: 420,
-    reach: 60,
+    reach: 70,
     pierceShell: true,
+    cells: 3,
   },
 };
 
-/** 가게에 나오는 차례이자 울타리 아래에 서는 자리의 차례 */
+/** 가게에 나오는 차례 */
 export const ALLY_ORDER: readonly AllyId[] = ['sunflower', 'frog', 'mint', 'can', 'sparrow', 'cactus'];
 
 /**
- * 동료가 서는 자리(시뮬레이션 좌표). ALLY_ORDER의 차례대로 물총의 왼쪽에 셋, 오른쪽에 셋이 선다.
+ * 동료가 서는 텃밭의 칸. 물총의 왼쪽에 half칸, 오른쪽에 half칸이 있고 칸마다 너비가 cell이다.
+ * 0~3번 칸은 왼쪽(left부터), 4~7번 칸은 오른쪽(right부터)이다. 동료 하나는 한쪽 안에서 이어진 칸에만 선다.
  * 물벼락 버튼은 이 줄 아래 오른쪽 끝에 놓인다.
  */
-export const ALLY_SPOTS: Readonly<Record<AllyId, { x: number; y: number }>> = {
-  sunflower: { x: 84, y: FIELD.depth + 26 },
-  frog: { x: 156, y: FIELD.depth + 26 },
-  mint: { x: 52, y: FIELD.depth + 26 },
-  can: { x: 188, y: FIELD.depth + 26 },
-  sparrow: { x: 20, y: FIELD.depth + 26 },
-  cactus: { x: 220, y: FIELD.depth + 26 },
-};
+export const GARDEN_CELLS = { half: 4, cell: 24, left: 4, right: 140, y: FIELD.depth + 26 } as const;
+/** 텃밭의 칸 수 */
+export const CELL_COUNT = GARDEN_CELLS.half * 2;
 
 /**
  * 같은 동료를 모은 수에 따른 별. 두 마리가 모이면 ★2, 넷이면 ★3, 여덟이면 ★4, 열여섯이면 ★5다.
@@ -519,7 +523,7 @@ export const SHOP = {
  * 동료가 늘어 판이 세지는 만큼 벌레도 따라 세져서, 영구 강화의 값어치가 줄지 않는다.
  * 판을 앞쪽 날에서 시작해 동료를 미리 모아도, 벌레도 같이 세져 있어서 득이 없다.
  */
-export const TEAM_HEAT = { heat: 1.08, days: 8 } as const;
+export const TEAM_HEAT = { heat: 1.1, days: 8 } as const;
 
 // ------------------------------------------------------------ 유물
 

@@ -2,8 +2,8 @@
  * 자동 플레이. 테스트에서 "강화 없이는 며칠째에 막히고, 강화를 사면 얼마나 더 가는지"를 숫자로 확인한다.
  * 화면에서 하는 판과 같은 step을 돌린다.
  */
-import { allyOf, canBuyCard, canReroll } from './allies';
-import { ENEMIES, RELIC_ORDER, SHOOTER, SHOP, UPGRADE_ORDER } from './data';
+import { canBuyCard, canReroll } from './allies';
+import { ALLIES, ENEMIES, RELIC_ORDER, SHOOTER, SHOP, UPGRADE_ORDER } from './data';
 import {
   applyRun,
   bankSeeds,
@@ -28,19 +28,28 @@ export type BotStyle = 'idle' | 'active';
 const STEP = 1 / 60;
 
 /**
- * 동료 가게에서 사는 법. keen은 이미 있는 동료를 먼저 사서 합치고, 열매가 남으면 새 동료를 들이고,
+ * 동료 가게에서 사는 법. keen은 빈칸이 있으면 값진(큰) 동료부터 새로 놓고, 칸이 차면 같은 동료를 사서 합치고,
  * 살 것이 없으면 한 번 다시 뽑아 보는 사람이다. first는 놓인 차례대로 살 수 있는 것을 사는(아무거나 사는) 사람이다.
+ * 둘 다 놓을 수 있으면 새로 놓고, 아니면 합친다.
  */
 export type PickStyle = 'keen' | 'first';
 
 /** 가게가 열려 있으면 이번 걸음에 할 일(살 카드, 다시 뽑기, 다음 날). 열려 있지 않으면 빈 것 */
 export function botShop(state: RunState, picks: PickStyle = 'keen'): Pick<Input, 'buy' | 'reroll' | 'ready'> {
   if (!state.shopping) return {};
-  const open = state.shop.map((_, index) => index).filter((index) => canBuyCard(state, index));
-  if (open.length > 0) {
-    if (picks === 'first') return { buy: open[0] };
-    const owned = open.find((index) => allyOf(state, state.shop[index].id));
-    return { buy: owned ?? open[0] };
+  const cards = state.shop.map((_, index) => index);
+  const placeable = cards.filter((index) => canBuyCard(state, index, 'place'));
+  const mergeable = cards.filter((index) => canBuyCard(state, index, 'merge'));
+  if (picks === 'first') {
+    const first = cards.find((index) => placeable.includes(index) || mergeable.includes(index));
+    if (first !== undefined) return { buy: { card: first, mode: placeable.includes(first) ? 'place' : 'merge' } };
+  } else {
+    if (placeable.length > 0) {
+      const price = (index: number): number => ALLIES[state.shop[index].id].price;
+      const best = placeable.reduce((a, b) => (price(b) > price(a) ? b : a));
+      return { buy: { card: best, mode: 'place' } };
+    }
+    if (mergeable.length > 0) return { buy: { card: mergeable[0], mode: 'merge' } };
   }
   // 산 카드가 하나도 없는데 열매가 넉넉하면 한 번 다시 뽑는다.
   const untouched = state.shop.every((card) => !card.sold);

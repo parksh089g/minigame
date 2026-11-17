@@ -55,7 +55,7 @@ describe('하던 판의 저장', () => {
     const restored = readRunRecord(throughDisk(runRecord({ state, banked: 0, bankedShards: 0 }, T))).run!.state;
     expect(restored.shop).toEqual(state.shop);
     expect(restored.fruit).toBe(state.fruit);
-    step(restored, STEP, { aim: null, storm: false, buy: 2 });
+    step(restored, STEP, { aim: null, storm: false, buy: { card: 2, mode: 'place' } });
     expect(restored.shop[2].sold).toBe(true);
     const again = readRunRecord(throughDisk(runRecord({ state: restored, banked: 0, bankedShards: 0 }, T))).run!.state;
     expect(again.allies).toEqual(restored.allies);
@@ -72,7 +72,7 @@ describe('하던 판의 저장', () => {
     // 해바라기 둘과 거름 2단계를 가진 판
     const read = readRunRecord(old(toVersion3(state, { helpers: 2, compost: 2, boons: ['jet', 'bloom'] }))).run!;
     expect(read.banked).toBe(4);
-    expect(read.state.allies).toEqual([{ id: 'sunflower', copies: 2, fireIn: 0.3 }]);
+    expect(read.state.allies).toEqual([{ id: 'sunflower', copies: 2, fireIn: 0.3, cell: 3 }]);
     expect(read.state.stats.allyPower).toBeCloseTo(1.3);
     expect(read.state.fruit).toBe(SHOP.purse);
     expect(read.state.shopping).toBe(false);
@@ -114,8 +114,11 @@ describe('하던 판의 저장', () => {
       broken((record) => (record.run.state.phase = 'over')),
       broken((record) => ((record.run.state.stats as Record<string, unknown>).damage = null)),
       broken((record) => ((record.run.state.queue as { kind: string }[])[0].kind = 'dragon')),
-      broken((record) => (record.run.state.allies = [{ id: 'dragon', copies: 1, fireIn: 0 }])),
-      broken((record) => (record.run.state.allies = [{ id: 'frog', copies: 1, fireIn: 0 }, { id: 'frog', copies: 1, fireIn: 0 }])),
+      broken((record) => (record.run.state.allies = [{ id: 'dragon', copies: 1, fireIn: 0, cell: 0 }])),
+      broken((record) => (record.run.state.allies = [{ id: 'frog', copies: 1, fireIn: 0 }])),
+      // 같은 칸에 둘이 서거나, 한쪽 끝을 넘어 선 동료
+      broken((record) => (record.run.state.allies = [{ id: 'frog', copies: 1, fireIn: 0, cell: 0 }, { id: 'frog', copies: 1, fireIn: 0, cell: 1 }])),
+      broken((record) => (record.run.state.allies = [{ id: 'frog', copies: 1, fireIn: 0, cell: 3 }])),
       broken((record) => (record.run.state.shop = [{ id: 'frog', sold: 'yes' }])),
       broken((record) => delete record.run.state.fruit),
       broken((record) => (record.run.state = [] as unknown as Record<string, unknown>)),
@@ -145,6 +148,15 @@ describe('하던 판의 저장에 적힌 값의 범위 (10차 검토 G11)', () =
 
   it('판에서 나올 수 없는 값이 적힌 판은 버린다', () => {
     expect(readWith(() => undefined)).not.toBeNull();
+    // 같은 동료가 다른 칸에 따로 서 있는 것은 판에서 나올 수 있다.
+    const twins = readWith(
+      (state) =>
+        (state.allies = [
+          { id: 'frog', copies: 2, fireIn: 0, cell: 0 },
+          { id: 'frog', copies: 1, fireIn: 0, cell: 2 },
+        ]),
+    );
+    expect(twins?.state.allies.map((ally) => ally.cell)).toEqual([0, 2]);
     const broken: Array<[string, (state: Record<string, any>) => void]> = [
       ['물줄기 200만 갈래', (state) => (state.stats.streams = 2e6)],
       ['물줄기 0갈래', (state) => (state.stats.streams = 0)],
@@ -162,7 +174,7 @@ describe('하던 판의 저장에 적힌 값의 범위 (10차 검토 G11)', () =
       ['너무 많은 물방울', (state) => (state.shots = Array.from({ length: 5000 }, () => state.shots[0]))],
       ['넷을 놓은 가게', (state) => (state.shop = Array.from({ length: 4 }, () => ({ id: 'frog', sold: false })))],
       ['열매 1경 개', (state) => (state.fruit = 1e16)],
-      ['동료 백 마리를 합친 것', (state) => (state.allies = [{ id: 'frog', copies: 100, fireIn: 0 }])],
+      ['동료 백 마리를 합친 것', (state) => (state.allies = [{ id: 'frog', copies: 100, fireIn: 0, cell: 0 }])],
       ['싸우는 중에 열린 가게', (state) => ((state.phase = 'fight'), (state.shopping = true))],
       ['너무 큰 날의 벌레', (state) => (state.enemies[0].day = 1e6)],
     ];

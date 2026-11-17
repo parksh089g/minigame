@@ -8,14 +8,14 @@
  * 필드를 더했으면 RUN_VERSION도 올린다. 옛 저장에는 새 필드가 없어서 그대로는 버려지므로,
  * 빠진 값을 채워서 이어 할 수 있으면 readRunRecord에서 채운다(버전 2의 판에 유물의 값을 채우는 fillRelicFields처럼).
  */
-import { copiesFor, openShop, type Ally, type ShopCard } from './allies';
+import { cellsValid, copiesFor, openShop, placeAlly, type Ally, type ShopCard } from './allies';
 import { ALLIES, ALLY_STARS, GUN, SHOP, STEP, ENEMIES, type AllyId, type EnemyKind } from './data';
 import { applyRun, bankSeeds, bankShards, MAX_DAY, type GardenMeta, type Spawn, type Stats } from './rules';
 import type { Enemy, Phase, RunState, Shot } from './sim';
 
 /**
  * 3: 유물이 생겼다(판의 shards, guardLeft와 능력치의 유물 값들, 저장의 bankedShards).
- * 4: 판마다 고르는 강화 대신 동료가 생겼다(판의 allies, fruit, shopping, shop, rolls와 물방울의 ally, 능력치의 allyPower).
+ * 4: 판마다 고르는 강화 대신 동료가 생겼다(판의 allies와 동료가 선 칸, fruit, shopping, shop, rolls와 물방울의 ally, 능력치의 allyPower).
  */
 export const RUN_VERSION = 4;
 
@@ -101,7 +101,7 @@ const SHOT_SHAPE: Record<keyof Shot, Kind> = {
   ally: 'string',
 };
 
-const ALLY_SHAPE: Record<keyof Ally, Kind> = { id: 'string', copies: 'number', fireIn: 'number' };
+const ALLY_SHAPE: Record<keyof Ally, Kind> = { id: 'string', copies: 'number', fireIn: 'number', cell: 'number' };
 const CARD_SHAPE: Record<keyof ShopCard, Kind> = { id: 'string', sold: 'boolean' };
 
 const SPAWN_SHAPE: Record<keyof Spawn, Kind> = { at: 'number', kind: 'string', x: 'number' };
@@ -215,8 +215,9 @@ function isRunState(value: unknown): value is RunState {
   if (!fits(value, STATE_SHAPE)) return false;
   if (!LIVE_PHASES.includes(value.phase as Phase) || !fits(value.stats, STATS_SHAPE)) return false;
   const allies = value.allies as unknown[];
-  const ids = allies.map((ally) => (isObject(ally) ? ally.id : null));
-  if (!allies.every((ally) => fits(ally, ALLY_SHAPE) && isAlly(ally.id)) || new Set(ids).size !== ids.length) return false;
+  // 같은 동료가 여럿 설 수 있지만, 칸을 겹치거나 한쪽 끝을 넘어서 설 수는 없다.
+  if (!allies.every((ally) => fits(ally, ALLY_SHAPE) && isAlly(ally.id))) return false;
+  if (!cellsValid(allies as Ally[])) return false;
   if (!(value.shop as unknown[]).every((card) => fits(card, CARD_SHAPE) && isAlly(card.id))) return false;
   const queue = value.queue as unknown[];
   const enemies = value.enemies as unknown[];
@@ -261,8 +262,10 @@ function fillAllyFields(run: Record<string, unknown>): Record<string, unknown> {
   const { helperIn, boons: _boons, offer, ...rest } = state;
   const count = typeof helpers === 'number' ? Math.max(0, Math.min(ALLY_STARS.max, Math.floor(helpers))) : 0;
   const waits = Array.isArray(helperIn) ? helperIn : [];
-  const allies: Ally[] =
-    count > 0 ? [{ id: 'sunflower', copies: count, fireIn: typeof waits[0] === 'number' ? Math.max(0, waits[0]) : 0.5 }] : [];
+  const team: Pick<RunState, 'allies'> = { allies: [] };
+  const sunflower = count > 0 ? placeAlly(team, 'sunflower', count) : null;
+  if (sunflower) sunflower.fireIn = typeof waits[0] === 'number' ? Math.max(0, waits[0]) : 0.5;
+  const allies = team.allies;
   // 거름의 단계를 해바라기 씨의 피해 비율에서 거꾸로 셈한다(예전에는 물총 피해의 0.4 + 단계마다 0.15였다).
   const ratio = typeof helperDamage === 'number' && typeof stats.damage === 'number' && stats.damage > 0 ? helperDamage / stats.damage : 0.4;
   const compost = Math.max(0, Math.round((ratio - 0.4) / 0.15));

@@ -6,16 +6,32 @@ import type Phaser from 'phaser';
 import { FONT_SIZE, GAME_WIDTH, THEME, THEME_CSS } from '../../config';
 import { addTapZone, addText, drawPanel } from '../../core/ui';
 import type { PauseExtra } from '../../scenes/MiniGameScene';
-import { allyLabel, canBuyCard, canReroll, type Ally } from './allies';
+import {
+  allyLabel,
+  allySpot,
+  canBuyAny,
+  canBuyCard,
+  canReroll,
+  mergeTarget,
+  owns,
+  refundFor,
+  starOf,
+  type Ally,
+  type BuyMode,
+} from './allies';
 import { allyTexture, TEX } from './art';
-import { ALLIES, SHOP } from './data';
-import { cardStatus, SHOP_TEXT } from './shop-text';
+import { ALLIES, GARDEN_CELLS, SHOP } from './data';
+import { cardStatus, mergedStar, purseLine, SHOP_TEXT } from './shop-text';
 import type { RunState } from './sim';
 
 export { cardStatus, SHOP_TEXT } from './shop-text';
 
 /** 카드 한 장 */
 const CARD = { margin: 10, height: 46, gap: 5 } as const;
+/** 이미 있는 동료의 카드를 누르면 나오는 두 단추(합치기, 새로 놓기) */
+const CHOICE = { width: 66, height: 18, gap: 4, top: 22 } as const;
+/** 카드 이름 옆의 칸 표시(작은 네모) */
+const PIP = { size: 6, gap: 2 } as const;
 /** 아래의 단추 줄 */
 const BUTTON = { height: 30, gap: 8, top: 7 } as const;
 /** 카드 위의 글 한 줄 */
@@ -32,6 +48,8 @@ const HEAD_GAP = 3;
 const ARM_MS = 280;
 /** 카드 그림의 크기 배율(동료의 그림은 30 × 38) */
 const ICON_SCALE = 0.68;
+/** 텃밭에서 동료를 눌러 고르는 자리: 울타리 아래 top부터 height만큼 */
+const GARDEN_PICK = { top: 2, height: 46 } as const;
 
 /** 방금 지킨 날의 알림. 가게 창의 맨 위에 함께 적는다. */
 export interface ClearedNote {
@@ -42,13 +60,16 @@ export interface ClearedNote {
 }
 
 export interface ShopHandlers {
-  buy(index: number): void;
+  /** 그 자리(0부터)의 카드를 합치거나(merge) 새로 놓아(place) 산다. */
+  buy(index: number, mode: BuyMode): void;
   reroll(): void;
+  /** 텃밭의 그 동료(state.allies의 차례)를 내보낸다. */
+  dismiss(index: number): void;
   ready(): void;
 }
 
 export interface ShopPanel {
-  /** 사거나 다시 뽑은 뒤의 판으로 다시 그린다. */
+  /** 사거나 다시 뽑거나 내보낸 뒤의 판으로 다시 그린다. */
   refresh(state: RunState): void;
   destroy(): void;
 }
@@ -56,8 +77,9 @@ export interface ShopPanel {
 type Faded = Phaser.GameObjects.GameObject & { setAlpha(alpha: number): unknown };
 
 /**
- * 판 위(top과 bottom 사이)에 동료 가게를 띄운다. 카드를 누르면 buy에 그 자리(0부터)를 넘기고,
- * 아래의 단추로 다시 뽑거나 가게를 닫는다. 판이 바뀌면(사거나 다시 뽑으면) 부른 쪽이 refresh로 다시 그린다.
+ * 판 위(top과 bottom 사이)에 동료 가게를 띄운다. bottom은 울타리이고, 그 아래 텃밭은 가리지 않는다.
+ * 처음 보는 동료의 카드는 누르면 바로 빈칸에 놓는다. 이미 있는 동료의 카드는 누르면 "합치기"와 "새로 놓기"가 나와서 고른다.
+ * 텃밭의 동료를 누르면 왼쪽 아래 단추가 "내보내기"로 바뀐다. 판이 바뀌면 부른 쪽이 refresh로 다시 그린다.
  * cleared가 있으면 방금 지킨 날의 알림을 맨 위에 적는다(판의 첫날 앞과 이어 한 판에서는 없다).
  */
 export function openShopPanel(
@@ -71,11 +93,19 @@ export function openShopPanel(
   const openedAt = scene.time.now;
   let objects: Phaser.GameObjects.GameObject[] = [];
   let closed = false;
+  /** 고른 카드(두 단추를 펼친 카드)와 고른 텃밭의 동료. 둘 가운데 하나만 고른다. */
+  let pickedCard: number | null = null;
+  let pickedAlly: number | null = null;
+  let current = state;
   const armed = (): boolean => !closed && scene.time.now - openedAt >= ARM_MS;
 
   const build = (run: RunState, fade: boolean): void => {
     for (const object of objects) object.destroy();
     objects = [];
+    current = run;
+    if (pickedCard !== null && (!run.shop[pickedCard] || run.shop[pickedCard].sold)) pickedCard = null;
+    if (pickedAlly !== null && !run.allies[pickedAlly]) pickedAlly = null;
+    const rebuild = (): void => build(current, false);
     /** 창이 뜰 때 함께 나타나는 것들(누르는 자리를 뺀 모두) */
     const shown: Faded[] = [];
     const keep = <T extends Faded>(object: T): T => {
@@ -100,7 +130,7 @@ export function openShopPanel(
           ]
         : []),
       { text: SHOP_TEXT.title, size: cleared ? 14 : 16, color: THEME_CSS.inkDeep, height: cleared ? 19 : 22 },
-      { text: SHOP_TEXT.purse(run.fruit), size: FONT_SIZE.small, color: THEME_CSS.sub, height: 15 },
+      { text: purseLine(run), size: FONT_SIZE.small, color: THEME_CSS.sub, height: 15 },
     ];
     const cards = run.shop.length;
     const headHeight = head.reduce((sum, line) => sum + line.height, 0) + HEAD_GAP;
@@ -125,7 +155,9 @@ export function openShopPanel(
       const ally = ALLIES[card.id];
       const y = top + headHeight + index * (CARD.height + CARD.gap);
       const face = CARD.height - 3;
-      const affordable = canBuyCard(run, index);
+      const owned = owns(run, card.id);
+      const affordable = canBuyAny(run, index);
+      const picked = pickedCard === index;
       const panel = keep(scene.add.graphics().setDepth(depth));
       const draw = (pressed: boolean): void => {
         panel.clear();
@@ -133,7 +165,7 @@ export function openShopPanel(
           depth: 3,
           radius: 12,
           fill: card.sold ? THEME.bg : undefined,
-          border: pressed && affordable ? THEME.pinkDeep : undefined,
+          border: (pressed && affordable) || picked ? THEME.pinkDeep : undefined,
         });
       };
       draw(false);
@@ -146,20 +178,30 @@ export function openShopPanel(
           .setAlpha(fade),
       );
       const name = keep(addText(scene, CARD.margin + 42, y + 6, ally.name, { size: 14 }).setDepth(depth).setAlpha(fade));
+      // 이름 옆의 작은 네모: 차지하는 칸 수
+      const pips = keep(scene.add.graphics().setDepth(depth).setAlpha(fade));
+      const pipLeft = name.x + name.width + 5;
+      pips.fillStyle(THEME.mintDeep, 1);
+      for (let at = 0; at < ally.cells; at += 1) {
+        pips.fillRoundedRect(pipLeft + at * (PIP.size + PIP.gap), y + 12, PIP.size, PIP.size, 1.5);
+      }
+      const statusLeft = pipLeft + ally.cells * (PIP.size + PIP.gap) + 3;
       if (!card.sold) {
         const status = cardStatus(run, card.id);
         keep(
-          addText(scene, name.x + name.width + 6, y + 9, status.text, {
+          addText(scene, statusLeft, y + 9, status.text, {
             size: FONT_SIZE.small,
             color: status.color,
           }).setDepth(depth),
         );
       }
-      keep(
-        addText(scene, CARD.margin + 42, y + 25, ally.blurb, { size: FONT_SIZE.small, color: THEME_CSS.sub })
-          .setDepth(depth)
-          .setAlpha(fade),
-      );
+      if (!picked) {
+        keep(
+          addText(scene, CARD.margin + 42, y + 25, ally.blurb, { size: FONT_SIZE.small, color: THEME_CSS.sub })
+            .setDepth(depth)
+            .setAlpha(fade),
+        );
+      }
       // 오른쪽 끝의 값: 열매 그림과 수. 산 카드에는 값 대신 "데려왔어요"
       const right = CARD.margin + width - 10;
       if (card.sold) {
@@ -189,13 +231,83 @@ export function openShopPanel(
       }
       objects.push(
         addTapZone(scene, CARD.margin, y, width, CARD.height, draw, () => {
-          if (!armed() || !canBuyCard(run, index)) return;
-          handlers.buy(index);
-        }),
+          if (!armed() || !canBuyAny(run, index)) return;
+          // 처음 보는 동료는 고를 것이 없으니 바로 놓는다.
+          if (!owned) {
+            handlers.buy(index, 'place');
+            return;
+          }
+          pickedCard = picked ? null : index;
+          pickedAlly = null;
+          rebuild();
+        }).setDepth(depth),
+      );
+      if (picked) {
+        const merged = mergedStar(run, card.id);
+        const choices: Array<{ label: string; mode: BuyMode }> = [
+          {
+            label: merged !== null && merged > starOf(mergeTarget(run, card.id)?.copies ?? 0) ? SHOP_TEXT.mergeButton(merged) : SHOP_TEXT.mergeSame,
+            mode: 'merge',
+          },
+          { label: `${SHOP_TEXT.placeButton} ${SHOP_TEXT.cells(ally.cells)}`, mode: 'place' },
+        ];
+        choices.forEach((choice, at) => {
+          const x = CARD.margin + 42 + at * (CHOICE.width + CHOICE.gap);
+          const by = y + CHOICE.top;
+          const enabled = canBuyCard(run, index, choice.mode);
+          const g = keep(scene.add.graphics().setDepth(depth));
+          const drawChoice = (pressed: boolean): void => {
+            g.clear();
+            g.fillStyle(choice.mode === 'merge' ? THEME.pinkDeep : THEME.mintDeep, 1);
+            g.fillRoundedRect(x, by + 2, CHOICE.width, CHOICE.height - 2, 8);
+            g.fillStyle(choice.mode === 'merge' ? THEME.pink : THEME.mint, 1);
+            g.fillRoundedRect(x, by + (pressed && enabled ? 2 : 0), CHOICE.width, CHOICE.height - 2, 8);
+          };
+          drawChoice(false);
+          g.setAlpha(enabled ? 1 : 0.4);
+          keep(
+            addText(scene, x + CHOICE.width / 2, by + (CHOICE.height - 2) / 2, choice.label, {
+              size: FONT_SIZE.small,
+              color: THEME_CSS.inkDeep,
+              originX: 0.5,
+              originY: 0.5,
+            })
+              .setDepth(depth)
+              .setAlpha(enabled ? 1 : 0.4),
+          );
+          objects.push(
+            addTapZone(scene, x, by - 2, CHOICE.width, CHOICE.height + 4, drawChoice, () => {
+              if (!armed() || !canBuyCard(run, index, choice.mode)) return;
+              pickedCard = null;
+              handlers.buy(index, choice.mode);
+            }).setDepth(depth + 1),
+          );
+        });
+      }
+    });
+
+    // 텃밭의 동료: 누르면 고르고, 고른 동료는 테두리로 보인다. 울타리 아래는 가리지 않으므로 동료가 그대로 보인다.
+    run.allies.forEach((ally, index) => {
+      const cells = ALLIES[ally.id].cells;
+      const spot = allySpot(ally);
+      const left = spot.x - (cells * GARDEN_CELLS.cell) / 2;
+      const zoneTop = area.bottom + GARDEN_PICK.top;
+      if (pickedAlly === index) {
+        const ring = keep(scene.add.graphics().setDepth(depth));
+        ring.lineStyle(2, THEME.coralDeep, 1);
+        ring.strokeRoundedRect(left + 1, zoneTop, cells * GARDEN_CELLS.cell - 2, GARDEN_PICK.height, 8);
+      }
+      objects.push(
+        addTapZone(scene, left, zoneTop, cells * GARDEN_CELLS.cell, GARDEN_PICK.height, () => undefined, () => {
+          if (!armed()) return;
+          pickedAlly = pickedAlly === index ? null : index;
+          pickedCard = null;
+          rebuild();
+        }).setDepth(depth),
       );
     });
 
-    // 아래의 단추 줄: 왼쪽은 다시 뽑기, 오른쪽은 가게를 닫고 날을 시작한다.
+    // 아래의 단추 줄: 왼쪽은 다시 뽑기(동료를 골랐으면 내보내기), 오른쪽은 가게를 닫고 날을 시작한다.
     const buttonTop = top + headHeight + cardsHeight + BUTTON.top;
     const half = (width - BUTTON.gap) / 2;
     const button = (
@@ -205,7 +317,7 @@ export function openShopPanel(
       lip: number,
       enabled: boolean,
       onTap: () => void,
-      cost?: number,
+      cost?: { value: number; color: string },
     ): void => {
       const g = keep(scene.add.graphics().setDepth(depth));
       const draw = (pressed: boolean): void => {
@@ -233,9 +345,9 @@ export function openShopPanel(
         const iconX = text.x + text.width / 2 + 10;
         keep(scene.add.image(iconX, middle, TEX.fruit).setDepth(depth).setAlpha(enabled ? 1 : 0.45));
         keep(
-          addText(scene, iconX + 8, middle, String(cost), {
+          addText(scene, iconX + 8, middle, cost.value > 0 && cost.color === THEME_CSS.good ? `+${cost.value}` : String(cost.value), {
             size: 12,
-            color: THEME_CSS.accent,
+            color: cost.color,
             originY: 0.5,
           })
             .setDepth(depth)
@@ -246,10 +358,22 @@ export function openShopPanel(
         addTapZone(scene, x, buttonTop, half, BUTTON.height, draw, () => {
           if (!armed() || !enabled) return;
           onTap();
-        }),
+        }).setDepth(depth),
       );
     };
-    button(CARD.margin, SHOP_TEXT.reroll, THEME.card, THEME.shadow, canReroll(run), () => handlers.reroll(), SHOP.reroll);
+    const leaving = pickedAlly !== null ? run.allies[pickedAlly] : undefined;
+    if (leaving && pickedAlly !== null) {
+      const index = pickedAlly;
+      button(CARD.margin, SHOP_TEXT.dismiss, THEME.coral, THEME.coralDeep, true, () => {
+        pickedAlly = null;
+        handlers.dismiss(index);
+      }, { value: refundFor(leaving), color: THEME_CSS.good });
+    } else {
+      button(CARD.margin, SHOP_TEXT.reroll, THEME.card, THEME.shadow, canReroll(run), () => handlers.reroll(), {
+        value: SHOP.reroll,
+        color: THEME_CSS.accent,
+      });
+    }
     const opening = run.lastCleared < run.day;
     button(CARD.margin + half + BUTTON.gap, opening ? SHOP_TEXT.start(run.day) : SHOP_TEXT.next, THEME.pink, THEME.pinkDeep, true, () => {
       closed = true;
