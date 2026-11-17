@@ -127,9 +127,21 @@ export interface CharmInfo {
   kind: CharmKind;
   price: number;
   effect: CharmEffect;
-  /** 가게에서 한 번 강화했을 때의 효과와 설명. 강화한 부적의 id는 원래 id에 UPGRADE_MARK가 붙는다. */
-  upgrade: { description: string; effect: CharmEffect };
+  /**
+   * 가게에서 강화했을 때의 효과와 설명. 한 단계에 하나씩, UPGRADE_MAX개다.
+   * 강화한 부적의 id는 원래 id에 단계만큼 UPGRADE_MARK가 붙는다('twins+', 'twins++', 'twins+++').
+   */
+  upgrades: readonly CharmStep[];
 }
+
+/** 강화 한 단계의 효과와, 가게의 카드와 말풍선에 적는 한 줄 */
+export interface CharmStep {
+  description: string;
+  effect: CharmEffect;
+}
+
+/** 부적 한 장을 강화할 수 있는 단계의 수 */
+export const UPGRADE_MAX = 3;
 
 const CHERRY = 0;
 const CLOVER = 1;
@@ -161,64 +173,274 @@ export const SAVINGS_PER = 3;
  */
 export const CHARMS: readonly CharmInfo[] = [
   // 확률: 그림이 나올 확률을 바꾼다.
-  { id: 'more-cherry', name: '체리 듬뿍', description: '체리 늘고 다른 그림 줄어요', kind: 'odds', price: 3, effect: { weight: [CHERRY, 32] }, upgrade: { description: '체리 더 늘고 나머지 줄어요', effect: { weight: [CHERRY, 48] } } },
-  { id: 'more-clover', name: '클로버 듬뿍', description: '클로버 늘고 다른 그림 줄어요', kind: 'odds', price: 3, effect: { weight: [CLOVER, 27] }, upgrade: { description: '클로버 더 늘고 나머지 줄어요', effect: { weight: [CLOVER, 37] } } },
-  { id: 'more-bell', name: '종 듬뿍', description: '종 늘고 다른 그림 줄어요', kind: 'odds', price: 5, effect: { weight: [BELL, 29] }, upgrade: { description: '종 더 늘고 나머지 줄어요', effect: { weight: [BELL, 38] } } },
-  { id: 'more-horseshoe', name: '말굽 듬뿍', description: '말굽 늘고 다른 그림 줄어요', kind: 'odds', price: 5, effect: { weight: [HORSESHOE, 25] }, upgrade: { description: '말굽 더 늘고 나머지 줄어요', effect: { weight: [HORSESHOE, 33] } } },
-  { id: 'more-diamond', name: '다이아 듬뿍', description: '다이아 늘고 다른 그림 줄어요', kind: 'odds', price: 6, effect: { weight: [DIAMOND, 23] }, upgrade: { description: '다이아 더 늘고 나머지 줄어요', effect: { weight: [DIAMOND, 30] } } },
-  { id: 'more-seven', name: '7 듬뿍', description: '7 늘고 다른 그림 줄어요', kind: 'odds', price: 9, effect: { weight: [WILD, 6] }, upgrade: { description: '7 더 늘고 나머지 줄어요', effect: { weight: [WILD, 12] } } },
-  { id: 'less-cherry', name: '체리 덜기', description: '체리가 덜 나와요', kind: 'odds', price: 7, effect: { weight: [CHERRY, -19] }, upgrade: { description: '체리가 훨씬 덜 나와요', effect: { weight: [CHERRY, -23] } } },
-  { id: 'less-clover', name: '클로버 덜기', description: '클로버가 덜 나와요', kind: 'odds', price: 6, effect: { weight: [CLOVER, -17] }, upgrade: { description: '클로버가 훨씬 덜 나와요', effect: { weight: [CLOVER, -21] } } },
+  {
+    id: 'more-cherry', name: '체리 듬뿍', kind: 'odds', price: 3,
+    description: '체리 늘고 다른 그림 줄어요', effect: { weight: [CHERRY, 32] },
+    upgrades: [
+      { description: '체리 더 늘고 나머지 줄어요', effect: { weight: [CHERRY, 48] } },
+      { description: '체리 또 늘고 나머지 줄어요', effect: { weight: [CHERRY, 64] } },
+      { description: '체리 꽉 차고 나머지 줄어요', effect: { weight: [CHERRY, 80] } },
+    ],
+  },
+  {
+    id: 'more-clover', name: '클로버 듬뿍', kind: 'odds', price: 3,
+    description: '클로버 늘고 다른 그림 줄어요', effect: { weight: [CLOVER, 27] },
+    upgrades: [
+      { description: '클로버 더 늘고 나머지 줄어요', effect: { weight: [CLOVER, 37] } },
+      { description: '클로버 또 늘고 나머지 줄어요', effect: { weight: [CLOVER, 47] } },
+      { description: '클로버 꽉 차고 나머지 줄어요', effect: { weight: [CLOVER, 57] } },
+    ],
+  },
+  {
+    id: 'more-bell', name: '종 듬뿍', kind: 'odds', price: 5,
+    description: '종 늘고 다른 그림 줄어요', effect: { weight: [BELL, 29] },
+    upgrades: [
+      { description: '종 더 늘고 나머지 줄어요', effect: { weight: [BELL, 38] } },
+      { description: '종 또 늘고 나머지 줄어요', effect: { weight: [BELL, 47] } },
+      { description: '종 꽉 차고 나머지 줄어요', effect: { weight: [BELL, 56] } },
+    ],
+  },
+  {
+    id: 'more-horseshoe', name: '말굽 듬뿍', kind: 'odds', price: 5,
+    description: '말굽 늘고 다른 그림 줄어요', effect: { weight: [HORSESHOE, 25] },
+    upgrades: [
+      { description: '말굽 더 늘고 나머지 줄어요', effect: { weight: [HORSESHOE, 33] } },
+      { description: '말굽 또 늘고 나머지 줄어요', effect: { weight: [HORSESHOE, 41] } },
+      { description: '말굽 꽉 차고 나머지 줄어요', effect: { weight: [HORSESHOE, 49] } },
+    ],
+  },
+  {
+    id: 'more-diamond', name: '다이아 듬뿍', kind: 'odds', price: 6,
+    description: '다이아 늘고 다른 그림 줄어요', effect: { weight: [DIAMOND, 23] },
+    upgrades: [
+      { description: '다이아 더 늘고 나머지 줄어요', effect: { weight: [DIAMOND, 30] } },
+      { description: '다이아 또 늘고 나머지 줄어요', effect: { weight: [DIAMOND, 37] } },
+      { description: '다이아 꽉 차고 나머지 줄어요', effect: { weight: [DIAMOND, 44] } },
+    ],
+  },
+  {
+    id: 'more-seven', name: '7 듬뿍', kind: 'odds', price: 9,
+    description: '7 늘고 다른 그림 줄어요', effect: { weight: [WILD, 6] },
+    upgrades: [
+      { description: '7 더 늘고 나머지 줄어요', effect: { weight: [WILD, 12] } },
+      { description: '7 또 늘고 나머지 줄어요', effect: { weight: [WILD, 18] } },
+      { description: '7 꽉 차고 나머지 줄어요', effect: { weight: [WILD, 24] } },
+    ],
+  },
+  {
+    id: 'less-cherry', name: '체리 덜기', kind: 'odds', price: 7,
+    description: '체리가 덜 나와요', effect: { weight: [CHERRY, -19] },
+    upgrades: [
+      { description: '체리가 훨씬 덜 나와요', effect: { weight: [CHERRY, -22] } },
+      { description: '체리가 아주 드물게 나와요', effect: { weight: [CHERRY, -25] } },
+      { description: '체리가 거의 안 나와요', effect: { weight: [CHERRY, -27] } },
+    ],
+  },
+  {
+    id: 'less-clover', name: '클로버 덜기', kind: 'odds', price: 6,
+    description: '클로버가 덜 나와요', effect: { weight: [CLOVER, -17] },
+    upgrades: [
+      { description: '클로버가 훨씬 덜 나와요', effect: { weight: [CLOVER, -19] } },
+      { description: '클로버가 아주 드물게 나와요', effect: { weight: [CLOVER, -21] } },
+      { description: '클로버가 거의 안 나와요', effect: { weight: [CLOVER, -22] } },
+    ],
+  },
   // 상금: 그림의 상금을 올린다.
-  { id: 'gold-cherry', name: '황금 체리', description: '체리 줄의 상금 +4', kind: 'prize', price: 6, effect: { value: [CHERRY, 4] }, upgrade: { description: '체리 줄의 상금 +6', effect: { value: [CHERRY, 6] } } },
-  { id: 'gold-clover', name: '황금 클로버', description: '클로버 줄의 상금 +5', kind: 'prize', price: 6, effect: { value: [CLOVER, 5] }, upgrade: { description: '클로버 줄의 상금 +9', effect: { value: [CLOVER, 9] } } },
-  { id: 'gold-bell', name: '황금 종', description: '종 줄의 상금 +6', kind: 'prize', price: 5, effect: { value: [BELL, 6] }, upgrade: { description: '종 줄의 상금 +9', effect: { value: [BELL, 9] } } },
-  { id: 'gold-horseshoe', name: '황금 말굽', description: '말굽 줄의 상금 +10', kind: 'prize', price: 4, effect: { value: [HORSESHOE, 10] }, upgrade: { description: '말굽 줄의 상금 +16', effect: { value: [HORSESHOE, 16] } } },
-  { id: 'gold-diamond', name: '황금 다이아', description: '다이아 줄의 상금 +16', kind: 'prize', price: 4, effect: { value: [DIAMOND, 16] }, upgrade: { description: '다이아 줄의 상금 +24', effect: { value: [DIAMOND, 24] } } },
+  {
+    id: 'gold-cherry', name: '황금 체리', kind: 'prize', price: 6,
+    description: '체리 줄의 상금 +4', effect: { value: [CHERRY, 4] },
+    upgrades: [
+      { description: '체리 줄의 상금 +6', effect: { value: [CHERRY, 6] } },
+      { description: '체리 줄의 상금 +9', effect: { value: [CHERRY, 9] } },
+      { description: '체리 줄의 상금 +12', effect: { value: [CHERRY, 12] } },
+    ],
+  },
+  {
+    id: 'gold-clover', name: '황금 클로버', kind: 'prize', price: 6,
+    description: '클로버 줄의 상금 +5', effect: { value: [CLOVER, 5] },
+    upgrades: [
+      { description: '클로버 줄의 상금 +9', effect: { value: [CLOVER, 9] } },
+      { description: '클로버 줄의 상금 +13', effect: { value: [CLOVER, 13] } },
+      { description: '클로버 줄의 상금 +18', effect: { value: [CLOVER, 18] } },
+    ],
+  },
+  {
+    id: 'gold-bell', name: '황금 종', kind: 'prize', price: 5,
+    description: '종 줄의 상금 +6', effect: { value: [BELL, 6] },
+    upgrades: [
+      { description: '종 줄의 상금 +9', effect: { value: [BELL, 9] } },
+      { description: '종 줄의 상금 +13', effect: { value: [BELL, 13] } },
+      { description: '종 줄의 상금 +18', effect: { value: [BELL, 18] } },
+    ],
+  },
+  {
+    id: 'gold-horseshoe', name: '황금 말굽', kind: 'prize', price: 4,
+    description: '말굽 줄의 상금 +10', effect: { value: [HORSESHOE, 10] },
+    upgrades: [
+      { description: '말굽 줄의 상금 +16', effect: { value: [HORSESHOE, 16] } },
+      { description: '말굽 줄의 상금 +23', effect: { value: [HORSESHOE, 23] } },
+      { description: '말굽 줄의 상금 +30', effect: { value: [HORSESHOE, 30] } },
+    ],
+  },
+  {
+    id: 'gold-diamond', name: '황금 다이아', kind: 'prize', price: 4,
+    description: '다이아 줄의 상금 +16', effect: { value: [DIAMOND, 16] },
+    upgrades: [
+      { description: '다이아 줄의 상금 +24', effect: { value: [DIAMOND, 24] } },
+      { description: '다이아 줄의 상금 +34', effect: { value: [DIAMOND, 34] } },
+      { description: '다이아 줄의 상금 +45', effect: { value: [DIAMOND, 45] } },
+    ],
+  },
   // 줄: 줄의 갈래마다 상금을 곱한다.
-  { id: 'wide', name: '가로 두 배', description: '가로줄의 상금이 두 배', kind: 'line', price: 4, effect: { lineTimes: ['row', 2] }, upgrade: { description: '가로줄의 상금이 세 배', effect: { lineTimes: ['row', 3] } } },
-  { id: 'tall', name: '세로 두 배', description: '세로줄의 상금이 두 배', kind: 'line', price: 5, effect: { lineTimes: ['col', 2] }, upgrade: { description: '세로줄의 상금이 세 배', effect: { lineTimes: ['col', 3] } } },
-  { id: 'slant', name: '대각선 세 배', description: '대각선의 상금이 세 배', kind: 'line', price: 9, effect: { lineTimes: ['diag', 3] }, upgrade: { description: '대각선의 상금이 네 배', effect: { lineTimes: ['diag', 4] } } },
+  {
+    id: 'wide', name: '가로 두 배', kind: 'line', price: 4,
+    description: '가로줄의 상금이 두 배', effect: { lineTimes: ['row', 2] },
+    upgrades: [
+      { description: '가로줄의 상금이 세 배', effect: { lineTimes: ['row', 3] } },
+      { description: '가로줄의 상금이 네 배', effect: { lineTimes: ['row', 4] } },
+      { description: '가로줄의 상금이 다섯 배', effect: { lineTimes: ['row', 5] } },
+    ],
+  },
+  {
+    id: 'tall', name: '세로 두 배', kind: 'line', price: 5,
+    description: '세로줄의 상금이 두 배', effect: { lineTimes: ['col', 2] },
+    upgrades: [
+      { description: '세로줄의 상금이 세 배', effect: { lineTimes: ['col', 3] } },
+      { description: '세로줄의 상금이 네 배', effect: { lineTimes: ['col', 4] } },
+      { description: '세로줄의 상금이 다섯 배', effect: { lineTimes: ['col', 5] } },
+    ],
+  },
+  {
+    id: 'slant', name: '대각선 세 배', kind: 'line', price: 9,
+    description: '대각선의 상금이 세 배', effect: { lineTimes: ['diag', 3] },
+    upgrades: [
+      { description: '대각선의 상금이 네 배', effect: { lineTimes: ['diag', 4] } },
+      { description: '대각선의 상금이 다섯 배', effect: { lineTimes: ['diag', 5] } },
+      { description: '대각선의 상금이 여섯 배', effect: { lineTimes: ['diag', 6] } },
+    ],
+  },
   // 재주: 판의 흐름을 바꾼다.
-  { id: 'extra', name: '덤 스핀', description: '라운드마다 세 번 더 돌려요', kind: 'trick', price: 6, effect: { spins: 3 }, upgrade: { description: '라운드마다 다섯 번 더 돌려요', effect: { spins: 5 } } },
-  { id: 'piggy', name: '저금통', description: '남긴 3개마다 +1, 20까지', kind: 'trick', price: 4, effect: { savingsCap: 20 }, upgrade: { description: '남긴 3개마다 +1, 60까지', effect: { savingsCap: 60 } } },
-  { id: 'comfort', name: '위로 금화', description: '꽝이면 금화를 4개 더 받아요', kind: 'trick', price: 4, effect: { consolation: 4 }, upgrade: { description: '꽝이면 금화를 9개 더 받아요', effect: { consolation: 9 } } },
-  { id: 'twins', name: '쌍둥이 줄', description: '딱 두 줄 맞으면 두 배', kind: 'trick', price: 6, effect: { comboExact: [2, 2] }, upgrade: { description: '딱 두 줄 맞으면 네 배', effect: { comboExact: [2, 4] } } },
-  { id: 'crown', name: '왕관', description: '세 줄 이상 맞으면 두 배', kind: 'trick', price: 7, effect: { combo: [3, 2] }, upgrade: { description: '세 줄 이상 맞으면 세 배', effect: { combo: [3, 3] } } },
-  { id: 'middle', name: '가운데 7', description: '가운데 칸이 셋에 한 번 7', kind: 'trick', price: 8, effect: { centerWild: 0.35 }, upgrade: { description: '가운데 칸이 셋에 두 번 7', effect: { centerWild: 0.65 } } },
-  { id: 'finale', name: '막판 한 방', description: '마지막 스핀의 상금이 세 배', kind: 'trick', price: 8, effect: { lastTimes: 3 }, upgrade: { description: '마지막 스핀의 상금이 다섯 배', effect: { lastTimes: 5 } } },
-  { id: 'rebound', name: '오뚝이', description: '같은 라운드의 꽝 다음 세 배', kind: 'trick', price: 10, effect: { reboundTimes: 3 }, upgrade: { description: '같은 라운드의 꽝 다음 네 배', effect: { reboundTimes: 4 } } },
+  {
+    id: 'extra', name: '덤 스핀', kind: 'trick', price: 6,
+    description: '라운드마다 세 번 더 돌려요', effect: { spins: 3 },
+    upgrades: [
+      { description: '라운드마다 다섯 번 더 돌려요', effect: { spins: 5 } },
+      { description: '라운드마다 일곱 번 더 돌려요', effect: { spins: 7 } },
+      { description: '라운드마다 아홉 번 더 돌려요', effect: { spins: 9 } },
+    ],
+  },
+  {
+    id: 'piggy', name: '저금통', kind: 'trick', price: 4,
+    description: '남긴 3개마다 +1, 20까지', effect: { savingsCap: 20 },
+    upgrades: [
+      { description: '남긴 3개마다 +1, 60까지', effect: { savingsCap: 60 } },
+      { description: '남긴 3개에 +1, 200까지', effect: { savingsCap: 200 } },
+      { description: '남긴 3개에 +1, 600까지', effect: { savingsCap: 600 } },
+    ],
+  },
+  {
+    id: 'comfort', name: '위로 금화', kind: 'trick', price: 4,
+    description: '꽝이면 금화를 4개 더 받아요', effect: { consolation: 4 },
+    upgrades: [
+      { description: '꽝이면 금화를 9개 더 받아요', effect: { consolation: 9 } },
+      { description: '꽝이면 금화 15개 더 받아요', effect: { consolation: 15 } },
+      { description: '꽝이면 금화 25개 더 받아요', effect: { consolation: 25 } },
+    ],
+  },
+  {
+    id: 'twins', name: '쌍둥이 줄', kind: 'trick', price: 6,
+    description: '딱 두 줄 맞으면 두 배', effect: { comboExact: [2, 2] },
+    upgrades: [
+      { description: '딱 두 줄 맞으면 네 배', effect: { comboExact: [2, 4] } },
+      { description: '딱 두 줄 맞으면 여섯 배', effect: { comboExact: [2, 6] } },
+      { description: '딱 두 줄 맞으면 여덟 배', effect: { comboExact: [2, 8] } },
+    ],
+  },
+  {
+    id: 'crown', name: '왕관', kind: 'trick', price: 7,
+    description: '세 줄 이상 맞으면 두 배', effect: { combo: [3, 2] },
+    upgrades: [
+      { description: '세 줄 이상 맞으면 세 배', effect: { combo: [3, 3] } },
+      { description: '세 줄 이상 맞으면 네 배', effect: { combo: [3, 4] } },
+      { description: '세 줄 이상 맞으면 다섯 배', effect: { combo: [3, 5] } },
+    ],
+  },
+  {
+    id: 'middle', name: '가운데 7', kind: 'trick', price: 8,
+    description: '가운데 칸이 셋에 한 번 7', effect: { centerWild: 0.35 },
+    upgrades: [
+      { description: '가운데 칸이 셋에 두 번 7', effect: { centerWild: 0.65 } },
+      { description: '가운데 칸이 거의 늘 7', effect: { centerWild: 0.85 } },
+      { description: '가운데 칸이 언제나 7', effect: { centerWild: 1 } },
+    ],
+  },
+  {
+    id: 'finale', name: '막판 한 방', kind: 'trick', price: 8,
+    description: '마지막 스핀의 상금이 세 배', effect: { lastTimes: 3 },
+    upgrades: [
+      { description: '마지막 스핀의 상금이 다섯 배', effect: { lastTimes: 5 } },
+      { description: '마지막 스핀의 상금이 일곱 배', effect: { lastTimes: 7 } },
+      { description: '마지막 스핀의 상금이 아홉 배', effect: { lastTimes: 9 } },
+    ],
+  },
+  {
+    id: 'rebound', name: '오뚝이', kind: 'trick', price: 10,
+    description: '같은 라운드의 꽝 다음 세 배', effect: { reboundTimes: 3 },
+    upgrades: [
+      { description: '같은 라운드의 꽝 다음 네 배', effect: { reboundTimes: 4 } },
+      { description: '같은 라운드 꽝 다음 다섯 배', effect: { reboundTimes: 5 } },
+      { description: '같은 라운드 꽝 다음 여섯 배', effect: { reboundTimes: 6 } },
+    ],
+  },
 ];
 
-/** 강화한 부적의 id 끝에 붙는 표시. 'twins'를 강화하면 'twins+'가 된다. */
+/** 강화한 부적의 id 끝에 붙는 표시. 한 단계에 하나씩 붙는다: 'twins' → 'twins+' → 'twins++' → 'twins+++'. */
 export const UPGRADE_MARK = '+';
 
-/** 강화했는지 */
+/** 강화한 단계. 강화하지 않았으면 0이다. id 끝에 붙은 표시를 센다(UPGRADE_MAX를 넘는 id는 없는 부적이다). */
+export function levelOf(id: string): number {
+  let level = 0;
+  for (let end = id.length; end > 0 && id.startsWith(UPGRADE_MARK, end - UPGRADE_MARK.length); end -= UPGRADE_MARK.length) {
+    level += 1;
+  }
+  return level;
+}
+
+/** 강화했는지(한 단계라도) */
 export function isUpgraded(id: string): boolean {
-  return id.endsWith(UPGRADE_MARK);
+  return levelOf(id) > 0;
+}
+
+/** 끝까지 강화했는지 */
+export function isMaxed(id: string): boolean {
+  return levelOf(id) >= UPGRADE_MAX;
 }
 
 /** 강화하기 전의 id. 강화하지 않은 id는 그대로다. 같은 부적인지 견줄 때와 도감에 넣을 때 쓴다. */
 export function baseOf(id: string): string {
-  return isUpgraded(id) ? id.slice(0, -UPGRADE_MARK.length) : id;
+  return id.slice(0, id.length - levelOf(id) * UPGRADE_MARK.length);
 }
 
-/** 강화한 뒤의 id. 이미 강화한 id는 그대로다. */
+/** 한 단계 더 강화한 id. 끝까지 강화한 id는 그대로다. */
 export function upgradedOf(id: string): string {
-  return isUpgraded(id) ? id : `${id}${UPGRADE_MARK}`;
+  return isMaxed(id) ? id : `${id}${UPGRADE_MARK}`;
 }
 
-/** 강화한 부적: id에 표시가 붙고, 효과와 설명이 강화한 것으로 바뀐다. 이름과 갈래, 값은 그대로다. */
-function upgradedCharm(charm: CharmInfo): CharmInfo {
-  return { ...charm, id: upgradedOf(charm.id), description: charm.upgrade.description, effect: charm.upgrade.effect };
+/** 그 단계까지 강화한 부적: id에 표시가 붙고, 효과와 설명이 그 단계의 것으로 바뀐다. 이름과 갈래, 값은 그대로다. */
+function charmAt(charm: CharmInfo, level: number): CharmInfo {
+  if (level <= 0) return charm;
+  const step = charm.upgrades[level - 1];
+  return { ...charm, id: `${charm.id}${UPGRADE_MARK.repeat(level)}`, description: step.description, effect: step.effect };
 }
 
-/** 가게에 나오는 부적(CHARMS)과, 그것을 강화한 부적까지 id로 찾는 표 */
+/** 가게에 나오는 부적(CHARMS)과, 그것을 단계마다 강화한 부적까지 id로 찾는 표 */
 const CHARM_BY_ID: ReadonlyMap<string, CharmInfo> = new Map(
-  CHARMS.flatMap((charm) => [charm, upgradedCharm(charm)]).map((charm) => [charm.id, charm]),
+  CHARMS.flatMap((charm) => Array.from({ length: charm.upgrades.length + 1 }, (_, level) => charmAt(charm, level))).map(
+    (charm) => [charm.id, charm],
+  ),
 );
 
-/** id로 부적을 찾는다. 강화한 부적의 id('twins+')도 찾는다. 없는 id면 undefined. */
+/** id로 부적을 찾는다. 강화한 부적의 id('twins+', 'twins++')도 찾는다. 없는 id면 undefined. */
 export function charmOf(id: string): CharmInfo | undefined {
   return CHARM_BY_ID.get(id);
 }
@@ -488,7 +710,7 @@ export interface RunState {
   coin: number;
   /** 이번 판에 받은 금화를 모두 더한 것. 이것이 점수다. */
   earned: number;
-  /** 붙인 부적의 id. 많아야 slotsOf(run)장이다. 강화한 부적은 id 끝에 UPGRADE_MARK가 붙어 있다. */
+  /** 붙인 부적의 id. 많아야 slotsOf(run)장이다. 강화한 부적은 id 끝에 단계만큼 UPGRADE_MARK가 붙어 있다. */
   charms: string[];
   /** 가게가 열려 있을 때의 가게. 아니면 null. */
   shop: Shop | null;
@@ -798,30 +1020,47 @@ export function reroll(run: RunState, random: () => number): RunState {
  * 돌려받는 몫은 절반이라, 사서 떼거나 강화해서 떼면 언제나 손해다.
  */
 export const REFUND_RATE = 0.5;
-export const UPGRADE_RATE = 15;
+/** 강화하는 값: 단계마다 부적의 값에 이 수를 곱한다. 단계가 오를수록 훨씬 비싸진다. */
+export const UPGRADE_RATES: readonly number[] = [15, 40, 100];
 
-/**
- * 그 부적을 강화하는 값. 부적의 값에 UPGRADE_RATE를 곱해 올림한다. 없는 부적이면 0이다.
- * run을 주면 그 판의 대장장이 망치(유물)만큼 싸진다(내림하고, 1보다 싸지지는 않는다).
- * 내림이라서 1단계에도 어느 부적이든 적어도 한 개는 싸다.
- */
-export function upgradeCostOf(id: string, run?: Pick<RunState, 'relics'>): number {
-  const charm = charmOf(baseOf(id));
-  if (!charm) return 0;
-  const cost = Math.ceil(charm.price * UPGRADE_RATE);
+/** 그 부적(강화하기 전의 것)을 level단계에서 한 단계 더 올리는 값. 올릴 단계가 없으면 0이다. */
+function stepCost(charm: CharmInfo, level: number, run?: Pick<RunState, 'relics'>): number {
+  const rate = UPGRADE_RATES[level];
+  if (rate === undefined || level >= charm.upgrades.length) return 0;
+  const cost = Math.ceil(charm.price * rate);
   const cut = RELIC_STEP.hammer * relicLevel(run, 'hammer');
   return Math.max(1, Math.floor((cost * (100 - cut)) / 100));
 }
 
 /**
- * 그 부적을 뗄 때 돌려받는 금화: 치른 값(강화했으면 강화하는 값까지)의 REFUND_RATE만큼, 내림한다.
+ * 그 부적을 한 단계 더 강화하는 값. 부적의 값에 그 단계의 UPGRADE_RATES를 곱해 올림한다.
+ * 없는 부적이거나 끝까지 강화한 부적이면 0이다.
+ * run을 주면 그 판의 대장장이 망치(유물)만큼 싸진다(내림하고, 1보다 싸지지는 않는다).
+ * 내림이라서 1단계에도 어느 부적이든 적어도 한 개는 싸다.
+ */
+export function upgradeCostOf(id: string, run?: Pick<RunState, 'relics'>): number {
+  const charm = charmOf(baseOf(id));
+  if (!charm || !charmOf(id)) return 0;
+  return stepCost(charm, levelOf(id), run);
+}
+
+/** 그 부적에 이제까지 치른 값: 살 때의 값에, 강화한 단계마다의 값을 더한 것. 없는 부적이면 0이다. */
+export function paidFor(id: string, run?: Pick<RunState, 'relics'>): number {
+  const charm = charmOf(baseOf(id));
+  if (!charm || !charmOf(id)) return 0;
+  let paid = charm.price;
+  for (let level = 0; level < levelOf(id); level += 1) paid += stepCost(charm, level, run);
+  return paid;
+}
+
+/**
+ * 그 부적을 뗄 때 돌려받는 금화: 치른 값(강화했으면 강화한 단계마다의 값까지)의 REFUND_RATE만큼, 내림한다.
  * run을 주면 그 판의 상인의 도장(유물)만큼의 덤이 더 붙고(덤은 올림한다. 1단계에도 한 개는 더 받는다),
  * 강화하는 값도 그 판의 값으로 친다. 어떤 때에도 치른 값보다는 적게 돌려받는다.
  */
 export function refundOf(id: string, run?: Pick<RunState, 'relics'>): number {
-  const charm = charmOf(baseOf(id));
-  if (!charm) return 0;
-  const paid = charm.price + (isUpgraded(id) ? upgradeCostOf(id, run) : 0);
+  const paid = paidFor(id, run);
+  if (paid <= 0) return 0;
   const base = Math.floor((paid * Math.round(REFUND_RATE * 100)) / 100);
   const bonus = Math.ceil((paid * RELIC_STEP.seal * relicLevel(run, 'seal')) / 100);
   return Math.max(0, Math.min(paid - 1, base + bonus));
@@ -844,13 +1083,13 @@ export function upgradeBlock(run: RunState, slot: number): UpgradeBlock | null {
   if (run.phase !== 'shop') return 'closed';
   const id = run.charms[slot];
   if (id === undefined || !charmOf(id)) return 'none';
-  if (isUpgraded(id)) return 'done';
+  if (isMaxed(id)) return 'done';
   if (run.coin < upgradeCostOf(id, run)) return 'coin';
   return null;
 }
 
 /**
- * 붙여 둔 slot번째 부적을 금화를 내고 강화한다. 부적마다 한 번만 강화할 수 있고, 가게에서만 한다.
+ * 붙여 둔 slot번째 부적을 금화를 내고 한 단계 강화한다. 부적마다 UPGRADE_MAX단계까지 올릴 수 있고, 가게에서만 한다.
  * 강화할 수 없으면 run을 그대로 돌려준다. 자리가 다 찬 뒤에도 금화를 쓸 곳이 된다.
  */
 export function upgrade(run: RunState, slot: number): RunState {

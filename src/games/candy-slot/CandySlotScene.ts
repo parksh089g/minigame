@@ -127,7 +127,7 @@ import {
   bubbleShop,
   CHIP,
   chipPlace,
-  hasUpgradeMark,
+  upgradeMarks,
   offerChip,
   REFUND_SIGN,
   spinLabel,
@@ -1962,7 +1962,7 @@ export class CandySlotScene extends MiniGameScene {
   }
 
   /**
-   * 붙인 부적의 이름과 설명을 그 위에 띄운다. 강화한 부적은 이름 옆에 별이 붙는다.
+   * 붙인 부적의 이름과 설명을 그 위에 띄운다. 강화한 부적은 이름 옆에 단계만큼 별이 붙는다.
    * 가게에서는 떼는 버튼(돌려받는 금화가 적힌다)과 강화 칸(강화하면 바뀌는 설명, 값, 버튼)이 같이 뜬다.
    */
   private showBubble(slot: number, name: string, description: string): void {
@@ -1987,8 +1987,8 @@ export class CandySlotScene extends MiniGameScene {
       return text.setScale(Math.min(1, place.textWidth / Math.max(1, text.width)));
     };
     const views: Disposable[] = [back, title, small(place.body, description, LOOK.text.sub)];
-    if (hasUpgradeMark(this.run.charms[slot])) {
-      const markX = title.x + Math.ceil(title.width) + 2 + UPGRADE_MARK_BOX / 2;
+    for (let mark = 0; mark < upgradeMarks(this.run.charms[slot]); mark += 1) {
+      const markX = title.x + Math.ceil(title.width) + 2 + UPGRADE_MARK_BOX / 2 + mark * (UPGRADE_MARK_BOX - 2);
       views.push(this.add.image(markX, title.y + title.height / 2, upgradeMarkTexture(this)).setDepth(depth));
     }
     const zones: Phaser.GameObjects.GameObject[] = [];

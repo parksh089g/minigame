@@ -161,7 +161,7 @@ describe('부적의 목록', () => {
     const known = fontSyllables();
     expect(known.size).toBe(2350);
     const texts = [
-      ...CHARMS.flatMap((charm) => [charm.name, charm.description, charm.upgrade.description]),
+      ...CHARMS.flatMap((charm) => [charm.name, charm.description, ...charm.upgrades.map((step) => step.description)]),
       ...SYMBOLS.map((symbol) => symbol.name),
     ];
     for (const text of texts) {
@@ -172,7 +172,7 @@ describe('부적의 목록', () => {
     for (const charm of CHARMS) {
       expect(charm.name.length, charm.name).toBeLessThanOrEqual(7);
       expect(charm.description.length, charm.description).toBeLessThanOrEqual(16);
-      expect(charm.upgrade.description.length, charm.upgrade.description).toBeLessThanOrEqual(16);
+      for (const step of charm.upgrades) expect(step.description.length, step.description).toBeLessThanOrEqual(16);
     }
   });
 
@@ -202,9 +202,11 @@ describe('확률', () => {
     for (const charm of more) {
       const symbol = charm.effect.weight![0];
       expect(charm.description).toBe(`${SYMBOLS[symbol].name} 늘고 다른 그림 줄어요`);
-      expect(charm.upgrade.description).toBe(`${SYMBOLS[symbol].name} 더 늘고 나머지 줄어요`);
-      // 설명대로다: 강화하든 아니든 그 그림만 늘고 다른 그림은 모두 준다.
-      for (const id of [charm.id, upgradedOf(charm.id)]) {
+      expect(charm.upgrades.map((step) => step.description)).toEqual(
+        ['더 늘고', '또 늘고', '꽉 차고'].map((words) => `${SYMBOLS[symbol].name} ${words} 나머지 줄어요`),
+      );
+      // 설명대로다: 몇 단계로 강화하든 그 그림만 늘고 다른 그림은 모두 준다.
+      for (const id of [charm.id, ...charm.upgrades.map((_, level) => `${charm.id}${'+'.repeat(level + 1)}`)]) {
         const before = oddsOf([]);
         const after = oddsOf([id]);
         SYMBOLS.forEach((_, other) => {

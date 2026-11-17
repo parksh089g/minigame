@@ -21,13 +21,13 @@ import {
   bubbleShop,
   CHIP,
   chipPlace,
-  hasUpgradeMark,
   HIT_CHIP_TEXT,
   hitChip,
   offerChip,
   SPIN_TEXT,
   spinLabel,
   timesText,
+  upgradeMarks,
   type BubbleKind,
 } from './shop-text';
 
@@ -122,7 +122,7 @@ describe('붙인 부적의 설명 창', () => {
       expect(shop?.refund, charm.id).toBe(refundOf(charm.id));
       expect(shop?.upgrade.state, charm.id).toBe('ready');
       expect(shop?.upgrade.lead).toBe(BUBBLE_TEXT.lead);
-      expect(shop?.upgrade.description).toBe(charm.upgrade.description);
+      expect(shop?.upgrade.description).toBe(charm.upgrades[0].description);
       expect(shop?.upgrade.cost).toBe(upgradeCostOf(charm.id));
       // 확률 부적이면 강화했을 때 줄이 맞을 확률이 어떻게 바뀌는지도 낸다.
       expect(shop?.upgrade.chip !== null, charm.id).toBe(charm.kind === 'odds');
@@ -139,7 +139,7 @@ describe('붙인 부적의 설명 창', () => {
     expect(shop?.upgrade).toEqual({
       state: 'poor',
       lead: '금화가 모자라요',
-      description: CHARMS.find((charm) => charm.id === 'twins')?.upgrade.description,
+      description: CHARMS.find((charm) => charm.id === 'twins')?.upgrades[0].description,
       cost,
       chip: null,
       tight: false,
@@ -166,18 +166,44 @@ describe('붙인 부적의 설명 창', () => {
     expect(bubbleShop({ ...late, coin: cost + lowered - 1 }, 0)?.upgrade.tight).toBe(true);
   });
 
-  it('이미 강화한 부적은 그렇다고 적고, 돌려받는 금화는 강화하는 값까지 친 것이다', () => {
-    const before = shopping(999, ['twins']);
-    const after = upgrade(before, 0);
-    const shop = bubbleShop(after, 0);
-    expect(shop?.upgrade).toEqual({ state: 'done', lead: '이미 강화했어요', description: null, cost: null, chip: null, tight: false });
+  it('한 단계 강화한 부적은 다음 단계의 설명과 값을 내고, 돌려받는 금화는 강화한 값까지 친 것이다', () => {
+    const before = shopping(9999, ['twins']);
+    const once = upgrade(before, 0);
+    const shop = bubbleShop(once, 0);
+    const twins = CHARMS.find((charm) => charm.id === 'twins');
+    expect(shop?.upgrade).toMatchObject({
+      state: 'ready',
+      lead: BUBBLE_TEXT.lead,
+      description: twins?.upgrades[1].description,
+      cost: upgradeCostOf('twins+'),
+    });
+    expect(shop?.upgrade.cost).toBeGreaterThan(upgradeCostOf('twins'));
     expect(shop?.refund).toBe(refundOf('twins+'));
     expect(shop?.refund).toBeGreaterThan(refundOf('twins'));
+    expect(bubbleKindOf(shop ?? null)).toBe('upgrade');
+    const twice = bubbleShop(upgrade(once, 0), 0);
+    expect(twice?.upgrade).toMatchObject({ state: 'ready', description: twins?.upgrades[2].description, cost: upgradeCostOf('twins++') });
+    // 확률 부적은 단계마다 다음 단계의 확률을 미리 보여 준다.
+    const chip = bubbleShop(shopping(9999, ['more-cherry++']), 0)?.upgrade.chip;
+    expect(chip).toEqual(hitChip(hitChance(['more-cherry++']), hitChance(['more-cherry+++'])));
+  });
+
+  it('끝까지 강화한 부적은 그렇다고 적고, 이름 옆의 별은 강화한 단계만큼이다', () => {
+    const before = shopping(9999, ['twins']);
+    const after = upgrade(upgrade(upgrade(before, 0), 0), 0);
+    expect(after.charms).toEqual(['twins+++']);
+    const shop = bubbleShop(after, 0);
+    expect(shop?.upgrade).toEqual({ state: 'done', lead: '끝까지 강화했어요', description: null, cost: null, chip: null, tight: false });
+    expect(shop?.refund).toBe(refundOf('twins+++'));
+    expect(shop?.refund).toBeGreaterThan(refundOf('twins++'));
     expect(bubbleKindOf(shop ?? null)).toBe('done');
-    expect(hasUpgradeMark(after.charms[0])).toBe(true);
-    expect(hasUpgradeMark(before.charms[0])).toBe(false);
-    expect(hasUpgradeMark(undefined)).toBe(false);
-    expect(hasUpgradeMark('no-such-charm+')).toBe(false);
+    expect(upgradeMarks(after.charms[0])).toBe(3);
+    expect(upgradeMarks('twins++')).toBe(2);
+    expect(upgradeMarks('twins+')).toBe(1);
+    expect(upgradeMarks(before.charms[0])).toBe(0);
+    expect(upgradeMarks(undefined)).toBe(0);
+    expect(upgradeMarks('no-such-charm+')).toBe(0);
+    expect(upgradeMarks('twins++++')).toBe(0);
   });
 });
 

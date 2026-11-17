@@ -13,7 +13,7 @@ import {
   baseOf,
   CENTER,
   charmOf,
-  isUpgraded,
+  levelOf,
   LINES,
   SIZE,
   SYMBOLS,
@@ -601,8 +601,25 @@ export function drawUpgradeMark(g: Graphics, x: number, y: number, r: number): v
   g.fillCircle(x - r * 0.2, y - r * 0.22, Math.max(0.5, r * 0.16));
 }
 
-/** 부적 그림에서 강화한 표시가 놓이는 자리(왼쪽 위 귀퉁이)와 별의 크기. 부적의 한가운데가 원점이다. */
-const CHARM_MARK = { x: -9, y: -8.8, r: 5 } as const;
+/**
+ * 부적 그림에서 강화한 표시가 놓이는 자리(왼쪽 위 귀퉁이)와 별의 크기. 부적의 한가운데가 원점이다.
+ * 강화한 단계만큼 별이 왼쪽 위에서 오른쪽으로 나란히 놓인다. 단계가 오르면 별이 조금씩 작아져서,
+ * 세 개가 놓여도 오른쪽 위의 표시(더하기, 빼기)를 가리지 않는다.
+ */
+const CHARM_MARK = { x: -9, y: -8.8, r: [5, 4.5, 4.1], step: [0, 6.4, 5.6] } as const;
+
+/** 부적의 귀퉁이에 강화한 단계만큼 별을 그린다. */
+function drawCharmMarks(g: Graphics, level: number): void {
+  const count = Math.min(level, CHARM_MARK.r.length);
+  if (count <= 0) return;
+  const r = CHARM_MARK.r[count - 1];
+  const step = CHARM_MARK.step[count - 1];
+  // 작아진 별도 왼쪽 위 모서리에 같은 만큼 붙어 있게 한다.
+  const shift = CHARM_MARK.r[0] - r;
+  for (let index = 0; index < count; index += 1) {
+    drawUpgradeMark(g, CHARM_MARK.x - shift + index * step, CHARM_MARK.y - shift, r);
+  }
+}
 
 /** 줄 부적의 작은 판에서 짙게 칠할 칸들. 가로와 세로는 가운데 줄 하나로 방향을 보여 주고, 대각선은 두 줄을 다 칠한다. */
 function lineCells(kind: LineKind): number[] {
@@ -639,10 +656,10 @@ function drawCharm(g: Graphics, charm: CharmInfo): void {
     // 강화한 부적도 원래 부적의 그림을 쓴다.
     TRICKS[baseOf(charm.id)]?.(g);
   }
-  if (isUpgraded(charm.id)) drawUpgradeMark(g, CHARM_MARK.x, CHARM_MARK.y, CHARM_MARK.r);
+  drawCharmMarks(g, levelOf(charm.id));
 }
 
-/** 부적의 그림. 강화한 부적(id 끝에 표시가 붙은 것)은 귀퉁이에 별이 붙는다. 없는 id면 빈자리의 그림을 돌려준다. */
+/** 부적의 그림. 강화한 부적(id 끝에 표시가 붙은 것)은 귀퉁이에 단계만큼 별이 붙는다. 없는 id면 빈자리의 그림을 돌려준다. */
 export function charmTexture(scene: Phaser.Scene, id: string): string {
   const charm = charmOf(id);
   if (!charm) return emptySlotTexture(scene);

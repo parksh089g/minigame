@@ -5,7 +5,7 @@
 import {
   charmOf,
   hitChance,
-  isUpgraded,
+  levelOf,
   refundOf,
   targetFor,
   upgradeBlock,
@@ -85,20 +85,21 @@ export const BUBBLE_TEXT = {
   /** 강화하면 바뀌는 설명의 머리말 */
   lead: '강화하면',
   poor: '금화가 모자라요',
-  done: '이미 강화했어요',
+  /** 끝 단계까지 강화한 부적의 설명 창에 적는 글 */
+  done: '끝까지 강화했어요',
   /** 강화할 수는 있지만, 하고 나면 가진 금화가 다음 라운드의 목표보다 적어질 때의 머리말 */
   tight: '목표보다 적게 남아요',
 } as const;
 
 /** 설명 창의 강화 칸 */
 export interface UpgradeOffer {
-  /** ready: 강화할 수 있다. poor: 금화가 모자란다. done: 이미 강화했다. */
+  /** ready: 한 단계 더 강화할 수 있다. poor: 금화가 모자란다. done: 끝까지 강화했다. */
   state: 'ready' | 'poor' | 'done';
   /** 강화 칸의 첫 줄: 머리말이거나, 강화할 수 없는 까닭 */
   lead: string;
-  /** 강화하면 바뀌는 설명. 이미 강화했으면 null */
+  /** 한 단계 더 강화하면 바뀌는 설명. 끝까지 강화했으면 null */
   description: string | null;
-  /** 강화하는 값. 이미 강화했으면 null */
+  /** 한 단계 더 강화하는 값. 끝까지 강화했으면 null */
   cost: number | null;
   /** 확률 부적을 강화하면 한 줄이 맞을 확률이 어떻게 바뀌는지. 강화할 수 있는 확률 부적에만 있다. */
   chip: HitChip | null;
@@ -130,7 +131,7 @@ export function bubbleShop(run: RunState, slot: number): BubbleShop | null {
     return { refund, upgrade: { state: 'done', lead: BUBBLE_TEXT.done, description: null, cost: null, chip: null, tight: false } };
   }
   const base = charmOf(id);
-  const description = base?.upgrade.description ?? '';
+  const description = charmOf(upgradedOf(id))?.description ?? '';
   const cost = upgradeCostOf(id, run);
   if (block === 'coin') {
     return { refund, upgrade: { state: 'poor', lead: BUBBLE_TEXT.poor, description, cost, chip: null, tight: false } };
@@ -147,15 +148,15 @@ export function bubbleShop(run: RunState, slot: number): BubbleShop | null {
   return { refund, upgrade: { state: 'ready', lead: BUBBLE_TEXT.lead, description, cost, chip, tight: false } };
 }
 
-/** 강화한 부적인지. 설명 창의 이름 옆에 별을 놓을 때 쓴다. */
-export function hasUpgradeMark(id: string | undefined): boolean {
-  return id !== undefined && isUpgraded(id) && charmOf(id) !== undefined;
+/** 강화한 단계(0~UPGRADE_MAX). 설명 창의 이름 옆에 그 수만큼 별을 놓을 때 쓴다. 없는 부적이면 0이다. */
+export function upgradeMarks(id: string | undefined): number {
+  return id !== undefined && charmOf(id) !== undefined ? levelOf(id) : 0;
 }
 
 /** 돌려받는 금화를 버튼에 적을 때 앞에 붙이는 표시. 값을 치르는 버튼(강화, 다시 뽑기)과 헷갈리지 않게 한다. */
 export const REFUND_SIGN = '+';
 
-/** 설명 창의 모양: 이름과 설명만(plain), 강화 칸까지(upgrade), 이미 강화한 부적(done) */
+/** 설명 창의 모양: 이름과 설명만(plain), 강화 칸까지(upgrade), 끝까지 강화한 부적(done) */
 export type BubbleKind = 'plain' | 'upgrade' | 'done';
 
 export function bubbleKindOf(shop: BubbleShop | null): BubbleKind {
