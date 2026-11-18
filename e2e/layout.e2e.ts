@@ -21,7 +21,7 @@ import {
 import { CHARMS, HOLDS_PER_ROUND, REROLL_COST, SLOTS, type RunState } from '../src/games/candy-slot/rules';
 import { cellCorner, type ShopCard } from '../src/games/garden-guard/allies';
 import { ALLIES, CELL_COUNT, FIELD, GARDEN_CELLS, GARDEN_SCENE, PAIRS, SHOP, UPGRADE_ORDER, UPGRADES } from '../src/games/garden-guard/data';
-import { SHOP_TEXT } from '../src/games/garden-guard/shop-text';
+import { allyInfo, INFO_TEXT, SHOP_TEXT } from '../src/games/garden-guard/shop-text';
 import { iconKey } from '../src/games/lantern-keeper/icons';
 import { NEWS_GAP, newsLine, normalizeMeta, unknownNews } from '../src/games/lantern-keeper/meta';
 import { echoText, upgradeDescription, upgradeTitle, type Upgrade } from '../src/games/lantern-keeper/rules';
@@ -2148,6 +2148,76 @@ it('텃밭 지키기: 맞닿은 짝에는 밭에 하트가 뜨고, 짝을 지을
     .toEqual({ id: 'sparrow', copies: 1, cell: 2 });
   expect(await textPoint(page, GARDEN_SCENE, SHOP_TEXT.pair)).toBeNull();
   await expect.poll(() => hiddenTexts(page, GARDEN_SCENE), { ...WAIT, message: '짝 곁에 놓은 뒤의 가게' }).toEqual([]);
+});
+
+/** 캔버스의 논리 좌표 at을 손가락으로 ms만큼 누르고 있다가 뗀다(움직이지 않는다). */
+async function holdOnCanvas(page: Page, at: { x: number; y: number }, ms: number): Promise<void> {
+  const box = await page.locator('canvas').boundingBox();
+  if (!box) throw new Error('캔버스가 보이지 않는다');
+  const scale = box.width / GAME_WIDTH;
+  const point = { x: box.x + at.x * scale, y: box.y + at.y * scale };
+  const client = await page.context().newCDPSession(page);
+  await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point] });
+  await page.waitForTimeout(ms);
+  await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await client.detach();
+}
+
+it('텃밭 지키기: 카드나 밭의 동료를 꾹 누르면 동료 정보가 뜨고, 그 손을 떼도 사거나 고르지 않는다', async ({ page }) => {
+  await openGardenShop(page);
+  const team = [{ id: 'frog', copies: 2, fireIn: 0.5, cell: 2 }];
+  const fenceY = await setGardenTeam(page, team, 30, [
+    { id: 'sunflower', sold: false },
+    { id: 'frog', sold: false },
+    { id: 'mint', sold: false },
+  ]);
+  const before = await gardenTeam(page);
+  expect(before.allies).toEqual([{ id: 'frog', copies: 2, cell: 2 }]);
+  const stats = await page.evaluate(
+    (key) => (window.__pocketArcade?.scene.getScene(key) as unknown as { run: { stats: object } }).run.stats,
+    GARDEN_SCENE,
+  );
+  const run = { allies: before.allies.map((ally) => ({ ...ally, fireIn: 0.5 })), stats } as unknown as Parameters<typeof allyInfo>[0];
+
+  // 처음 보는 해바라기의 카드: 누르기만 하면 바로 사지만, 꾹 누르면 정보만 뜬다.
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, ALLIES.sunflower.name), WAIT).not.toBeNull();
+  const card = allyInfo(run, 'sunflower');
+  await holdOnCanvas(page, (await textPoint(page, GARDEN_SCENE, ALLIES.sunflower.name))!, 700);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, INFO_TEXT.close), { ...WAIT, message: '카드의 정보 창' }).not.toBeNull();
+  for (const line of [card.star, card.aim, ...card.numbers]) {
+    expect(await textPoint(page, GARDEN_SCENE, line), line).not.toBeNull();
+  }
+  expect(card.star).toBe(SHOP_TEXT.fresh);
+  // 가게의 글은 감춰져서 정보 창과 겹치지 않는다.
+  expect(await textPoint(page, GARDEN_SCENE, SHOP_TEXT.title)).toBeNull();
+  expect(await hiddenTexts(page, GARDEN_SCENE), '카드의 정보 창').toEqual([]);
+  await page.waitForTimeout(300);
+  expect(await gardenTeam(page), '꾹 누른 카드는 사지 않는다').toEqual(before);
+  await tapText(page, GARDEN_SCENE, INFO_TEXT.close);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, SHOP_TEXT.title), WAIT).not.toBeNull();
+  expect(await textPoint(page, GARDEN_SCENE, INFO_TEXT.close)).toBeNull();
+  expect(await gardenTeam(page), '닫아도 사지 않는다').toEqual(before);
+
+  // 밭의 개구리(★2)를 꾹 누르면 그 동료의 정보가 뜨고, 고르지는 않는다(내보내기 단추가 나오지 않는다).
+  const frog = allyInfo(run, 'frog', 2);
+  await holdOnCanvas(page, gardenCellPoint(fenceY, 3), 700);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, frog.aim), { ...WAIT, message: '밭의 동료의 정보 창' }).not.toBeNull();
+  for (const line of [frog.name, ...frog.specials, ...frog.numbers]) {
+    expect(await textPoint(page, GARDEN_SCENE, line), line).not.toBeNull();
+  }
+  expect(frog.numbers).toContain('★2 → ★3: 피해 ×1.5 · 빠르기 ×1.1');
+  expect(await hiddenTexts(page, GARDEN_SCENE), '밭의 동료의 정보 창').toEqual([]);
+  // 아무 데나 누르면 닫힌다.
+  await tapAt(page, GAME_WIDTH / 2, fenceY - 20);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, INFO_TEXT.close), WAIT).toBeNull();
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, SHOP_TEXT.reroll), WAIT).not.toBeNull();
+  expect(await textPoint(page, GARDEN_SCENE, SHOP_TEXT.dismiss)).toBeNull();
+  expect(await gardenTeam(page)).toEqual(before);
+  expect(await hiddenTexts(page, GARDEN_SCENE), '정보 창을 닫은 가게').toEqual([]);
+
+  // 짧게 누르면 여느 때처럼 산다.
+  await tapText(page, GARDEN_SCENE, SHOP_TEXT.fresh);
+  await expect.poll(async () => (await gardenTeam(page)).allies.length, WAIT).toBe(2);
 });
 
 it('텃밭 지키기: 하던 판을 두고 나가거나 앱이 꺼져도 준비 화면에서 그 자리부터 이어 하고, 새 판을 고르면 그 판을 마친다', async ({ page }) => {
