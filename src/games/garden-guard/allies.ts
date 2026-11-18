@@ -22,6 +22,11 @@ export interface Ally {
 export interface ShopCard {
   id: AllyId;
   sold: boolean;
+  /**
+   * 묶어 둔 카드인지. 묶어 둔 카드는 다시 뽑아도, 다음 날 가게가 다시 열려도 그 자리에 남는다.
+   * 묶기 전에 적은 판의 카드에는 없어서 적지 않으면 묶지 않은 것이다.
+   */
+  locked?: boolean;
 }
 
 /** 이미 있는 동료를 살 때 고르는 것: 합쳐서 별을 올리거나(merge), 빈칸에 하나 더 놓거나(place) */
@@ -299,10 +304,40 @@ export function drawShop(state: RunState): ShopCard[] {
   return cards;
 }
 
-/** 가게를 연다. 판의 첫날 앞과, 날을 지킬 때마다 연다. */
+/** 다음에 가게를 다시 그릴 때 그 자리에 남는 카드인지: 묶어 두었고 아직 사지 않은 카드 */
+export function keptCard(card: ShopCard | undefined): boolean {
+  return !!card && !!card.locked && !card.sold;
+}
+
+/**
+ * 새로 뽑은 카드(drawn) 가운데 묶어 둔 카드(previous의 같은 자리)가 있던 자리는 묶어 둔 카드로 남긴다.
+ * 남은 자리만 새 카드가 된다. 뽑는 난수는 그대로라서 묶지 않은 자리에는 묶지 않았을 때와 같은 카드가 나온다.
+ */
+export function keepLocked(previous: readonly ShopCard[], drawn: ShopCard[]): ShopCard[] {
+  return drawn.map((card, index) => (keptCard(previous[index]) ? previous[index] : card));
+}
+
+/** 가게를 연다. 판의 첫날 앞과, 날을 지킬 때마다 연다. 전날 묶어 둔 카드는 그 자리에 그대로 있다. */
 export function openShop(state: RunState): void {
   state.shopping = true;
-  state.shop = drawShop(state);
+  state.shop = keepLocked(state.shop, drawShop(state));
+}
+
+/**
+ * 가게를 닫을 때 남길 카드. 묶어 둔 카드가 있으면 다음에 열 때 그 자리에 놓도록 카드 줄을 그대로 두고, 없으면 비운다.
+ * (닫힌 가게의 카드는 살 수 없고, 다음에 열 때 묶어 둔 카드만 쓴다.)
+ */
+export function closedShop(shop: readonly ShopCard[]): ShopCard[] {
+  return shop.some(keptCard) ? [...shop] : [];
+}
+
+/** 가게가 열려 있을 때 사지 않은 카드를 묶거나 푼다. 묶는 데에는 열매가 들지 않는다. 바뀐 묶임(묶었으면 true), 못 바꿨으면 null */
+export function toggleLock(state: RunState, index: number): boolean | null {
+  const card = state.shop[index];
+  if (!state.shopping || !card || card.sold) return null;
+  const locked = !card.locked;
+  state.shop = state.shop.map((other, at) => (at === index ? { ...other, locked } : other));
+  return locked;
 }
 
 /**
@@ -359,17 +394,22 @@ export function buyCard(state: RunState, index: number, mode: BuyMode, at: BuyAt
   return { id: card.id, mode, star, ally };
 }
 
-/** 카드를 다시 뽑을 수 있는지 */
+/** 카드를 다시 뽑을 수 있는지. 카드를 모두 묶어 두었으면 바뀔 것이 없으니 뽑지 않는다. */
 export function canReroll(state: RunState): boolean {
-  return state.shopping && state.fruit >= SHOP.reroll && shopPool(state).length > 0;
+  return (
+    state.shopping &&
+    state.fruit >= SHOP.reroll &&
+    shopPool(state).length > 0 &&
+    (state.shop.length < SHOP.cards || !state.shop.every(keptCard))
+  );
 }
 
-/** 열매를 내고 카드를 다시 뽑는다. 뽑았으면 true */
+/** 열매를 내고 카드를 다시 뽑는다. 묶어 둔 카드는 그 자리에 남는다. 뽑았으면 true */
 export function reroll(state: RunState): boolean {
   if (!canReroll(state)) return false;
   state.fruit -= SHOP.reroll;
   state.rolls += 1;
-  state.shop = drawShop(state);
+  state.shop = keepLocked(state.shop, drawShop(state));
   return true;
 }
 

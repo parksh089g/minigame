@@ -38,6 +38,12 @@ const CARD = { margin: 10, height: 46, gap: 5 } as const;
 const CHOICE = { width: 66, height: 18, gap: 4, top: 22 } as const;
 /** 카드 이름 옆의 칸 표시(작은 네모) */
 const PIP = { size: 6, gap: 2 } as const;
+/**
+ * 카드의 왼쪽 위 모서리에 걸친 자물쇠 단추. 동그라미(radius)는 카드 모서리에 반쯤 걸치고,
+ * 누르는 자리(hit, 네모의 한 변)는 손가락에 넉넉하게 동그라미보다 크며 카드 밖의 여백까지 닿는다.
+ * 위의 카드와 겹치지 않게 카드 사이의 틈에서 시작한다. 그림과 이름, 값은 가리지 않는다.
+ */
+const LOCK = { x: 5, y: 5, radius: 8, hit: 26 } as const;
 /** 아래의 단추 줄 */
 const BUTTON = { height: 30, gap: 8, top: 7 } as const;
 /** 카드 위의 글 한 줄 */
@@ -73,6 +79,8 @@ export interface ShopHandlers {
   /** 그 자리(0부터)의 카드를 합치거나(merge) 새로 놓아(place) 산다. 끌어다 놓았으면 놓은 칸이나 합칠 동료도 넘긴다. */
   buy(index: number, mode: BuyMode, at?: BuyAt): void;
   reroll(): void;
+  /** 그 자리(0부터)의 카드를 묶거나 푼다. 묶어 둔 카드는 다시 뽑아도, 다음 날에도 남는다. */
+  lock(index: number): void;
   /** 텃밭의 그 동료(state.allies의 차례)를 다른 칸(첫 칸)으로 옮긴다. */
   move(ally: number, cell: number): void;
   /** 텃밭의 같은 동료 둘을 합친다(from이 to에 합쳐진다). */
@@ -109,9 +117,35 @@ export interface ShopPanel {
 type Faded = Phaser.GameObjects.GameObject & { setAlpha(alpha: number): unknown };
 
 /**
+ * 자물쇠 단추를 그린다. 묶었으면 짙은 라일락 동그라미에 닫힌 흰 자물쇠, 풀었으면 흰 동그라미에 고리가 열린 옅은 자물쇠다.
+ * (cx, cy)는 동그라미의 한가운데다.
+ */
+function drawLock(g: Phaser.GameObjects.Graphics, cx: number, cy: number, locked: boolean, pressed: boolean): void {
+  g.clear();
+  const y = cy + (pressed ? 1 : 0);
+  g.fillStyle(locked ? THEME.lilacDeep : THEME.card, 1);
+  g.fillCircle(cx, y, LOCK.radius);
+  g.lineStyle(1.5, locked ? THEME.lilacDeep : THEME.shadow, 1);
+  g.strokeCircle(cx, y, LOCK.radius);
+  const ink = locked ? THEME.card : THEME.faint;
+  // 몸통
+  g.fillStyle(ink, 1);
+  g.fillRoundedRect(cx - 4, y - 1, 8, 6, 1.5);
+  // 고리: 묶었으면 몸통에 꽂히고, 풀었으면 들려서 왼쪽이 떠 있다.
+  const lift = locked ? 0 : 2;
+  g.lineStyle(1.6, ink, 1);
+  g.beginPath();
+  g.arc(cx, y - 2.5 - lift, 2.6, Math.PI, 0, false);
+  g.strokePath();
+  g.lineBetween(cx + 2.6, y - 2.5 - lift, cx + 2.6, y - 1);
+  if (locked) g.lineBetween(cx - 2.6, y - 2.5, cx - 2.6, y - 1);
+}
+
+/**
  * 판 위(top과 bottom 사이)에 동료 가게를 띄운다. bottom은 울타리이고, 그 아래 텃밭은 가리지 않는다.
  * 처음 보는 동료의 카드는 누르면 바로 빈칸에 놓는다. 이미 있는 동료의 카드는 누르면 "합치기"와 "새로 놓기"가 나와서 고른다.
- * 텃밭의 동료를 누르면 왼쪽 아래 단추가 "내보내기"로 바뀐다. 판이 바뀌면 부른 쪽이 refresh로 다시 그린다.
+ * 텃밭의 동료를 누르면 왼쪽 아래 단추가 "내보내기"로 바뀐다. 카드 왼쪽 위의 자물쇠를 누르면 그 카드를 묶거나 푼다.
+ * 판이 바뀌면 부른 쪽이 refresh로 다시 그린다.
  * cleared가 있으면 방금 지킨 날의 알림을 맨 위에 적는다(판의 첫날 앞과 이어 한 판에서는 없다).
  */
 export function openShopPanel(
@@ -330,7 +364,7 @@ export function openShopPanel(
           depth: 3,
           radius: 12,
           fill: card.sold ? THEME.bg : undefined,
-          border: (pressed && affordable) || picked ? THEME.pinkDeep : undefined,
+          border: (pressed && affordable) || picked ? THEME.pinkDeep : card.locked && !card.sold ? THEME.lilacDeep : undefined,
         });
       };
       draw(false);
@@ -408,6 +442,21 @@ export function openShopPanel(
       // 카드를 밭으로 끌어다 놓으면 그 자리에 선다(같은 동료 위에 놓으면 합쳐진다). 열매가 모자란 카드는 끌 수 없다.
       if (!card.sold && run.fruit >= ally.price) grabbable(zone, { kind: 'card', index }, card.id, ally.shape[Math.floor(ally.shape.length / 2)]);
       objects.push(zone);
+      // 사지 않은 카드의 왼쪽 위 자물쇠: 누르면 묶거나 푼다. 카드보다 위에 있어서 누른 손가락이 카드를 사거나 끌지 않는다.
+      if (!card.sold) {
+        const locked = card.locked === true;
+        const cx = CARD.margin + LOCK.x;
+        const cy = y + LOCK.y;
+        const lock = keep(scene.add.graphics().setDepth(depth + 1));
+        drawLock(lock, cx, cy, locked, false);
+        const drawPressed = (pressed: boolean): void => drawLock(lock, cx, cy, locked, pressed);
+        objects.push(
+          addTapZone(scene, cx - LOCK.hit / 2, y - CARD.gap, LOCK.hit, LOCK.hit, drawPressed, () => {
+            if (!armed()) return;
+            handlers.lock(index);
+          }).setDepth(depth + 1),
+        );
+      }
       if (picked) {
         const merged = mergedStar(run, card.id);
         const choices: Array<{ label: string; mode: BuyMode }> = [

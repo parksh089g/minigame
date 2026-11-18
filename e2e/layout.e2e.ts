@@ -1876,6 +1876,146 @@ it('텃밭 지키기: 초당 30번만 그리는 기기에서도 가게에서 한
   ]);
 });
 
+/** 가게의 카드와 열매, 날 */
+type GardenShop = { day: number; lastCleared: number; shopping: boolean; shop: ShopCard[]; fruit: number; rolls: number };
+
+function gardenShop(page: Page): Promise<GardenShop> {
+  return page.evaluate((key) => {
+    const run = (window.__pocketArcade?.scene.getScene(key) as unknown as { run: GardenShop }).run;
+    return {
+      day: run.day,
+      lastCleared: run.lastCleared,
+      shopping: run.shopping,
+      shop: run.shop.map((card) => ({ ...card })),
+      fruit: run.fruit,
+      rolls: run.rolls,
+    };
+  }, GARDEN_SCENE);
+}
+
+/**
+ * 가게의 그 자리(0부터) 카드의 자물쇠 단추(카드의 왼쪽 위 모서리). 이름은 카드 위에서 6만큼 내려와 적히고, 자물쇠는 카드 위에서 5만큼 내려온 데에 있다.
+ * 같은 동료의 카드가 여럿이면 위에서부터 몇째 이름인지로 그 카드를 찾는다.
+ */
+async function gardenLockPoint(page: Page, index: number): Promise<{ x: number; y: number }> {
+  const { shop } = await gardenShop(page);
+  const name = ALLIES[shop[index].id].name;
+  const nth = shop.slice(0, index).filter((card) => card.id === shop[index].id).length;
+  const ys = await page.evaluate(
+    ({ key, name }) => {
+      const scene = window.__pocketArcade?.scene.getScene(key) as unknown as Phaser.Scene;
+      return scene.children.list
+        .filter((item) => item.type === 'Text' && (item as Phaser.GameObjects.Text).text === name)
+        .map((item) => (item as Phaser.GameObjects.Text).getBounds().centerY - scene.cameras.main.scrollY)
+        .sort((a, b) => a - b);
+    },
+    { key: GARDEN_SCENE, name },
+  );
+  if (ys[nth] === undefined) throw new Error(`${name} 카드가 보이지 않는다`);
+  return { x: 15, y: ys[nth] - 10 };
+}
+
+it('텃밭 지키기: 카드의 자물쇠를 눌러 묶으면 다시 뽑아도, 다음 날 가게에도 그 카드가 그 자리에 남는다', async ({ page }) => {
+  await openGardenShop(page);
+  const cards: ShopCard[] = [
+    { id: 'cactus', sold: false },
+    { id: 'sunflower', sold: false },
+    { id: 'frog', sold: false },
+  ];
+  await setGardenTeam(page, [], 10, cards);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, ALLIES.sunflower.name), WAIT).not.toBeNull();
+  // 창이 뜨고 잠깐은 눌리지 않는다.
+  await page.waitForTimeout(400);
+  const lock = await gardenLockPoint(page, 1);
+  await tapAt(page, lock.x, lock.y);
+  await expect.poll(async () => (await gardenShop(page)).shop[1], { ...WAIT, message: '묶은 해바라기' }).toEqual({
+    id: 'sunflower',
+    sold: false,
+    locked: true,
+  });
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, SHOP_TEXT.locked), WAIT).not.toBeNull();
+  // 자물쇠를 누른 것은 카드를 사지 않는다. 묶는 데에는 열매가 들지 않는다.
+  expect(await gardenShop(page)).toMatchObject({ fruit: 10 });
+  expect((await gardenTeam(page)).allies).toEqual([]);
+  expect(await hiddenTexts(page, GARDEN_SCENE), '묶은 카드가 있는 가게').toEqual([]);
+
+  // 다시 뽑으면 묶은 해바라기는 그 자리에 남는다.
+  await tapText(page, GARDEN_SCENE, SHOP_TEXT.reroll);
+  await expect.poll(async () => (await gardenShop(page)).rolls, WAIT).toBe(1);
+  expect((await gardenShop(page)).shop[1]).toEqual({ id: 'sunflower', sold: false, locked: true });
+  expect((await gardenShop(page)).fruit).toBe(10 - SHOP.reroll);
+
+  // 가게를 닫고 날을 지키면 다음 가게에도 해바라기가 묶인 채 남는다. 벌레는 치워서 날을 금방 지킨다.
+  await tapText(page, GARDEN_SCENE, SHOP_TEXT.start(1));
+  await expect.poll(async () => (await gardenShop(page)).shopping, WAIT).toBe(false);
+  await page.evaluate((key) => {
+    const run = (
+      window.__pocketArcade?.scene.getScene(key) as unknown as {
+        run: { queue: unknown[]; enemies: unknown[]; dayTotal: number; dayKilled: number };
+      }
+    ).run;
+    run.queue = [];
+    run.enemies = [];
+    run.dayTotal = run.dayKilled;
+  }, GARDEN_SCENE);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, SHOP_TEXT.next), { ...WAIT, message: '날을 지킨 뒤의 가게' }).not.toBeNull();
+  const next = await gardenShop(page);
+  expect(next.lastCleared).toBe(1);
+  expect(next.shop[1]).toEqual({ id: 'sunflower', sold: false, locked: true });
+  expect(await hiddenTexts(page, GARDEN_SCENE), '날을 지킨 뒤 묶은 카드가 남은 가게').toEqual([]);
+
+  // 다시 누르면 풀린다.
+  await page.waitForTimeout(400);
+  const again = await gardenLockPoint(page, 1);
+  await tapAt(page, again.x, again.y);
+  await expect.poll(async () => (await gardenShop(page)).shop[1].locked, { ...WAIT, message: '푼 해바라기' }).toBe(false);
+});
+
+it('텃밭 지키기: 초당 20번만 그리는 기기에서도 한 번 누른 자물쇠는 한 번만 묶는다 (11차 검토 G12)', async ({ page }) => {
+  await openGardenShop(page);
+  await setGardenTeam(page, [], 0, [
+    { id: 'cactus', sold: false },
+    { id: 'sunflower', sold: false },
+    { id: 'frog', sold: false },
+  ]);
+  // 초당 20번만 그려서 한 프레임에 시뮬레이션이 늘 두 걸음 넘게 돈다(초당 30번이면 한 걸음만 도는 프레임도 있다).
+  // 묶기는 두 번 하면 풀려 버려 겉으로는 알 수 없을 때가 있으니, 시뮬레이션이 알린 묶기('lock')의 수를 센다.
+  await page.evaluate((key) => {
+    const scene = window.__pocketArcade?.scene.getScene(key) as unknown as {
+      react(events: Array<{ type: string }>): void;
+      lockEvents?: number;
+    };
+    const react = scene.react.bind(scene);
+    scene.lockEvents = 0;
+    scene.react = (events) => {
+      scene.lockEvents! += events.filter((event) => event.type === 'lock').length;
+      react(events);
+    };
+    const loop = window.__pocketArcade?.loop as unknown as {
+      sleep(): void;
+      wake(): void;
+      fpsLimit: number;
+      hasFpsLimit: boolean;
+      _limitRate: number;
+    };
+    loop.sleep();
+    loop.fpsLimit = 20;
+    loop.hasFpsLimit = true;
+    loop._limitRate = 1000 / 20;
+    loop.wake();
+  }, GARDEN_SCENE);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, ALLIES.frog.name), WAIT).not.toBeNull();
+  await page.waitForTimeout(400);
+  const lock = await gardenLockPoint(page, 2);
+  await tapAt(page, lock.x, lock.y);
+  const locks = (): Promise<number> =>
+    page.evaluate((key) => (window.__pocketArcade?.scene.getScene(key) as unknown as { lockEvents: number }).lockEvents, GARDEN_SCENE);
+  await expect.poll(locks, { ...WAIT, message: '자물쇠를 누른 것' }).toBeGreaterThan(0);
+  await page.waitForTimeout(500);
+  expect(await locks(), '한 번 누른 자물쇠').toBe(1);
+  expect((await gardenShop(page)).shop.map((card) => card.locked === true)).toEqual([false, false, true]);
+});
+
 it('텃밭 지키기: 끄는 동안 다른 손가락이 화면을 스쳐도 끌던 동료는 처음 손가락을 따라간다 (11차 검토 G15)', async ({ page }) => {
   await openGardenShop(page);
   const fenceY = await setGardenTeam(page, [{ id: 'sunflower', copies: 1, fireIn: 0.5, cell: 3 }], 0);

@@ -102,7 +102,8 @@ const SHOT_SHAPE: Record<keyof Shot, Kind> = {
 };
 
 const ALLY_SHAPE: Record<keyof Ally, Kind> = { id: 'string', copies: 'number', fireIn: 'number', cell: 'number' };
-const CARD_SHAPE: Record<keyof ShopCard, Kind> = { id: 'string', sold: 'boolean' };
+/** 가게의 카드. 묶임(locked)은 묶기가 생기기 전에 적은 판에는 없어서 따로 본다(isCard). */
+const CARD_SHAPE: Record<Exclude<keyof ShopCard, 'locked'>, Kind> = { id: 'string', sold: 'boolean' };
 
 const SPAWN_SHAPE: Record<keyof Spawn, Kind> = { at: 'number', kind: 'string', x: 'number' };
 
@@ -223,7 +224,9 @@ function isRunState(value: unknown): value is RunState {
   // 같은 동료가 여럿 설 수 있지만, 칸을 겹치거나 한쪽 끝을 넘어서 설 수는 없다.
   if (!allies.every((ally) => fits(ally, ALLY_SHAPE) && isAlly(ally.id))) return false;
   if (!cellsValid(allies as Ally[])) return false;
-  if (!(value.shop as unknown[]).every((card) => fits(card, CARD_SHAPE) && isAlly(card.id))) return false;
+  const isCard = (card: unknown): boolean =>
+    fits(card, CARD_SHAPE) && isAlly(card.id) && (card.locked === undefined || typeof card.locked === 'boolean');
+  if (!(value.shop as unknown[]).every(isCard)) return false;
   const queue = value.queue as unknown[];
   const enemies = value.enemies as unknown[];
   const shots = value.shots as unknown[];

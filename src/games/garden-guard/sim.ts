@@ -8,6 +8,7 @@ import {
   allyInterval,
   allySpot,
   buyCard,
+  closedShop,
   dismissAlly,
   fruitFor,
   heatScale,
@@ -17,6 +18,7 @@ import {
   placeAlly,
   reroll,
   starOf,
+  toggleLock,
   type Ally,
   type BuyAt,
   type BuyMode,
@@ -186,6 +188,8 @@ export interface Input {
   join?: { from: number; to: number };
   /** 가게에서 내보낸 동료의 자리(state.allies의 차례) */
   dismiss?: number;
+  /** 가게에서 묶거나 푼 카드의 자리(0부터). 묶어 둔 카드는 다시 뽑아도, 다음 날에도 그 자리에 남는다. */
+  lock?: number;
   /** 가게의 카드를 다시 뽑는지 */
   reroll?: boolean;
   /** 가게를 닫고 다음 날로 가는지 */
@@ -220,6 +224,8 @@ export type SimEvent =
   /** 동료를 내보내고 열매를 돌려받았다. x는 그 동료가 섰던 자리다. */
   | { type: 'dismiss'; id: AllyId; refund: number; x: number; y: number }
   | { type: 'reroll' }
+  /** 가게의 카드를 묶거나 풀었다. locked는 바뀐 뒤의 묶임이다. */
+  | { type: 'lock'; card: number; locked: boolean }
   | { type: 'over' };
 
 /** 텃밭의 맨 아래(시뮬레이션 y). 이보다 아래로 간 물방울은 버린다. */
@@ -679,6 +685,11 @@ export function step(state: RunState, dt: number, input: Input = NO_INPUT): SimE
   state.t += dt;
 
   if (state.shopping) {
+    // 묶기를 다시 뽑기보다 먼저 해서, 한 걸음에 둘 다 누르면 묶은 카드가 남는다.
+    if (input.lock !== undefined) {
+      const locked = toggleLock(state, input.lock);
+      if (locked !== null) events.push({ type: 'lock', card: input.lock, locked });
+    }
     if (input.reroll && reroll(state)) events.push({ type: 'reroll' });
     if (input.move) {
       const moved = moveAlly(state, input.move.ally, input.move.cell);
@@ -702,7 +713,7 @@ export function step(state: RunState, dt: number, input: Input = NO_INPUT): SimE
     }
     if (input.ready) {
       state.shopping = false;
-      state.shop = [];
+      state.shop = closedShop(state.shop);
       state.restLeft = Math.min(state.restLeft, DAY.afterPick);
     }
   }

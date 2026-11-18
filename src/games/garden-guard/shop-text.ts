@@ -33,6 +33,9 @@ export const SHOP_TEXT = {
   top: (star: number) => `★${star} 다 모았어요`,
   sold: '데려왔어요',
   reroll: '다시 뽑기',
+  /** 카드의 자물쇠를 눌러 묶거나 풀었을 때 잠깐 띄운다. */
+  locked: '다음에도 남게 묶었어요',
+  unlocked: '묶은 것을 풀었어요',
   /** 판의 첫날 앞에서 가게를 닫는 단추 */
   start: (day: number) => `${day}일째 시작`,
   next: '다음 날',

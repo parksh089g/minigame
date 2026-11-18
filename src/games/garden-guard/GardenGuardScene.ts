@@ -9,7 +9,7 @@ import { MiniGameScene, type PauseExtra, type ResultStat } from '../../scenes/Mi
 import { LOOK, registerGardenTextures, TEX } from './art';
 import { ALLIES, ENEMIES, GARDEN_GAME_ID, GARDEN_SCENE, type EnemyKind } from './data';
 import { buildLobby } from './lobby';
-import { openShopPanel, teamInfo, type ClearedNote, type ShopPanel } from './shop';
+import { openShopPanel, SHOP_TEXT, teamInfo, type ClearedNote, type ShopPanel } from './shop';
 import {
   applyRun,
   bankSeeds,
@@ -142,7 +142,7 @@ export class GardenGuardScene extends MiniGameScene {
   private stormAsked = false;
   /** 동료 가게 창과, 거기서 누른 것. 누른 것은 다음 걸음에 시뮬레이션으로 넘긴다. */
   private shop: ShopPanel | null = null;
-  private shopAsked: Pick<Input, 'buy' | 'reroll' | 'ready' | 'dismiss' | 'move' | 'join'> = {};
+  private shopAsked: Pick<Input, 'buy' | 'reroll' | 'ready' | 'dismiss' | 'move' | 'join' | 'lock'> = {};
   /** 동료 가게를 띄울 때(판 안의 초). 판의 첫날 앞과 이어 한 판은 0이라 바로 뜬다. */
   private shopAt = 0;
   /** 방금 지킨 날의 알림. 가운데에 띄우는 대신 가게 창의 맨 위에 적는다. */
@@ -495,6 +495,7 @@ export class GardenGuardScene extends MiniGameScene {
       input.move = undefined;
       input.join = undefined;
       input.dismiss = undefined;
+      input.lock = undefined;
       if (events.length > 0) this.react(events);
     }
     // 화면이 빨리 바뀌는 기기에서는 한 프레임에 한 걸음도 못 갈 때가 있다. 그때 누른 것은 다음 프레임으로 넘긴다.
@@ -615,6 +616,13 @@ export class GardenGuardScene extends MiniGameScene {
           this.shop?.refresh(this.run as RunState);
           this.saveRun();
           break;
+        case 'lock':
+          sfx.click();
+          this.shopToast(event.locked ? SHOP_TEXT.locked : SHOP_TEXT.unlocked);
+          this.shop?.refresh(this.run as RunState);
+          // 묶은 것이 저장에 남아야 이어 해도 그 카드가 남는다.
+          this.saveRun();
+          break;
         case 'dayStart': {
           this.closeShop();
           if (this.hintPending) this.showHint();
@@ -686,6 +694,9 @@ export class GardenGuardScene extends MiniGameScene {
         },
         reroll: () => {
           this.shopAsked = { ...this.shopAsked, reroll: true };
+        },
+        lock: (index) => {
+          this.shopAsked = { ...this.shopAsked, lock: index };
         },
         ready: () => {
           sfx.click();
