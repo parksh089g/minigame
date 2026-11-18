@@ -171,6 +171,11 @@ const LIMIT = {
   list: 4000,
   /** 동료 거름의 배율의 위쪽 끝 */
   allyPower: 100,
+  /**
+   * 동료 하나에 모은 수의 위쪽 끝. ★5가 열여섯 마리이던 때 적은 판도 읽도록 그때의 끝으로 두고,
+   * 읽은 뒤에 지금의 ★5(copiesFor(ALLY_STARS.max))로 줄인다.
+   */
+  copies: 16,
 } as const;
 
 const inRange = (value: unknown, low: number, high: number): boolean =>
@@ -200,7 +205,7 @@ function valuesFit(state: Record<string, unknown>): boolean {
     (state.queue as unknown[]).length <= LIMIT.list &&
     (state.enemies as unknown[]).length <= LIMIT.list &&
     (state.shots as unknown[]).length <= LIMIT.list &&
-    (state.allies as Array<Record<string, number>>).every((ally) => inRange(ally.copies, 1, copiesFor(ALLY_STARS.max))) &&
+    (state.allies as Array<Record<string, number>>).every((ally) => inRange(ally.copies, 1, LIMIT.copies)) &&
     (state.shop as unknown[]).length <= SHOP.cards &&
     // 가게는 날을 지키고 쉬는 동안(판의 첫날 앞도)에만 열린다.
     (!state.shopping || state.phase === 'rest') &&
@@ -309,6 +314,8 @@ export function readRunRecord(raw: unknown): { savedAt: number; run: SavedRun | 
   if (!known || !isObject(run) || !isRunState(run.state)) return { savedAt, run: null };
   // 옛 판에서 강화를 고르던 중이었으면, 그 자리에 가게의 카드를 놓는다.
   if (run.state.shopping && run.state.shop.length === 0) openShop(run.state);
+  // ★5에 모으는 수가 줄기 전(열여섯 마리)에 적은 판은 지금의 ★5로 줄인다.
+  for (const ally of run.state.allies) ally.copies = Math.min(Math.floor(ally.copies), copiesFor(ALLY_STARS.max));
   const whole = (value: unknown): number => (kindOf(value) === 'number' ? Math.max(0, Math.floor(value as number)) : 0);
   return { savedAt, run: { state: run.state, banked: whole(run.banked), bankedShards: whole(run.bankedShards) } };
 }

@@ -27,15 +27,16 @@ export interface ShopCard {
 /** 이미 있는 동료를 살 때 고르는 것: 합쳐서 별을 올리거나(merge), 빈칸에 하나 더 놓거나(place) */
 export type BuyMode = 'merge' | 'place';
 
-/** 별 하나를 더 올리는 데 드는 수: ★1은 1, ★2는 2, ★3은 4, ★4는 8, ★5는 16마리 */
+/** 그 별이 되는 데 모아야 하는 수(ALLY_STARS.copies): ★1은 1, ★2는 2, ★3은 3, ★4는 5, ★5는 8마리 */
 export function copiesFor(star: number): number {
-  return 2 ** (Math.max(1, Math.min(ALLY_STARS.max, Math.floor(star))) - 1);
+  return ALLY_STARS.copies[Math.max(1, Math.min(ALLY_STARS.max, Math.floor(star))) - 1];
 }
 
 /** 모은 수에 따른 별(1~ALLY_STARS.max). 하나도 없으면 0 */
 export function starOf(copies: number): number {
-  if (copies < 1) return 0;
-  return Math.min(ALLY_STARS.max, Math.floor(Math.log2(copies)) + 1);
+  let star = 0;
+  for (let next = 1; next <= ALLY_STARS.max && copies >= copiesFor(next); next += 1) star = next;
+  return star;
 }
 
 /** 다음 별까지의 진행: 지금 별에서 모은 수와, 다음 별에 필요한 수. 다 올렸으면 null */

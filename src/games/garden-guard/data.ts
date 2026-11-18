@@ -263,8 +263,11 @@ export const GUN = {
   /** 물방울이 한 초에 날아가는 거리 */
   shotSpeed: 380,
   shotRadius: 4,
-  /** 화면을 누르고 직접 겨누는 동안에는 쏘는 간격이 이만큼으로 줄어든다. */
-  manualRate: 0.75,
+  /**
+   * 화면을 누르고 직접 겨누는 동안에는 쏘는 간격이 이만큼으로 줄어든다(3분의 2쯤 더 빠르게 쏜다).
+   * 동료가 생긴 뒤 손을 떼고 하는 판이 직접 하는 판만큼 가서(11차 검토 G17), 0.75에서 0.6으로 내려 직접 겨누는 값어치를 되살렸다.
+   */
+  manualRate: 0.6,
   /** 치명타의 피해 배율 */
   critMult: 2.5,
   /** 갈래 물총의 곁가지 물방울이 벌어지는 각도(라디안)와 피해 비율 */
@@ -566,10 +569,11 @@ export const GARDEN_CELLS = { cols: 4, rows: 3, cell: 22, left: 10, right: 142, 
 export const CELL_COUNT = GARDEN_CELLS.cols * 2 * GARDEN_CELLS.rows;
 
 /**
- * 같은 동료를 모은 수에 따른 별. 두 마리가 모이면 ★2, 넷이면 ★3, 여덟이면 ★4, 열여섯이면 ★5다.
+ * 같은 동료를 모은 수에 따른 별. copies[별 - 1]마리가 모이면 그 별이다: 둘이면 ★2, 셋이면 ★3, 다섯이면 ★4, 여덟이면 ★5.
+ * 한 판에 버는 열매(보통 아흐레에 40~50개)로 ★5까지 닿을 수 있게 잡았다. 전에는 1·2·4·8·16마리라서 ★5는 한 판으로 닿지 않았다.
  * 별이 하나 오를 때마다 피해는 damage배, 쏘는 간격은 interval배가 된다.
  */
-export const ALLY_STARS = { max: 5, damage: 1.75, interval: 0.9 } as const;
+export const ALLY_STARS = { max: 5, copies: [1, 2, 3, 5, 8], damage: 1.5, interval: 0.9 } as const;
 
 /** 동료 가게 */
 export const SHOP = {

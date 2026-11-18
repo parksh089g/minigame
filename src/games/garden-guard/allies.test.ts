@@ -99,14 +99,21 @@ function run(state: RunState, seconds: number): SimEvent[] {
 }
 
 describe('별과 합치기', () => {
-  it('두 마리면 ★2, 넷이면 ★3, 여덟이면 ★4, 열여섯이면 ★5이고 그 위로는 오르지 않는다', () => {
-    expect([0, 1, 2, 3, 4, 7, 8, 15, 16, 40].map(starOf)).toEqual([0, 1, 2, 2, 3, 3, 4, 4, 5, 5]);
-    expect([1, 2, 3, 4, 5].map(copiesFor)).toEqual([1, 2, 4, 8, 16]);
+  it('두 마리면 ★2, 셋이면 ★3, 다섯이면 ★4, 여덟이면 ★5이고 그 위로는 오르지 않는다', () => {
+    expect([0, 1, 2, 3, 4, 5, 7, 8, 16, 40].map(starOf)).toEqual([0, 1, 2, 3, 3, 4, 4, 5, 5, 5]);
+    expect([1, 2, 3, 4, 5].map(copiesFor)).toEqual([1, 2, 3, 5, 8]);
     expect(nextStar(1)).toEqual({ have: 1, need: 2 });
-    expect(nextStar(5)).toEqual({ have: 5, need: 8 });
-    expect(nextStar(16)).toBeNull();
-    expect(maxed(15)).toBe(false);
-    expect(maxed(16)).toBe(true);
+    expect(nextStar(4)).toEqual({ have: 4, need: 5 });
+    expect(nextStar(8)).toBeNull();
+    expect(maxed(7)).toBe(false);
+    expect(maxed(8)).toBe(true);
+  });
+
+  it('한 판에 버는 열매로 ★5까지 닿는다: 아흐레를 지키고 받는 열매로 가장 싼 동료를 ★5로 모을 수 있다 (11차 검토)', () => {
+    let fruit = SHOP.purse;
+    for (let day = 1; day <= 9; day += 1) fruit += fruitFor(day);
+    const cheapest = Math.min(...ALLY_ORDER.map((id) => ALLIES[id].price));
+    expect(copiesFor(ALLY_STARS.max) * cheapest).toBeLessThanOrEqual(fruit);
   });
 
   it('별이 오를수록 세고 빠르게 쏘고, 물총이 세지면 동료도 세진다', () => {
@@ -123,8 +130,8 @@ describe('별과 합치기', () => {
   it('같은 동료를 합치면 하나로 모이고 별이 오른 때를 알려 주며, 다 모은 뒤로는 늘지 않는다', () => {
     const state = quiet([['frog', 1], ['sunflower', 1]]);
     expect(mergeAlly(state, 'frog')?.star).toBe(2);
-    expect(mergeAlly(state, 'frog')?.star).toBe(0);
     expect(mergeAlly(state, 'frog')?.star).toBe(3);
+    expect(mergeAlly(state, 'frog')?.star).toBe(0);
     // 없는 동료에는 합칠 수 없다.
     expect(mergeAlly(state, 'mint')).toBeNull();
     // 칸의 차례대로 선다.
@@ -248,7 +255,7 @@ describe('텃밭의 칸', () => {
   it('가게가 열려 있으면 밭의 동료를 다른 칸으로 옮기고, 같은 동료끼리 합친다', () => {
     const state = shopAt(30);
     placeAlly(state, 'frog', 1, 0);
-    placeAlly(state, 'frog', 3, 16);
+    placeAlly(state, 'frog', 4, 16);
     placeAlly(state, 'sunflower', 1, 3);
     // 자기 칸과 겹쳐도 옮길 수 있다(한 칸 오른쪽으로).
     expect(fitsAt(state.allies, 'frog', 1, 0)).toBe(true);
@@ -262,16 +269,16 @@ describe('텃밭의 칸', () => {
     // 다른 동료와 겹치거나 밭 밖으로 나가면 옮기지 않는다.
     expect(moveAlly(state, 0, 2)).toBeNull();
     expect(moveAlly(state, 0, 7)).toBeNull();
-    // 같은 동료끼리 합치면 하나가 되고 칸이 빈다. 1 + 3마리면 ★3
+    // 같은 동료끼리 합치면 하나가 되고 칸이 빈다. 1 + 4마리면 ★4
     expect(canJoin(state, 0, 1)).toBe(false);
     const joined = step(state, DT, { aim: null, storm: false, join: { from: 0, to: 2 } });
-    expect(joined).toContainEqual({ type: 'join', id: 'frog', star: 3, ...allySpot({ id: 'frog', cell: 16 }) });
+    expect(joined).toContainEqual({ type: 'join', id: 'frog', star: 4, ...allySpot({ id: 'frog', cell: 16 }) });
     expect(state.allies.map((ally) => [ally.id, ally.cell, ally.copies])).toEqual([
       ['sunflower', 3, 1],
-      ['frog', 16, 4],
+      ['frog', 16, 5],
     ]);
     // 다 모은 수를 넘게는 합치지 않는다.
-    placeAlly(state, 'frog', 13, 0);
+    placeAlly(state, 'frog', 4, 0);
     expect(canJoin(state, 0, 2)).toBe(false);
     // 가게가 닫혀 있으면 옮기지도 합치지도 않는다.
     skipShop(state);
@@ -440,17 +447,17 @@ describe('동료 가게', () => {
   });
 
   it('카드에 새 동료인지, 지금 별과 모은 수, 합치면 별이 오르는지 적는다', () => {
-    const state = quiet([['frog', 1], ['mint', 2], ['can', 16]]);
+    const state = quiet([['frog', 1], ['mint', 3], ['can', 8]]);
     expect(cardStatus(state, 'sunflower').text).toBe(SHOP_TEXT.fresh);
     expect(cardStatus(state, 'frog').text).toBe('사면 ★2!');
-    expect(cardStatus(state, 'mint').text).toBe('★2 · 2/4');
+    expect(cardStatus(state, 'mint').text).toBe('★3 · 3/5');
     expect(cardStatus(state, 'can').text).toBe('★5 다 모았어요');
     // 같은 동료가 여럿이면 가장 많이 모은 것에 합친다.
     placeAlly(state, 'mint');
-    expect(cardStatus(state, 'mint').text).toBe('★2 · 2/4');
+    expect(cardStatus(state, 'mint').text).toBe('★3 · 3/5');
   });
 
-  it('자동 플레이는 빈칸이 있으면 값진 동료를 새로 놓고, 칸이 차면 합치고, 살 것이 없으면 가게를 닫는다', () => {
+  it('자동 플레이는 사면 별이 오르는 동료를 먼저 합치고, 빈칸이 있으면 값진 동료를 새로 놓고, 칸이 차면 합치고, 살 것이 없으면 가게를 닫는다', () => {
     const state = shopAt(30, 3);
     state.fruit = 100;
     state.shop = [
@@ -461,6 +468,8 @@ describe('동료 가게', () => {
     expect(botShop(state)).toEqual({ buy: { card: 1, mode: 'place' } });
     expect(botShop(state, 'first')).toEqual({ buy: { card: 0, mode: 'place' } });
     placeAlly(state, 'mint', 1, 0);
+    // 박하가 하나 있으면 박하 카드를 사서 합친다(★2로 오른다).
+    expect(botShop(state)).toEqual({ buy: { card: 0, mode: 'merge' } });
     placeAlly(state, 'can', 1, 8);
     for (let cell = 1; cell < 8; cell += 1) placeAlly(state, 'cactus', 1, cell);
     expect(freeCells(state.allies)).toBe(0);
