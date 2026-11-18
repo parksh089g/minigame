@@ -1682,7 +1682,7 @@ it('텃밭 지키기: 이미 있는 동료의 카드는 합치거나 새로 놓�
   await expect.poll(async () => (await team()).allies, WAIT).toEqual([{ id: 'sunflower', copies: 2, cell: 3 }]);
 
   // 새로 놓으면 다른 칸에 한 마리가 더 선다.
-  await expect.poll(() => openCard(SHOP_TEXT.owned(2, 2, 4), place), { ...WAIT, message: '새로 놓기' }).not.toBeNull();
+  await expect.poll(() => openCard(SHOP_TEXT.merge(3), place), { ...WAIT, message: '새로 놓기' }).not.toBeNull();
   await tapText(page, GARDEN_SCENE, place);
   await expect.poll(async () => (await team()).allies.length, WAIT).toBe(2);
   expect((await team()).allies.map((ally) => ally.cell)).toEqual([3, 4]);
