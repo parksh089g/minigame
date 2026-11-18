@@ -20,7 +20,7 @@ import {
 } from '../src/games/lantern-keeper/data';
 import { CHARMS, HOLDS_PER_ROUND, REROLL_COST, SLOTS, type RunState } from '../src/games/candy-slot/rules';
 import { cellCorner, type ShopCard } from '../src/games/garden-guard/allies';
-import { ALLIES, CELL_COUNT, FIELD, GARDEN_CELLS, GARDEN_SCENE, SHOP, UPGRADE_ORDER, UPGRADES } from '../src/games/garden-guard/data';
+import { ALLIES, CELL_COUNT, FIELD, GARDEN_CELLS, GARDEN_SCENE, PAIRS, SHOP, UPGRADE_ORDER, UPGRADES } from '../src/games/garden-guard/data';
 import { SHOP_TEXT } from '../src/games/garden-guard/shop-text';
 import { iconKey } from '../src/games/lantern-keeper/icons';
 import { NEWS_GAP, newsLine, normalizeMeta, unknownNews } from '../src/games/lantern-keeper/meta';
@@ -1681,11 +1681,11 @@ it('텃밭 지키기: 이미 있는 동료의 카드는 합치거나 새로 놓�
   await tapText(page, GARDEN_SCENE, merge);
   await expect.poll(async () => (await team()).allies, WAIT).toEqual([{ id: 'sunflower', copies: 2, cell: 3 }]);
 
-  // 새로 놓으면 다른 칸에 한 마리가 더 선다.
+  // 새로 놓으면 다른 칸에 한 마리가 더 선다. 해바라기는 어느 동료와도 짝이라서 짝이 생기는 첫 해바라기의 밑(11번 칸)에 선다.
   await expect.poll(() => openCard(SHOP_TEXT.merge(3), place), { ...WAIT, message: '새로 놓기' }).not.toBeNull();
   await tapText(page, GARDEN_SCENE, place);
   await expect.poll(async () => (await team()).allies.length, WAIT).toBe(2);
-  expect((await team()).allies.map((ally) => ally.cell)).toEqual([3, 4]);
+  expect((await team()).allies.map((ally) => ally.cell)).toEqual([3, 11]);
 
   // 텃밭의 동료를 누르면 "내보내기"가 나오고, 누르면 그 동료가 떠나며 열매를 돌려받는다.
   const before = await team();
@@ -1700,7 +1700,7 @@ it('텃밭 지키기: 이미 있는 동료의 카드는 합치거나 새로 놓�
   };
   await expect
     .poll(async () => {
-      if (!(await textPoint(page, GARDEN_SCENE, SHOP_TEXT.dismiss))) await tapAt(page, cellPoint(4).x, cellPoint(4).y);
+      if (!(await textPoint(page, GARDEN_SCENE, SHOP_TEXT.dismiss))) await tapAt(page, cellPoint(11).x, cellPoint(11).y);
       return textPoint(page, GARDEN_SCENE, SHOP_TEXT.dismiss);
     }, { ...WAIT, message: '내보내기 단추' })
     .not.toBeNull();
@@ -2085,6 +2085,69 @@ it('텃밭 지키기: 밭이 꽉 찬 가게의 카드 글자가 가리지 않고
   }, GARDEN_SCENE);
   expect(stars.length, '밭의 별 글자').toBe(CELL_COUNT);
   for (const size of stars) expect(size).toBeGreaterThanOrEqual(FONT_SIZE.small);
+});
+
+it('텃밭 지키기: 맞닿은 짝에는 밭에 하트가 뜨고, 짝을 지을 수 있는 카드에는 짝 효과가 적히며, 끄는 동안 짝이 생기는 자리에 "짝!"이 뜬다', async ({
+  page,
+}) => {
+  await openGardenShop(page, 30);
+  // 짝 셋: 개구리 둘(위아래), 해바라기와 참새(위아래), 물뿌리개와 박하(옆). 동료는 칸의 차례대로 둔다.
+  const team: GardenAlly[] = [
+    { id: 'frog', copies: 1, fireIn: 0.5, cell: 0 },
+    { id: 'sunflower', copies: 1, fireIn: 0.5, cell: 3 },
+    { id: 'can', copies: 1, fireIn: 0.5, cell: 4 },
+    { id: 'mint', copies: 1, fireIn: 0.5, cell: 5 },
+    { id: 'frog', copies: 2, fireIn: 0.5, cell: 8 },
+    { id: 'sparrow', copies: 1, fireIn: 0.5, cell: 11 },
+  ];
+  // 참새와 사마귀는 해바라기 곁(2번 칸)에 설 수 있어서 짝 효과를, 선인장은 짝(고슴도치)이 없어서 설명을 적는다.
+  const fenceY = await setGardenTeam(page, team, 30, [
+    { id: 'sparrow', sold: false },
+    { id: 'mantis', sold: false },
+    { id: 'cactus', sold: false },
+  ]);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, PAIRS.sparrow.line), WAIT).not.toBeNull();
+  expect(await textPoint(page, GARDEN_SCENE, PAIRS.mantis.line)).not.toBeNull();
+  expect(await textPoint(page, GARDEN_SCENE, ALLIES.cactus.blurb)).not.toBeNull();
+  expect(await textPoint(page, GARDEN_SCENE, ALLIES.sparrow.blurb)).toBeNull();
+  // 밭의 동료가 새로 서는 동안(커지며 나타난다)은 기다린다. 짝 효과의 줄은 열매 그림에 닿지 않는다.
+  await expect.poll(() => hiddenTexts(page, GARDEN_SCENE), { ...WAIT, message: '짝 효과가 적힌 가게' }).toEqual([]);
+  expect(await textsOutsideCards(page, GARDEN_SCENE, SHOP_TEXT.title)).toEqual([]);
+  // 밭에는 짝마다 하트를 그렸다(그림이라서 글자 크기와 상관없다).
+  const hearts = await page.evaluate(
+    (key) =>
+      (window.__pocketArcade?.scene.getScene(key) as unknown as { view: { hearts: { commandBuffer: unknown[] } } }).view.hearts
+        .commandBuffer.length,
+    GARDEN_SCENE,
+  );
+  expect(hearts, '밭의 하트').toBeGreaterThan(0);
+
+  // 참새 카드를 해바라기 곁(2번 칸)으로 끄는 동안 "짝!"이 뜨고, 놓으면 그 칸에 선다.
+  const box = await page.locator('canvas').boundingBox();
+  if (!box) throw new Error('캔버스가 보이지 않는다');
+  const scale = box.width / GAME_WIDTH;
+  const at = (point: { x: number; y: number }): { x: number; y: number } => ({ x: box.x + point.x * scale, y: box.y + point.y * scale });
+  const from = (await textPoint(page, GARDEN_SCENE, ALLIES.sparrow.name))!;
+  const target = gardenCellPoint(fenceY, 2);
+  const to = { x: target.x, y: target.y + 26 };
+  const client = await page.context().newCDPSession(page);
+  await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [at(from)] });
+  for (let step = 1; step <= 10; step += 1) {
+    const t = step / 10;
+    await client.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [at({ x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t })],
+    });
+    await page.waitForTimeout(20);
+  }
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, SHOP_TEXT.pair), { ...WAIT, message: '짝!' }).not.toBeNull();
+  await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await client.detach();
+  await expect
+    .poll(async () => (await gardenTeam(page)).allies.find((ally) => ally.cell === 2), { ...WAIT, message: '짝 곁에 선 참새' })
+    .toEqual({ id: 'sparrow', copies: 1, cell: 2 });
+  expect(await textPoint(page, GARDEN_SCENE, SHOP_TEXT.pair)).toBeNull();
+  await expect.poll(() => hiddenTexts(page, GARDEN_SCENE), { ...WAIT, message: '짝 곁에 놓은 뒤의 가게' }).toEqual([]);
 });
 
 it('텃밭 지키기: 하던 판을 두고 나가거나 앱이 꺼져도 준비 화면에서 그 자리부터 이어 하고, 새 판을 고르면 그 판을 마친다', async ({ page }) => {

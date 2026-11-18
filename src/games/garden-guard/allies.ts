@@ -3,7 +3,7 @@
  * 같은 동료를 또 사면 합쳐서 별을 올리거나(칸은 그대로) 빈칸에 하나 더 놓는다.
  * 화면이 없는 규칙이라서 시뮬레이션(sim.ts)과 자동 플레이(bot.ts)가 함께 쓴다.
  */
-import { ALLIES, ALLY_ORDER, ALLY_STARS, CELL_COUNT, GARDEN_CELLS, SHOOTER, SHOP, TEAM_HEAT, type AllyId } from './data';
+import { ALLIES, ALLY_ORDER, ALLY_STARS, CELL_COUNT, GARDEN_CELLS, PAIRS, SHOOTER, SHOP, TEAM_HEAT, type AllyId } from './data';
 import { isBossDay, nextRandom } from './rules';
 import type { RunState } from './sim';
 
@@ -159,19 +159,181 @@ export function fitsAt(allies: readonly Pick<Ally, 'id' | 'cell'>[], id: AllyId,
   return cells.every((at) => map[at] === -1 || map[at] === ignore);
 }
 
+// ------------------------------------------------------------ 짝 효과(PAIRS)
+
+/** 짝 효과로 받는 덤: 피해 + damage, 빠르기 + rate(0.1이면 10%). 덤이 없으면 둘 다 0 */
+export interface PairBonus {
+  damage: number;
+  rate: number;
+}
+
+/** 짝이 된 두 동료(state.allies의 차례, a < b)와, 화면이 하트를 그릴 자리(시뮬레이션 좌표, 둘이 맞닿은 변 위) */
+export interface PairLink {
+  a: number;
+  b: number;
+  x: number;
+  y: number;
+}
+
+/** 덤을 한 번만 받게 셀 때 쓰는 동료의 차례 */
+const PAIR_ORDER: Readonly<Record<AllyId, number>> = Object.fromEntries(ALLY_ORDER.map((id, index) => [id, index])) as Record<
+  AllyId,
+  number
+>;
+
+/** owner의 짝 효과가 partner를 짝으로 삼는지 */
+function pairsWith(owner: AllyId, partner: AllyId): boolean {
+  const partners = PAIRS[owner].with;
+  return partners === 'any' || partners.includes(partner);
+}
+
+/** 두 동료가 붙으면 짝이 되는지(어느 쪽의 짝 효과든 하나라도 맞으면) */
+export function pairs(a: AllyId, b: AllyId): boolean {
+  return pairsWith(a, b) || pairsWith(b, a);
+}
+
+/** 그 칸과 변이 맞닿은 칸들. 물총을 사이에 둔 왼쪽 끝과 오른쪽 끝은 맞닿지 않는다. */
+function sideNeighbours(cell: number): number[] {
+  const { col, row } = cellAt(cell);
+  const inSide = col % GARDEN_CELLS.cols;
+  const near: number[] = [];
+  if (inSide > 0) near.push(cell - 1);
+  if (inSide < GARDEN_CELLS.cols - 1) near.push(cell + 1);
+  if (row > 0) near.push(cell - ROW);
+  if (row < GARDEN_CELLS.rows - 1) near.push(cell + ROW);
+  return near;
+}
+
+/** 맞닿은 두 동료(a < b)와 맞닿은 변들([a의 칸, b의 칸]). 칸의 차례대로 찾아서 늘 같은 차례다. */
+function touching(allies: readonly Pick<Ally, 'id' | 'cell'>[]): Array<{ a: number; b: number; edges: Array<[number, number]> }> {
+  const map = cellMap(allies);
+  const found = new Map<number, { a: number; b: number; edges: Array<[number, number]> }>();
+  for (let cell = 0; cell < CELL_COUNT; cell += 1) {
+    const a = map[cell];
+    if (a === -1) continue;
+    for (const next of sideNeighbours(cell)) {
+      const b = map[next];
+      if (b <= a) continue;
+      const key = a * CELL_COUNT + b;
+      let pair = found.get(key);
+      if (!pair) {
+        pair = { a, b, edges: [] };
+        found.set(key, pair);
+      }
+      pair.edges.push([cell, next]);
+    }
+  }
+  return [...found.values()];
+}
+
 /**
- * 그 동료를 저절로 놓을 첫 칸. 물총에 가까운 자리부터 찾고, 같은 거리면 번호가 작은 칸이 먼저다. 자리가 없으면 null
+ * 짝이 된 동료들과 하트를 그릴 자리. 옆으로 맞닿았으면 맞닿은 변들 가운데 가운데 것의 한가운데다.
+ * 위아래로만 맞닿았으면 변의 한가운데가 위 동료의 발밑(별 글자가 적히는 줄)에 걸리므로, 맞닿은 변의 끝 가운데
+ * 위 동료의 별 글자에서 가장 먼 곳이다(같으면 오른쪽 끝).
+ */
+export function pairLinks(allies: readonly Pick<Ally, 'id' | 'cell'>[]): PairLink[] {
+  const links: PairLink[] = [];
+  const size = GARDEN_CELLS.cell;
+  const map = cellMap(allies);
+  for (const { a, b, edges } of touching(allies)) {
+    if (!pairs(allies[a].id, allies[b].id)) continue;
+    const across = edges.filter(([from, to]) => Math.abs(to - from) === 1);
+    if (across.length > 0) {
+      const [from, to] = across[Math.floor((across.length - 1) / 2)];
+      const corner = cellCorner(Math.min(from, to));
+      links.push({ a, b, x: corner.x + size, y: corner.y + size / 2 });
+      continue;
+    }
+    let best: { x: number; y: number; away: number } | null = null;
+    for (const [from, to] of [...edges].reverse()) {
+      const upper = Math.min(from, to);
+      const corner = cellCorner(upper);
+      const star = allySpot(allies[map[upper]]).x;
+      for (const x of [corner.x + size, corner.x]) {
+        const away = Math.abs(x - star);
+        if (!best || away > best.away + 1e-9) best = { x, y: corner.y + size, away };
+      }
+    }
+    if (best) links.push({ a, b, x: best.x, y: best.y });
+  }
+  return links;
+}
+
+/**
+ * 동료마다(state.allies의 차례대로) 짝 효과로 받는 덤. 같은 동료의 같은 덤은 짝이 여럿이어도 한 번만 받는다.
+ * 시뮬레이션은 동료가 쏠 때 이 덤을 읽는다. 동료의 칸으로만 정해지는 값이다.
+ */
+export function pairBonuses(allies: readonly Pick<Ally, 'id' | 'cell'>[]): PairBonus[] {
+  const bonus = allies.map(() => ({ damage: 0, rate: 0 }));
+  const taken = allies.map(() => 0);
+  const give = (to: number, owner: AllyId, part: number): void => {
+    const bit = 1 << (PAIR_ORDER[owner] * 2 + part);
+    if (taken[to] & bit) return;
+    taken[to] |= bit;
+    bonus[to].damage += PAIRS[owner].damage ?? 0;
+    bonus[to].rate += PAIRS[owner].rate ?? 0;
+  };
+  for (const { a, b } of touching(allies)) {
+    for (const [owner, partner] of [
+      [a, b],
+      [b, a],
+    ]) {
+      const id = allies[owner].id;
+      if (!pairsWith(id, allies[partner].id)) continue;
+      const gives = PAIRS[id].gives;
+      if (gives !== 'other') give(owner, id, 0);
+      if (gives !== 'self') give(partner, id, 1);
+    }
+  }
+  return bonus;
+}
+
+/**
+ * 그 동료를 첫 칸 cell에 놓으면 생기는 짝: 2는 이 동료의 짝 효과가 맞는 자리, 1은 곁의 동료의 짝 효과만 맞는 자리
+ * (해바라기 곁처럼), 0은 짝이 없는 자리다. ignore(state.allies의 차례)인 동료는 없는 것으로 친다(옮길 때).
+ */
+export function pairScore(allies: readonly Pick<Ally, 'id' | 'cell'>[], id: AllyId, cell: number, ignore = -1): number {
+  const cells = shapeCells(id, cell);
+  if (!cells) return 0;
+  const map = cellMap(allies);
+  let score = 0;
+  for (const at of cells) {
+    for (const next of sideNeighbours(at)) {
+      const other = map[next];
+      if (other === -1 || other === ignore || cells.includes(next)) continue;
+      if (pairsWith(id, allies[other].id)) return 2;
+      if (pairsWith(allies[other].id, id)) score = 1;
+    }
+  }
+  return score;
+}
+
+/** 그 동료를 첫 칸 cell에 놓으면 짝이 생기는지(끄는 동안 "짝!"을 띄운다) */
+export function formsPair(allies: readonly Pick<Ally, 'id' | 'cell'>[], id: AllyId, cell: number, ignore = -1): boolean {
+  return pairScore(allies, id, cell, ignore) > 0;
+}
+
+/**
+ * 그 동료를 저절로 놓을 첫 칸. 제 짝 효과가 맞는 자리가 먼저이고, 다음은 곁의 동료의 짝 효과라도 맞는 자리,
+ * 그 가운데 물총에 가까운 자리, 같은 거리면 번호가 작은 칸이 먼저다. 자리가 없으면 null
  * (가게에서 카드를 누르기만 했을 때와 자동 플레이가 쓴다. 끌어다 놓으면 놓은 자리에 선다.)
  */
 export function findCell(allies: readonly Pick<Ally, 'id' | 'cell'>[], id: AllyId): number | null {
-  let best: { cell: number; distance: number } | null = null;
+  let best: { cell: number; distance: number; score: number } | null = null;
   for (let cell = 0; cell < CELL_COUNT; cell += 1) {
     if (!fitsAt(allies, id, cell)) continue;
     const spot = cellSpot(cell, id);
     const distance = Math.hypot(spot.x - SHOOTER.x, spot.y - SHOOTER.y);
-    if (!best || distance < best.distance - 1e-9) best = { cell, distance };
+    const score = pairScore(allies, id, cell);
+    if (!best || score > best.score || (score === best.score && distance < best.distance - 1e-9)) best = { cell, distance, score };
   }
   return best ? best.cell : null;
+}
+
+/** 가게의 카드를 누르기만 해도 제 짝 효과가 맞는 자리에 서는지(카드에 설명 대신 그 짝 효과를 적는다) */
+export function pairReady(allies: readonly Pick<Ally, 'id' | 'cell'>[], id: AllyId): boolean {
+  const cell = findCell(allies, id);
+  return cell !== null && pairScore(allies, id, cell) === 2;
 }
 
 /** 칸의 차례대로 동료를 늘어놓는다. 쏘는 차례와 그리는 차례가 늘 같게 한다. */

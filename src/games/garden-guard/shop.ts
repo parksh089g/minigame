@@ -16,8 +16,10 @@ import {
   cellCorner,
   cellMap,
   fitsAt,
+  formsPair,
   mergeTarget,
   owns,
+  pairReady,
   refundFor,
   shapeCells,
   starOf,
@@ -26,7 +28,8 @@ import {
   type BuyMode,
 } from './allies';
 import { allyTexture, TEX } from './art';
-import { ALLIES, CELL_COUNT, FIELD, GARDEN_CELLS, SHOP, type AllyId } from './data';
+import { ALLIES, CELL_COUNT, FIELD, GARDEN_CELLS, PAIRS, SHOP, type AllyId } from './data';
+import { drawHeart } from './pair-mark';
 import { cardStatus, mergedStar, purseLine, SHOP_TEXT } from './shop-text';
 import type { RunState } from './sim';
 
@@ -230,7 +233,12 @@ export function openShopPanel(
       g.fillRoundedRect(corner.x + 1, top + 1, GARDEN_CELLS.cell - 2, GARDEN_CELLS.cell - 2, 5);
       g.strokeRoundedRect(corner.x + 1, top + 1, GARDEN_CELLS.cell - 2, GARDEN_CELLS.cell - 2, 5);
     }
-    now.label.setText(drop.kind === 'merge' ? SHOP_TEXT.mergeSame : '').setPosition(x, y - DRAG_LIFT - 26);
+    // 놓으면 짝이 생기는 자리면 "짝!"이라고 알려 준다.
+    const ignore = now.from.kind === 'ally' ? now.from.index : -1;
+    const paired = drop.kind === 'place' && formsPair(current.allies, now.id, drop.cell, ignore);
+    now.label
+      .setText(drop.kind === 'merge' ? SHOP_TEXT.mergeSame : paired ? SHOP_TEXT.pair : '')
+      .setPosition(x, y - DRAG_LIFT - 26);
     now.ghost.setPosition(x, y - DRAG_LIFT);
   };
   const startDrag = (pointer: Phaser.Input.Pointer): void => {
@@ -395,8 +403,14 @@ export function openShopPanel(
         );
       }
       if (!picked) {
+        // 누르기만 해도 제 짝 효과가 맞는 자리에 서는 카드에는 설명 대신 그 짝 효과를 하트와 함께 적는다.
+        const paired = !card.sold && pairReady(run.allies, card.id);
+        if (paired) drawHeart(keep(scene.add.graphics().setDepth(depth)), CARD.margin + 46, y + 31);
         keep(
-          addText(scene, CARD.margin + 42, y + 25, ally.blurb, { size: FONT_SIZE.small, color: THEME_CSS.sub })
+          addText(scene, CARD.margin + (paired ? 53 : 42), y + 25, paired ? PAIRS[card.id].line : ally.blurb, {
+            size: FONT_SIZE.small,
+            color: paired ? THEME_CSS.pinkDeep : THEME_CSS.sub,
+          })
             .setDepth(depth)
             .setAlpha(fade),
         );

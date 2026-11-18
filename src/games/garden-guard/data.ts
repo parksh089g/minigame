@@ -606,6 +606,42 @@ export const ALLIES: Readonly<Record<AllyId, AllyDef>> = {
   },
 };
 
+/**
+ * 짝 효과의 덤. 짝이 된 동료의 피해가 damage만큼 커지거나(0.15면 15%), 쏘는 빠르기가 rate만큼 빨라진다(간격 ÷ (1 + rate)).
+ */
+export interface PairDef {
+  /** 짝이 되는 동료. any면 어느 동료와 붙어도 짝이다. */
+  with: 'any' | readonly AllyId[];
+  /** 덤을 받는 쪽: self는 이 동료, other는 붙은 짝, both는 둘 다 */
+  gives: 'self' | 'other' | 'both';
+  damage?: number;
+  rate?: number;
+  /** 가게의 카드에 적는 한 줄(이 짝 효과가 맞는 빈자리가 있으면 설명 대신 적는다) */
+  line: string;
+}
+
+/** 식물인 동료. 물뿌리개와 사마귀가 짝으로 삼는다. */
+const PLANTS: readonly AllyId[] = ['sunflower', 'mint', 'cactus', 'pumpkin'];
+
+/**
+ * 동료마다 하나씩 있는 짝 효과. 텃밭에서 칸의 변이 맞닿은 두 동료(물총의 같은 쪽)가 짝이 되면 덤을 받는다.
+ * 어디에 세우느냐가 거리만이 아니라 이웃으로도 정해져서, 세 줄짜리 텃밭이 작은 퍼즐이 된다.
+ * 같은 동료의 같은 덤은 한 번만 받는다(해바라기 둘에 붙어도 10%). 덤은 10~15%로 작게 두었다:
+ * 80판을 하는 자동 플레이가 닿는 날은 짝 효과가 없을 때와 같다(69일째).
+ */
+export const PAIRS: Readonly<Record<AllyId, PairDef>> = {
+  sunflower: { with: 'any', gives: 'other', rate: 0.1, line: '붙은 동료가 10% 빨리 쏴요' },
+  frog: { with: ['frog'], gives: 'self', damage: 0.15, line: '개구리끼리 붙으면 15% 세게' },
+  mint: { with: 'any', gives: 'other', damage: 0.1, line: '붙은 동료가 10% 세게 쏴요' },
+  can: { with: PLANTS, gives: 'both', damage: 0.1, line: '식물과 붙으면 둘 다 10% 세게' },
+  sparrow: { with: ['sunflower'], gives: 'self', rate: 0.1, line: '해바라기와 붙으면 10% 빨리' },
+  cactus: { with: ['hedgehog'], gives: 'self', damage: 0.15, line: '고슴도치와 붙으면 15% 세게' },
+  pumpkin: { with: ['sunflower'], gives: 'self', damage: 0.15, line: '해바라기와 붙으면 15% 세게' },
+  hedgehog: { with: ['cactus'], gives: 'self', rate: 0.1, line: '선인장과 붙으면 10% 빨리' },
+  mantis: { with: PLANTS, gives: 'self', damage: 0.1, line: '식물과 붙으면 10% 세게' },
+  toad: { with: ['frog'], gives: 'both', damage: 0.1, line: '개구리와 붙으면 둘 다 10% 세게' },
+};
+
 /** 가게에 나오는 차례 */
 export const ALLY_ORDER: readonly AllyId[] = [
   'sunflower',

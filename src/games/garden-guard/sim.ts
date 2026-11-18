@@ -15,6 +15,7 @@ import {
   joinAllies,
   moveAlly,
   openShop,
+  pairBonuses,
   placeAlly,
   reroll,
   starOf,
@@ -22,6 +23,7 @@ import {
   type Ally,
   type BuyAt,
   type BuyMode,
+  type PairBonus,
   type ShopCard,
 } from './allies';
 import {
@@ -578,9 +580,12 @@ export function allyTarget(state: RunState, ally: Pick<Ally, 'id' | 'cell'>): En
   return target;
 }
 
-/** 판에 선 동료들이 쏜다. 별이 높을수록 세고 빠르게 쏜다. */
+/** 판에 선 동료들이 쏜다. 별이 높을수록 세고 빠르게 쏜다. 짝 효과(PAIRS)의 덤도 받는다. */
 function fireAllies(state: RunState, dt: number, events: SimEvent[]): void {
-  for (const ally of state.allies) {
+  // 짝 효과의 덤은 칸으로만 정해진다. 이번 걸음에 쏘는 동료가 있을 때 한 번만 센다.
+  let bonuses: PairBonus[] | null = null;
+  for (let index = 0; index < state.allies.length; index += 1) {
+    const ally = state.allies[index];
     ally.fireIn -= dt;
     if (ally.fireIn > 0) continue;
     const target = allyTarget(state, ally);
@@ -595,9 +600,11 @@ function fireAllies(state: RunState, dt: number, events: SimEvent[]): void {
     const time = Math.hypot(target.x - spot.x, target.y - spot.y) / def.shotSpeed;
     const stopY = FIELD.depth - ENEMIES[target.kind].radius;
     const y = Math.min(stopY, target.y + paceOf(target, state.stats.pace) * time);
+    bonuses ??= pairBonuses(state.allies);
+    const bonus = bonuses[index];
     // 빠른 손은 동료도 함께 빠르게 한다.
-    ally.fireIn += allyInterval(ally.id, star) * (state.stats.interval / GUN.interval);
-    const damage = allyDamage(ally.id, star, state.stats.damage, state.stats.allyPower);
+    ally.fireIn += (allyInterval(ally.id, star) * (state.stats.interval / GUN.interval)) / (1 + bonus.rate);
+    const damage = allyDamage(ally.id, star, state.stats.damage, state.stats.allyPower) * (1 + bonus.damage);
     addShot(state, spot, clampAim(Math.atan2(y - spot.y, target.x - spot.x)), damage, false, ally.id, def.shotSpeed);
     events.push({ type: 'fire', ally: ally.id, cell: ally.cell });
   }

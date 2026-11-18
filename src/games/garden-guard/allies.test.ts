@@ -234,9 +234,10 @@ describe('텃밭의 칸', () => {
 
   it('누르기만 하면 물총에 가까운 빈칸부터 서고, 끌어다 놓으면 놓은 칸에 선다', () => {
     const state = quiet([]);
-    expect(placeAlly(state, 'sunflower')?.cell).toBe(3);
-    expect(placeAlly(state, 'sunflower')?.cell).toBe(4);
-    expect(placeAlly(state, 'sunflower')?.cell).toBe(11);
+    // 참새끼리는 짝이 아니라서 물총에 가까운 차례대로 선다.
+    expect(placeAlly(state, 'sparrow')?.cell).toBe(3);
+    expect(placeAlly(state, 'sparrow')?.cell).toBe(4);
+    expect(placeAlly(state, 'sparrow')?.cell).toBe(11);
     // 놓은 칸이 비어 있으면 그 칸에, 겹치면 놓지 않는다.
     expect(placeAlly(state, 'cactus', 1, 0)?.cell).toBe(0);
     expect(placeAlly(state, 'hedgehog', 1, 2)).toBeNull();
