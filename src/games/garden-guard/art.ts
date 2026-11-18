@@ -90,7 +90,7 @@ export const TEX = {
   shard: 'gg-shard',
   /** 열매: 동료 가게에서 쓰는 돈 */
   fruit: 'gg-fruit',
-  /** 동료가 쏘는 것: 개구리의 혀끝, 박하 잎, 물뿌리개의 물덩이, 참새의 낱알, 선인장의 가시 */
+  /** 동료가 쏘는 것: 개구리(와 두꺼비)의 혀끝, 박하 잎, 물뿌리개의 물덩이, 참새의 낱알, 선인장(과 고슴도치)의 가시 */
   tongue: 'gg-tongue',
   leaf: 'gg-leaf',
   spray: 'gg-spray',
@@ -98,6 +98,8 @@ export const TEX = {
   spine: 'gg-spine',
   /** 호박덩굴이 던지는 작은 호박 */
   pumpkin: 'gg-pumpkin',
+  /** 사마귀가 앞발로 베는 초록 낫자국 */
+  blade: 'gg-blade',
 } as const;
 
 /** 동료의 그림. 해바라기는 예전부터 있던 그림을 그대로 쓴다. */
@@ -113,6 +115,8 @@ export const ALLY_SHOT: Readonly<Record<AllyId, string>> = {
   cactus: TEX.spine,
   pumpkin: TEX.pumpkin,
   hedgehog: TEX.spine,
+  mantis: TEX.blade,
+  toad: TEX.tongue,
 };
 
 // ───────── 그리기 도구 ─────────
@@ -555,6 +559,18 @@ const ITEM_ART: Readonly<Record<string, Art>> = {
       stroke(c, 'M7 8Q5 14 7 20M17 8Q19 14 17 20', '#d9743a', 1.2);
     },
   },
+  /** 사마귀의 낫자국: 위로 둥근 초승달. 날아가는 쪽이 위다. */
+  [TEX.blade]: {
+    width: 12,
+    height: 8,
+    view: [24, 16],
+    draw(c) {
+      const d = 'M2 13Q12 -1 22 13Q12 6 2 13Z';
+      fill(c, d, '#9fe6c6');
+      stroke(c, d, '#57b98f', 1.6);
+      stroke(c, 'M6 9.500Q12 4 18 9.500', 'rgba(255, 255, 255, 0.8)', 1);
+    },
+  },
   [TEX.mound]: {
     width: 26,
     height: 20,
@@ -886,6 +902,75 @@ const ALLY_ART: Readonly<Record<Exclude<AllyId, 'sunflower'>, Art>> = {
       oval(c, 20, 35.5, 3, 1.8, '#8a6a52');
       oval(c, 25.5, 28.5, 1.6, 1.4, INK);
       face(c, 17, 27.5, 5, 1.2);
+    },
+  },
+  /** 사마귀: 세모난 머리에 큰 눈, 가슴 앞에 접은 두 앞발(낫) */
+  mantis: {
+    ...ALLY_SIZE,
+    draw(c) {
+      // 다리와 더듬이
+      stroke(c, 'M12 29L7 37M18 29L23 37M13 26L5 31M17 26L25 31', LEAF_DEEP, 1.6);
+      stroke(c, 'M12.500 6Q10 1 6 1.500M17.500 6Q20 1 24 1.500', LEAF_DEEP, 1.2);
+      // 배와 가슴
+      oval(c, 15, 29, 6, 7.5, LEAF_DEEP);
+      oval(c, 15, 28.5, 4.4, 6, '#9fe6c6');
+      stroke(c, 'M11.500 26.500H18.500M11.500 30H18.500', '#7fd3ae', 1);
+      box(c, 12.5, 13, 5, 12, 2.5, '#7fd3ae');
+      // 세모난 머리와 양쪽의 큰 눈
+      fill(c, 'M5 8Q15 2 25 8Q21 16.500 15 18Q9 16.500 5 8Z', '#7fd3ae');
+      for (const x of [7.5, 22.5]) {
+        oval(c, x, 8.5, 3.8, 4, '#57b98f');
+        oval(c, x, 8.5, 2.8, 3, '#e9fbf1');
+        oval(c, x + (x < 15 ? 0.6 : -0.6), 9, 1.5, 1.5, INK);
+        oval(c, x + (x < 15 ? 1 : -0.2), 8.3, 0.55, 0.55, WHITE);
+      }
+      oval(c, 10.5, 13, 1.8, 1.1, BLUSH);
+      oval(c, 19.5, 13, 1.8, 1.1, BLUSH);
+      stroke(c, 'M13.600 13.200Q15 14.600 16.400 13.200', INK, 1);
+      // 접은 앞발: 팔꿈치에서 꺾여 낫처럼 위로 선다.
+      for (const side of [-1, 1]) {
+        const x = 15 + side * 3;
+        const d = `M${x} 17L${x + side * 6} 22L${x + side * 5} 13.500`;
+        stroke(c, d, '#57b98f', 2.6);
+        stroke(c, d, '#9fe6c6', 1.2);
+        fill(c, `M${x + side * 5.6} 18L${x + side * 3.4} 17.400L${x + side * 5.4} 16.400Z`, '#57b98f');
+      }
+    },
+  },
+  /** 두꺼비: 오톨도톨한 넓적한 몸에 금빛 눈, 머리에 작은 왕관(가장 센 동료) */
+  toad: {
+    ...ALLY_SIZE,
+    draw(c) {
+      oval(c, 6, 35.5, 5.5, 2.6, '#9a8250');
+      oval(c, 24, 35.5, 5.5, 2.6, '#9a8250');
+      oval(c, 15, 16.3, 8.7, 5.4, '#9a8250');
+      oval(c, 15, 26.5, 14, 10.5, '#9a8250');
+      oval(c, 15, 26, 13.2, 9.8, '#c4a86c');
+      oval(c, 15, 30.5, 8.5, 5.5, '#f3e3bd');
+      oval(c, 15, 16.5, 8, 4.8, '#c4a86c');
+      for (const [x, y, r] of [
+        [4.5, 24, 1.5],
+        [6.5, 29.5, 1.2],
+        [25.5, 24, 1.5],
+        [23.5, 29.5, 1.2],
+        [10, 20, 1.1],
+        [20, 20, 1.1],
+      ] as const) {
+        oval(c, x, y, r, r * 0.85, '#a88d58');
+      }
+      for (const x of [8, 22]) {
+        oval(c, x, 16, 5.2, 4.8, '#c4a86c');
+        oval(c, x, 16, 3.5, 3.3, '#ffcf5c');
+        oval(c, x, 16.3, 2.2, 1.2, INK);
+        oval(c, x - 1, 15.2, 0.7, 0.7, WHITE);
+      }
+      oval(c, 6, 23.5, 2.4, 1.4, BLUSH);
+      oval(c, 24, 23.5, 2.4, 1.4, BLUSH);
+      stroke(c, 'M9 23Q15 27 21 23', INK, 1.3);
+      // 머리의 작은 왕관
+      fill(c, 'M10.500 12.500L10 5.500L13 8.500L15 4L17 8.500L20 5.500L19.500 12.500Z', '#ffcf5c');
+      box(c, 10.3, 10.6, 9.4, 2.4, 1, '#f2b84b');
+      oval(c, 15, 6.8, 1, 1, '#ff9fb5');
     },
   },
 };

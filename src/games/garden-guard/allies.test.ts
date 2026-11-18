@@ -169,20 +169,39 @@ describe('텃밭의 칸', () => {
     expect(cellAt(13)).toEqual({ col: 5, row: 1 });
   });
 
-  it('동료마다 모양이 있고(세로, 가로, ㄴ자), 칸을 많이 차지할수록 한 마리가 세다', () => {
+  it('동료마다 모양이 있고(세로, 가로, ㄴ자, 네모), 칸을 많이 차지할수록 한 마리가 세다', () => {
     for (const id of ALLY_ORDER) expect(ALLIES[id].shape.length, id).toBe(ALLIES[id].cells);
     const three = ALLY_ORDER.filter((id) => ALLIES[id].cells === 3).map((id) => shapeSize(id));
     // 세 칸짜리는 세로, 가로, ㄴ자가 하나씩이다.
     expect(three).toEqual(expect.arrayContaining([{ width: 1, height: 3 }, { width: 3, height: 1 }, { width: 2, height: 2 }]));
     const power = (id: AllyId): number => allyDamage(id, 1, 20, 1) / ALLIES[id].interval;
     const sizes = new Set(ALLY_ORDER.map((id) => ALLIES[id].cells));
-    expect([...sizes].sort()).toEqual([1, 2, 3]);
+    expect([...sizes].sort()).toEqual([1, 2, 3, 4]);
+    expect(shapeSize('toad')).toEqual({ width: 2, height: 2 });
     const by = (cells: number): AllyId[] => ALLY_ORDER.filter((id) => ALLIES[id].cells === cells);
     const most = (ids: AllyId[]): number => Math.max(...ids.map(power));
     expect(most(by(2))).toBeGreaterThan(most(by(1)));
     expect(most(by(3))).toBeGreaterThan(most(by(2)));
+    expect(most(by(4))).toBeGreaterThan(most(by(3)));
     // 큰 동료는 값도 더 비싸다.
     for (const big of by(3)) for (const small of by(1)) expect(ALLIES[big].price).toBeGreaterThan(ALLIES[small].price);
+    for (const big of by(4)) for (const small of by(3)) expect(ALLIES[big].price).toBeGreaterThan(ALLIES[small].price);
+  });
+
+  it('뒤에 나오는 사마귀와 두꺼비는 고슴도치보다 열매와 칸 하나에 드는 힘이 조금 낫다', () => {
+    const power = (id: AllyId): number => allyDamage(id, 1, 20, 1) / ALLIES[id].interval;
+    const perFruit = (id: AllyId): number => power(id) / ALLIES[id].price;
+    const perCell = (id: AllyId): number => power(id) / ALLIES[id].cells;
+    for (const id of ['mantis', 'toad'] as const) {
+      expect(ALLIES[id].fromDay, id).toBeGreaterThan(ALLIES.hedgehog.fromDay);
+      // 조금 낫지만 많이 낫지는 않다(3할 안쪽).
+      expect(perFruit(id) / perFruit('hedgehog'), id).toBeGreaterThan(1);
+      expect(perFruit(id) / perFruit('hedgehog'), id).toBeLessThan(1.3);
+      expect(perCell(id) / perCell('hedgehog'), id).toBeGreaterThan(1);
+      expect(perCell(id) / perCell('hedgehog'), id).toBeLessThan(1.3);
+    }
+    // 두꺼비는 한 마리로는 가장 세다.
+    for (const id of ALLY_ORDER) if (id !== 'toad') expect(power('toad'), id).toBeGreaterThan(power(id));
   });
 
   it('모양은 밭 안에서 한쪽에만 서고, 물총을 넘어 양쪽에 걸치지 않는다', () => {
@@ -194,6 +213,16 @@ describe('텃밭의 칸', () => {
     expect(shapeCells('hedgehog', 0)).toEqual([0, 8, 9]);
     expect(shapeCells('hedgehog', 3)).toBeNull();
     expect(shapeCells('frog', 7)).toBeNull();
+    // 네모난 네 칸은 위의 두 줄에서만 서고(맨 아래 줄에서는 아래로 넘친다), 한쪽 안에서만 선다.
+    expect(shapeCells('toad', 0)).toEqual([0, 1, 8, 9]);
+    expect(shapeCells('toad', 10)).toEqual([10, 11, 18, 19]);
+    expect(shapeCells('toad', 12)).toEqual([12, 13, 20, 21]);
+    expect(shapeCells('toad', 3)).toBeNull();
+    expect(shapeCells('toad', 7)).toBeNull();
+    expect(shapeCells('toad', 16)).toBeNull();
+    expect(shapeCells('toad', 22)).toBeNull();
+    expect(shapeCells('mantis', 6)).toEqual([6, 14, 22]);
+    expect(shapeCells('mantis', 14)).toBeNull();
     expect(shapeCells('can', 16)).toBeNull();
     expect(shapeCells('sunflower', -1)).toBeNull();
     expect(shapeCells('sunflower', 24)).toBeNull();
@@ -215,6 +244,28 @@ describe('텃밭의 칸', () => {
     expect(cellsValid(state.allies)).toBe(true);
     expect(state.allies.map((ally) => ally.cell)).toEqual([0, 3, 4, 5, 11]);
     expect(freeCells(state.allies)).toBe(CELL_COUNT - 9);
+  });
+
+  it('두꺼비(2 × 2)는 물총에 가까운 네모난 빈자리에 서고, 자리가 없으면 서지 못한다', () => {
+    const state = quiet([]);
+    // 물총 바로 옆 두 줄(왼쪽 2·3·10·11)이 가장 가깝다.
+    expect(placeAlly(state, 'toad')?.cell).toBe(2);
+    // 다음은 오른쪽 4·5·12·13
+    expect(placeAlly(state, 'toad')?.cell).toBe(4);
+    expect(state.allies.map((ally) => shapeCells(ally.id, ally.cell))).toEqual([
+      [2, 3, 10, 11],
+      [4, 5, 12, 13],
+    ]);
+    // 사마귀(세로 3칸)는 두꺼비 둘을 피해 세 줄이 다 빈 곳에 선다.
+    expect(placeAlly(state, 'mantis')?.cell).toBe(1);
+    // 물뿌리개(세로 2칸)로 위의 두 줄을 채우면, 맨 아래 줄만 남은 곳에는 네모가 들어가지 않는다.
+    const low = quiet([]);
+    for (const cell of [0, 1, 2, 3, 4, 5, 6, 7]) placeAlly(low, 'can', 1, cell);
+    expect(freeCells(low.allies)).toBe(8);
+    expect(canPlace(low, 'toad')).toBe(false);
+    expect(placeAlly(low, 'toad', 1, 16)).toBeNull();
+    expect(canPlace(low, 'pumpkin')).toBe(true);
+    expect(cellsValid(state.allies)).toBe(true);
   });
 
   it('빈칸이 모자라거나 모양이 들어갈 자리가 없으면 새로 놓을 수 없다', () => {
@@ -403,6 +454,14 @@ describe('동료 가게', () => {
       if (ALLIES[id].fromDay > 1) expect(pool(ALLIES[id].fromDay - 1)).not.toContain(id);
     }
     expect(pool(99)).toEqual([...ALLY_ORDER]);
+    // 24일째 고슴도치 뒤로도 30일째에 사마귀, 40일째에 두꺼비가 새로 나온다.
+    expect(pool(29)).not.toContain('mantis');
+    expect(pool(30)).toContain('mantis');
+    expect(pool(39)).not.toContain('toad');
+    expect(pool(40).slice(-2)).toEqual(['mantis', 'toad']);
+    // 나오는 날 차례대로 놓여 있다.
+    const days = ALLY_ORDER.map((id) => ALLIES[id].fromDay);
+    expect(days).toEqual([...days].sort((a, b) => a - b));
     expect(drawShop(shopAt(1))).toHaveLength(SHOP.cards);
   });
 
@@ -538,6 +597,29 @@ describe('동료마다의 솜씨', () => {
     expect(lone.hp).toBe(lone.maxHp);
   });
 
+  it('사마귀는 대장과 튼튼한 벌레를 베고 껍데기도 뚫으며, 두꺼비는 울타리에 가까운 벌레를 쳐서 늦춘다', () => {
+    const state = quiet([]);
+    const tough = put(state, 'snail', 60, 120, 500);
+    put(state, 'ant', 200, 300, 10);
+    expect(allyTarget(state, { id: 'mantis', cell: 0 })).toBe(tough);
+    const front = put(state, 'ant', 150, 310, 10);
+    expect(allyTarget(state, { id: 'toad', cell: 4 })).toBe(front);
+
+    const shell = quiet([['mantis', 1]]);
+    const beetle = put(shell, 'beetle', 100, 200);
+    run(shell, 1.5);
+    const hits = (beetle.maxHp - beetle.hp) / allyDamage('mantis', 1, shell.stats.damage, 1);
+    expect(hits).toBeGreaterThanOrEqual(1);
+    expect(hits).toBeCloseTo(Math.round(hits), 5);
+
+    const slow = quiet([['toad', 1]]);
+    const ant = put(slow, 'ant', 100, 250);
+    run(slow, 1);
+    expect(ant.hp).toBeLessThan(ant.maxHp);
+    expect(ant.slowLeft).toBeGreaterThan(0);
+    expect(ant.slow).toBeCloseTo(ALLIES.toad.chill?.slow ?? 0);
+  });
+
   it('겨눌 벌레가 없으면 쏘지 않고 기다렸다가, 벌레가 오면 바로 쏜다', () => {
     const state = quiet([['sunflower', 1], ['frog', 1]]);
     const idle = run(state, 1);
@@ -554,7 +636,7 @@ describe('동료마다의 솜씨', () => {
     expect([...ALLY_ORDER].sort()).toEqual(Object.keys(ALLIES).sort());
     for (const id of ALLY_ORDER) {
       expect(ALLIES[id].cells, id).toBeGreaterThanOrEqual(1);
-      expect(ALLIES[id].cells, id).toBeLessThanOrEqual(3);
+      expect(ALLIES[id].cells, id).toBeLessThanOrEqual(4);
       expect(ALLIES[id].name.length, id).toBeLessThanOrEqual(5);
       expect(ALLIES[id].blurb.length, id).toBeLessThanOrEqual(17);
       expect(ALLIES[id].price, id).toBeGreaterThan(0);

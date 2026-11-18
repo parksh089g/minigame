@@ -381,7 +381,17 @@ export const FENCE_BASE = 100;
  * 같은 동료를 또 사면 합쳐져서 별이 오른다(ALLY_STARS). 동료의 피해는 물총 한 발의 피해(Stats.damage)에 비율을 곱해서,
  * 영구 강화와 새 밭으로 물총이 세지는 만큼 동료도 같이 세진다. 값은 여기만 고치면 된다.
  */
-export type AllyId = 'sunflower' | 'frog' | 'mint' | 'can' | 'sparrow' | 'cactus' | 'pumpkin' | 'hedgehog';
+export type AllyId =
+  | 'sunflower'
+  | 'frog'
+  | 'mint'
+  | 'can'
+  | 'sparrow'
+  | 'cactus'
+  | 'pumpkin'
+  | 'hedgehog'
+  | 'mantis'
+  | 'toad';
 
 /**
  * 동료가 겨누는 벌레. near는 제게 가까운 것, boss는 체력이 가장 많은 것(대장이 먼저), front는 울타리에 가장 가까운 것,
@@ -392,7 +402,7 @@ export type AllyAim = 'near' | 'boss' | 'front' | 'crowd' | 'far';
 /** 동료가 차지하는 칸의 모양. [가로, 세로]의 목록이고 [0, 0]이 첫 칸이다. */
 export type AllyShape = ReadonlyArray<readonly [number, number]>;
 
-/** 동료의 모양들: 한 칸, 가로 두 칸, 세로 두 칸, 세로 세 칸, 가로 세 칸, ㄴ자 세 칸 */
+/** 동료의 모양들: 한 칸, 가로 두 칸, 세로 두 칸, 세로 세 칸, 가로 세 칸, ㄴ자 세 칸, 네모난 네 칸(2 × 2) */
 export const SHAPES = {
   dot: [[0, 0]],
   row2: [
@@ -415,6 +425,12 @@ export const SHAPES = {
   ],
   ell3: [
     [0, 0],
+    [0, 1],
+    [1, 1],
+  ],
+  square4: [
+    [0, 0],
+    [1, 0],
     [0, 1],
     [1, 1],
   ],
@@ -553,10 +569,56 @@ export const ALLIES: Readonly<Record<AllyId, AllyDef>> = {
     cells: 3,
     shape: SHAPES.ell3,
   },
+  /**
+   * 사마귀: 개구리처럼 대장과 튼튼한 벌레를 겨누지만 훨씬 자주 벤다. 대장이 질겨지는 뒤쪽 날을 위한 동료다.
+   * 열매와 칸 하나에 드는 힘이 고슴도치보다 조금 낫다(뒤에 나오는 동료일수록 들일 만하게).
+   */
+  mantis: {
+    name: '사마귀',
+    blurb: '대장을 앞발로 재빨리 베어요',
+    fromDay: 30,
+    price: 7,
+    interval: 1,
+    damage: 1.75,
+    aim: 'boss',
+    shotSpeed: 520,
+    pierceShell: true,
+    cells: 3,
+    shape: SHAPES.col3,
+  },
+  /**
+   * 두꺼비: 한 마리로는 가장 센 동료. 울타리에 다가온 벌레를 혀로 쳐서 조금 늦춘다.
+   * 네 칸(2 × 2)을 차지하고 값도 가장 비싸서, 열매와 칸 하나에 드는 힘은 고슴도치보다 조금만 낫다.
+   */
+  toad: {
+    name: '두꺼비',
+    blurb: '다가온 벌레를 쳐서 늦춰요',
+    fromDay: 40,
+    price: 9,
+    interval: 0.75,
+    damage: 1.7,
+    aim: 'front',
+    shotSpeed: 560,
+    pierceShell: true,
+    chill: { slow: 0.3, seconds: 1.2 },
+    cells: 4,
+    shape: SHAPES.square4,
+  },
 };
 
 /** 가게에 나오는 차례 */
-export const ALLY_ORDER: readonly AllyId[] = ['sunflower', 'frog', 'mint', 'can', 'sparrow', 'cactus', 'pumpkin', 'hedgehog'];
+export const ALLY_ORDER: readonly AllyId[] = [
+  'sunflower',
+  'frog',
+  'mint',
+  'can',
+  'sparrow',
+  'cactus',
+  'pumpkin',
+  'hedgehog',
+  'mantis',
+  'toad',
+];
 
 /**
  * 동료가 서는 텃밭의 칸. 물총의 왼쪽과 오른쪽에 cols칸씩, 세로로 rows줄이고 칸마다 크기가 cell이다.

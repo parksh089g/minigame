@@ -54,10 +54,12 @@ interface AllyView {
 
 /**
  * 동료의 그림을 줄이는 배율. 칸을 많이 차지하는 동료일수록 크게 그리되(1칸, 2칸, 3칸),
- * 한 줄짜리 모양은 위아래 줄을 너무 가리지 않게 줄인다.
+ * 한 줄짜리 모양은 위아래 줄을 너무 가리지 않게 줄인다. 네모난 네 칸(2 × 2)은 세 칸보다 조금 더 크게 그려서
+ * 가장 큰 동료로 보이게 한다.
  */
 export function allyScale(id: AllyId): number {
-  const size = Math.min(1.08, 0.54 + ALLIES[id].cells * 0.18);
+  const cells = ALLIES[id].cells;
+  const size = Math.min(cells >= 4 ? 1.16 : 1.08, 0.54 + cells * 0.18);
   const rows = shapeSize(id).height;
   return Math.min(size, (rows * GARDEN_CELLS.cell + 14) / 38);
 }
