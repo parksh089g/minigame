@@ -4,7 +4,7 @@
  * 이 점검은 오류 없이 어긋나는 배치를 본다.
  */
 import './app-globals';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type CDPSession, type Page } from '@playwright/test';
 import { FONT_SIZE, GAME_WIDTH, SCENE, THEME_CSS } from '../src/config';
 import { STAGE_LEVELS, stageRandom } from '../src/core/stages';
 import { dealLevel as colorSortLevel } from '../src/games/color-sort/rules';
@@ -1746,13 +1746,33 @@ it('텃밭 지키기: 이미 있는 동료의 카드는 합치거나 새로 놓�
 });
 
 /** 캔버스의 논리 좌표 from에서 to까지 손가락으로 끈다(터치를 누르고, 여러 번 나눠 옮기고, 뗀다). */
+/**
+ * 손가락을 대자마자 toward 쪽으로 끌기 시작한다. 누름과 첫 움직임을 이어서 보내서, CI처럼 느린 곳에서
+ * 두 터치 사이가 꾹 누르기(0.45초)보다 길어져 동료 정보 창이 뜨지 않게 한다. 첫 움직임은 끌기가 시작되는 거리(12)를 넘는다.
+ */
+async function touchAndGo(
+  client: CDPSession,
+  start: { x: number; y: number; id?: number },
+  toward: { x: number; y: number },
+  scale: number,
+): Promise<void> {
+  const dx = toward.x - start.x;
+  const dy = toward.y - start.y;
+  const t = Math.min(1, (14 * scale) / Math.max(1, Math.hypot(dx, dy)));
+  const first = { ...start, x: start.x + dx * t, y: start.y + dy * t };
+  await Promise.all([
+    client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [start] }),
+    client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [first] }),
+  ]);
+}
+
 async function dragOnCanvas(page: Page, from: { x: number; y: number }, to: { x: number; y: number }): Promise<void> {
   const box = await page.locator('canvas').boundingBox();
   if (!box) throw new Error('캔버스가 보이지 않는다');
   const scale = box.width / GAME_WIDTH;
   const at = (x: number, y: number): { x: number; y: number } => ({ x: box.x + x * scale, y: box.y + y * scale });
   const client = await page.context().newCDPSession(page);
-  await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [at(from.x, from.y)] });
+  await touchAndGo(client, at(from.x, from.y), at(to.x, to.y), scale);
   const steps = 10;
   for (let step = 1; step <= steps; step += 1) {
     const t = step / steps;
@@ -2033,7 +2053,7 @@ it('텃밭 지키기: 끄는 동안 다른 손가락이 화면을 스쳐도 끌�
   // 다른 손가락은 가게의 빈 곳(판의 위쪽)을 스친다. 거기에 놓이면 아무 일도 없다.
   const other = at({ x: GAME_WIDTH / 2, y: 70 }, 2);
   const client = await page.context().newCDPSession(page);
-  await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [at(from, 1)] });
+  await touchAndGo(client, at(from, 1), at(to, 1), scale);
   for (let step = 1; step <= 5; step += 1) {
     const t = step / 10;
     await client.send('Input.dispatchTouchEvent', {
@@ -2131,7 +2151,7 @@ it('텃밭 지키기: 맞닿은 짝에는 밭에 하트가 뜨고, 짝을 지을
   const target = gardenCellPoint(fenceY, 2);
   const to = { x: target.x, y: target.y + 26 };
   const client = await page.context().newCDPSession(page);
-  await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [at(from)] });
+  await touchAndGo(client, at(from), at(to), scale);
   for (let step = 1; step <= 10; step += 1) {
     const t = step / 10;
     await client.send('Input.dispatchTouchEvent', {

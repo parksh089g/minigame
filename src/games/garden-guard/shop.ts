@@ -192,7 +192,7 @@ export function openShopPanel(
     y: number;
     pointer: number;
     canDrag: boolean;
-    /** 누른 때(scene.time.now) */
+    /** 누른 때(performance.now()) */
     at: number;
     /** 손가락이 아직 HOLD_SLOP 안에 머물러 있는지. 한 번 벗어나면 정보 창은 뜨지 않는다. */
     still: boolean;
@@ -341,15 +341,16 @@ export function openShopPanel(
   ): void => {
     zone.on(Phaser.Input.Events.GAMEOBJECT_POINTER_DOWN, (pointer: Phaser.Input.Pointer) => {
       if (!armed() || drag || info) return;
-      pending = { from, id, grip, x: pointer.worldX, y: pointer.worldY, pointer: pointer.id, canDrag, at: scene.time.now, still: true };
+      pending = { from, id, grip, x: pointer.worldX, y: pointer.worldY, pointer: pointer.id, canDrag, at: performance.now(), still: true };
     });
   };
   /**
    * 누른 채로 HOLD_MS가 지났는지 프레임마다 본다. 손을 떼거나 끌기 시작하면 pending이 비고, 손가락이 HOLD_SLOP을 벗어났으면 still이 꺼지므로 띄우지 않는다.
-   * 타이머(time.delayedCall)는 프레임이 느린 기기에서 게임 시간이 실제 시간보다 느리게 흘러 늦게 뜨므로, 실제 시각(time.now)으로 잰다.
+   * 타이머(time.delayedCall)는 프레임이 느린 기기에서 게임 시간이 실제 시간보다 느리게 흘러 늦게 뜨므로, 실제 시각(performance.now())으로 잰다.
+   * scene.time.now는 그 프레임이 시작된 때여서, 느린 프레임에서는 누른 때가 한 프레임만큼 앞으로 잡혀 일찍 뜬다.
    */
   const onUpdate = (): void => {
-    if (pending && pending.still && !drag && !info && !closed && scene.time.now - pending.at >= HOLD_MS) showInfo(pending.from, pending.id);
+    if (pending && pending.still && !drag && !info && !closed && performance.now() - pending.at >= HOLD_MS) showInfo(pending.from, pending.id);
   };
   scene.events.on(Phaser.Scenes.Events.UPDATE, onUpdate);
   // 장면의 이벤트는 장면을 다시 열어도 남으므로, 가게를 닫지 않은 채 장면이 끝나도 떼어 낸다.
