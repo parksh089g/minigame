@@ -2,7 +2,7 @@
  * 동료 가게에 적는 글. 화면(shop.ts)과 따로 두어서 화면 없이 테스트한다.
  */
 import { THEME_CSS } from '../../config';
-import { ALLIES, ALLY_STARS, CELL_COUNT, GUN, type AllyAim, type AllyId } from './data';
+import { ALLIES, ALLY_STARS, CELL_COUNT, GUN, PAIRS, type AllyAim, type AllyId } from './data';
 import {
   allyDamage,
   allyInterval,
@@ -11,6 +11,7 @@ import {
   mergeTarget,
   nextStar,
   owns,
+  pairBonuses,
   refundFor,
   starOf,
   type Ally,
@@ -110,6 +111,12 @@ export const INFO_TEXT = {
   price: (price: number, refund: number) => `값: 열매 ${price}개 · 내보내면 ${refund}개`,
   /** 가게의 카드: 합치면 오르는 별 */
   merged: (star: number) => `합치면 ★${star}`,
+  /** 짝 효과(PAIRS의 line) */
+  pair: (line: string) => `짝: ${line}`,
+  /** 밭의 동료가 지금 맞닿은 짝에게서 받는 덤 */
+  pairNow: (parts: string[]) => `지금 짝 덕분에 ${parts.join(' · ')}`,
+  pairDamage: (percent: number) => `피해 +${percent}%`,
+  pairRate: (percent: number) => `빠르기 +${percent}%`,
   close: '닫기',
 } as const;
 
@@ -125,6 +132,8 @@ export interface AllyInfo {
   aim: string;
   /** 솜씨(없으면 빈 목록) */
   specials: string[];
+  /** 짝 효과. 밭의 동료가 지금 짝의 덤을 받고 있으면 그 덤을 한 줄 더 적는다. */
+  pairs: string[];
   /** 한 발의 피해, 1초에 쏘는 수, 다음 별이 되면 바뀌는 것(다 올렸으면 그렇다는 말), 값과 돌려받는 열매 */
   numbers: string[];
 }
@@ -136,11 +145,12 @@ function shortNumber(value: number, digits = 2): string {
 
 /**
  * 동료 정보 창의 내용. copies를 주면 밭에 선 그만큼 모은 동료이고, 주지 않으면 가게의 카드다.
+ * index를 주면 밭의 그 동료가 지금 맞닿은 짝에게서 받는 덤도 적는다(피해와 빠르기 줄은 덤을 뺀 바탕이다).
  * 카드는 사서 합칠 동료가 있으면 합친 뒤의 모습을, 없으면 새로 놓은 ★1의 모습을 적는다.
  * 피해와 빠르기는 시뮬레이션(sim.ts의 fireAllies)과 같은 셈(allyDamage, allyInterval)에 그 판의 능력치를 넣어서 구한다.
  * 빠른 손은 동료도 함께 빠르게 하고, 동료 거름은 동료의 피해만 키운다.
  */
-export function allyInfo(state: Pick<RunState, 'allies' | 'stats'>, id: AllyId, copies?: number): AllyInfo {
+export function allyInfo(state: Pick<RunState, 'allies' | 'stats'>, id: AllyId, copies?: number, index?: number): AllyInfo {
   const def = ALLIES[id];
   const { stats } = state;
   let have: number;
@@ -168,5 +178,13 @@ export function allyInfo(state: Pick<RunState, 'allies' | 'stats'>, id: AllyId, 
       : SHOP_TEXT.top(level),
   );
   numbers.push(INFO_TEXT.price(def.price, refundFor({ id, copies: have })));
-  return { id, name: def.name, star, cells: SHOP_TEXT.cells(def.cells), aim: INFO_TEXT.aim(def.aim), specials, numbers };
+  const pairs = [INFO_TEXT.pair(PAIRS[id].line)];
+  const bonus = index !== undefined && state.allies[index]?.id === id ? pairBonuses(state.allies)[index] : undefined;
+  if (bonus && (bonus.damage > 0 || bonus.rate > 0)) {
+    const parts: string[] = [];
+    if (bonus.damage > 0) parts.push(INFO_TEXT.pairDamage(Math.round(bonus.damage * 100)));
+    if (bonus.rate > 0) parts.push(INFO_TEXT.pairRate(Math.round(bonus.rate * 100)));
+    pairs.push(INFO_TEXT.pairNow(parts));
+  }
+  return { id, name: def.name, star, cells: SHOP_TEXT.cells(def.cells), aim: INFO_TEXT.aim(def.aim), specials, pairs, numbers };
 }

@@ -369,7 +369,7 @@ export function openShopPanel(
           return { x: corner.x, y: area.bottom + (corner.y - FIELD.depth), size: GARDEN_CELLS.cell };
         })
       : [];
-    info = openAllyInfo(scene, area, depth + 4, allyInfo(current, id, ally?.copies), ring, () => {
+    info = openAllyInfo(scene, area, depth + 4, allyInfo(current, id, ally?.copies, ally ? from.index : undefined), ring, () => {
       closeInfo();
       if (!closed) build(current, false);
     });

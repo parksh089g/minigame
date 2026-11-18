@@ -94,6 +94,7 @@ export function openAllyInfo(
   };
   line(info.aim, THEME_CSS.ink);
   for (const special of info.specials) line(special, THEME_CSS.good);
+  for (const pair of info.pairs) line(pair, THEME_CSS.pinkDeep);
   info.numbers.forEach((text, index) => {
     // 마지막 두 줄(다음 별, 값)은 덜 중요하므로 옅게 적는다.
     line(text, index >= info.numbers.length - 2 ? THEME_CSS.sub : THEME_CSS.ink);

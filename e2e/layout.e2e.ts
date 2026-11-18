@@ -2165,14 +2165,21 @@ async function holdOnCanvas(page: Page, at: { x: number; y: number }, ms: number
 
 it('텃밭 지키기: 카드나 밭의 동료를 꾹 누르면 동료 정보가 뜨고, 그 손을 떼도 사거나 고르지 않는다', async ({ page }) => {
   await openGardenShop(page);
-  const team = [{ id: 'frog', copies: 2, fireIn: 0.5, cell: 2 }];
+  // 개구리(2·3번 칸) 바로 아래에 두꺼비(10·11·18·19번 칸)가 맞닿아 짝이 된다.
+  const team = [
+    { id: 'frog', copies: 2, fireIn: 0.5, cell: 2 },
+    { id: 'toad', copies: 1, fireIn: 0.5, cell: 10 },
+  ];
   const fenceY = await setGardenTeam(page, team, 30, [
     { id: 'sunflower', sold: false },
     { id: 'frog', sold: false },
     { id: 'mint', sold: false },
   ]);
   const before = await gardenTeam(page);
-  expect(before.allies).toEqual([{ id: 'frog', copies: 2, cell: 2 }]);
+  expect(before.allies).toEqual([
+    { id: 'frog', copies: 2, cell: 2 },
+    { id: 'toad', copies: 1, cell: 10 },
+  ]);
   const stats = await page.evaluate(
     (key) => (window.__pocketArcade?.scene.getScene(key) as unknown as { run: { stats: object } }).run.stats,
     GARDEN_SCENE,
@@ -2184,7 +2191,7 @@ it('텃밭 지키기: 카드나 밭의 동료를 꾹 누르면 동료 정보가 
   const card = allyInfo(run, 'sunflower');
   await holdOnCanvas(page, (await textPoint(page, GARDEN_SCENE, ALLIES.sunflower.name))!, 700);
   await expect.poll(() => textPoint(page, GARDEN_SCENE, INFO_TEXT.close), { ...WAIT, message: '카드의 정보 창' }).not.toBeNull();
-  for (const line of [card.star, card.aim, ...card.numbers]) {
+  for (const line of [card.star, card.aim, ...card.pairs, ...card.numbers]) {
     expect(await textPoint(page, GARDEN_SCENE, line), line).not.toBeNull();
   }
   expect(card.star).toBe(SHOP_TEXT.fresh);
@@ -2199,14 +2206,28 @@ it('텃밭 지키기: 카드나 밭의 동료를 꾹 누르면 동료 정보가 
   expect(await gardenTeam(page), '닫아도 사지 않는다').toEqual(before);
 
   // 밭의 개구리(★2)를 꾹 누르면 그 동료의 정보가 뜨고, 고르지는 않는다(내보내기 단추가 나오지 않는다).
-  const frog = allyInfo(run, 'frog', 2);
+  // 두꺼비와 맞닿아 있으므로 짝 효과와 함께 지금 받는 덤도 적는다.
+  const frog = allyInfo(run, 'frog', 2, 0);
   await holdOnCanvas(page, gardenCellPoint(fenceY, 3), 700);
   await expect.poll(() => textPoint(page, GARDEN_SCENE, frog.aim), { ...WAIT, message: '밭의 동료의 정보 창' }).not.toBeNull();
-  for (const line of [frog.name, ...frog.specials, ...frog.numbers]) {
+  for (const line of [frog.name, ...frog.specials, ...frog.pairs, ...frog.numbers]) {
     expect(await textPoint(page, GARDEN_SCENE, line), line).not.toBeNull();
   }
   expect(frog.numbers).toContain('★2 → ★3: 피해 ×1.5 · 빠르기 ×1.1');
+  expect(frog.pairs).toEqual([INFO_TEXT.pair(PAIRS.frog.line), INFO_TEXT.pairNow([INFO_TEXT.pairDamage(10)])]);
   expect(await hiddenTexts(page, GARDEN_SCENE), '밭의 동료의 정보 창').toEqual([]);
+  await tapText(page, GARDEN_SCENE, INFO_TEXT.close);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, SHOP_TEXT.title), WAIT).not.toBeNull();
+
+  // 솜씨가 둘이고 짝 덤도 받는 두꺼비는 줄이 가장 많은 창이지만 모두 보인다.
+  const toad = allyInfo(run, 'toad', 1, 1);
+  expect(toad.specials.length + toad.pairs.length).toBe(4);
+  await holdOnCanvas(page, gardenCellPoint(fenceY, 18), 700);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, toad.aim), { ...WAIT, message: '두꺼비의 정보 창' }).not.toBeNull();
+  for (const line of [toad.name, ...toad.specials, ...toad.pairs, ...toad.numbers]) {
+    expect(await textPoint(page, GARDEN_SCENE, line), line).not.toBeNull();
+  }
+  expect(await hiddenTexts(page, GARDEN_SCENE), '두꺼비의 정보 창').toEqual([]);
   // 아무 데나 누르면 닫힌다.
   await tapAt(page, GAME_WIDTH / 2, fenceY - 20);
   await expect.poll(() => textPoint(page, GARDEN_SCENE, INFO_TEXT.close), WAIT).toBeNull();
@@ -2217,7 +2238,7 @@ it('텃밭 지키기: 카드나 밭의 동료를 꾹 누르면 동료 정보가 
 
   // 짧게 누르면 여느 때처럼 산다.
   await tapText(page, GARDEN_SCENE, SHOP_TEXT.fresh);
-  await expect.poll(async () => (await gardenTeam(page)).allies.length, WAIT).toBe(2);
+  await expect.poll(async () => (await gardenTeam(page)).allies.length, WAIT).toBe(3);
 });
 
 it('텃밭 지키기: 하던 판을 두고 나가거나 앱이 꺼져도 준비 화면에서 그 자리부터 이어 하고, 새 판을 고르면 그 판을 마친다', async ({ page }) => {

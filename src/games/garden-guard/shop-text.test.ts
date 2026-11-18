@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { allyDamage, allyInterval, copiesFor, placeAlly } from './allies';
-import { ALLIES, ALLY_ORDER, ALLY_STARS, GUN, type AllyAim } from './data';
+import { ALLIES, ALLY_ORDER, ALLY_STARS, GUN, PAIRS, type AllyAim } from './data';
 import { AIM_TEXT, allyInfo, INFO_TEXT, SHOP_TEXT } from './shop-text';
 import { createRun, type RunState } from './sim';
 
@@ -112,10 +112,28 @@ describe('동료 정보 창의 글(allyInfo)', () => {
     expect(allyInfo(state, 'sunflower').numbers).toEqual(allyInfo(state, 'sunflower', 1).numbers);
   });
 
+  it('짝 효과를 적고, 밭의 동료가 지금 짝의 덤을 받으면 그 덤도 적는다', () => {
+    const state = shopRun();
+    state.allies = [];
+    expect(allyInfo(state, 'sparrow').pairs).toEqual([INFO_TEXT.pair(PAIRS.sparrow.line)]);
+    // 참새(2번 칸)와 해바라기(3번 칸)가 맞닿으면 참새는 제 짝 효과와 해바라기의 짝 효과를 함께 받는다(둘 다 빠르기).
+    state.allies = [
+      { id: 'sparrow', copies: 1, fireIn: 0.5, cell: 2 },
+      { id: 'sunflower', copies: 1, fireIn: 0.5, cell: 3 },
+    ];
+    expect(allyInfo(state, 'sparrow', 1, 0).pairs).toEqual([INFO_TEXT.pair(PAIRS.sparrow.line), INFO_TEXT.pairNow([INFO_TEXT.pairRate(20)])]);
+    // 해바라기는 짝 덤을 주기만 하고 받지는 않는다.
+    expect(allyInfo(state, 'sunflower', 1, 1).pairs).toEqual([INFO_TEXT.pair(PAIRS.sunflower.line)]);
+    // 떨어져 있으면 덤이 없다.
+    state.allies[1].cell = 5;
+    expect(allyInfo(state, 'sparrow', 1, 0).pairs).toHaveLength(1);
+    expect(INFO_TEXT.pairNow([INFO_TEXT.pairDamage(15), INFO_TEXT.pairRate(10)])).toBe('지금 짝 덕분에 피해 +15% · 빠르기 +10%');
+  });
+
   it('모든 동료와 별의 글이 글꼴에 있는 글자만 쓴다', () => {
     const known = fontSyllables();
     const state = shopRun();
-    const texts: string[] = [INFO_TEXT.close];
+    const texts: string[] = [INFO_TEXT.close, INFO_TEXT.pairNow([INFO_TEXT.pairDamage(10), INFO_TEXT.pairRate(10)])];
     for (const id of ALLY_ORDER) {
       texts.push(...Object.values(allyInfo(state, id)).flat().map(String));
       for (let star = 1; star <= ALLY_STARS.max; star += 1) {
