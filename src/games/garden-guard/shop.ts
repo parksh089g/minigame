@@ -90,6 +90,8 @@ interface Drag {
   ghost: Phaser.GameObjects.Image;
   marks: Phaser.GameObjects.Graphics;
   label: Phaser.GameObjects.Text;
+  /** 끌고 있는 손가락. 다른 손가락이 움직이거나 떨어져도 끌던 것은 그대로 둔다(11차 검토 G15). */
+  pointer: number;
 }
 
 /** 끌던 것을 놓으면 할 일 */
@@ -204,6 +206,7 @@ export function openShopPanel(
       from: pending.from,
       id: pending.id,
       grip: pending.grip,
+      pointer: pending.pointer,
       ghost: scene.add.image(pointer.worldX, pointer.worldY, allyTexture(pending.id)).setScale(scale).setAlpha(0.9).setDepth(depth + 3),
       marks: scene.add.graphics().setDepth(depth + 2),
       label: addText(scene, pointer.worldX, pointer.worldY, '', {
@@ -229,7 +232,7 @@ export function openShopPanel(
   };
   const onMove = (pointer: Phaser.Input.Pointer): void => {
     if (drag) {
-      paintDrop(drag, pointer.worldX, pointer.worldY);
+      if (pointer.id === drag.pointer) paintDrop(drag, pointer.worldX, pointer.worldY);
       return;
     }
     if (pending && pointer.id === pending.pointer && Math.hypot(pointer.worldX - pending.x, pointer.worldY - pending.y) > DRAG_START) {
@@ -237,8 +240,8 @@ export function openShopPanel(
     }
   };
   const onUp = (pointer: Phaser.Input.Pointer): void => {
-    pending = null;
-    if (!drag) return;
+    if (pending && pointer.id === pending.pointer) pending = null;
+    if (!drag || pointer.id !== drag.pointer) return;
     const now = drag;
     const drop = dropAt(now, pointer.worldX, pointer.worldY);
     endDrag();

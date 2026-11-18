@@ -4,7 +4,7 @@
  */
 import Phaser from 'phaser';
 import { mascotTexture } from '../../art/cosmetics';
-import { GAME_WIDTH, THEME_CSS } from '../../config';
+import { FONT_SIZE, GAME_WIDTH, THEME_CSS } from '../../config';
 import { addText } from '../../core/ui';
 import { store } from '../../core/store';
 import { allySpot, cellCorner, shapeCells, shapeSize, starOf, type Ally } from './allies';
@@ -459,8 +459,9 @@ export class FieldView {
           .setOrigin(0.5, 1)
           .setScale(scale)
           .setDepth(this.depth + 4);
+        // 가장 작은 글자 크기(10px)보다 작게 쓰지 않는다(11차 검토 G16).
         const stars = addText(scene, spot.x, foot + ALLY_FOOT - 2, '', {
-          size: 9,
+          size: FONT_SIZE.small,
           color: THEME_CSS.accent,
           originX: 0.5,
           originY: 0.5,

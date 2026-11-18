@@ -487,11 +487,14 @@ export class GardenGuardScene extends MiniGameScene {
       this.pending -= STEP;
       const events = step(state, STEP, input);
       stepped = true;
-      // 물벼락과 가게에서 누른 것은 한 번만 넘긴다.
+      // 물벼락과 가게에서 누른 것은 한 번만 넘긴다. 한 프레임에 여러 걸음이 돌아도(초당 30번 그리는 기기) 두 번 들어가지 않는다(11차 검토 G12).
       input.storm = false;
       input.buy = undefined;
       input.reroll = undefined;
       input.ready = undefined;
+      input.move = undefined;
+      input.join = undefined;
+      input.dismiss = undefined;
       if (events.length > 0) this.react(events);
     }
     // 화면이 빨리 바뀌는 기기에서는 한 프레임에 한 걸음도 못 갈 때가 있다. 그때 누른 것은 다음 프레임으로 넘긴다.

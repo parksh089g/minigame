@@ -14,8 +14,8 @@ export const SHOP_TEXT = {
     free > 0 ? `열매 ${fruit}개 · 빈칸 ${free}/${CELL_COUNT}` : `열매 ${fruit}개 · 빈칸 없음 · 밭의 동료를 눌러 내보내요`,
   /** 처음 들이는 동료 */
   fresh: '새 동료',
-  /** 놓을 빈칸이 모자란 새 동료 */
-  noRoom: '빈칸이 모자라요',
+  /** 놓을 빈칸이 모자란 새 동료. 세 칸 동료의 카드에서도 값 옆의 열매 그림에 닿지 않게 짧게 쓴다(11차 검토 G13). */
+  noRoom: '자리 없음',
   /** 이미 있는 동료를 살 때 고르는 두 단추 */
   mergeButton: (star: number) => `합치기 ★${star}`,
   mergeSame: '합치기',

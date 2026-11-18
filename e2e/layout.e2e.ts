@@ -1766,6 +1766,187 @@ async function dragOnCanvas(page: Page, from: { x: number; y: number }, to: { x:
   await client.detach();
 }
 
+type GardenAlly = { id: string; copies: number; fireIn: number; cell: number };
+type GardenTeam = { allies: Array<{ id: string; copies: number; cell: number }>; fruit: number };
+
+/** 텃밭 지키기의 첫날 앞 가게까지 연다. 영구 강화는 넉넉히, 판은 startDay부터다. */
+async function openGardenShop(page: Page, startDay = 1): Promise<void> {
+  await openApp(page);
+  await seedGardenMeta(page, {
+    version: 4,
+    seeds: 0,
+    levels: { power: 20, rapid: 6, fence: 10, storm: 1 },
+    best: startDay + 9,
+    runs: 5,
+    kills: 100,
+    startDay,
+    fields: 0,
+    bestEver: startDay + 9,
+    shards: 0,
+    relics: {},
+    savedAt: Date.now() + 60_000,
+  });
+  await page.reload();
+  await waitForScene(page, 'Hub');
+  await startScene(page, GARDEN_SCENE);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, '출발!'), WAIT).not.toBeNull();
+  await tapText(page, GARDEN_SCENE, '출발!');
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, SHOP_TEXT.title), WAIT).not.toBeNull();
+}
+
+/** 가게가 열린 판의 동료를 allies로 바꾸고 열매를 fruit로 둔 뒤, 가게를 다시 그린다. 그날의 첫 칸 좌표를 돌려줄 fenceY도 준다. */
+async function setGardenTeam(page: Page, allies: GardenAlly[], fruit: number, shop?: ShopCard[]): Promise<number> {
+  return page.evaluate(
+    ({ key, allies, fruit, shop }) => {
+      const scene = window.__pocketArcade?.scene.getScene(key) as unknown as {
+        run: { allies: unknown[]; fruit: number; shop: unknown[] };
+        shop: { refresh(run: unknown): void };
+        layout: { fenceY: number };
+      };
+      scene.run.allies = allies;
+      scene.run.fruit = fruit;
+      if (shop) scene.run.shop = shop;
+      scene.shop.refresh(scene.run);
+      return scene.layout.fenceY;
+    },
+    { key: GARDEN_SCENE, allies, fruit, shop },
+  );
+}
+
+function gardenTeam(page: Page): Promise<GardenTeam> {
+  return page.evaluate((key) => {
+    const run = (window.__pocketArcade?.scene.getScene(key) as unknown as { run: GardenTeam }).run;
+    return { allies: run.allies.map((ally) => ({ id: ally.id, copies: ally.copies, cell: ally.cell })), fruit: run.fruit };
+  }, GARDEN_SCENE);
+}
+
+/** 밭의 그 칸의 한가운데(화면의 논리 좌표) */
+function gardenCellPoint(fenceY: number, cell: number): { x: number; y: number } {
+  const corner = cellCorner(cell);
+  return { x: corner.x + GARDEN_CELLS.cell / 2, y: fenceY + (corner.y - FIELD.depth) + GARDEN_CELLS.cell / 2 };
+}
+
+it('텃밭 지키기: 초당 30번만 그리는 기기에서도 가게에서 한 번 누른 내보내기와 합치기는 한 번만 된다 (11차 검토 G12)', async ({ page }) => {
+  await openGardenShop(page);
+  const three = [2, 3, 4].map((cell) => ({ id: 'sunflower', copies: 1, fireIn: 0.5, cell }));
+  const fenceY = await setGardenTeam(page, three, 0);
+  // 저전력 모드의 폰처럼 초당 30번만 그린다. 한 프레임에 시뮬레이션이 두 걸음씩 돈다.
+  await page.evaluate(() => {
+    const loop = window.__pocketArcade?.loop as unknown as {
+      sleep(): void;
+      wake(): void;
+      fpsLimit: number;
+      hasFpsLimit: boolean;
+      _limitRate: number;
+    };
+    loop.sleep();
+    loop.fpsLimit = 30;
+    loop.hasFpsLimit = true;
+    loop._limitRate = 1000 / 30;
+    loop.wake();
+  });
+
+  // 2번 칸의 해바라기를 눌러 내보내면 그 한 마리만 떠난다.
+  const first = gardenCellPoint(fenceY, 2);
+  await expect
+    .poll(async () => {
+      if (!(await textPoint(page, GARDEN_SCENE, SHOP_TEXT.dismiss))) await tapAt(page, first.x, first.y);
+      return textPoint(page, GARDEN_SCENE, SHOP_TEXT.dismiss);
+    }, { ...WAIT, message: '내보내기 단추' })
+    .not.toBeNull();
+  await tapText(page, GARDEN_SCENE, SHOP_TEXT.dismiss);
+  await expect.poll(async () => (await gardenTeam(page)).allies.length, WAIT).toBe(2);
+  await page.waitForTimeout(500);
+  expect(await gardenTeam(page)).toEqual({
+    allies: [
+      { id: 'sunflower', copies: 1, cell: 3 },
+      { id: 'sunflower', copies: 1, cell: 4 },
+    ],
+    fruit: Math.floor(ALLIES.sunflower.price / 2),
+  });
+
+  // 세 마리 가운데 하나를 끌어 다른 하나에 합치면 그 둘만 합쳐진다.
+  await setGardenTeam(page, three, 0);
+  await dragOnCanvas(page, gardenCellPoint(fenceY, 2), { ...gardenCellPoint(fenceY, 3), y: gardenCellPoint(fenceY, 3).y + 26 });
+  await expect.poll(async () => (await gardenTeam(page)).allies.length, WAIT).toBe(2);
+  await page.waitForTimeout(500);
+  expect((await gardenTeam(page)).allies).toEqual([
+    { id: 'sunflower', copies: 2, cell: 3 },
+    { id: 'sunflower', copies: 1, cell: 4 },
+  ]);
+});
+
+it('텃밭 지키기: 끄는 동안 다른 손가락이 화면을 스쳐도 끌던 동료는 처음 손가락을 따라간다 (11차 검토 G15)', async ({ page }) => {
+  await openGardenShop(page);
+  const fenceY = await setGardenTeam(page, [{ id: 'sunflower', copies: 1, fireIn: 0.5, cell: 3 }], 0);
+  const box = await page.locator('canvas').boundingBox();
+  if (!box) throw new Error('캔버스가 보이지 않는다');
+  const scale = box.width / GAME_WIDTH;
+  const at = (point: { x: number; y: number }, id: number): { x: number; y: number; id: number } => ({
+    x: box.x + point.x * scale,
+    y: box.y + point.y * scale,
+    id,
+  });
+  const from = gardenCellPoint(fenceY, 3);
+  const target = gardenCellPoint(fenceY, 1);
+  const to = { x: target.x, y: target.y + 26 };
+  // 다른 손가락은 가게의 빈 곳(판의 위쪽)을 스친다. 거기에 놓이면 아무 일도 없다.
+  const other = at({ x: GAME_WIDTH / 2, y: 70 }, 2);
+  const client = await page.context().newCDPSession(page);
+  await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [at(from, 1)] });
+  for (let step = 1; step <= 5; step += 1) {
+    const t = step / 10;
+    await client.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [at({ x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t }, 1)],
+    });
+    await page.waitForTimeout(20);
+  }
+  const middle = at({ x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 }, 1);
+  await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [middle, other] });
+  await page.waitForTimeout(40);
+  // CDP의 touchEnd에는 뗀 손가락을 적는다.
+  await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [other] });
+  await page.waitForTimeout(40);
+  // 다른 손가락을 뗐을 때 놓이지 않았다.
+  expect((await gardenTeam(page)).allies).toEqual([{ id: 'sunflower', copies: 1, cell: 3 }]);
+  for (let step = 6; step <= 10; step += 1) {
+    const t = step / 10;
+    await client.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [at({ x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t }, 1)],
+    });
+    await page.waitForTimeout(20);
+  }
+  await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [at(to, 1)] });
+  await client.detach();
+  await expect.poll(async () => (await gardenTeam(page)).allies, WAIT).toEqual([{ id: 'sunflower', copies: 1, cell: 1 }]);
+});
+
+it('텃밭 지키기: 밭이 꽉 찬 가게의 카드 글자가 가리지 않고, 밭의 별 글자는 가장 작은 글자 크기보다 작지 않다 (11차 검토 G13, G16)', async ({
+  page,
+}) => {
+  await openGardenShop(page, 26);
+  // 24칸을 모두 채우고 세 칸 동료의 카드를 놓는다. 세 칸 동료는 놓을 자리가 없다.
+  const full = Array.from({ length: CELL_COUNT }, (_, cell) => ({ id: 'sparrow', copies: 1 + (cell % 4), fireIn: 0.5, cell }));
+  await setGardenTeam(page, full, 99, [
+    { id: 'pumpkin', sold: false },
+    { id: 'hedgehog', sold: false },
+    { id: 'sparrow', sold: false },
+  ]);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, SHOP_TEXT.noRoom), WAIT).not.toBeNull();
+  // 밭의 동료가 새로 서는 동안(커지며 나타난다)은 기다린다.
+  await expect.poll(() => hiddenTexts(page, GARDEN_SCENE), { ...WAIT, message: '밭이 꽉 찬 가게' }).toEqual([]);
+  const stars = await page.evaluate((key) => {
+    const scene = window.__pocketArcade?.scene.getScene(key) as unknown as Phaser.Scene;
+    return scene.children.list
+      .filter((item) => item.type === 'Text' && /^★\d$/.test((item as Phaser.GameObjects.Text).text))
+      .map((item) => parseFloat(String((item as Phaser.GameObjects.Text).style.fontSize)));
+  }, GARDEN_SCENE);
+  expect(stars.length, '밭의 별 글자').toBe(CELL_COUNT);
+  for (const size of stars) expect(size).toBeGreaterThanOrEqual(FONT_SIZE.small);
+});
+
 it('텃밭 지키기: 하던 판을 두고 나가거나 앱이 꺼져도 준비 화면에서 그 자리부터 이어 하고, 새 판을 고르면 그 판을 마친다', async ({ page }) => {
   await openApp(page);
   await seedGardenMeta(page, {
