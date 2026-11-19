@@ -2261,6 +2261,50 @@ it('텃밭 지키기: 카드나 밭의 동료를 꾹 누르면 동료 정보가 
   await expect.poll(async () => (await gardenTeam(page)).allies.length, WAIT).toBe(3);
 });
 
+it('텃밭 지키기: 빠르기 버튼을 누르면 판이 두 배로 흐르고, 고른 빠르기는 다음 판에도 남는다', async ({ page }) => {
+  await openGardenShop(page);
+  await tapText(page, GARDEN_SCENE, SHOP_TEXT.start(1));
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, SHOP_TEXT.title), WAIT).toBeNull();
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, '×1'), WAIT).not.toBeNull();
+  /** 한 프레임(50ms)을 직접 돌려서 판 안의 시간이 얼마나 흘렀는지 잰다. 그동안 게임의 프레임은 끼어들지 못한다. */
+  const tick = (): Promise<number> =>
+    page.evaluate((key) => {
+      const scene = window.__pocketArcade?.scene.getScene(key) as unknown as {
+        run: { t: number };
+        pending: number;
+        update(time: number, delta: number): void;
+      };
+      scene.pending = 0;
+      const before = scene.run.t;
+      scene.update(0, 50);
+      return scene.run.t - before;
+    }, GARDEN_SCENE);
+  expect(await tick()).toBeCloseTo(0.05, 2);
+
+  await tapText(page, GARDEN_SCENE, '×1');
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, '×2'), WAIT).not.toBeNull();
+  expect(await textPoint(page, GARDEN_SCENE, '×1')).toBeNull();
+  expect(await tick()).toBeCloseTo(0.1, 2);
+  // 버튼을 눌러도 그쪽으로 겨누지 않는다.
+  expect(await page.evaluate((key) => (window.__pocketArcade?.scene.getScene(key) as unknown as { run: { manual: boolean } }).run.manual, GARDEN_SCENE)).toBe(false);
+  expect(await page.evaluate(() => localStorage.getItem('pocket-arcade-garden-speed'))).toBe('2');
+  expect(await hiddenTexts(page, GARDEN_SCENE), '빠르기 버튼이 있는 판 화면').toEqual([]);
+
+  // 페이지를 다시 열고 새 판을 시작해도 두 배로 흐른다.
+  await page.reload();
+  await waitForScene(page, 'Hub');
+  await startScene(page, GARDEN_SCENE);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, '새 판'), WAIT).not.toBeNull();
+  await page.evaluate((key) => window.__pocketArcade?.scene.getScene(key)?.scene.restart({ mode: 'run' }), GARDEN_SCENE);
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, SHOP_TEXT.title), WAIT).not.toBeNull();
+  await tapText(page, GARDEN_SCENE, SHOP_TEXT.start(1));
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, '×2'), WAIT).not.toBeNull();
+  expect(await tick()).toBeCloseTo(0.1, 2);
+  await tapText(page, GARDEN_SCENE, '×2');
+  await expect.poll(() => textPoint(page, GARDEN_SCENE, '×1'), WAIT).not.toBeNull();
+  expect(await tick()).toBeCloseTo(0.05, 2);
+});
+
 it('텃밭 지키기: 하던 판을 두고 나가거나 앱이 꺼져도 준비 화면에서 그 자리부터 이어 하고, 새 판을 고르면 그 판을 마친다', async ({ page }) => {
   await openApp(page);
   await seedGardenMeta(page, {
