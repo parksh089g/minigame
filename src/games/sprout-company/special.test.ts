@@ -142,13 +142,17 @@ describe('특별한 카드가 나올 때', () => {
   it('예약으로 이어서 시작하는 게임에도 나온다', () => {
     const state = company(OFFICES.length - 1);
     startProject(state, 'lightning-tap');
+    startProject(state, 'jump-runner');
     expect(enqueue(state, 'stack-tower')).toBe(true);
     state.project!.done = state.project!.total;
     state.inbox = [];
+    state.backlog = [];
     const events = advance(state, 0.1, () => 0);
     expect(events.some((event) => event.type === 'release')).toBe(true);
-    expect(state.project?.id).toBe('stack-tower');
-    expect([...state.inbox, ...state.desks.map((desk) => desk.task)].some((task) => task?.special === 'idea')).toBe(true);
+    expect(state.second?.id).toBe('stack-tower');
+    const tower = (task: Task | null): boolean => task?.project === 'stack-tower';
+    const cards = [...state.inbox, ...state.backlog, ...state.desks.map((desk) => desk.task)].filter(tower);
+    expect(cards.some((task) => task?.special === 'idea')).toBe(true);
     // 손으로 출시할 때도 같다.
     enqueue(state, 'lightning-tap');
     state.project!.done = state.project!.total;
@@ -156,6 +160,8 @@ describe('특별한 카드가 나올 때', () => {
     state.inbox = [];
     state.backlog = [];
     expect(release(state, () => 0)).not.toBeNull();
+    expect(state.second?.id).toBe('lightning-tap');
+    expect(state.inbox.length).toBeGreaterThan(0);
     expect(state.inbox.every((task) => task.special === 'idea')).toBe(true);
   });
 

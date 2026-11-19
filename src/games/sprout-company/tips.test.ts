@@ -90,7 +90,7 @@ describe('처음 안내', () => {
     state.office = OFFICES.length - 1;
     expect(drain(state)).toEqual(['dept']);
     state.project = { id: 'lightning-tap', done: 0, total: 4, care: 0 };
-    expect(drain(state)).toEqual(['care', 'queue']);
+    expect(drain(state)).toEqual(['care', 'twin', 'queue']);
 
     // 꽃 네 송이를 받은 게임이 생기면 대박을 알려 준다.
     state.flowers['lightning-tap'] = 3;

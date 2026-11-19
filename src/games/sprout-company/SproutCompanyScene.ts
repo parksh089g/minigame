@@ -76,11 +76,13 @@ import {
 } from './data';
 import {
   acceptRush,
+  activeProjects,
   advance,
   assign,
   availableProjects,
   bestFlowers,
   cardBoost,
+  cardSlot,
   cheerReach,
   awayRate,
   bossFor,
@@ -120,6 +122,7 @@ import {
   goalLimits,
   hasBuddy,
   hasFreeDesk,
+  hasFreeSlot,
   hire,
   hireBlock,
   hireCost,
@@ -142,14 +145,17 @@ import {
   projectBonus,
   projectReputation,
   ratedBonus,
+  projectAt,
   promoteLead,
   queueBlock,
+  readySlot,
   release,
   seedLeaves,
   setStars,
   skillAt,
   skillOpen,
   skill,
+  slotOf,
   specialtyOf,
   squash,
   starsOf,
@@ -157,6 +163,7 @@ import {
   swapDesks,
   totalReputation,
   train,
+  twinOpen,
   trainBlock,
   trainCost,
   upgradeDepartment,
@@ -188,6 +195,8 @@ const STRIP = { top: 42, height: 40 } as const;
 const STRIP_BAR = { width: 70, height: 11 } as const;
 /** 몇 번째 출시인지 적은 글과 그 옆에 놓인 것(출시하기 버튼, 받을 잎사귀, 평가의 꽃) 사이에 두는 틈 */
 const STRIP_TAG_GAP = 3;
+/** 두 게임을 함께 만들 때, 칸마다의 표시 색. 일감함의 카드와 위의 띠에 같은 색 점을 찍어 어느 게임의 카드인지 알린다. */
+const SLOT_COLORS = [THEME.lilacDeep, 0xf0883e] as const;
 const ROOM_TOP = 88;
 const BUTTON_HEIGHT = 32;
 const INBOX_HEIGHT = 42;
@@ -997,13 +1006,26 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
     const state = this.state;
     const project = state.project;
     const flowers = flowersNow(state);
-    const signature = project ? `${project.id}|${project.done}|${isReady(state)}|${flowers}` : 'none';
+    // 두 번째 칸이 열린 사무실에서 만드는 게임이 있으면 띠를 둘로 나눠 두 칸을 함께 보여 준다.
+    const twin = twinOpen(state) && project !== null;
+    const one = (slot: number): string => {
+      const at = projectAt(state, slot);
+      return at ? `${at.id}|${at.done}|${isReady(state, slot)}|${flowersNow(state, slot)}` : 'none';
+    };
+    const signature = twin ? `twin|${one(0)}|${one(1)}` : one(0);
     if (signature === this.stripSignature) return;
     this.stripSignature = signature;
 
     const strip = this.strip;
     strip.removeAll(true);
     const { top, height } = STRIP;
+    if (twin) {
+      const gap = 4;
+      const half = (INNER - gap) / 2;
+      this.stripHalf(0, MARGIN, half);
+      this.stripHalf(1, MARGIN + half + gap, half);
+      return;
+    }
     strip.add(
       this.add
         .image(MARGIN, top, bakedPanel(this, INNER, height - 3, { fill: THEME.card, shadow: THEME.shadow, radius: 12, depth: 3 }))
@@ -1088,6 +1110,57 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
   }
 
   /**
+   * 두 게임을 함께 만들 때의 띠 한 칸. 이름과 진행 막대, 지금의 평가를 작게 보여 주고,
+   * 다 만들었으면 출시하기 버튼을 단다. 빈 칸에는 게임을 하나 더 고르는 버튼을 단다.
+   */
+  private stripHalf(slot: number, left: number, width: number): void {
+    const state = this.state;
+    const strip = this.strip;
+    const { top, height } = STRIP;
+    strip.add(
+      this.add
+        .image(left, top, bakedPanel(this, width, height - 3, { fill: THEME.card, shadow: THEME.shadow, radius: 12, depth: 3 }))
+        .setOrigin(0, 0),
+    );
+    const project = projectAt(state, slot);
+    if (!project) {
+      this.button(strip, left + 6, top + 5, width - 12, 28, '하나 더 만들기', 'pink', () => this.openPanel('project'));
+      return;
+    }
+    const def = PROJECTS[project.id];
+    const flowers = flowersNow(state, slot);
+    const mark = (x: number, y: number): Phaser.GameObjects.Image =>
+      this.add.image(x, y, circle(this, 3)).setTint(SLOT_COLORS[slot]);
+    if (isReady(state, slot)) {
+      strip.add([mark(left + 8, top + 12), this.add.image(left + 24, top + 12, def.icon).setDisplaySize(18, 18)]);
+      strip.add(this.flowerRow(left + 10, top + 28, 6, 0, flowers));
+      this.button(strip, left + 44, top + 5, width - 50, 28, '출시하기', 'pink', () => this.releaseProject(slot));
+      return;
+    }
+    strip.add([mark(left + 8, top + 11), this.add.image(left + 21, top + 11, def.icon).setDisplaySize(16, 16)]);
+    const title = addText(this, left + 31, top + 4, def.title, { size: FONT_SIZE.small, color: THEME_CSS.inkDeep });
+    fitWidth(title, width - 35);
+    strip.add(title);
+    const bar = { left: left + 6, top: top + 21, width: width - 46, height: STRIP_BAR.height };
+    const middle = bar.top + bar.height / 2;
+    const share = project.done / project.total;
+    strip.add(addRoundRect(this, bar.left, bar.top, bar.width, bar.height, bar.height / 2, THEME.dim));
+    if (share > 0) {
+      const length = Math.max(bar.height, bar.width * share);
+      strip.add([...new Pill(this, bar.left, bar.top, bar.height, THEME.mintDeep).setLength(length).parts]);
+    }
+    strip.add(
+      addText(this, bar.left + bar.width / 2, middle, `${project.done}/${project.total}`, {
+        size: FONT_SIZE.small,
+        color: THEME_CSS.inkDeep,
+        originX: 0.5,
+        originY: 0.5,
+      }),
+    );
+    strip.add(this.flowerRow(bar.left + bar.width + 6, middle, 7, 0, flowers));
+  }
+
+  /**
    * 평가의 꽃을 한 줄로 놓는다. x는 첫 꽃의 가운데, y는 줄의 가운데, lit은 핀 꽃의 수다.
    * 만든 그림들을 돌려주므로 받는 쪽에서 컨테이너에 넣거나 움직인다.
    */
@@ -1097,8 +1170,8 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
     );
   }
 
-  private releaseProject(): void {
-    const result = release(this.state, Math.random);
+  private releaseProject(slot = 0): void {
+    const result = release(this.state, Math.random, slot);
     if (result) this.celebrate(result);
   }
 
@@ -1585,7 +1658,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
         floatText(this, view.x + view.width / 2, view.y + 22, `${TASKS[event.kind].name} 끝`, color, bounds, DEPTH.fx);
         this.popCare(view.x + view.width / 2, view.y + 30, event.care);
       }
-      this.play(!event.rush && isReady(this.state) ? 'ready' : 'done');
+      this.play(event.ready ? 'ready' : 'done');
     } else if (event.type === 'idea') {
       // 아이디어가 번뜩이면 일하는 자리마다 반짝이가 튄다.
       this.play('idea');
@@ -1664,8 +1737,13 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
     const shown = Math.min(state.inbox.length, INBOX_SLOTS);
     if (this.selected >= shown) this.selected = 0;
     const more = cardsWaiting(state) - shown;
-    const cards = state.inbox.slice(0, shown).map((task) => `${task.kind}${task.rush ? '!' : ''}${task.special ?? ''}`);
-    const signature = `${cards.join(',')}|${more}|${this.selected}|${state.project?.id ?? ''}|${isReady(state)}`;
+    // 두 게임을 함께 만들 때는 카드마다 어느 칸의 게임인지 점으로 알린다.
+    const twin = state.second !== null;
+    const cards = state.inbox
+      .slice(0, shown)
+      .map((task) => `${task.kind}${task.rush ? '!' : ''}${task.special ?? ''}${twin ? cardSlot(state, task) : ''}`);
+    const ready = activeProjects(state).every((project) => project.done >= project.total);
+    const signature = `${cards.join(',')}|${more}|${this.selected}|${state.project?.id ?? ''}|${state.second?.id ?? ''}|${ready}`;
     if (signature === this.inboxSignature) return;
     this.inboxSignature = signature;
 
@@ -1675,7 +1753,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
     if (shown === 0) {
       const message = !state.project
         ? '게임을 고르면 업무 카드가 여기 놓여요'
-        : isReady(state)
+        : ready
           ? '업무를 모두 끝냈어요'
           : '카드를 모두 맡겼어요';
       inbox.add(
@@ -1714,12 +1792,16 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
       const badge = task.special
         ? this.add.image(x + CARD.width - 4, y + 3, SC[task.special]).setDisplaySize(BADGE, BADGE)
         : null;
+      const slot = twin ? cardSlot(state, task) : -1;
+      const mark = slot >= 0 ? this.add.image(x + 5, y + 22.5, circle(this, 3)).setTint(SLOT_COLORS[slot]) : null;
+      if (mark) parts.push(mark);
       const draw = (pressed: boolean): void => {
         const offset = pressed ? 2 : 0;
         face.setY(y + offset);
         edge?.setY(y + offset);
         icon.setY(y + 13 + offset);
         badge?.setY(y + 3 + offset);
+        mark?.setY(y + 22.5 + offset);
       };
       const zone = addTapZone(this, x - (step - CARD.width) / 2, top, step, INBOX_HEIGHT - 2, draw, () => {
         if (this.selected === index) return;
@@ -1809,7 +1891,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
     if (rush) text = `급한 의뢰 ${rush.done}/${rush.total}  남은 시간 ${Math.max(0, Math.ceil(rush.left))}초`;
     else if (bugged) text = '버그가 나왔어요! 그 자리를 눌러 잡아요';
     else if (picked && idle) text = SPECIALS[picked].description;
-    else if (isReady(state)) text = '다 만들었어요! 출시하기를 눌러요';
+    else if (readySlot(state) >= 0) text = '다 만들었어요! 출시하기를 눌러요';
     else if (!state.project) text = state.releases === 0 ? '게임 고르기를 눌러 첫 게임을 만들어요' : '다음에 만들 게임을 골라요';
     else if (state.inbox.length > 0 && idle) {
       const first = state.lead > 0 ? '팀장이 곧 맡겨요. 직접 맡기면 더 빨라요' : '쉬는 친구를 눌러 카드를 맡겨요';
@@ -1857,7 +1939,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
       (hasFreeDesk(state) && hirePool(state).length > 0 && state.leaves >= hireCost(state)) ||
       leadBlock(state) === null ||
       state.desks.some((_, index) => trainBlock(state, index) === null);
-    this.dots.project?.setVisible(!state.project);
+    this.dots.project?.setVisible(hasFreeSlot(state));
     this.dots.gear?.setVisible(canBuy);
     this.dots.staff?.setVisible(canHire);
     const canGrow = DEPARTMENT_ORDER.some((id) => departmentBlock(state, id) === null);
@@ -1990,7 +2072,8 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
     const page = this.pages[kind] ?? 0;
     if (kind === 'project') {
       const projects = availableProjects(state).map((id) => `${versionOf(state, id)}${departmentsMissing(state, id)}`);
-      return `${page}|${state.project?.id ?? ''}|${state.office}|${projects.join(',')}|${state.queue.join(',')}`;
+      const making = `${state.project?.id ?? ''}|${state.second?.id ?? ''}`;
+      return `${page}|${making}|${state.office}|${projects.join(',')}|${state.queue.join(',')}`;
     }
     if (kind === 'gear') {
       const one = (id: EquipmentId, desk: number): string =>
@@ -2153,8 +2236,9 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
     const state = this.state;
     // 큰 게임이 위에 오도록 뒤에서부터 적는다.
     const ids = [...availableProjects(state)].reverse();
-    // 예약 줄이 열린 사무실에서는, 만드는 게임이 있는 동안 다음 게임을 예약한다.
+    // 예약 줄이 열린 사무실에서는, 칸이 다 차 있는 동안 다음 게임을 예약한다.
     const queueOpen = QUEUE.unlockOffice <= state.office;
+    const free = hasFreeSlot(state);
     const bottom = this.listPanel(panel, 'project', '프로젝트', ids, 38, queueOpen ? 54 : 18, (id: ProjectId, middle, left, width) => {
       const def = PROJECTS[id];
       const version = versionOf(state, id) + 1;
@@ -2182,7 +2266,8 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
         `카드 ${def.cards.length}장  평판 +${projectReputation(state, id)}  잎 +${formatLeaves(projectBonus(state, id))}`,
       );
 
-      if (queueOpen && state.project) {
+      // 빈 칸이 있으면 바로 만들고, 칸이 다 찼으면 예약한다.
+      if (queueOpen && !free) {
         const reserve = this.button(panel, left + width - 58, middle - 13, 48, 26, '예약', 'yellow', () => {
           if (!enqueue(state, id)) return;
           this.save();
@@ -2191,7 +2276,7 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
         if (queueBlock(state, id) !== null) reserve.setEnabled(false);
         return;
       }
-      const making = state.project?.id === id;
+      const making = slotOf(state, id) >= 0;
       const button = this.button(panel, left + width - 58, middle - 13, 48, 26, making ? '만드는 중' : '만들기', 'pink', () => {
         if (!startProject(state, id, Math.random)) return;
         this.selected = 0;
@@ -2200,14 +2285,18 @@ export class SproutCompanyScene extends Phaser.Scene implements BackAware, Refit
         this.save();
         this.refreshNow();
       });
-      if (state.project) button.setEnabled(false);
+      if (!free || making) button.setEnabled(false);
     });
     let noteTop = bottom + 3;
-    let note = state.project ? '지금 만드는 게임을 출시하면 다음 게임을 고를 수 있어요' : '이미 낸 게임을 다시 만들면 업데이트가 돼요';
+    let note = !state.project
+      ? '이미 낸 게임을 다시 만들면 업데이트가 돼요'
+      : free
+        ? '지금 만드는 게임과 함께 하나 더 만들 수 있어요'
+        : '지금 만드는 게임을 출시하면 다음 게임을 고를 수 있어요';
     if (queueOpen) {
       this.buildQueueRow(panel, bottom);
       noteTop += 36;
-      if (state.project) note = '다 만들면 저절로 출시하고 예약한 게임을 만들어요';
+      if (!free) note = '다 만들면 저절로 출시하고 예약한 게임을 만들어요';
     }
     const line = addText(this, W / 2, noteTop, note, { size: FONT_SIZE.small, color: THEME_CSS.faint, originX: 0.5 });
     panel.add(line.setScale(Math.min(0.95, (W - 36) / line.width)));

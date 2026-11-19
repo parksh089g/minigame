@@ -49,8 +49,10 @@ import {
   SKILLS,
   STAFF,
   STAFF_ORDER,
+  TIP_IDS,
   TIPS,
   TRAINING,
+  TWIN,
   type StaffId,
 } from '../src/games/sprout-company/data';
 import { buddyOf, createCompany, hasBuddy, type CompanyState } from '../src/games/sprout-company/rules';
@@ -673,11 +675,15 @@ async function seedCompany(page: Page, state: CompanyState): Promise<void> {
 
 it('새싹 컴퍼니: 이름이 가장 긴 게임을 다 만들었을 때도 띠의 글자가 출시하기 버튼에 가려지지 않는다', async ({ page }) => {
   await openApp(page);
-  // 가장 큰 사무실에서, 이름이 가장 긴 게임을 열세 번째로 내려는 회사. 이름 옆에 "업데이트 12"가 붙는다.
-  const longest = [...PROJECT_ORDER].sort((a, b) => PROJECTS[b].title.length - PROJECTS[a].title.length)[0];
+  // 띠가 한 칸뿐인 가장 큰 사무실에서, 이름이 가장 긴 게임을 열세 번째로 내려는 회사. 이름 옆에 "업데이트 12"가 붙는다.
+  // 두 번째 칸이 열린 사무실에서는 띠가 둘로 나뉘고, 그 띠는 아래의 두 게임 점검이 본다.
+  const office = TWIN.unlockOffice - 1;
+  const longest = PROJECT_ORDER.filter((id) => PROJECTS[id].unlockOffice <= office).sort(
+    (a, b) => PROJECTS[b].title.length - PROJECTS[a].title.length,
+  )[0];
   const cards = PROJECTS[longest].cards.length;
   const state = createCompany('sprout', Date.now());
-  state.office = OFFICES.length - 1;
+  state.office = office;
   state.guide = GUIDE_STEPS.length;
   state.released[longest] = 12;
   state.releases = 12;
@@ -742,6 +748,46 @@ it('새싹 컴퍼니: 만드는 게임의 띠에 끝낸 카드 수가 가려지�
   await expect.poll(() => textPoint(page, COMPANY_SCENE, count(done + 1)), { ...WAIT, message: '카드를 끝내면 수가 올라야 한다' }).not.toBeNull();
   expect(await textPoint(page, COMPANY_SCENE, count(done)), '지난 수는 지워져야 한다').toBeNull();
   await expectStripClear('한 장을 더 끝낸 띠');
+});
+
+it('새싹 컴퍼니: 두 게임을 함께 만들 때 두 칸의 이름과 수가 가려지지 않고, 다 만든 칸만 출시한다', async ({ page }) => {
+  await openApp(page);
+  // 두 번째 칸이 열린 사무실에서, 이름이 가장 긴 두 게임을 함께 만드는 회사. 앞의 것은 반쯤, 뒤의 것은 다 만들었다.
+  // 두 번째 칸이 열린 사무실에서 만들 수 있는 게임만 고른다. 부서가 있어야 하는 게임은 그보다 뒤의 사무실에서 열린다.
+  const open = PROJECT_ORDER.filter((id) => PROJECTS[id].unlockOffice <= TWIN.unlockOffice);
+  const [first, second] = [...open].sort((a, b) => PROJECTS[b].title.length - PROJECTS[a].title.length);
+  const cards = PROJECTS[first].cards;
+  const done = Math.floor(cards.length / 2);
+  const state = createCompany('sprout', Date.now());
+  state.office = TWIN.unlockOffice;
+  state.guide = GUIDE_STEPS.length;
+  state.tips = [...TIP_IDS];
+  state.project = { id: first, done, total: cards.length, care: done * RATING.full };
+  state.backlog = cards.slice(done).map((kind) => ({ kind, left: 1000, total: 1000, project: first }));
+  const total = PROJECTS[second].cards.length;
+  state.second = { id: second, done: total, total, care: total * RATING.full };
+  await seedCompany(page, state);
+  await page.reload();
+  await waitForScene(page, 'Hub');
+  await startScene(page, COMPANY_SCENE);
+
+  const count = `${done}/${cards.length}`;
+  await expect.poll(() => textPoint(page, COMPANY_SCENE, count), { ...WAIT, message: '앞 칸의 끝낸 카드 수가 떠야 한다' }).not.toBeNull();
+  for (const label of [PROJECTS[first].title, '출시하기']) expect(await textPoint(page, COMPANY_SCENE, label), label).not.toBeNull();
+  const strip = await page.evaluate((key) => {
+    const scene = window.__pocketArcade?.scene.getScene(key) as unknown as CompanyView;
+    return scene.strip.list.flatMap((item) => (item.type === 'Text' && item.text ? [item.text] : []));
+  }, COMPANY_SCENE);
+  const hidden = await hiddenTexts(page, COMPANY_SCENE);
+  expect(hidden.filter((line) => strip.some((label) => line.startsWith(`${label}:`))), '두 칸의 띠').toEqual([]);
+
+  // 출시하기를 누르면 뒤 칸의 게임만 나오고, 앞 칸의 게임은 그대로 이어진다. 빈 칸에는 하나 더 만들기가 뜬다.
+  await tapText(page, COMPANY_SCENE, '출시하기');
+  await expect
+    .poll(() => page.evaluate((key) => (window.__pocketArcade?.scene.getScene(key) as unknown as CompanyView).state.released, COMPANY_SCENE), WAIT)
+    .toEqual({ [second]: 1 });
+  await expect.poll(() => textPoint(page, COMPANY_SCENE, '하나 더 만들기'), WAIT).not.toBeNull();
+  expect(await textPoint(page, COMPANY_SCENE, count), '앞 칸은 그대로 남는다').not.toBeNull();
 });
 
 /** 새싹 컴퍼니 장면의 글자 하나: 줄여 적은 배율, 글씨 크기, 색, 화면에서의 상자 */

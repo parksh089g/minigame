@@ -35,6 +35,7 @@ import {
 } from './data';
 import {
   acceptRush,
+  activeProjects,
   advance,
   assign,
   availableProjects,
@@ -86,6 +87,7 @@ import {
   projectWork,
   promoteLead,
   queueBlock,
+  readySlot,
   release,
   skill,
   specialtyOf,
@@ -93,6 +95,7 @@ import {
   startProject,
   train,
   trainBlock,
+  versionOf,
   trainCost,
   upgradeDepartment,
   type CompanyState,
@@ -284,7 +287,9 @@ describe('프로젝트', () => {
     assign(state, 0, 0);
     expect(advance(state, work / 2)).toHaveLength(0);
     expect(state.desks[0].task?.left).toBeCloseTo(work / 2);
-    expect(advance(state, work / 2 + 0.01)).toEqual([{ type: 'task', desk: 0, kind: 'plan', rush: false, care: RATING.fit }]);
+    expect(advance(state, work / 2 + 0.01)).toEqual([
+      { type: 'task', desk: 0, kind: 'plan', rush: false, care: RATING.fit, ready: false },
+    ]);
     expect(state.desks[0].task).toBeNull();
     expect(state.project?.done).toBe(1);
     expect(isReady(state)).toBe(false);
@@ -615,6 +620,7 @@ describe('닫아 둔 동안', () => {
     state.leaves = 1e12;
     expect(promoteLead(state)).toBe(true);
     startProject(state, 'lightning-tap');
+    startProject(state, 'memory-cards');
     expect(enqueue(state, 'stack-tower')).toBe(true);
     const before = state.releases;
     const passed = passOpen(state, PLAY_TRIP.maxSeconds, () => 0.5);
@@ -1061,6 +1067,9 @@ describe('예약 줄', () => {
     expect(queueBlock(state, 'stack-tower')).toBe('idle');
     expect(enqueue(state, 'stack-tower')).toBe(false);
     startProject(state, 'lightning-tap');
+    // 두 번째 칸이 비어 있으면 예약할 것 없이 바로 시작하면 된다.
+    expect(queueBlock(state, 'stack-tower')).toBe('idle');
+    startProject(state, 'memory-cards');
     expect(queueBlock(state, 'lantern-keeper')).toBe('department');
     for (let slot = 0; slot < QUEUE.slots; slot += 1) expect(enqueue(state, 'stack-tower')).toBe(true);
     expect(queueBlock(state, 'stack-tower')).toBe('full');
@@ -1071,6 +1080,7 @@ describe('예약 줄', () => {
   it('예약한 것을 뺄 수 있다', () => {
     const state = grown(LAST);
     startProject(state, 'lightning-tap');
+    startProject(state, 'jump-runner');
     enqueue(state, 'stack-tower');
     enqueue(state, 'memory-cards');
     expect(dequeue(state, 5)).toBe(false);
@@ -1082,49 +1092,69 @@ describe('예약 줄', () => {
   it('예약이 있으면 다 만든 게임을 저절로 출시하고 다음 게임을 시작한다', () => {
     const state = grown(LAST);
     startProject(state, 'lightning-tap');
+    startProject(state, 'jump-runner');
     enqueue(state, 'stack-tower');
     enqueue(state, 'lightning-tap');
-    expect(drainQueue(state)).toEqual(['lightning-tap', 'stack-tower']);
-    expect(state.releases).toBe(2);
-    expect(state.released).toEqual({ 'lightning-tap': 1, 'stack-tower': 1 });
+    const released = drainQueue(state);
+    // 두 칸에서 함께 만든 게임을 다 만드는 대로 내고, 빈 칸에서 예약한 차례대로 이어서 만든다.
+    expect(released).toContain('lightning-tap');
+    expect(released.length).toBeGreaterThanOrEqual(2);
+    expect(state.releases).toBe(released.length);
+    expect(activeProjects(state)).toHaveLength(2);
     // 같은 게임을 다시 예약한 것은 업데이트로 시작한다.
-    expect(state.project?.id).toBe('lightning-tap');
-    expect(state.inbox[0].total).toBeCloseTo(projectWork(state, 'lightning-tap'));
+    const update = activeProjects(state).find((project) => project.id === 'lightning-tap');
+    expect(update).toBeDefined();
+    expect(versionOf(state, 'lightning-tap')).toBe(1);
     expect(state.leaves).toBeGreaterThan(0);
 
-    // 예약이 비면 마지막 게임은 직접 출시할 때까지 기다린다.
-    finishProject(state);
+    // 예약이 비면 남은 게임은 직접 출시할 때까지 기다린다.
+    for (let time = 0; readySlot(state) < 0 || !isReady(state, 1 - readySlot(state)); time += 0.5) {
+      for (let index = 0; index < state.desks.length; index += 1) {
+        const card = bestCardFor(state, index);
+        if (card >= 0) assign(state, card, index);
+      }
+      advance(state, 0.5, () => 0.5);
+      if (time > 100_000) throw new Error('끝나지 않는다');
+    }
+    const releases = state.releases;
     advance(state, 5, () => 0.5);
-    expect(isReady(state)).toBe(true);
-    expect(state.releases).toBe(2);
-    expect(release(state)?.version).toBe(2);
+    expect(state.releases).toBe(releases);
+    expect(release(state, undefined, 1)).not.toBeNull();
+    expect(release(state)).not.toBeNull();
+    expect(state.project).toBeNull();
+    expect(state.second).toBeNull();
   });
 
   it('직접 출시해도 예약한 게임이 바로 시작된다', () => {
     const state = grown(LAST);
     startProject(state, 'lightning-tap');
+    startProject(state, 'jump-runner');
     enqueue(state, 'stack-tower');
-    state.inbox = [];
-    state.backlog = [];
+    state.inbox = state.inbox.filter((task) => task.project !== 'lightning-tap');
+    state.backlog = state.backlog.filter((task) => task.project !== 'lightning-tap');
     if (state.project) state.project.done = state.project.total;
     expect(release(state)?.id).toBe('lightning-tap');
-    expect(state.project?.id).toBe('stack-tower');
+    // 두 번째 칸의 게임이 앞으로 오고, 빈 칸에서 예약한 게임이 시작된다.
+    expect(state.project?.id).toBe('jump-runner');
+    expect(state.second?.id).toBe('stack-tower');
     expect(state.queue).toEqual([]);
-    expect(cardsWaiting(state)).toBe(PROJECTS['stack-tower'].cards.length);
+    expect(cardsWaiting(state)).toBe(PROJECTS['stack-tower'].cards.length + PROJECTS['jump-runner'].cards.length);
   });
 
   it('팀장이 있으면 닫아 둔 동안에도 예약한 게임을 이어서 만들고 출시한다', () => {
     const state = grown(LAST);
     state.lead = LEAD.levels.length;
     startProject(state, 'lightning-tap');
+    startProject(state, 'jump-runner');
     enqueue(state, 'stack-tower');
     enqueue(state, 'memory-cards');
     const away = catchUp(state, 3600);
+    // 카드가 적은 번개 탭이 먼저 나오고, 그 칸에서 시작한 탑 쌓기가 카드 여섯 장의 점프 러너보다 먼저 끝난다.
     expect(away?.releases.map((entry) => entry.id)).toEqual(['lightning-tap', 'stack-tower']);
     expect(state.releases).toBe(2);
-    // 마지막 게임은 다 만들어 두고, 돌아온 사람이 출시한다.
-    expect(state.project?.id).toBe('memory-cards');
-    expect(isReady(state)).toBe(true);
+    // 마지막 두 게임은 다 만들어 두고, 돌아온 사람이 출시한다.
+    expect(activeProjects(state).map((project) => project.id)).toEqual(['jump-runner', 'memory-cards']);
+    expect(isReady(state, 0) && isReady(state, 1)).toBe(true);
     expect(state.queue).toEqual([]);
   });
 
@@ -1145,6 +1175,7 @@ describe('예약 줄', () => {
     upgradeDepartment(state, 'code');
     joinDepartment(state, 0, 'code');
     startProject(state, 'logic-tiles');
+    startProject(state, 'jump-runner');
     enqueue(state, 'stack-tower');
     enqueue(state, 'logic-tiles');
     const copy = normalizeCompany(JSON.parse(JSON.stringify(state)));

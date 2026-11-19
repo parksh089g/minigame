@@ -350,6 +350,7 @@ describe('대박', () => {
     const state = company(OFFICES.length - 1);
     state.lead = 3;
     startProject(state, 'lightning-tap');
+    startProject(state, 'stack-tower');
     for (let index = 0; index < 3; index += 1) expect(enqueue(state, 'lightning-tap')).toBe(true);
     const away = catchUp(state, 6 * 3600);
     expect(away?.releases.length).toBeGreaterThan(0);

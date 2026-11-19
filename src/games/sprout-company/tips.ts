@@ -3,7 +3,7 @@
  * 어떤 때에 어떤 안내가 뜨는지만 여기에 두고, 글은 data.ts에, 화면에 띄우는 일은 씬에 있다.
  * 본 안내는 회사의 세이브에 적혀서 다시 뜨지 않는다.
  */
-import { BREAK, DEPARTMENT, PERK_ORDER, PROJECT_ORDER, QUEUE, RATING, TIP_IDS, TRAINING, type SpecialKind, type TipId } from './data';
+import { BREAK, DEPARTMENT, PERK_ORDER, PROJECT_ORDER, QUEUE, RATING, TIP_IDS, TRAINING, TWIN, type SpecialKind, type TipId } from './data';
 import {
   bestFlowers,
   departmentCount,
@@ -48,6 +48,7 @@ const WHEN: Readonly<Record<TipId, (state: CompanyState) => boolean>> = {
   backlog: (state) => state.backlog.length > 0,
   play: (state) => state.releases >= 2,
   dept: (state) => state.office >= DEPARTMENT.unlockOffice && departmentCount(state) === 0,
+  twin: (state) => state.office >= TWIN.unlockOffice && state.project !== null && state.second === null,
   queue: (state) => state.office >= QUEUE.unlockOffice && state.project !== null && state.queue.length === 0,
   branch: (state) => foundBlock(state) === null,
   fruit: (state) => PERK_ORDER.some((id) => perkBlock(state, id) === null),
