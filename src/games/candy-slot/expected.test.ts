@@ -243,9 +243,10 @@ describe('셈에 넣는 것들', () => {
   });
 
   it('context로 준 값이 부적에서 셈한 값을 대신한다', () => {
+    // 7 듬뿍과 가운데 7은 7 세트의 두 장이라 세트의 덤(7의 무게 +2)까지 들어서 7의 무게는 13이다.
     const charms = ['more-seven', 'gold-bell', 'tall', 'middle'];
     const parts = spinExpect(charms);
-    expect(expectedSpin([], {}, { weights: [30, 25, 19, 13, 8, 11], values: [2, 3, 11, 8, 12, 20], lineTimes: { row: 1, col: 2, diag: 1 }, centerWild: 0.35 })).toBeCloseTo(
+    expect(expectedSpin([], {}, { weights: [30, 25, 19, 13, 8, 13], values: [2, 3, 11, 8, 12, 20], lineTimes: { row: 1, col: 2, diag: 1 }, centerWild: 0.35 })).toBeCloseTo(
       expectedSpin(charms),
       10,
     );
