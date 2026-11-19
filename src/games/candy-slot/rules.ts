@@ -517,8 +517,8 @@ export function lineOdds(charms: readonly string[]): number[] {
 
 /**
  * 어느 한 줄이 (어떤 그림으로든) 맞을 확률(0~1). lineOdds를 모두 더한 값이다.
- * 가게에서 확률 부적을 붙이면 줄이 얼마나 더(또는 덜) 맞게 되는지 미리 보여 줄 때 쓴다.
  * 한 그림만 늘리면 오르지만, 서로 다른 그림을 함께 늘리면 도로 내려갈 수 있다.
+ * (가게의 미리 보기는 이 확률 대신 한 라운드의 상금의 기댓값을 셈한다. expected.ts를 보라.)
  */
 export function hitChance(charms: readonly string[]): number {
   return lineOdds(charms).reduce((sum, chance) => sum + chance, 0);

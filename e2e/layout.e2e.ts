@@ -19,6 +19,7 @@ import {
   type WeaponId,
 } from '../src/games/lantern-keeper/data';
 import { CHARMS, HOLDS_PER_ROUND, REROLL_COST, SLOTS, type RunState } from '../src/games/candy-slot/rules';
+import { offerChip, PRIZE_CHIP_TEXT } from '../src/games/candy-slot/shop-text';
 import { cellCorner, type ShopCard } from '../src/games/garden-guard/allies';
 import { ALLIES, CELL_COUNT, FIELD, GARDEN_CELLS, GARDEN_SCENE, PAIRS, SHOP, UPGRADE_ORDER, UPGRADES } from '../src/games/garden-guard/data';
 import { allyInfo, INFO_TEXT, SHOP_TEXT } from '../src/games/garden-guard/shop-text';
@@ -1249,6 +1250,20 @@ it('행운 슬롯: 가게의 부적 세 줄과 붙인 부적의 설명, 상금�
   );
   await expect.poll(() => textPoint(page, SCENE.candySlot, '부적 가게'), WAIT).not.toBeNull();
   expect(await hiddenTexts(page, SCENE.candySlot, { from: '부적 가게' }), '가게').toEqual([]);
+  // 줄마다 사면 벌이가 어떻게 바뀌는지의 미리 보기가 이름 옆에 붙고, 줄 밖으로 넘치거나 글자가 줄지 않는다.
+  const chips = await page.evaluate(
+    ([key, label]) =>
+      (window.__pocketArcade?.scene.getScene(key)?.children.list ?? [])
+        .filter((item): item is Phaser.GameObjects.Text => item.type === 'Text' && (item as Phaser.GameObjects.Text).visible)
+        .filter((text) => text.text.startsWith(`${label} `))
+        .map((text) => ({ text: text.text, scale: Math.min(text.scaleX, text.scaleY) })),
+    [SCENE.candySlot, PRIZE_CHIP_TEXT.label] as const,
+  );
+  const owned = widest.map((charm) => charm.id);
+  const previews = longest.flatMap((charm) => offerChip(owned, charm.id)?.text ?? []);
+  expect(previews.length, '미리 보기가 붙는 부적이 가게에 있어야 한다').toBeGreaterThan(0);
+  expect(chips, '가게의 미리 보기').toEqual(previews.map((text) => ({ text, scale: 1 })));
+  expect(await textsOutsideCards(page, SCENE.candySlot, '부적 가게'), '가게의 줄').toEqual([]);
 
   // 한 장을 사면 그 줄은 팔린 자리가 되고, 다섯 자리가 다 찬다.
   await tapText(page, SCENE.candySlot, longest[0].name);

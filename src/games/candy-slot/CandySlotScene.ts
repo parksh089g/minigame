@@ -135,7 +135,7 @@ import {
   REFUND_SIGN,
   spinLabel,
   type ChipTone,
-  type HitChip,
+  type PreviewChip,
 } from './shop-text';
 
 // ───────── 움직임 ─────────
@@ -177,6 +177,8 @@ const MISS_MS = 260;
 const SETTLE_DELAY_MS = 420;
 /** 목표를 채웠다고 알린 뒤 가게가 열릴 때까지(ms) */
 const SHOP_DELAY_MS = 900;
+/** 가게가 열리기 전에 미리 보기를 한 장씩 셈해 두는 간격(ms). 세 장이 SHOP_DELAY_MS 안에 끝난다. */
+const PREVIEW_WARM_MS = 120;
 /** 가게가 열리고 이만큼은 아래 버튼(다시 뽑기, 다음 라운드)의 누름을 받지 않는다(ms). */
 const SHOP_GUARD_MS = 400;
 /** 판이 끝난 뒤 결과 화면이 뜰 때까지(ms) */
@@ -1451,6 +1453,11 @@ export class CandySlotScene extends MiniGameScene {
     if (bonus > 0) {
       this.time.delayedCall(260, () => this.floatCoin(goal.x + goal.width / 2 + 24, goal.y + goal.height, bonus));
     }
+    // 축하 글이 떠 있는 동안 가게의 미리 보기를 한 장씩 나눠 셈해 둔다. 셈한 것은 기억해 두므로, 느린 기기에서도
+    // 가게가 열리는 프레임에 셈이 몰리지 않는다.
+    (this.run.shop?.offers ?? []).forEach((id, index) => {
+      if (id) this.time.delayedCall(PREVIEW_WARM_MS * (index + 1), () => offerChip(this.run.charms, id));
+    });
     this.time.delayedCall(SHOP_DELAY_MS, () => this.openShop());
   }
 
@@ -2083,7 +2090,7 @@ export class CandySlotScene extends MiniGameScene {
 
   // ───────── 강화와 미리 보기 ─────────
 
-  /** 가게의 줄마다 놓인, 줄이 맞을 확률의 미리 보기 표. 가게를 열 때마다 새로 만든다. */
+  /** 가게의 줄마다 놓인, 사면 벌이(한 라운드에 받을 금화의 기댓값)가 어떻게 바뀌는지의 미리 보기 표. 가게를 열 때마다 새로 만든다. */
   private offerChips: Array<{ back: Graphics; text: Text } | undefined> = [];
 
   /**
@@ -2134,11 +2141,11 @@ export class CandySlotScene extends MiniGameScene {
   }
 
   /**
-   * 줄이 맞을 확률이 어떻게 바뀌는지를 적은 작은 표를 놓는다. left와 right 사이에, middle을 한가운데 높이로 놓는다.
+   * 벌이가 어떻게 바뀌는지를 적은 작은 표를 놓는다. left와 right 사이에, middle을 한가운데 높이로 놓는다.
    * 오르면 초록, 내리면 빨강, 그대로면 흐린 빛깔이다. 놓은 것(바탕과 글)을 돌려준다.
    */
   private addChip(
-    chip: HitChip,
+    chip: PreviewChip,
     left: number,
     right: number,
     middle: number,
@@ -2154,7 +2161,7 @@ export class CandySlotScene extends MiniGameScene {
   private drawChip(
     back: Graphics,
     text: Text,
-    chip: HitChip,
+    chip: PreviewChip,
     left: number,
     right: number,
     middle: number,
@@ -2175,9 +2182,9 @@ export class CandySlotScene extends MiniGameScene {
   }
 
   /**
-   * 가게에 나온 확률 부적마다, 사서 붙이면 한 줄이 맞을 확률이 얼마나 바뀌는지를 이름 옆의 작은 표에 적는다.
-   * 서로 다른 그림을 늘리는 부적을 겹치면 줄이 도로 덜 맞게 되는데, 사기 전에는 알 길이 없었다.
-   * 확률 부적이 아니거나 팔린 줄의 표는 감춘다.
+   * 가게에 나온 부적마다, 사서 붙이면 벌이(한 라운드에 받을 금화의 기댓값)가 지금 붙인 부적과 견주어 얼마나 바뀌는지를
+   * 이름 옆의 작은 표에 적는다. 서로 다른 그림을 늘리는 부적을 겹치면 도로 줄기도 하는데, 사기 전에는 알 길이 없었다.
+   * 저금통처럼 벌이로 셈할 수 없는 부적이나 팔린 줄의 표는 감춘다.
    */
   private refreshOfferChips(): void {
     this.offerRows.forEach((row, offer) => {
