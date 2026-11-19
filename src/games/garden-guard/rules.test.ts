@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { BOSS_EVERY, BOSS_ROTATION, COMMON_KINDS, DAY, ENEMIES, FENCE_BASE, FIELD, GUN, UPGRADE_ORDER, UPGRADES } from './data';
+import {
+  BOSS_EVERY,
+  BOSS_ROTATION,
+  COMMON_KINDS,
+  DAY,
+  ENEMIES,
+  FENCE_BASE,
+  FIELD,
+  GUN,
+  LATE_BOSSES,
+  UPGRADE_ORDER,
+  UPGRADES,
+} from './data';
 import {
   applyRun,
   bankSeeds,
@@ -86,14 +98,22 @@ describe('날마다의 난이도', () => {
     for (const day of [5, 25, 30, 60, 95]) expect(bossCount(day), `${day}`).toBe(1);
   });
 
-  it('대장의 날마다 두더지와 장수풍뎅이가 번갈아 나온다', () => {
-    expect([4, 5, 10, 15, 20, 25, 30].map(bossKind)).toEqual([null, 'mole', 'rhino', 'mole', 'rhino', 'mole', 'rhino']);
-    for (const kind of BOSS_ROTATION) {
+  it('25일째까지는 두더지와 장수풍뎅이가 번갈아 나오고, 그 뒤로는 거미가 끼어 셋이 돈다', () => {
+    expect([4, 5, 10, 15, 20, 25].map(bossKind)).toEqual([null, 'mole', 'rhino', 'mole', 'rhino', 'mole']);
+    expect([30, 35, 40, 45, 50, 55, 60].map(bossKind)).toEqual(['spider', 'rhino', 'mole', 'spider', 'rhino', 'mole', 'spider']);
+    expect([26, 31, 44].map(bossKind)).toEqual([null, null, null]);
+    // 거미는 25일째 뒤에만 나온다.
+    for (let day = BOSS_EVERY; day <= LATE_BOSSES.from; day += BOSS_EVERY) expect(bossKind(day), `${day}`).not.toBe('spider');
+    expect(ENEMIES.spider.fromDay).toBeGreaterThan(LATE_BOSSES.from);
+    for (const kind of [...BOSS_ROTATION, ...LATE_BOSSES.rotation]) {
       expect(ENEMIES[kind].boss, kind).toBe(true);
       expect(ENEMIES[kind].skill, kind).toBeDefined();
       expect(COMMON_KINDS, kind).not.toContain(kind);
     }
     expect(new Set(BOSS_ROTATION).size).toBe(BOSS_ROTATION.length);
+    expect(new Set(LATE_BOSSES.rotation).size).toBe(LATE_BOSSES.rotation.length);
+    // 세 대장의 솜씨가 모두 다르다.
+    expect(new Set(LATE_BOSSES.rotation.map((kind) => ENEMIES[kind].skill)).size).toBe(3);
   });
 
   it('체력은 LATE_FROM일째까지 빠르게, 그 뒤로는 천천히 불어나고 이어진다', () => {
@@ -121,6 +141,14 @@ describe('날마다의 난이도', () => {
     }
     expect(kindWeight('mole', 50)).toBe(0);
     expect(kindWeight('rhino', 50)).toBe(0);
+    expect(kindWeight('spider', 50)).toBe(0);
+    // 아기 진딧물은 진딧물이 나뉘어서만 생긴다.
+    expect(kindWeight('nymph', 50)).toBe(0);
+    expect(COMMON_KINDS).not.toContain('nymph');
+    expect(ENEMIES.aphid.splits).toBe('nymph');
+    // 25일째 뒤로 새 벌레: 26일째부터 진딧물
+    expect(ENEMIES.aphid.fromDay).toBe(26);
+    for (let day = 1; day <= 25; day += 1) expect(kindWeight('aphid', day), `${day}`).toBe(0);
     // 8일째 뒤로도 새 벌레가 나온다: 14일째쯤 모기 떼, 24일째쯤 땅강아지
     expect(ENEMIES.mosquito.fromDay).toBeGreaterThan(10);
     expect(ENEMIES.digger.fromDay).toBeGreaterThan(20);
@@ -167,6 +195,29 @@ describe('그날 나올 벌레', () => {
       expect(alone.length, `seed ${seed}`).toBeLessThanOrEqual(1);
     }
     expect(swarms).toBeGreaterThan(5);
+  });
+
+  it('25일째까지 나오는 벌레는 새 벌레를 넣기 전과 똑같다', () => {
+    // 1~25일째의 planDay를 씨앗 넷으로 뽑아 이어 붙인 것의 해시. 새 벌레와 거미를 넣기 전에 잰 값이다.
+    // 이 값이 바뀌면 앞쪽 날의 판이 달라진 것이다(앞쪽 날의 벌레나 나오는 차례를 일부러 바꿨다면 새로 잰다).
+    const plans: string[] = [];
+    for (let day = 1; day <= 25; day += 1) {
+      for (let seed = 1; seed <= 4; seed += 1) {
+        const spawns = planDay(day, randomFrom(seed * 97 + day));
+        for (const spawn of spawns) expect(['aphid', 'nymph', 'spider'], `${day}`).not.toContain(spawn.kind);
+        plans.push(JSON.stringify(spawns));
+      }
+    }
+    let hash = 2166136261;
+    const text = plans.join('|');
+    for (let index = 0; index < text.length; index += 1) hash = Math.imul(hash ^ text.charCodeAt(index), 16777619) >>> 0;
+    expect(hash).toBe(36739831);
+  });
+
+  it('26일째부터는 진딧물이 섞여 나온다', () => {
+    let aphids = 0;
+    for (let seed = 1; seed <= 10; seed += 1) aphids += planDay(27, randomFrom(seed)).filter((spawn) => spawn.kind === 'aphid').length;
+    expect(aphids).toBeGreaterThan(5);
   });
 
   it('같은 난수면 같은 날이 나온다', () => {

@@ -530,6 +530,23 @@ export class FieldView {
     const { layout } = this;
     g.clear();
     for (const enemy of state.enemies) {
+      // 멈춰 선 대장 거미는 울타리까지 거미줄을 늘어뜨린다. 막 쏜 참에 가장 짙고, 다음에 쏠 때까지 옅어진다.
+      const def = ENEMIES[enemy.kind];
+      if (def.skill !== 'web' || !enemy.biting) continue;
+      const fresh = Math.min(1, Math.max(0, enemy.biteIn / def.biteEvery));
+      const from = toScreenY(layout, enemy.y) + def.radius;
+      const sway = Math.sin(this.clock * 3 + enemy.id) * 2;
+      g.lineStyle(1.4, LOOK.silk, 0.35 + 0.55 * fresh);
+      g.beginPath();
+      g.moveTo(enemy.x - 2, from);
+      g.lineTo(enemy.x - 2 + sway, layout.fenceY - 2);
+      g.moveTo(enemy.x + 2, from);
+      g.lineTo(enemy.x + 2 - sway, layout.fenceY - 2);
+      g.strokePath();
+      g.fillStyle(LOOK.silk, 0.5 + 0.4 * fresh);
+      g.fillCircle(enemy.x, layout.fenceY - 3, 2.5 + 2 * fresh);
+    }
+    for (const enemy of state.enemies) {
       if (enemy.hp >= enemy.maxHp || enemy.hp <= 0 || isBuried(enemy)) continue;
       const def = ENEMIES[enemy.kind];
       const width = def.boss ? 36 : 14;

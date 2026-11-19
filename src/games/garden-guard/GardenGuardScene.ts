@@ -140,12 +140,14 @@ export const TEXT = {
   bossTips: {
     mole: '두더지는 부하를 불러요. 먼저 쫓아내요!',
     rhino: '웅크리면 곧 돌진해요. 찬물로 늦춰요!',
+    spider: '거미는 멀리서 줄을 쏴요. 먼저 쫓아내요!',
   } as Partial<Record<EnemyKind, string>>,
   /** 새 벌레가 처음 나올 무렵에 뜨는 안내 */
   bugTips: {
     beetle: '풍뎅이는 단단해요. 크게 맞혀야 통해요',
     mosquito: '모기는 떼로 와요. 물보라가 잘 들어요',
     digger: '땅강아지는 땅속에 숨어요. 나오면 쏴요!',
+    aphid: '진딧물은 쫓아내면 둘로 나뉘어요',
   } as Partial<Record<EnemyKind, string>>,
   record: '새 기록!',
   over: '울타리가 무너졌어요',

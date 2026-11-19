@@ -399,3 +399,58 @@ it('텃밭 지키기: 대장의 날을 지키면 유물 조각을 받아서 저�
   expect(await hiddenTexts(page, SCENE.result), '결과 화면').toEqual([]);
   expect(await readMeta(page)).toMatchObject({ shards: 1, best: 5, runs: 6 });
 });
+
+it('텃밭 지키기: 25일째 뒤의 진딧물과 대장 거미가 그려지고, 진딧물 안내가 화면 안에 한 줄로 들어간다', async ({ page }) => {
+  // 26일째에서 시작할 수 있는 사람이다. 진딧물을 처음 만나는 무렵이라 안내가 뜬다.
+  await openLobby(page, { ...BASE, best: 27, runs: 30, startDay: 26, savedAt: Date.now() + 60_000 });
+  await tapText(page, GARDEN_SCENE, '출발!');
+  type Run = {
+    day: number;
+    dayTime: number;
+    fence: number;
+    stats: { fenceMax: number };
+    queue: Array<{ at: number; kind: string; x: number }>;
+    enemies: Array<{ kind: string; y: number; biting: boolean }>;
+  };
+  const run = (): Promise<Run | null> =>
+    page.evaluate((key) => (window.__pocketArcade?.scene.getScene(key) as unknown as { run: Run | null }).run, GARDEN_SCENE);
+  await expect.poll(async () => (await run())?.day, WAIT).toBe(26);
+  await expect.poll(() => hasText(page, '26일째 시작'), WAIT).toBe(true);
+  await tapText(page, GARDEN_SCENE, '26일째 시작');
+  await expect.poll(async () => (await lobbyTexts(page)).some((item) => item.text === '동료 가게'), WAIT).toBe(false);
+
+  // 나올 벌레를 진딧물과 대장 거미로 바꾸고, 울타리가 무너지지 않게 한다.
+  await page.evaluate((key) => {
+    const state = (window.__pocketArcade?.scene.getScene(key) as unknown as { run: Run }).run;
+    state.enemies = [];
+    state.queue = [
+      { at: state.dayTime, kind: 'spider', x: 120 },
+      { at: state.dayTime, kind: 'aphid', x: 60 },
+    ];
+    state.stats.fenceMax = 1e8;
+    state.fence = 1e8;
+  }, GARDEN_SCENE);
+  const tip = '진딧물은 쫓아내면 둘로 나뉘어요';
+  await expect.poll(async () => (await lobbyTexts(page)).some((item) => item.text === tip), WAIT).toBe(true);
+  const box = (await lobbyTexts(page)).find((item) => item.text === tip) as TextBox;
+  expect(box.left, '안내의 왼쪽 끝').toBeGreaterThanOrEqual(0);
+  expect(box.right, '안내의 오른쪽 끝').toBeLessThanOrEqual(GAME_WIDTH);
+  expect(box.bottom - box.top, '한 줄').toBeLessThan(24);
+  // 새 그림이 등록되어 있다.
+  const textures = await page.evaluate((key) => {
+    const scene = window.__pocketArcade?.scene.getScene(key);
+    return ['gg-aphid', 'gg-nymph', 'gg-spider'].map((name) => scene?.textures.exists(name) ?? false);
+  }, GARDEN_SCENE);
+  expect(textures).toEqual([true, true, true]);
+  // 거미는 판의 가운데에 멈춰서 거미줄을 쏜다. 느린 기계에서도 오래 기다리지 않게 멈출 자리 바로 위로 옮겨 둔다.
+  await page.evaluate((key) => {
+    const state = (window.__pocketArcade?.scene.getScene(key) as unknown as { run: Run }).run;
+    for (const enemy of state.enemies) if (enemy.kind === 'spider') enemy.y = Math.max(enemy.y, 140);
+  }, GARDEN_SCENE);
+  await expect
+    .poll(async () => (await run())?.enemies.some((enemy) => enemy.kind === 'spider' && enemy.biting), { ...WAIT, message: '거미가 멈춘다' })
+    .toBe(true);
+  const spider = (await run())?.enemies.find((enemy) => enemy.kind === 'spider');
+  expect(spider?.y).toBe(150);
+  if (process.env.GG_SHOT) await page.screenshot({ path: `${process.env.GG_SHOT}-${page.viewportSize()?.width}.png` });
+});

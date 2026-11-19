@@ -6,6 +6,7 @@ import {
   BOSS_EVERY,
   BOSS_ROTATION,
   COMMON_KINDS,
+  LATE_BOSSES,
   DAY,
   ENEMIES,
   FENCE_BASE,
@@ -82,9 +83,16 @@ export function isBossDay(day: number): boolean {
   return day > 0 && day % BOSS_EVERY === 0;
 }
 
-/** 그날 나오는 대장. 대장의 날마다 BOSS_ROTATION을 차례로 돈다(5일째 두더지, 10일째 장수풍뎅이, ...). 대장의 날이 아니면 null */
+/**
+ * 그날 나오는 대장. 25일째까지는 대장의 날마다 BOSS_ROTATION을 차례로 돈다(5일째 두더지, 10일째 장수풍뎅이, ...).
+ * 그 뒤로는 거미가 낀 LATE_BOSSES.rotation을 돈다(30일째 거미, 35일째 장수풍뎅이, 40일째 두더지, ...). 대장의 날이 아니면 null
+ */
 export function bossKind(day: number): EnemyKind | null {
   if (!isBossDay(day)) return null;
+  if (day > LATE_BOSSES.from) {
+    const late = LATE_BOSSES.rotation;
+    return late[(day / BOSS_EVERY - LATE_BOSSES.from / BOSS_EVERY - 1) % late.length];
+  }
   return BOSS_ROTATION[(day / BOSS_EVERY - 1) % BOSS_ROTATION.length];
 }
 

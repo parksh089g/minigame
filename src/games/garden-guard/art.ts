@@ -57,6 +57,8 @@ export const LOOK = {
   shell: 0xb9b3c9,
   seed: 0xe6b56e,
   bite: THEME.coral,
+  /** 대장 거미가 울타리까지 늘어뜨리는 거미줄 */
+  silk: 0xa79dc8,
 } as const;
 
 /** 벌레를 쫓아냈을 때 튀는 조각의 색 */
@@ -69,8 +71,11 @@ export const ENEMY_TINT: Readonly<Record<EnemyKind, number>> = {
   beetle: 0x8fa3e8,
   mosquito: 0xb9b0d9,
   digger: 0xd1ab84,
+  aphid: 0xb8e07a,
+  nymph: 0xd4ef9f,
   mole: 0xb79f93,
   rhino: 0x9b87d6,
+  spider: 0xf0a0c0,
 };
 
 export const enemyTexture = (kind: EnemyKind): string => `gg-${kind}`;
@@ -368,6 +373,39 @@ const ENEMY_ART: Readonly<Record<EnemyKind, Art>> = {
       stroke(c, 'M16 21Q12 14 9 4M24 21Q28 14 31 4', '#a0764f', 1.3);
     },
   },
+  /** 진딧물: 통통한 연두색 몸에 등의 두 대롱. 쫓아내면 둘로 나뉜다. */
+  aphid: {
+    width: 24,
+    height: 24,
+    view: BUG_VIEW,
+    draw(c) {
+      stroke(c, 'M11 15L4 12M10 21L3 23M29 15L36 12M30 21L37 23', '#86b552', 2);
+      // 등의 두 대롱
+      stroke(c, 'M14 9L11 3M26 9L29 3', '#86b552', 2.4);
+      oval(c, 20, 16, 13, 13.5, '#a6d466');
+      oval(c, 20, 15, 11.5, 12, '#b8e07a');
+      // 몸이 둘로 갈라질 자리
+      stroke(c, 'M20 4V22', '#98c95c', 1.4);
+      oval(c, 15, 10, 3.5, 2.2, 'rgba(255, 255, 255, 0.55)', -0.5);
+      oval(c, 20, 29, 9.5, 7.5, '#9acb5e');
+      face(c, 20, 28.5, 8.5, 2);
+      stroke(c, 'M17 34Q13 37 11 39M23 34Q27 37 29 39', '#86b552', 1.3);
+    },
+  },
+  /** 아기 진딧물: 진딧물을 작게 줄인 모습 */
+  nymph: {
+    width: 16,
+    height: 16,
+    view: BUG_VIEW,
+    draw(c) {
+      stroke(c, 'M10 16L4 13M10 23L4 25M30 16L36 13M30 23L36 25', '#9acb5e', 2.4);
+      oval(c, 20, 17, 13, 13, '#c4e88e');
+      oval(c, 20, 16, 11.5, 11.5, '#d4ef9f');
+      oval(c, 15, 11, 3.5, 2.2, 'rgba(255, 255, 255, 0.6)', -0.5);
+      oval(c, 20, 29, 10, 8, '#b3dd7a');
+      face(c, 20, 28.5, 9, 2.4);
+    },
+  },
   mole: {
     width: 46,
     height: 46,
@@ -413,6 +451,41 @@ const ENEMY_ART: Readonly<Record<EnemyKind, Art>> = {
       face(c, 23, 29.500, 11, 1.8, 'none');
       // 찌푸린 눈썹
       stroke(c, 'M14.500 26L19 27.300M31.500 26L27 27.300', INK, 1.1);
+    },
+  },
+  /** 대장 거미: 털복숭이 분홍 몸에 여덟 다리, 등에 하트 무늬. 아래(울타리 쪽)로 거미줄을 쏜다. */
+  spider: {
+    width: 46,
+    height: 46,
+    view: [46, 46],
+    draw(c) {
+      // 여덟 다리: 무릎을 위로 꺾고 끝은 바깥 아래로
+      for (const side of [-1, 1]) {
+        for (const [ky, fy, reach] of [
+          [8, 4, 20],
+          [14, 13, 22],
+          [21, 25, 22],
+          [27, 37, 19],
+        ] as const) {
+          const kx = 23 + side * (reach - 4);
+          const fx = 23 + side * (reach + 1);
+          stroke(c, `M${23 + side * 8} ${ky + 8}L${kx} ${ky}L${fx} ${fy}`, '#c96b93', 2.3);
+        }
+      }
+      // 배와 등의 하트 무늬
+      oval(c, 23, 17, 14, 13, '#e48aae');
+      oval(c, 23, 16, 13, 12, '#f0a0c0');
+      fill(c, 'M23 21C18 17 18.500 12 21 12C22 12 23 13 23 14C23 13 24 12 25 12C27.500 12 28 17 23 21Z', '#ffd0e0');
+      oval(c, 16, 10, 3.4, 2, 'rgba(255, 255, 255, 0.6)', -0.5);
+      // 머리
+      oval(c, 23, 32, 11, 8, '#c96b93');
+      oval(c, 23, 31.500, 10, 7, '#d87ba2');
+      // 왕관
+      fill(c, 'M15 6L16.500 0.500L20 4L23 0L26 4L29.500 0.500L31 6Z', '#ffcf5c');
+      box(c, 14.500, 5, 17, 2.6, 1.3, '#f2b53a');
+      face(c, 23, 30.500, 9, 1.8, 'grumpy');
+      // 실을 뽑는 작은 엄니
+      stroke(c, 'M20.500 38L20 41M25.500 38L26 41', '#8f4a69', 1.6);
     },
   },
 };

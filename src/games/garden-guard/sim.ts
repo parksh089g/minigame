@@ -38,9 +38,11 @@ import {
   HOP,
   SHOOTER,
   SHOP,
+  SPLIT,
   STORM,
   SUMMON,
   WEAVE,
+  WEB,
   type AllyId,
   type EnemyKind,
 } from './data';
@@ -355,6 +357,15 @@ function spawnEnemy(state: RunState, kind: EnemyKind, x: number, y: number, even
   events.push({ type: 'spawn', kind, x: homeX });
 }
 
+/**
+ * 그 벌레가 멈춰 서서 갉기 시작하는 높이(시뮬레이션 y). 여느 벌레는 울타리에 몸이 닿는 곳이고,
+ * 대장 거미는 판의 가운데(WEB.stopY)에서 멈춰 거미줄로 갉는다.
+ */
+export function stopYOf(kind: EnemyKind): number {
+  const def = ENEMIES[kind];
+  return def.skill === 'web' ? WEB.stopY : FIELD.depth - def.radius;
+}
+
 /** 땅강아지가 땅속에 숨어 있는지. 숨은 동안에는 물방울도 물벼락도 닿지 않고, 아무도 겨누지 않는다. */
 export function isBuried(enemy: Enemy): boolean {
   return ENEMIES[enemy.kind].gait === 'dig' && enemy.y > DIG.from && enemy.y < DIG.to;
@@ -389,7 +400,7 @@ function moveEnemy(state: RunState, enemy: Enemy, dt: number, events: SimEvent[]
   if (enemy.flash > 0) enemy.flash = Math.max(0, enemy.flash - dt);
   if (enemy.slowLeft > 0) enemy.slowLeft -= dt;
   const slow = enemy.slowLeft > 0 ? 1 - enemy.slow : 1;
-  const stopY = FIELD.depth - def.radius;
+  const stopY = stopYOf(enemy.kind);
 
   if (!enemy.biting) {
     enemy.clock += dt * slow;
@@ -423,7 +434,8 @@ function moveEnemy(state: RunState, enemy: Enemy, dt: number, events: SimEvent[]
         state.fence = Math.max(0, state.fence - damage);
         events.push({ type: 'bite', x: enemy.x, damage });
       }
-      if (state.stats.thorns > 0) hurt(state.stats, enemy, state.stats.thorns, false);
+      // 멀리서 거미줄로 갉는 거미는 가시에 찔리지 않는다.
+      if (state.stats.thorns > 0 && def.skill !== 'web') hurt(state.stats, enemy, state.stats.thorns, false);
     }
   }
 
@@ -484,7 +496,7 @@ export function autoAim(state: RunState, from: { x: number; y: number }, nearest
   }
   if (!target) return null;
   const time = Math.hypot(target.x - from.x, target.y - from.y) / GUN.shotSpeed;
-  const stopY = FIELD.depth - ENEMIES[target.kind].radius;
+  const stopY = stopYOf(target.kind);
   return { x: target.x, y: Math.min(stopY, target.y + paceOf(target, state.stats.pace) * time) };
 }
 
@@ -609,7 +621,7 @@ function fireAllies(state: RunState, dt: number, events: SimEvent[]): void {
     const spot = allySpot(ally);
     // 날아가는 동안 벌레가 내려올 만큼 앞을 겨눈다.
     const time = Math.hypot(target.x - spot.x, target.y - spot.y) / def.shotSpeed;
-    const stopY = FIELD.depth - ENEMIES[target.kind].radius;
+    const stopY = stopYOf(target.kind);
     const y = Math.min(stopY, target.y + paceOf(target, state.stats.pace) * time);
     bonuses ??= pairBonuses(state.allies);
     const bonus = bonuses[index];
@@ -682,6 +694,8 @@ function moveShots(state: RunState, dt: number, events: SimEvent[]): void {
 function sweep(state: RunState, events: SimEvent[]): void {
   if (!state.enemies.some((enemy) => enemy.hp <= 0)) return;
   const alive: Enemy[] = [];
+  /** 쫓아낸 진딧물이 나뉘는 자리. 목록을 다 고른 뒤에 놓는다. */
+  const splits: Enemy[] = [];
   for (const enemy of state.enemies) {
     if (enemy.hp > 0) {
       alive.push(enemy);
@@ -692,8 +706,24 @@ function sweep(state: RunState, events: SimEvent[]): void {
     state.dayKilled += 1;
     state.seeds += seeds;
     events.push({ type: 'kill', x: enemy.x, y: enemy.y, kind: enemy.kind, seeds });
+    if (ENEMIES[enemy.kind].splits) splits.push(enemy);
   }
   state.enemies = alive;
+  for (const parent of splits) splitEnemy(state, parent, events);
+}
+
+/**
+ * 쫓아낸 진딧물이 그 자리에서 둘로 나뉜다. 나뉜 것도 그날 쫓아낼 벌레에 든다(벌레가 남아 있는 동안에는 날이 바뀌지 않으니 체력은 그날의 것이다).
+ * 울타리를 갉던 진딧물이 나뉘면 나뉜 것도 곧바로 울타리에 붙는다.
+ */
+function splitEnemy(state: RunState, parent: Enemy, events: SimEvent[]): void {
+  const kind = ENEMIES[parent.kind].splits as EnemyKind;
+  const y = Math.min(parent.y, stopYOf(kind));
+  for (const side of [-1, 1]) {
+    if (state.enemies.length >= MAX_ENEMIES) return;
+    spawnEnemy(state, kind, parent.x + side * SPLIT.spread, y, events);
+    state.dayTotal += 1;
+  }
 }
 
 /** 판을 dt초만큼 나아가게 하고, 그동안 일어난 일을 돌려준다. */
