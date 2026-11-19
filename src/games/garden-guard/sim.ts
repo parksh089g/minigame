@@ -47,6 +47,7 @@ import {
   type EnemyKind,
 } from './data';
 import { waveSeed, type DailyTag } from './daily';
+import { addDamage, emptyDamage, type DamageLog, type DamageSource } from './damage';
 import {
   biteScale,
   clearBonus,
@@ -169,6 +170,8 @@ export interface RunState {
    * 오늘의 판은 날마다 벌레 떼를, 가게마다 카드를 그날의 씨앗에서 따로 정해서 누구에게나 같다.
    */
   daily?: DailyTag;
+  /** 그날과 이 판에서 물총, 물벼락, 가시와 동료마다 준 피해(damage.ts). 이 기록이 생기기 전의 저장은 빈 기록으로 읽는다. */
+  dealt: DamageLog;
 }
 
 export interface RunConfig {
@@ -262,6 +265,7 @@ function beginDay(state: RunState, day: number, events: SimEvent[]): void {
   state.dayTotal = state.queue.length;
   state.dayKilled = 0;
   state.guardLeft = state.stats.guard;
+  state.dealt.day = {};
   events.push({ type: 'dayStart', day, boss: isBossDay(day) });
 }
 
@@ -300,6 +304,7 @@ export function createRun(config: RunConfig): { state: RunState; events: SimEven
     rolls: 0,
     shards: 0,
     guardLeft: 0,
+    dealt: emptyDamage(),
   };
   if (config.daily !== undefined) state.daily = { day: config.daily, draws: 0 };
   if (sprouts > 0) placeAlly(state, 'sunflower', sprouts);
@@ -435,7 +440,7 @@ function moveEnemy(state: RunState, enemy: Enemy, dt: number, events: SimEvent[]
         events.push({ type: 'bite', x: enemy.x, damage });
       }
       // 멀리서 거미줄로 갉는 거미는 가시에 찔리지 않는다.
-      if (state.stats.thorns > 0 && def.skill !== 'web') hurt(state.stats, enemy, state.stats.thorns, false);
+      if (state.stats.thorns > 0 && def.skill !== 'web') hurt(state, enemy, state.stats.thorns, false, 'thorns');
     }
   }
 
@@ -459,13 +464,16 @@ function moveEnemy(state: RunState, enemy: Enemy, dt: number, events: SimEvent[]
 /**
  * 벌레에게 피해를 준다. 껍데기가 있는 벌레는 치명타가 아니면 덜 받는다. 껍데기에 막혔으면 true.
  * 유물의 덤도 여기서 붙는다: 대장에게는 bossDamage배, 아직 안 다친(체력이 가득한) 벌레에게는 freshDamage배.
+ * 준 피해는 source의 몫으로 적는다. 남은 체력을 넘는 몫은 적지 않는다.
  */
-function hurt(stats: Stats, enemy: Enemy, amount: number, crit: boolean, pierceShell = false): boolean {
+function hurt(state: RunState, enemy: Enemy, amount: number, crit: boolean, source: DamageSource, pierceShell = false): boolean {
+  const { stats } = state;
   const def = ENEMIES[enemy.kind];
   const blocked = def.shell !== undefined && !crit && !pierceShell;
   let dealt = blocked ? amount * (def.shell as number) : amount;
   if (def.boss) dealt *= stats.bossDamage;
   if (enemy.hp >= enemy.maxHp) dealt *= stats.freshDamage;
+  if (enemy.hp > 0) addDamage(state.dealt, source, Math.min(dealt, enemy.hp));
   enemy.hp -= dealt;
   enemy.flash = 0.12;
   return blocked;
@@ -637,7 +645,7 @@ function castStorm(state: RunState, events: SimEvent[]): void {
   state.stormIn = state.stats.stormCooldown;
   for (const enemy of state.enemies) {
     if (enemy.y < -ENEMIES[enemy.kind].radius || isBuried(enemy)) continue;
-    hurt(state.stats, enemy, state.stats.stormDamage, true);
+    hurt(state, enemy, state.stats.stormDamage, true, 'storm');
     // 대장은 덩치가 커서 반만 느려진다.
     const slow = ENEMIES[enemy.kind].boss ? STORM.slow / 2 : STORM.slow;
     if (enemy.slowLeft <= 0 || slow >= enemy.slow) enemy.slow = slow;
@@ -658,7 +666,8 @@ function moveShots(state: RunState, dt: number, events: SimEvent[]): void {
       const reach = ENEMIES[enemy.kind].radius + GUN.shotRadius;
       if (Math.hypot(enemy.x - shot.x, enemy.y - shot.y) > reach) continue;
       const def = shot.ally ? ALLIES[shot.ally] : null;
-      const shell = hurt(stats, enemy, shot.damage, shot.crit, def?.pierceShell);
+      const source: DamageSource = shot.ally || 'gun';
+      const shell = hurt(state, enemy, shot.damage, shot.crit, source, def?.pierceShell);
       events.push({ type: 'hit', x: shot.x, y: shot.y, crit: shot.crit, shell });
       // 물총의 물방울에는 영구 강화의 찬물과 물보라가, 동료가 쏜 것에는 그 동료의 솜씨가 붙는다.
       const chill = def ? (def.chill?.slow ?? 0) : stats.chill;
@@ -674,7 +683,7 @@ function moveShots(state: RunState, dt: number, events: SimEvent[]): void {
         for (const other of state.enemies) {
           if (other === enemy || other.hp <= 0 || isBuried(other)) continue;
           const span = splashRadius + ENEMIES[other.kind].radius;
-          if (Math.hypot(other.x - shot.x, other.y - shot.y) <= span) hurt(stats, other, shot.damage * splashRatio, false);
+          if (Math.hypot(other.x - shot.x, other.y - shot.y) <= span) hurt(state, other, shot.damage * splashRatio, false, source);
         }
       }
       shot.hit.push(enemy.id);

@@ -24,6 +24,7 @@ import {
 } from './daily';
 import { buildDailyPage } from './daily-page';
 import { gardenDailyStore } from './daily-store';
+import { DAMAGE_TEXT, damageRows, sharePercent, sourceName } from './damage';
 import { ALLIES, ENEMIES, GARDEN_GAME_ID, GARDEN_SCENE, type EnemyKind } from './data';
 import { buildLobby } from './lobby';
 import { buildRankPage } from './rank-page';
@@ -1022,6 +1023,9 @@ export class GardenGuardScene extends MiniGameScene {
     ];
     // 대장을 물리친 판에만 적는다.
     if (state.shards > 0) stats.push(['받은 유물 조각', `${state.shards}개`]);
+    // 이 판에서 가장 많이 피해를 준 것과 그 몫. 피해를 주지 못한 판에는 적지 않는다.
+    const top = damageRows(state.dealt.run)[0];
+    if (top) stats.push([DAMAGE_TEXT.resultLabel, DAMAGE_TEXT.resultValue(sourceName(top.source), sharePercent(top.share))]);
     const daily = this.recordDaily(state);
     this.finishMiniGame(
       runScore(state),

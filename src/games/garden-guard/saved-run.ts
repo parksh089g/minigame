@@ -9,10 +9,12 @@
  * 빠진 값을 채워서 이어 할 수 있으면 readRunRecord에서 채운다(버전 2의 판에 유물의 값을 채우는 fillRelicFields처럼).
  * 오늘의 판의 표(RunState.daily)는 여느 판에는 없는 필드라 버전을 올리지 않고 따로 본다: 없으면 여느 판이고,
  * 있으면 모양이 맞아야 한다. 그래서 오늘의 판이 생기기 전에 적은 판도 그대로 읽힌다.
+ * 준 피해의 기록(dealt)은 판을 잇는 데 없어도 되는 것이라 버전을 올리지 않았다. 없거나 모양이 틀리면 빈 기록으로 읽는다.
  */
 import { cellsValid, copiesFor, openShop, placeAlly, type Ally, type ShopCard } from './allies';
 import { isDailyTag } from './daily';
 import { ALLIES, ALLY_STARS, GUN, SHOP, STEP, ENEMIES, type AllyId, type EnemyKind } from './data';
+import { emptyDamage, isDamageLog } from './damage';
 import { applyRun, bankSeeds, bankShards, countRun, MAX_DAY, type GardenMeta, type Spawn, type Stats } from './rules';
 import type { Enemy, Phase, RunState, Shot } from './sim';
 
@@ -40,8 +42,8 @@ export interface RunRecord {
 
 type Kind = 'number' | 'boolean' | 'string' | 'array' | 'object';
 
-/** 판의 필드. 오늘의 판의 표(daily)는 여느 판에는 없어서 따로 본다(isRunState). */
-const STATE_SHAPE: Record<Exclude<keyof RunState, 'daily'>, Kind> = {
+/** 판의 필드. 오늘의 판의 표(daily)는 여느 판에는 없어서, 준 피해의 기록(dealt)은 없어도 되어서 따로 본다(isRunState, readRunRecord). */
+const STATE_SHAPE: Record<Exclude<keyof RunState, 'daily' | 'dealt'>, Kind> = {
   rng: 'number',
   startDay: 'number',
   bestBefore: 'number',
@@ -324,6 +326,9 @@ export function readRunRecord(raw: unknown): { savedAt: number; run: SavedRun | 
   if (run.state.shopping && run.state.shop.length === 0) openShop(run.state);
   // ★5에 모으는 수가 줄기 전(열여섯 마리)에 적은 판은 지금의 ★5로 줄인다.
   for (const ally of run.state.allies) ally.copies = Math.min(Math.floor(ally.copies), copiesFor(ALLY_STARS.max));
+  // 준 피해의 기록이 생기기 전에 적은 판이나 기록이 망가진 판은 빈 기록으로 잇는다. 판은 버리지 않는다.
+  // 벌레의 체력은 날마다 곱으로 자라서 피해에는 위쪽 끝을 두지 않는다(유한한 수이기만 하면 된다).
+  if (!isDamageLog(run.state.dealt, Number.MAX_VALUE)) run.state.dealt = emptyDamage();
   const whole = (value: unknown): number => (kindOf(value) === 'number' ? Math.max(0, Math.floor(value as number)) : 0);
   return { savedAt, run: { state: run.state, banked: whole(run.banked), bankedShards: whole(run.bankedShards) } };
 }
