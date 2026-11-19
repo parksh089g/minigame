@@ -75,10 +75,10 @@ export function perkOf(id: PerkId): PerkInfo {
 /**
  * 끝난 판이 주는 조각: 넘긴 라운드마다 한 개. 멀리 갈수록 많이 받고, 첫 라운드도 못 넘긴 판은 받지 못한다.
  * 판마다 한 번, 끝났을 때만 준다(화면이 결과를 낼 때 부른다). 도중에 버리고 새로 시작한 판은 받지 못한다.
- * 오늘의 판도 똑같이 받는다.
+ * 오늘의 판도 똑같이 받는다. 대장의 상으로 고른 조각(RunState.bonusPieces)도 이때 함께 받는다.
  */
 export function piecesFor(run: RunState): number {
-  return Math.max(0, clearedRounds(run));
+  return Math.max(0, clearedRounds(run)) + (run.bonusPieces ?? 0);
 }
 
 /** 조각을 더한 새 상태. 한도(PIECES_MAX)를 넘지 않고, 0보다 작거나 정수가 아닌 값은 더하지 않는다. */

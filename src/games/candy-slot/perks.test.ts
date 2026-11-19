@@ -43,10 +43,11 @@ import {
   slotsOf,
   spin,
   START_COIN,
-  targetOf,
+  targetFor,
   type PerkId,
   type RunState,
 } from './rules';
+import { bossPiecesOf } from './round-events';
 
 /** 주아 글꼴에 들어 있는 한글: KS X 1001의 완성형 2,350자 */
 function fontSyllables(): Set<string> {
@@ -63,11 +64,14 @@ function fontSyllables(): Set<string> {
 const state = (pieces: number, perks: readonly PerkId[] = []): PerkState => ({ pieces, perks });
 const steady = (): number => 0.37;
 
-/** rounds개의 라운드를 넘기고 그다음 라운드를 하고 있는 판 */
+/**
+ * rounds개의 라운드를 넘기고 그다음 라운드를 하고 있는 판. 목표는 이벤트까지 넣은 것(targetFor)만큼 채운다.
+ * 대장의 상은 고르지 않고 가게를 닫아서 행운 조각을 받는다.
+ */
 function runAt(rounds: number, seed: string | null = null): RunState {
   let run = newRun(seed);
   for (let round = 0; round < rounds; round += 1) {
-    const settled = settleRound({ ...run, spinsLeft: 0, coin: targetOf(run.round) }, steady);
+    const settled = settleRound({ ...run, spinsLeft: 0, coin: targetFor(run, run.round) }, steady);
     if (!settled?.cleared) throw new Error('목표를 채우지 못했다');
     run = nextRound(settled.run);
   }
@@ -94,8 +98,9 @@ describe('해금의 목록', () => {
 
   it('값을 모두 더하면, 일곱 라운드쯤 넘기는 판으로 스무 판쯤 걸린다', () => {
     const total = PERKS.reduce((sum, perk) => sum + perk.price, 0);
+    // 일곱 라운드에 한 개씩, 그리고 다섯째 라운드의 대장을 넘기고 고른 조각
     const typical = piecesFor(runAt(7));
-    expect(typical).toBe(7);
+    expect(typical).toBe(7 + bossPiecesOf(5));
     const runs = total / typical;
     expect(runs).toBeGreaterThanOrEqual(15);
     expect(runs).toBeLessThanOrEqual(25);
@@ -141,13 +146,15 @@ describe('해금의 목록', () => {
 });
 
 describe('조각 받기', () => {
-  it('넘긴 라운드마다 한 개를 받는다', () => {
+  it('넘긴 라운드마다 한 개를 받고, 대장의 상으로 고른 조각을 더 받는다', () => {
     expect(piecesFor(newRun())).toBe(0);
     expect(piecesFor(runAt(1))).toBe(1);
-    expect(piecesFor(runAt(7))).toBe(7);
+    expect(piecesFor(runAt(4))).toBe(4);
+    expect(piecesFor(runAt(7))).toBe(7 + bossPiecesOf(5));
+    expect(piecesFor(runAt(10))).toBe(10 + bossPiecesOf(5) + bossPiecesOf(10));
     for (const rounds of [0, 3, 10]) {
       const run = runAt(rounds);
-      expect(piecesFor(run)).toBe(clearedRounds(run));
+      expect(piecesFor(run)).toBe(clearedRounds(run) + (run.bonusPieces ?? 0));
     }
   });
 
@@ -168,8 +175,8 @@ describe('조각 받기', () => {
   });
 
   it('오늘의 판도, 해금을 켠 판도 똑같이 받는다', () => {
-    expect(piecesFor(runAt(5, 'candy-slot:daily:1'))).toBe(5);
-    expect(piecesFor({ ...runAt(5), perks: [...PERK_IDS] })).toBe(5);
+    expect(piecesFor(runAt(5, 'candy-slot:daily:1'))).toBe(5 + bossPiecesOf(5));
+    expect(piecesFor({ ...runAt(5), perks: [...PERK_IDS] })).toBe(5 + bossPiecesOf(5));
   });
 
   it('조각을 더한다. 0 이하이거나 정수가 아니면 그대로이고, 한도를 넘지 않는다', () => {

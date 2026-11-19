@@ -25,14 +25,29 @@ function runOf(page: Page): Promise<RunState> {
   return page.evaluate((key) => (window.__pocketArcade?.scene.getScene(key) as unknown as SlotView).run, KEY);
 }
 
-function busyOf(page: Page): Promise<boolean> {
-  return page.evaluate((key) => (window.__pocketArcade?.scene.getScene(key) as unknown as SlotView).busy, KEY);
-}
-
 /**
  * 기기(IndexedDB)에 저장된 허브 세이브에서 행운 슬롯의 몫을 읽는다. 아직 저장된 것이 없으면 null.
  * 페이지를 다시 열기 전에, 방금 바뀐 판이 기기에 들어갔는지 기다리는 데 쓴다. 앱이 뜬 뒤에만 부른다.
  */
+/**
+ * 돌린 스핀의 결과를 끝까지 보여 줄 때까지 기다린다. 기다리는 동안 아직 보여 주고 있으면 건너뛴다(돌리기 버튼을 누른 것과 같다).
+ * CI처럼 느린 곳에서는 게임의 시간이 실제보다 느리게 흘러, 연출이 끝나기를 그냥 기다리면 15초를 넘길 때가 있었다.
+ * 건너뛰기가 다음 스핀을 돌리지 않도록, 보여 주는 중인지 보고 누르는 것을 한 번에 한다.
+ */
+async function finishSpin(page: Page): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate((key) => {
+          const scene = window.__pocketArcade?.scene.getScene(key) as unknown as SlotView & { trySpin(): void };
+          if (scene.busy) scene.trySpin();
+          return scene.busy;
+        }, KEY),
+      { ...WAIT, message: '스핀의 결과를 다 보여 줘야 한다' },
+    )
+    .toBe(false);
+}
+
 function storedSlot(page: Page): Promise<SlotSave | null> {
   return page.evaluate(
     () =>
@@ -142,7 +157,7 @@ it('행운 슬롯: 한 번 돌리고 페이지를 다시 열어 이어 하기를
 
   await tapText(page, KEY, '돌리기');
   await expect.poll(async () => (await runOf(page)).spinCount, { ...WAIT, message: '한 번 돌아야 한다' }).toBe(1);
-  await expect.poll(() => busyOf(page), { ...WAIT, message: '스핀의 결과를 다 보여 줘야 한다' }).toBe(false);
+  await finishSpin(page);
   const before = await runOf(page);
   await expect
     .poll(async () => (await storedSlot(page))?.run?.run, { ...WAIT, message: '돌린 판이 기기에 저장되어야 한다' })
@@ -162,7 +177,7 @@ it('행운 슬롯: 한 번 돌리고 페이지를 다시 열어 이어 하기를
   expect(await textPoint(page, KEY, RESUME_TEXT.resume), '고른 뒤에는 카드가 사라진다').toBeNull();
 
   // 이어 한 판에서 한 번 더 돌리면 그 판에서 이어진다.
-  await expect.poll(() => busyOf(page), WAIT).toBe(false);
+  await finishSpin(page);
   await tapText(page, KEY, '돌리기');
   await expect.poll(async () => (await runOf(page)).spinCount, WAIT).toBe(2);
   expect((await runOf(page)).spinsLeft).toBe(before.spinsLeft - 1);

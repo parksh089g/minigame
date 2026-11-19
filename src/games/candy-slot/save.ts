@@ -10,16 +10,19 @@
 import { normalizeFound, addFound } from './collection';
 import { addPieces, PIECES_MAX, unlock } from './perks';
 import { raise } from './relics';
+import { eventInfoOf, isBossRound, MAX_EXTRA_HOLDS, PICKABLE_SYMBOLS, REWARD_OFFERS, ruleOf, type RoundEvent } from './round-events';
 import {
   CELLS,
   charmOf,
   holdsOf,
   isUpgraded,
+  levelOf,
   OFFERS,
   ownsCharm,
   PERK_IDS,
   RELIC_IDS,
   RELIC_MAX,
+  roundHoldsOf,
   slotsOf,
   spinsOf,
   SYMBOLS,
@@ -33,6 +36,8 @@ import {
 /**
  * 하던 판을 적는 모양의 버전. RunState의 모양이나 뜻이 바뀌어 예전 판을 이어 할 수 없게 되면 하나 올린다.
  * 버전이 다른 판은 읽지 않고 버린다.
+ * 라운드 이벤트와 대장의 상(event, reward, bonusPieces)은 없어도 되는 값으로 더해서 버전을 올리지 않았다.
+ * 그것들이 생기기 전에 저장한 판은 이벤트 없이 이어지고, 다음 라운드를 넘길 때부터 이벤트가 걸린다.
  */
 export const RUN_VERSION = 1;
 
@@ -162,6 +167,38 @@ function readShop(raw: unknown): Shop | null {
   return { offers, rerollCost: raw.rerollCost };
 }
 
+/**
+ * 걸린 이벤트: 있는 이벤트이고, 목표 카드가 말하는 라운드(goal)의 것이며, 대장 라운드에는 대장이, 다른 라운드에는
+ * 여느 이벤트가 걸려 있어야 한다. 그림을 고르는 이벤트만 그림이 있다. 없으면(이벤트가 생기기 전의 판) undefined,
+ * 맞지 않으면 null.
+ */
+function readEvent(raw: unknown, goal: number): RoundEvent | null | undefined {
+  if (raw === undefined) return undefined;
+  if (!isObject(raw) || typeof raw.id !== 'string' || raw.round !== goal) return null;
+  const info = eventInfoOf(raw.id);
+  if (!info || info.boss !== isBossRound(goal)) return null;
+  if (!info.picksSymbol) return raw.symbol === undefined ? { id: info.id, round: goal } : null;
+  if (!isCount(raw.symbol) || raw.symbol >= PICKABLE_SYMBOLS) return null;
+  return { id: info.id, round: goal, symbol: raw.symbol };
+}
+
+/**
+ * 대장의 상: 서로 다른, 아직 붙이지 않은, 한 단계 강화한 부적이 REWARD_OFFERS장까지.
+ * 없으면 undefined, 맞지 않으면 null.
+ */
+function readReward(raw: unknown, charms: readonly string[]): string[] | null | undefined {
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > REWARD_OFFERS) return null;
+  const reward: string[] = [];
+  for (const id of raw) {
+    if (typeof id !== 'string' || !charmOf(id) || levelOf(id) !== 1 || ownsCharm(reward, id) || ownsCharm(charms, id)) {
+      return null;
+    }
+    reward.push(id);
+  }
+  return reward;
+}
+
 /** 바로 앞 스핀의 판: 아홉 칸에 있는 그림의 번호. 맞지 않으면 null. */
 function readGrid(raw: unknown): number[] | null {
   if (!Array.isArray(raw) || raw.length !== CELLS) return null;
@@ -194,7 +231,19 @@ export function readRun(raw: unknown): RunState | null {
   if (!isCount(round) || round < 1) return null;
   if (!isCount(coin) || !isCount(earned) || !isCount(bestSpin)) return null;
   if (!isCount(spinCount) || !isCount(drawCount)) return null;
-  if (!isCount(holdsLeft) || holdsLeft > holdsOf({ perks })) return null;
+
+  // 이벤트는 목표 카드가 말하는 라운드(돌리는 동안은 지금, 가게에서는 다음 라운드)의 것이다.
+  const event = readEvent(from.event, phase === 'shop' ? round + 1 : round);
+  if (event === null) return null;
+  // 대장의 상은 대장 라운드를 넘기고 연 가게에만 있다. 고른 조각은 0 이상의 정수다.
+  const reward = phase === 'shop' && isBossRound(round) ? readReward(from.reward, charms) : from.reward === undefined ? undefined : null;
+  if (reward === null) return null;
+  const bonusPieces = from.bonusPieces;
+  if (bonusPieces !== undefined && !isCount(bonusPieces)) return null;
+
+  // 잠그기는 그 라운드의 이벤트까지 넣은 횟수를 넘지 않는다. 가게에서는 지난 라운드의 이벤트를 알 수 없어서 넉넉히 본다.
+  const holdsMax = phase === 'spin' ? roundHoldsOf({ perks }, ruleOf(event)) : holdsOf({ perks }) + MAX_EXTRA_HOLDS;
+  if (!isCount(holdsLeft) || holdsLeft > holdsMax) return null;
   if (typeof afterMiss !== 'boolean') return null;
   if (seed !== null && (typeof seed !== 'string' || seed.length > SEED_MAX)) return null;
 
@@ -203,7 +252,7 @@ export function readRun(raw: unknown): RunState | null {
   if (!isCount(spinsLeft)) return null;
   let shop: Shop | null = null;
   if (phase === 'spin') {
-    if (from.shop !== null || spinsLeft > spinsOf(charms)) return null;
+    if (from.shop !== null || spinsLeft > spinsOf(charms, ruleOf(event))) return null;
   } else {
     shop = readShop(from.shop);
     if (!shop || spinsLeft !== 0) return null;
@@ -232,6 +281,10 @@ export function readRun(raw: unknown): RunState | null {
     drawCount,
     perks,
     relics,
+    // 없는 값은 적지 않는다. 이벤트가 생기기 전의 판과 모양이 같게 남는다.
+    ...(event ? { event } : {}),
+    ...(reward ? { reward } : {}),
+    ...(bonusPieces ? { bonusPieces } : {}),
   };
 }
 

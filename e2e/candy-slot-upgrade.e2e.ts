@@ -2,7 +2,7 @@
  * 행운 슬롯의 부적 강화와 가게의 미리 보기 화면 점검: 가게에서 붙인 부적을 눌러 강화하면 금화를 내고 별이 붙는지,
  * 세 단계까지 한 단계씩 오르는지, 지금 강화할 수 있는 부적에 표시가 달리는지,
  * 강화할 수 없을 때 까닭을 알리는지, 떼면 금화를 돌려받는지(유물이 있는 판에서도 적힌 수와 오가는 수가 같은지),
- * 확률 부적에 줄이 맞을 확률의 미리 보기가 붙는지,
+ * 가게의 부적과 강화 칸에 상금의 기댓값이 어떻게 바뀌는지 미리 보기가 붙는지,
  * 다음 스핀에 걸린 곱이 돌리기 버튼에 적히는지, 강화한 부적을 든 판을 이어 하고 도감과 결과 화면을 열어도 탈이 없는지 본다.
  * 값과 글은 규칙(rules.ts)과 글 모듈(shop-text.ts)에서 읽어 견주므로, 부적의 값이나 힘을 고쳐도 이 점검은 그대로 맞는다.
  * 점검마다 저장이 비어 있는 새 브라우저에서 시작한다.
@@ -36,14 +36,16 @@ import { RESUME_TEXT, type SlotSave } from '../src/games/candy-slot/save';
 import {
   BUBBLE_TEXT,
   bubbleShop,
-  HIT_CHIP_TEXT,
   offerChip,
+  PRIZE_CHIP_TEXT,
   SHOP_HINT,
   SPIN_TEXT,
   upgradableSlots,
-  type HitChip,
+  upgradeChip,
+  type PreviewChip,
 } from '../src/games/candy-slot/shop-text';
-import { hiddenTexts, it, openApp, startScene, tapAt, tapText, textPoint, waitForScene } from './app';
+import { setNoteOf } from '../src/games/candy-slot/sets';
+import { hiddenTexts, it, openApp, startScene, tapAt, tapText, textPoint, textsOutsideCards, waitForScene } from './app';
 
 const KEY = SCENE.candySlot;
 const WAIT = { timeout: 15_000 };
@@ -190,7 +192,7 @@ function readySlots(page: Page): Promise<number[]> {
 
 /**
  * 가게에서 slot번째 부적을 눌렀을 때 설명 창에 적혀야 하는 글들(가나다순). 강화 칸의 글과 값은 shop-text.ts가 정한 대로다.
- * 확률 부적이 아닌 부적에만 쓴다(확률 부적은 미리 보기 표의 글이 더 붙는다).
+ * 강화 칸의 미리 보기 표(벌이)는 bubbleTexts가 빼고 모으므로 여기에도 넣지 않는다.
  */
 function offerTexts(run: RunState, slot: number): string[] {
   const charm = mustCharm(run.charms[slot]);
@@ -198,13 +200,25 @@ function offerTexts(run: RunState, slot: number): string[] {
   if (!shop) throw new Error('가게가 열린 판이 아니다');
   const offer = shop.upgrade;
   const step = offer.description !== null && offer.cost !== null ? [offer.description, BUBBLE_TEXT.upgrade, String(offer.cost)] : [];
-  return [charm.name, charm.description, BUBBLE_TEXT.remove, `+${shop.refund}`, offer.lead, ...step].sort();
+  return [charm.name, charm.description, BUBBLE_TEXT.remove, `+${shop.refund}`, offer.lead, ...step, ...setTexts(run.charms, charm.id)].sort();
 }
 
-/** 지금 보이는 글자들 가운데 pick이 고른 것. 글과 빛깔, 높이를 위에서부터 차례로 돌려준다. */
-function shownTexts(page: Page, kind: 'bubble' | 'chips' | 'empty' | 'odds'): Promise<Array<{ text: string; color: string }>> {
+/** 세트에 드는 부적의 설명 창 맨 아래에 붙는 세트의 한 줄(sets.ts): 모은 정도와 덤의 글 */
+function setTexts(charms: readonly string[], id: string): string[] {
+  const note = setNoteOf(charms, id);
+  return note ? [note.progress, note.bonus] : [];
+}
+
+/**
+ * 지금 보이는 글자들 가운데 pick이 고른 것. 글과 빛깔, 높이를 위에서부터 차례로 돌려준다.
+ * bubble은 설명 창의 글에서 미리 보기 표를 뺀 것이고, bubbleChips는 설명 창의 미리 보기 표, chips는 가게의 미리 보기 표다.
+ */
+function shownTexts(
+  page: Page,
+  kind: 'bubble' | 'bubbleChips' | 'chips' | 'empty' | 'odds',
+): Promise<Array<{ text: string; color: string }>> {
   return page.evaluate(
-    ([key, what, chipLabel]) => {
+    ([key, what, chipLabels]) => {
       const scene = window.__pocketArcade?.scene.getScene(key);
       const texts = (scene?.children.list ?? []).filter(
         (item): item is Phaser.GameObjects.Text => item.type === 'Text' && (item as Phaser.GameObjects.Text).visible,
@@ -213,15 +227,17 @@ function shownTexts(page: Page, kind: 'bubble' | 'chips' | 'empty' | 'odds'): Pr
       const picked = texts.filter((text) => {
         if (what === 'empty') return text.text.trim() === '';
         if (text.text.trim() === '' || text.alpha <= 0) return false;
-        if (what === 'bubble') return text.depth === 38;
-        if (what === 'chips') return text.text.startsWith(chipLabel) && text.depth === 34;
+        const chip = chipLabels.some((label) => text.text.startsWith(`${label} `));
+        if (what === 'bubble') return text.depth === 38 && !chip;
+        if (what === 'bubbleChips') return text.depth === 38 && chip;
+        if (what === 'chips') return chip && text.depth === 34;
         return /^\d+%$/.test(text.text);
       });
       return picked
         .sort((a, b) => a.getBounds().centerY - b.getBounds().centerY || a.x - b.x)
         .map((text) => ({ text: text.text, color: String(text.style.color) }));
     },
-    [KEY, kind, HIT_CHIP_TEXT.label] as const,
+    [KEY, kind, [PRIZE_CHIP_TEXT.label]] as const,
   );
 }
 
@@ -231,8 +247,8 @@ async function bubbleTexts(page: Page): Promise<string[]> {
 }
 
 /** 미리 보기 표에 적혀야 하는 글과 빛깔 */
-function chipLook(chip: HitChip | null): { text: string; color: string } {
-  if (!chip) throw new Error('확률 부적이 아니다');
+function chipLook(chip: PreviewChip | null): { text: string; color: string } {
+  if (!chip) throw new Error('미리 보기가 없는 부적이다');
   const colors = { good: THEME_CSS.good, bad: THEME_CSS.bad, same: THEME_CSS.sub };
   return { text: chip.text, color: colors[chip.tone] };
 }
@@ -381,6 +397,7 @@ it('행운 슬롯: 금화가 모자라거나 끝까지 강화한 부적은 강�
       charm.upgrades[0].description,
       BUBBLE_TEXT.upgrade,
       String(cost),
+      ...setTexts([charm.id], charm.id),
     ].sort(),
   );
   expect(await hiddenTexts(page, KEY, { from: BUBBLE_TEXT.remove }), '금화가 모자란 설명 창').toEqual([]);
@@ -453,6 +470,7 @@ it('행운 슬롯: 강화하고 나면 다음 목표보다 적게 남을 때는 
       charm.upgrades[0].description,
       BUBBLE_TEXT.upgrade,
       String(cost),
+      ...setTexts([charm.id], charm.id),
     ].sort(),
   );
   expect(await hiddenTexts(page, KEY, { from: BUBBLE_TEXT.remove }), '알리는 글이 있는 설명 창').toEqual([]);
@@ -487,6 +505,7 @@ it('행운 슬롯: 유물이 있는 판에서도 버튼에 적힌 강화 값과 
       charm.upgrades[0].description,
       BUBBLE_TEXT.upgrade,
       String(cost),
+      ...setTexts([charm.id], charm.id),
     ].sort(),
   );
 
@@ -509,22 +528,37 @@ it('행운 슬롯: 유물이 있는 판에서도 버튼에 적힌 강화 값과 
   await expect.poll(() => textPoint(page, KEY, goalLabel(discard(strong, 0))), { ...WAIT, message: '금화의 수' }).not.toBeNull();
 });
 
-it('행운 슬롯: 가게의 확률 부적에는 사면 줄이 맞을 확률이 어떻게 바뀌는지가 적힌다', async ({ page }) => {
+/** 지금 보이는 미리 보기 표의 글자 크기 배율(가게의 표와 설명 창의 표). 1보다 작으면 가장 작은 글자 크기보다 작게 줄인 것이다. */
+function chipScales(page: Page): Promise<number[]> {
+  return page.evaluate(
+    ([key, label]) => {
+      const scene = window.__pocketArcade?.scene.getScene(key);
+      return (scene?.children.list ?? [])
+        .filter((item): item is Phaser.GameObjects.Text => item.type === 'Text' && (item as Phaser.GameObjects.Text).visible)
+        .filter((text) => text.text.startsWith(`${label} `))
+        .map((text) => Math.min(text.scaleX, text.scaleY));
+    },
+    [KEY, PRIZE_CHIP_TEXT.label] as const,
+  );
+}
+
+it('행운 슬롯: 가게의 부적에는 사면 벌이(한 라운드의 기댓값)가 어떻게 바뀌는지가 적힌다', async ({ page }) => {
+  it.slow();
   await openApp(page);
   await startScene(page, KEY);
-  const odds = CHARMS.filter((charm) => charm.kind === 'odds').map((charm) => charm.id);
-  const plain = CHARMS.find((charm) => charm.kind !== 'odds')?.id ?? '';
   const owned = ['more-cherry'];
-  const offers = ['more-clover', plain, 'less-clover'];
+  // 저금통은 벌이로 셈할 수 없어 표가 붙지 않는다.
+  const offers = ['more-clover', 'piggy', 'slant'];
   const start = shopRun(60, owned, offers);
   await openShopWith(page, start);
 
-  // 확률 부적 두 줄에만 표가 붙고, 적힌 수와 빛깔은 규칙으로 셈한 것과 같다.
-  expect(await shownTexts(page, 'chips'), '확률 부적의 미리 보기').toEqual([
+  // 표가 붙는 두 줄에 적힌 수와 빛깔은 규칙으로 셈한 것과 같다.
+  expect(await shownTexts(page, 'chips'), '가게의 미리 보기').toEqual([
     chipLook(offerChip(owned, offers[0])),
     chipLook(offerChip(owned, offers[2])),
   ]);
   expect(await hiddenTexts(page, KEY, { from: '부적 가게' }), '미리 보기가 붙은 가게').toEqual([]);
+  expect(await textsOutsideCards(page, KEY, '부적 가게'), '미리 보기가 붙은 가게의 줄').toEqual([]);
   expect(await shownTexts(page, 'empty'), '빈 글자는 감춰 둔다').toEqual([]);
 
   // 한 장을 사면 남은 줄의 수가 새로 붙인 부적까지 넣어 다시 셈해지고, 팔린 줄의 표는 사라진다.
@@ -534,18 +568,43 @@ it('행운 슬롯: 가게의 확률 부적에는 사면 줄이 맞을 확률이 
   expect(await shownTexts(page, 'chips'), '사고 난 뒤의 미리 보기').toEqual([chipLook(offerChip(bought, offers[2]))]);
   expect(await shownTexts(page, 'empty'), '팔린 줄의 빈 글자도 감춰 둔다').toEqual([]);
 
-  // 확률 부적을 모두, 부적이 없을 때와 다른 확률 부적을 강화해 겹쳐 둔 때에 올려 본다. 이름이나 값을 가리지 않아야 한다.
-  for (let first = 0; first < odds.length; first += 3) {
-    const group = odds.slice(first, first + 3);
-    const shown = [...group, plain, plain].slice(0, 3);
-    const stack = odds.filter((id) => !group.includes(id)).slice(0, 4).map(upgradedOf);
+  // 부적을 모두, 부적이 없을 때와 다른 부적을 강화해 겹쳐 둔 때에 올려 본다. 이름이나 값을 가리거나 줄 밖으로 넘치지 않고,
+  // 이름이 가장 긴 부적 옆에서도 글자를 줄이지 않는다.
+  const ids = CHARMS.map((charm) => charm.id);
+  for (let first = 0; first < ids.length; first += 3) {
+    const group = ids.slice(first, first + 3);
+    const stack = ids.filter((id) => !group.includes(id) && id !== 'piggy').slice(first % 7, (first % 7) + 4).map(upgradedOf);
     for (const charms of [[], stack]) {
-      await showShopRun(page, shopRun(60, charms, shown));
+      await showShopRun(page, shopRun(60, charms, group));
+      const where = `${charms.join(',')}에 ${group.join(',')}`;
       const chips = await shownTexts(page, 'chips');
-      expect(chips, `${charms.join(',')}에 ${group.join(',')}`).toEqual(group.map((id) => chipLook(offerChip(charms, id))));
+      expect(chips, where).toEqual(group.flatMap((id) => (offerChip(charms, id) ? [chipLook(offerChip(charms, id))] : [])));
       for (const chip of chips) expect(chip.text).not.toMatch(/[+-]0\.0%/);
-      expect(await hiddenTexts(page, KEY, { from: '부적 가게' }), `${group.join(',')}가 나온 가게`).toEqual([]);
+      expect(await chipScales(page), `${where}: 줄이지 않은 글자`).toEqual(chips.map(() => 1));
+      expect(await hiddenTexts(page, KEY, { from: '부적 가게' }), `${where}가 나온 가게`).toEqual([]);
+      expect(await textsOutsideCards(page, KEY, '부적 가게'), `${where}가 나온 가게의 줄`).toEqual([]);
     }
+  }
+});
+
+it('행운 슬롯: 붙인 부적의 강화 칸에는 강화하면 벌이가 어떻게 바뀌는지가 적힌다', async ({ page }) => {
+  it.slow();
+  await openApp(page);
+  await startScene(page, KEY);
+  // 덤 스핀, 확률, 줄, 상금 부적과 저금통. 강화 칸의 머리말 옆 좁은 자리에 들어가는지 본다.
+  const charms = ['extra', 'more-seven+', 'slant', 'gold-diamond++', 'piggy'];
+  const run = shopRun(99_999, charms, ['tall', 'crown', 'wide']);
+  await openShopWith(page, run);
+  for (let slot = 0; slot < charms.length; slot += 1) {
+    await tapSlot(page, slot);
+    await expect.poll(() => textPoint(page, KEY, BUBBLE_TEXT.upgrade), WAIT).not.toBeNull();
+    const chip = upgradeChip(charms, slot);
+    const expected = chip ? [chipLook(chip)] : [];
+    await expect.poll(() => shownTexts(page, 'bubbleChips'), { ...WAIT, message: `${charms[slot]}의 강화 칸` }).toEqual(expected);
+    expect(await bubbleTexts(page), `${charms[slot]}의 설명 창`).toEqual(offerTexts(run, slot));
+    expect(await chipScales(page), `${charms[slot]}: 줄이지 않은 글자`).toEqual([...expected, ...(await shownTexts(page, 'chips'))].map(() => 1));
+    expect(await hiddenTexts(page, KEY, { from: BUBBLE_TEXT.remove }), `${charms[slot]}의 설명 창`).toEqual([]);
+    await closeBubble(page);
   }
 });
 

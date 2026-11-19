@@ -4,6 +4,7 @@
  * 화면과 저장소 어느 쪽에도 기대지 않는 순수 함수들이다.
  */
 import { baseOf, CHARMS, charmOf, isUpgraded, type CharmInfo } from './rules';
+import { setOf, type CharmSet } from './sets';
 
 /** 도감에 실리는 부적의 수 */
 export const COLLECTION_SIZE = CHARMS.length;
@@ -75,4 +76,9 @@ export function collectionEntries(found: readonly string[]): CollectionEntry[] {
 export function entryText(entry: CollectionEntry): { name: string; description: string } {
   if (!entry.found) return { name: COLLECTION_TEXT.unknownName, description: COLLECTION_TEXT.unknownDescription };
   return { name: entry.charm.name, description: entry.charm.description };
+}
+
+/** 도감의 칸을 눌렀을 때 이름 옆에 적을 세트(sets.ts). 세트에 들지 않거나 아직 찾지 못한 부적이면 undefined */
+export function entrySet(entry: CollectionEntry): CharmSet | undefined {
+  return entry.found ? setOf(entry.charm.id) : undefined;
 }

@@ -2,9 +2,10 @@
  * 행운 슬롯의 가게와 돌리기 버튼에 적는 글, 그리고 붙인 부적의 설명 창에 놓이는 것들의 자리.
  * 규칙(rules.ts)이 낸 값을 화면에 적을 글과 자리로 바꾸기만 하는 순수 함수들이라, 화면 없이도 따져 볼 수 있다.
  */
+import { affectsPrize, expectedRound, type ExpectContext } from './expected';
 import {
   charmOf,
-  hitChance,
+  isMaxed,
   levelOf,
   refundOf,
   targetFor,
@@ -15,41 +16,68 @@ import {
   type RunState,
 } from './rules';
 
-// ───────── 줄이 맞을 확률의 미리 보기 ─────────
+// ───────── 상금의 미리 보기 ─────────
 
 /** 미리 보기 표의 빛깔: 오르면 good, 내리면 bad, 거의 그대로면 same */
 export type ChipTone = 'good' | 'bad' | 'same';
 
-export interface HitChip {
+export interface PreviewChip {
   text: string;
   tone: ChipTone;
 }
 
-/** 미리 보기 표의 머리말과, 달라지는 것이 없을 때 적는 말 */
-export const HIT_CHIP_TEXT = { label: '줄 확률', same: '그대로' } as const;
+/**
+ * 미리 보기 표의 머리말과, 달라지는 것이 없을 때 적는 말.
+ * 셈하는 것은 언제나 한 라운드에 받을 금화의 기댓값(expected.ts의 expectedRound)이 바뀌는 비율이다. 스핀의 수가 그대로인
+ * 부적이면 스핀 한 번의 평균 상금이 바뀌는 비율과 같고, 덤 스핀처럼 스핀의 수를 바꾸는 부적도 같은 잣대로 견줄 수 있다.
+ * 그래서 "평균 상금"이나 "라운드 상금"으로 나누지 않고, 라운드에 버는 금화라는 뜻의 "벌이" 하나로 적는다.
+ * 가게의 좁은 줄에서 가장 긴 이름(대각선 세 배) 옆에도 글자를 줄이지 않고 들어가는 길이이기도 하다.
+ */
+export const PRIZE_CHIP_TEXT = { label: '벌이', same: '그대로' } as const;
 
 /**
- * 한 줄이 맞을 확률이 before에서 after로(둘 다 0~1) 바뀔 때 작은 표에 적을 글.
- * 바뀌는 크기는 퍼센트의 차(15%에서 17%가 되면 +2.0%)로, 소수 첫째 자리까지 적는다.
+ * 기댓값이 before에서 after로 바뀔 때 작은 표에 적을 글.
+ * 바뀌는 비율이 10%보다 작으면 소수 첫째 자리까지("+4.2%"), 그보다 크면 정수로("+47%") 적는다.
  * 그 자리까지 반올림해서 0이 되는 작은 차이는 "+0.0%"라고 적지 않고 그대로라고 적는다.
  */
-export function hitChip(before: number, after: number): HitChip {
-  const tenths = Math.round((after - before) * 1000);
-  if (tenths === 0 || !Number.isFinite(tenths)) {
-    return { text: `${HIT_CHIP_TEXT.label} ${HIT_CHIP_TEXT.same}`, tone: 'same' };
-  }
-  const size = (Math.abs(tenths) / 10).toFixed(1);
-  return { text: `${HIT_CHIP_TEXT.label} ${tenths > 0 ? '+' : '-'}${size}%`, tone: tenths > 0 ? 'good' : 'bad' };
+export function prizeChip(before: number, after: number): PreviewChip {
+  const { label, same } = PRIZE_CHIP_TEXT;
+  const tenths = before > 0 ? Math.round((after / before - 1) * 1000) : NaN;
+  if (tenths === 0 || !Number.isFinite(tenths)) return { text: `${label} ${same}`, tone: 'same' };
+  const size = Math.abs(tenths) < 100 ? (Math.abs(tenths) / 10).toFixed(1) : String(Math.round(Math.abs(tenths) / 10));
+  return { text: `${label} ${tenths > 0 ? '+' : '-'}${size}%`, tone: tenths > 0 ? 'good' : 'bad' };
 }
 
 /**
- * 가게의 부적 id를 사서 붙이면 한 줄이 맞을 확률이 어떻게 바뀌는지. 확률 부적(kind가 odds)이 아니면 null이다.
- * 서로 다른 그림을 함께 늘리면 줄이 도로 덜 맞게 되기도 해서, 사기 전에 보여 준다.
+ * 부적을 before에서 after로 바꾸면 한 라운드에 받을 금화의 기댓값이 어떻게 바뀌는지. 저금통처럼 상금으로 셈할 수 없는
+ * 부적(changed가 그런 것)이면 null이다. context는 라운드의 변화 같은 것을 셈에 넣을 때 준다.
  */
-export function offerChip(charms: readonly string[], id: string): HitChip | null {
+function changeChip(
+  before: readonly string[],
+  after: readonly string[],
+  changed: string,
+  context?: ExpectContext,
+): PreviewChip | null {
+  if (!affectsPrize(changed)) return null;
+  return prizeChip(expectedRound(before, context), expectedRound(after, context));
+}
+
+/**
+ * 가게의 부적 id를 사서 붙이면 상금의 기댓값이 어떻게 바뀌는지. 지금 붙인 부적과 함께 셈하므로, 같은 부적도 무엇과
+ * 짝을 짓느냐에 따라 수가 다르다(서로 다른 그림을 함께 늘리면 도로 줄기도 한다). 셈할 수 없는 부적이면 null이다.
+ */
+export function offerChip(charms: readonly string[], id: string, context?: ExpectContext): PreviewChip | null {
   const charm = charmOf(id);
-  if (!charm || charm.kind !== 'odds') return null;
-  return hitChip(hitChance(charms), hitChance([...charms, charm.id]));
+  if (!charm) return null;
+  return changeChip(charms, [...charms, charm.id], charm.id, context);
+}
+
+/** 붙여 둔 slot번째 부적을 한 단계 강화하면 상금의 기댓값이 어떻게 바뀌는지. 셈할 수 없거나 강화할 수 없으면 null이다. */
+export function upgradeChip(charms: readonly string[], slot: number, context?: ExpectContext): PreviewChip | null {
+  const id = charms[slot];
+  if (id === undefined || !charmOf(id) || isMaxed(id)) return null;
+  const after = charms.map((charm, index) => (index === slot ? upgradedOf(charm) : charm));
+  return changeChip(charms, after, id, context);
 }
 
 // ───────── 돌리기 버튼 ─────────
@@ -114,8 +142,8 @@ export interface UpgradeOffer {
   description: string | null;
   /** 한 단계 더 강화하는 값. 끝까지 강화했으면 null */
   cost: number | null;
-  /** 확률 부적을 강화하면 한 줄이 맞을 확률이 어떻게 바뀌는지. 강화할 수 있는 확률 부적에만 있다. */
-  chip: HitChip | null;
+  /** 강화하면 상금의 기댓값이 어떻게 바뀌는지. 강화할 수 있고 상금으로 셈할 수 있는 부적에만 있다. */
+  chip: PreviewChip | null;
   /**
    * 강화하고 나면 가진 금화가 다음 라운드의 목표보다 적어지는지. 강화는 값이 커서, 있는 금화를 다 쓰면
    * 다음 라운드를 넘기기 어려워진다. 막지는 않고 머리말로 알리기만 한다.
@@ -143,7 +171,6 @@ export function bubbleShop(run: RunState, slot: number): BubbleShop | null {
   if (block === 'done') {
     return { refund, upgrade: { state: 'done', lead: BUBBLE_TEXT.done, description: null, cost: null, chip: null, tight: false } };
   }
-  const base = charmOf(id);
   const description = charmOf(upgradedOf(id))?.description ?? '';
   const cost = upgradeCostOf(id, run);
   if (block === 'coin') {
@@ -154,10 +181,7 @@ export function bubbleShop(run: RunState, slot: number): BubbleShop | null {
     // 알리는 글이 길어서 미리 보기 표는 놓지 않는다.
     return { refund, upgrade: { state: 'ready', lead: BUBBLE_TEXT.tight, description, cost, chip: null, tight: true } };
   }
-  const chip =
-    base?.kind === 'odds'
-      ? hitChip(hitChance(run.charms), hitChance(run.charms.map((charm, index) => (index === slot ? upgradedOf(charm) : charm))))
-      : null;
+  const chip = upgradeChip(run.charms, slot);
   return { refund, upgrade: { state: 'ready', lead: BUBBLE_TEXT.lead, description, cost, chip, tight: false } };
 }
 
@@ -194,6 +218,8 @@ export interface BubbleLayout {
   shop: { remove: Box; lead: Point; rule: number } | null;
   /** 강화하면 바뀌는 설명의 왼쪽 위와 강화 버튼. 강화할 것이 없으면(가게가 아니거나 이미 강화했으면) null */
   upgrade: { body: Point; button: Box } | null;
+  /** 세트의 한 줄(sets.ts)의 왼쪽 끝과 한가운데 높이. 세트에 들지 않는 부적이면 null */
+  set: Point | null;
 }
 
 /** 설명 창의 왼쪽 끝과 폭, 부적 줄과의 틈(꼬리가 들어가는 자리) */
@@ -202,6 +228,8 @@ const BUBBLE = { x: 16, gap: 6, pad: 10 } as const;
 const BUBBLE_BUTTON = { width: 70, height: 28, inset: 8, gap: 6 } as const;
 /** 설명 창의 높이: 이름과 설명만 있을 때와, 가게에서 강화 칸까지 있을 때 */
 const BUBBLE_HEIGHT = { plain: 44, shop: 74 } as const;
+/** 세트에 드는 부적의 설명 창은 맨 아래에 세트의 한 줄이 붙어 이만큼 길어진다. */
+const BUBBLE_SET_LINE = 16;
 
 /**
  * 설명 창의 자리. slotsTop은 부적 줄의 위쪽 끝이고, 창은 그 바로 위에 뜬다(아래쪽 끝이 늘 같은 높이다).
@@ -210,17 +238,20 @@ const BUBBLE_HEIGHT = { plain: 44, shop: 74 } as const;
  * 이미 강화한 부적의 창(done)도 크기와 떼는 버튼의 자리는 강화 칸이 있는 창(upgrade)과 같고, 강화 버튼만 없다.
  * 강화하면 창이 그 자리에서 done으로 바뀌는데, 강화 버튼을 잇달아 누르던 손이 떼는 버튼에 닿지 않게 하려는 것이다.
  */
-export function bubbleLayout(kind: BubbleKind, slotsTop: number, screenWidth: number): BubbleLayout {
-  const height = kind === 'plain' ? BUBBLE_HEIGHT.plain : BUBBLE_HEIGHT.shop;
+export function bubbleLayout(kind: BubbleKind, slotsTop: number, screenWidth: number, setLine = false): BubbleLayout {
+  const base = kind === 'plain' ? BUBBLE_HEIGHT.plain : BUBBLE_HEIGHT.shop;
+  const height = base + (setLine ? BUBBLE_SET_LINE : 0);
   const box: Box = { x: BUBBLE.x, y: slotsTop - BUBBLE.gap - height, width: screenWidth - BUBBLE.x * 2, height };
   const left = box.x + BUBBLE.pad;
   const title = { x: left, y: box.y + 6 };
+  // 세트의 한 줄은 원래의 창 아래에 덧붙는다. 그 위의 것들은 창의 위쪽 끝에서 잰 자리 그대로다.
+  const set = setLine ? { x: left, y: box.y + base + BUBBLE_SET_LINE / 2 - 4 } : null;
   if (kind === 'plain') {
-    return { box, title, body: { x: left, y: box.y + 24 }, textWidth: box.width - BUBBLE.pad * 2, shop: null, upgrade: null };
+    return { box, title, body: { x: left, y: box.y + 24 }, textWidth: box.width - BUBBLE.pad * 2, shop: null, upgrade: null, set };
   }
   const buttonLeft = box.x + box.width - BUBBLE_BUTTON.inset - BUBBLE_BUTTON.width;
   const button = (y: number): Box => ({ x: buttonLeft, y, width: BUBBLE_BUTTON.width, height: BUBBLE_BUTTON.height });
-  const shared = { box, title, body: { x: left, y: box.y + 23 }, textWidth: buttonLeft - BUBBLE_BUTTON.gap - left };
+  const shared = { box, title, body: { x: left, y: box.y + 23 }, textWidth: buttonLeft - BUBBLE_BUTTON.gap - left, set };
   const remove = button(box.y + 7);
   const rule = box.y + 38.5;
   if (kind === 'done') {

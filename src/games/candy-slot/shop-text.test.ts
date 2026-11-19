@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   CHARMS,
   discard,
-  hitChance,
   newRun,
   nextSpinTimes,
   refundOf,
@@ -21,17 +20,19 @@ import {
   bubbleShop,
   CHIP,
   chipPlace,
-  HIT_CHIP_TEXT,
-  hitChip,
   offerChip,
+  PRIZE_CHIP_TEXT,
+  prizeChip,
   SPIN_TEXT,
   spinLabel,
   timesText,
   SHOP_HINT,
   upgradableSlots,
+  upgradeChip,
   upgradeMarks,
   type BubbleKind,
 } from './shop-text';
+import { affectsPrize, expectedRound } from './expected';
 
 function shopping(coin: number, charms: string[]): RunState {
   return { ...newRun(), phase: 'shop', spinsLeft: 0, coin, charms, shop: { offers: [null, null, null], rerollCost: REROLL_COST } };
@@ -39,46 +40,74 @@ function shopping(coin: number, charms: string[]): RunState {
 
 const ODDS = CHARMS.filter((charm) => charm.kind === 'odds');
 
-describe('줄이 맞을 확률의 미리 보기', () => {
-  it('오르면 +, 내리면 -를 붙여 퍼센트의 차를 소수 첫째 자리까지 적는다', () => {
-    expect(hitChip(0.15, 0.171)).toEqual({ text: '줄 확률 +2.1%', tone: 'good' });
-    expect(hitChip(0.152, 0.144)).toEqual({ text: '줄 확률 -0.8%', tone: 'bad' });
-    expect(hitChip(0.09, 0.2)).toEqual({ text: '줄 확률 +11.0%', tone: 'good' });
-    expect(hitChip(0.3, 0.18)).toEqual({ text: '줄 확률 -12.0%', tone: 'bad' });
+/** 그 부적들에서 after로 바꾸면 미리 보기에 적혀야 하는 것: 한 라운드의 기댓값이 바뀌는 비율 */
+function chipFor(before: readonly string[], after: readonly string[]): ReturnType<typeof prizeChip> {
+  return prizeChip(expectedRound(before), expectedRound(after));
+}
+
+describe('벌이의 미리 보기', () => {
+  it('오르면 +, 내리면 -를 붙여 바뀌는 비율을 적는다: 10%보다 작으면 소수 첫째 자리까지, 크면 정수로', () => {
+    expect(prizeChip(10, 10.42)).toEqual({ text: '벌이 +4.2%', tone: 'good' });
+    expect(prizeChip(10, 9.92)).toEqual({ text: '벌이 -0.8%', tone: 'bad' });
+    expect(prizeChip(10, 14.7)).toEqual({ text: '벌이 +47%', tone: 'good' });
+    expect(prizeChip(10, 8.8)).toEqual({ text: '벌이 -12%', tone: 'bad' });
+    expect(prizeChip(4, 10)).toEqual({ text: '벌이 +150%', tone: 'good' });
+    // 반올림해서 10.0%가 되는 것부터는 정수로 적는다.
+    expect(prizeChip(100, 109.94).text).toBe('벌이 +9.9%');
+    expect(prizeChip(100, 109.96).text).toBe('벌이 +10%');
   });
 
   it('반올림해서 0이 되는 차이는 +0.0%라고 적지 않고 그대로라고 적는다', () => {
-    const same = { text: `${HIT_CHIP_TEXT.label} ${HIT_CHIP_TEXT.same}`, tone: 'same' };
-    expect(hitChip(0.15, 0.15)).toEqual(same);
-    expect(hitChip(0.15, 0.1504)).toEqual(same);
-    expect(hitChip(0.15, 0.1496)).toEqual(same);
-    // 반올림해서 0.1이 되는 것부터는 수로 적는다.
-    expect(hitChip(0.15, 0.1506).text).toBe('줄 확률 +0.1%');
-    expect(hitChip(0.15, 0.1494).text).toBe('줄 확률 -0.1%');
+    const same = { text: `${PRIZE_CHIP_TEXT.label} ${PRIZE_CHIP_TEXT.same}`, tone: 'same' };
+    expect(prizeChip(10, 10)).toEqual(same);
+    expect(prizeChip(10, 10.004)).toEqual(same);
+    expect(prizeChip(10, 9.996)).toEqual(same);
+    expect(prizeChip(0, 3)).toEqual(same);
+    // 반올림해서 0.1%가 되는 것부터는 수로 적는다.
+    expect(prizeChip(10, 10.006).text).toBe('벌이 +0.1%');
+    expect(prizeChip(10, 9.994).text).toBe('벌이 -0.1%');
     for (let step = -40; step <= 40; step += 1) {
-      const chip = hitChip(0.2, 0.2 + step * 0.00013);
+      const chip = prizeChip(20, 20 + step * 0.0013);
       expect(chip.text, String(step)).not.toMatch(/[+-]0\.0%/);
-      expect(chip.tone === 'same', String(step)).toBe(chip.text.endsWith(HIT_CHIP_TEXT.same));
+      expect(chip.tone === 'same', String(step)).toBe(chip.text.endsWith(PRIZE_CHIP_TEXT.same));
     }
   });
 
-  it('확률 부적에만 붙고, 적힌 수는 규칙이 내는 확률의 차와 같다', () => {
-    for (const charm of CHARMS) {
-      if (charm.kind !== 'odds') expect(offerChip([], charm.id), charm.id).toBeNull();
-    }
+  it('저금통 말고는 모든 부적에 붙고, 적힌 수는 지금 붙인 부적과 견준 한 라운드의 기댓값의 차와 같다', () => {
+    expect(offerChip([], 'piggy')).toBeNull();
+    expect(offerChip(['wide', 'extra'], 'piggy')).toBeNull();
     expect(offerChip([], 'no-such-charm')).toBeNull();
-    const owned: string[][] = [[], ...ODDS.map((charm) => [charm.id]), ODDS.slice(0, 4).map((charm) => upgradedOf(charm.id))];
+    const owned: string[][] = [
+      [],
+      ...ODDS.map((charm) => [charm.id]),
+      ODDS.slice(0, 4).map((charm) => upgradedOf(charm.id)),
+      ['gold-bell+', 'tall', 'twins', 'finale', 'rebound'],
+    ];
     for (const charms of owned) {
-      for (const charm of ODDS) {
-        if (charms.some((id) => id.startsWith(charm.id))) continue;
+      for (const charm of CHARMS) {
+        if (charm.id === 'piggy' || charms.some((id) => id.startsWith(charm.id))) continue;
         const chip = offerChip(charms, charm.id);
-        const delta = hitChance([...charms, charm.id]) - hitChance(charms);
-        const tenths = Math.round(delta * 1000);
-        expect(chip?.tone, `${charms.join(',')} + ${charm.id}`).toBe(tenths > 0 ? 'good' : tenths < 0 ? 'bad' : 'same');
-        if (tenths !== 0) expect(chip?.text).toBe(`줄 확률 ${tenths > 0 ? '+' : '-'}${(Math.abs(tenths) / 10).toFixed(1)}%`);
+        expect(chip, `${charms.join(',')} + ${charm.id}`).toEqual(chipFor(charms, [...charms, charm.id]));
         expect(chip?.text).not.toMatch(/[+-]0\.0%/);
       }
     }
+  });
+
+  it('같은 부적도 무엇과 짝을 짓느냐에 따라 오르기도 내리기도 한다', () => {
+    // 아무것도 없을 때 체리 듬뿍은 벌이를 올리지만, 7을 늘려 둔 판에서는 7을 덜 나오게 해서 벌이를 깎는다.
+    expect(offerChip([], 'more-cherry')?.tone).toBe('good');
+    const tones = new Set(
+      [['more-seven+++'], ['more-diamond+++', 'gold-diamond+++'], ['more-bell++', 'gold-bell+++']].map(
+        (charms) => offerChip(charms, 'more-cherry')?.tone,
+      ),
+    );
+    expect(tones.has('bad')).toBe(true);
+  });
+
+  it('덤 스핀은 스핀이 느는 만큼 라운드의 벌이가 는다', () => {
+    // 곱이 없으면 꼭 스핀의 수만큼이다: 6번에서 9번.
+    expect(offerChip([], 'extra')?.text).toBe('벌이 +50%');
+    expect(upgradeChip(['extra'], 0)?.text).toBe('벌이 +22%');
   });
 });
 
@@ -138,13 +167,15 @@ describe('붙인 부적의 설명 창', () => {
       expect(shop?.upgrade.lead).toBe(BUBBLE_TEXT.lead);
       expect(shop?.upgrade.description).toBe(charm.upgrades[0].description);
       expect(shop?.upgrade.cost).toBe(upgradeCostOf(charm.id));
-      // 확률 부적이면 강화했을 때 줄이 맞을 확률이 어떻게 바뀌는지도 낸다.
-      expect(shop?.upgrade.chip !== null, charm.id).toBe(charm.kind === 'odds');
+      // 강화하면 벌이가 어떻게 바뀌는지도 낸다(저금통은 벌이로 셈할 수 없어 없다).
+      expect(shop?.upgrade.chip !== null, charm.id).toBe(affectsPrize(charm.id));
+      expect(shop?.upgrade.chip ?? null, charm.id).toEqual(affectsPrize(charm.id) ? chipFor([charm.id], [upgradedOf(charm.id)]) : null);
       expect(bubbleKindOf(shop ?? null)).toBe('upgrade');
     }
     const stacked = ['more-cherry', 'more-clover'];
     const chip = bubbleShop(shopping(999, stacked), 1)?.upgrade.chip;
-    expect(chip).toEqual(hitChip(hitChance(stacked), hitChance(['more-cherry', 'more-clover+'])));
+    expect(chip).toEqual(chipFor(stacked, ['more-cherry', 'more-clover+']));
+    expect(chip).toEqual(upgradeChip(stacked, 1));
   });
 
   it('금화가 모자라면 까닭을 적고 값과 설명은 그대로 보여 준다', () => {
@@ -164,7 +195,7 @@ describe('붙인 부적의 설명 창', () => {
   it('강화하고 나면 다음 목표보다 적게 남을 때는 막지 않고 알리기만 한다', () => {
     const cost = upgradeCostOf('more-cherry');
     const next = targetFor(shopping(0, []), 2);
-    // 목표만큼은 남는다: 여느 머리말이고, 확률 부적이라 미리 보기 표가 놓인다.
+    // 목표만큼은 남는다: 여느 머리말이고, 미리 보기 표가 놓인다.
     const roomy = bubbleShop(shopping(cost + next, ['more-cherry']), 0)?.upgrade;
     expect(roomy).toMatchObject({ state: 'ready', lead: BUBBLE_TEXT.lead, tight: false });
     expect(roomy?.chip).not.toBeNull();
@@ -197,9 +228,12 @@ describe('붙인 부적의 설명 창', () => {
     expect(bubbleKindOf(shop ?? null)).toBe('upgrade');
     const twice = bubbleShop(upgrade(once, 0), 0);
     expect(twice?.upgrade).toMatchObject({ state: 'ready', description: twins?.upgrades[2].description, cost: upgradeCostOf('twins++') });
-    // 확률 부적은 단계마다 다음 단계의 확률을 미리 보여 준다.
+    // 단계마다 다음 단계의 벌이를 미리 보여 주고, 끝까지 강화한 부적에는 없다.
     const chip = bubbleShop(shopping(9999, ['more-cherry++']), 0)?.upgrade.chip;
-    expect(chip).toEqual(hitChip(hitChance(['more-cherry++']), hitChance(['more-cherry+++'])));
+    expect(chip).toEqual(chipFor(['more-cherry++'], ['more-cherry+++']));
+    expect(bubbleShop(shopping(9999, ['twins++']), 0)?.upgrade.chip).toEqual(chipFor(['twins++'], ['twins+++']));
+    expect(upgradeChip(['twins+++'], 0)).toBeNull();
+    expect(upgradeChip(['twins'], 1)).toBeNull();
   });
 
   it('끝까지 강화한 부적은 그렇다고 적고, 이름 옆의 별은 강화한 단계만큼이다', () => {
@@ -359,7 +393,7 @@ describe('가게의 안내', () => {
   it('안내와 설명 창의 글은 글꼴에 들어 있는 한글만 쓴다', () => {
     const known = fontSyllables();
     expect(known.size).toBe(2350);
-    for (const text of [SHOP_HINT, ...Object.values(BUBBLE_TEXT), ...Object.values(SPIN_TEXT), ...Object.values(HIT_CHIP_TEXT)]) {
+    for (const text of [SHOP_HINT, ...Object.values(BUBBLE_TEXT), ...Object.values(SPIN_TEXT), ...Object.values(PRIZE_CHIP_TEXT)]) {
       for (const letter of String(text).match(/[ㄱ-ㆎ가-힣]/g) ?? []) {
         expect(known.has(letter), `"${letter}" in "${text}"`).toBe(true);
       }
