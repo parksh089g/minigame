@@ -8,18 +8,22 @@ import {
   allyInterval,
   allySpot,
   buyCard,
+  closedShop,
   dismissAlly,
   fruitFor,
   heatScale,
   joinAllies,
   moveAlly,
   openShop,
+  pairBonuses,
   placeAlly,
   reroll,
   starOf,
+  toggleLock,
   type Ally,
   type BuyAt,
   type BuyMode,
+  type PairBonus,
   type ShopCard,
 } from './allies';
 import {
@@ -186,6 +190,8 @@ export interface Input {
   join?: { from: number; to: number };
   /** 가게에서 내보낸 동료의 자리(state.allies의 차례) */
   dismiss?: number;
+  /** 가게에서 묶거나 푼 카드의 자리(0부터). 묶어 둔 카드는 다시 뽑아도, 다음 날에도 그 자리에 남는다. */
+  lock?: number;
   /** 가게의 카드를 다시 뽑는지 */
   reroll?: boolean;
   /** 가게를 닫고 다음 날로 가는지 */
@@ -220,6 +226,8 @@ export type SimEvent =
   /** 동료를 내보내고 열매를 돌려받았다. x는 그 동료가 섰던 자리다. */
   | { type: 'dismiss'; id: AllyId; refund: number; x: number; y: number }
   | { type: 'reroll' }
+  /** 가게의 카드를 묶거나 풀었다. locked는 바뀐 뒤의 묶임이다. */
+  | { type: 'lock'; card: number; locked: boolean }
   | { type: 'over' };
 
 /** 텃밭의 맨 아래(시뮬레이션 y). 이보다 아래로 간 물방울은 버린다. */
@@ -572,9 +580,12 @@ export function allyTarget(state: RunState, ally: Pick<Ally, 'id' | 'cell'>): En
   return target;
 }
 
-/** 판에 선 동료들이 쏜다. 별이 높을수록 세고 빠르게 쏜다. */
+/** 판에 선 동료들이 쏜다. 별이 높을수록 세고 빠르게 쏜다. 짝 효과(PAIRS)의 덤도 받는다. */
 function fireAllies(state: RunState, dt: number, events: SimEvent[]): void {
-  for (const ally of state.allies) {
+  // 짝 효과의 덤은 칸으로만 정해진다. 이번 걸음에 쏘는 동료가 있을 때 한 번만 센다.
+  let bonuses: PairBonus[] | null = null;
+  for (let index = 0; index < state.allies.length; index += 1) {
+    const ally = state.allies[index];
     ally.fireIn -= dt;
     if (ally.fireIn > 0) continue;
     const target = allyTarget(state, ally);
@@ -589,9 +600,11 @@ function fireAllies(state: RunState, dt: number, events: SimEvent[]): void {
     const time = Math.hypot(target.x - spot.x, target.y - spot.y) / def.shotSpeed;
     const stopY = FIELD.depth - ENEMIES[target.kind].radius;
     const y = Math.min(stopY, target.y + paceOf(target, state.stats.pace) * time);
+    bonuses ??= pairBonuses(state.allies);
+    const bonus = bonuses[index];
     // 빠른 손은 동료도 함께 빠르게 한다.
-    ally.fireIn += allyInterval(ally.id, star) * (state.stats.interval / GUN.interval);
-    const damage = allyDamage(ally.id, star, state.stats.damage, state.stats.allyPower);
+    ally.fireIn += (allyInterval(ally.id, star) * (state.stats.interval / GUN.interval)) / (1 + bonus.rate);
+    const damage = allyDamage(ally.id, star, state.stats.damage, state.stats.allyPower) * (1 + bonus.damage);
     addShot(state, spot, clampAim(Math.atan2(y - spot.y, target.x - spot.x)), damage, false, ally.id, def.shotSpeed);
     events.push({ type: 'fire', ally: ally.id, cell: ally.cell });
   }
@@ -679,6 +692,11 @@ export function step(state: RunState, dt: number, input: Input = NO_INPUT): SimE
   state.t += dt;
 
   if (state.shopping) {
+    // 묶기를 다시 뽑기보다 먼저 해서, 한 걸음에 둘 다 누르면 묶은 카드가 남는다.
+    if (input.lock !== undefined) {
+      const locked = toggleLock(state, input.lock);
+      if (locked !== null) events.push({ type: 'lock', card: input.lock, locked });
+    }
     if (input.reroll && reroll(state)) events.push({ type: 'reroll' });
     if (input.move) {
       const moved = moveAlly(state, input.move.ally, input.move.cell);
@@ -702,7 +720,7 @@ export function step(state: RunState, dt: number, input: Input = NO_INPUT): SimE
     }
     if (input.ready) {
       state.shopping = false;
-      state.shop = [];
+      state.shop = closedShop(state.shop);
       state.restLeft = Math.min(state.restLeft, DAY.afterPick);
     }
   }

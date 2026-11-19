@@ -99,14 +99,21 @@ function run(state: RunState, seconds: number): SimEvent[] {
 }
 
 describe('별과 합치기', () => {
-  it('두 마리면 ★2, 넷이면 ★3, 여덟이면 ★4, 열여섯이면 ★5이고 그 위로는 오르지 않는다', () => {
-    expect([0, 1, 2, 3, 4, 7, 8, 15, 16, 40].map(starOf)).toEqual([0, 1, 2, 2, 3, 3, 4, 4, 5, 5]);
-    expect([1, 2, 3, 4, 5].map(copiesFor)).toEqual([1, 2, 4, 8, 16]);
+  it('두 마리면 ★2, 셋이면 ★3, 다섯이면 ★4, 여덟이면 ★5이고 그 위로는 오르지 않는다', () => {
+    expect([0, 1, 2, 3, 4, 5, 7, 8, 16, 40].map(starOf)).toEqual([0, 1, 2, 3, 3, 4, 4, 5, 5, 5]);
+    expect([1, 2, 3, 4, 5].map(copiesFor)).toEqual([1, 2, 3, 5, 8]);
     expect(nextStar(1)).toEqual({ have: 1, need: 2 });
-    expect(nextStar(5)).toEqual({ have: 5, need: 8 });
-    expect(nextStar(16)).toBeNull();
-    expect(maxed(15)).toBe(false);
-    expect(maxed(16)).toBe(true);
+    expect(nextStar(4)).toEqual({ have: 4, need: 5 });
+    expect(nextStar(8)).toBeNull();
+    expect(maxed(7)).toBe(false);
+    expect(maxed(8)).toBe(true);
+  });
+
+  it('한 판에 버는 열매로 ★5까지 닿는다: 아흐레를 지키고 받는 열매로 가장 싼 동료를 ★5로 모을 수 있다 (11차 검토)', () => {
+    let fruit = SHOP.purse;
+    for (let day = 1; day <= 9; day += 1) fruit += fruitFor(day);
+    const cheapest = Math.min(...ALLY_ORDER.map((id) => ALLIES[id].price));
+    expect(copiesFor(ALLY_STARS.max) * cheapest).toBeLessThanOrEqual(fruit);
   });
 
   it('별이 오를수록 세고 빠르게 쏘고, 물총이 세지면 동료도 세진다', () => {
@@ -123,8 +130,8 @@ describe('별과 합치기', () => {
   it('같은 동료를 합치면 하나로 모이고 별이 오른 때를 알려 주며, 다 모은 뒤로는 늘지 않는다', () => {
     const state = quiet([['frog', 1], ['sunflower', 1]]);
     expect(mergeAlly(state, 'frog')?.star).toBe(2);
-    expect(mergeAlly(state, 'frog')?.star).toBe(0);
     expect(mergeAlly(state, 'frog')?.star).toBe(3);
+    expect(mergeAlly(state, 'frog')?.star).toBe(0);
     // 없는 동료에는 합칠 수 없다.
     expect(mergeAlly(state, 'mint')).toBeNull();
     // 칸의 차례대로 선다.
@@ -162,20 +169,39 @@ describe('텃밭의 칸', () => {
     expect(cellAt(13)).toEqual({ col: 5, row: 1 });
   });
 
-  it('동료마다 모양이 있고(세로, 가로, ㄴ자), 칸을 많이 차지할수록 한 마리가 세다', () => {
+  it('동료마다 모양이 있고(세로, 가로, ㄴ자, 네모), 칸을 많이 차지할수록 한 마리가 세다', () => {
     for (const id of ALLY_ORDER) expect(ALLIES[id].shape.length, id).toBe(ALLIES[id].cells);
     const three = ALLY_ORDER.filter((id) => ALLIES[id].cells === 3).map((id) => shapeSize(id));
     // 세 칸짜리는 세로, 가로, ㄴ자가 하나씩이다.
     expect(three).toEqual(expect.arrayContaining([{ width: 1, height: 3 }, { width: 3, height: 1 }, { width: 2, height: 2 }]));
     const power = (id: AllyId): number => allyDamage(id, 1, 20, 1) / ALLIES[id].interval;
     const sizes = new Set(ALLY_ORDER.map((id) => ALLIES[id].cells));
-    expect([...sizes].sort()).toEqual([1, 2, 3]);
+    expect([...sizes].sort()).toEqual([1, 2, 3, 4]);
+    expect(shapeSize('toad')).toEqual({ width: 2, height: 2 });
     const by = (cells: number): AllyId[] => ALLY_ORDER.filter((id) => ALLIES[id].cells === cells);
     const most = (ids: AllyId[]): number => Math.max(...ids.map(power));
     expect(most(by(2))).toBeGreaterThan(most(by(1)));
     expect(most(by(3))).toBeGreaterThan(most(by(2)));
+    expect(most(by(4))).toBeGreaterThan(most(by(3)));
     // 큰 동료는 값도 더 비싸다.
     for (const big of by(3)) for (const small of by(1)) expect(ALLIES[big].price).toBeGreaterThan(ALLIES[small].price);
+    for (const big of by(4)) for (const small of by(3)) expect(ALLIES[big].price).toBeGreaterThan(ALLIES[small].price);
+  });
+
+  it('뒤에 나오는 사마귀와 두꺼비는 고슴도치보다 열매와 칸 하나에 드는 힘이 조금 낫다', () => {
+    const power = (id: AllyId): number => allyDamage(id, 1, 20, 1) / ALLIES[id].interval;
+    const perFruit = (id: AllyId): number => power(id) / ALLIES[id].price;
+    const perCell = (id: AllyId): number => power(id) / ALLIES[id].cells;
+    for (const id of ['mantis', 'toad'] as const) {
+      expect(ALLIES[id].fromDay, id).toBeGreaterThan(ALLIES.hedgehog.fromDay);
+      // 조금 낫지만 많이 낫지는 않다(3할 안쪽).
+      expect(perFruit(id) / perFruit('hedgehog'), id).toBeGreaterThan(1);
+      expect(perFruit(id) / perFruit('hedgehog'), id).toBeLessThan(1.3);
+      expect(perCell(id) / perCell('hedgehog'), id).toBeGreaterThan(1);
+      expect(perCell(id) / perCell('hedgehog'), id).toBeLessThan(1.3);
+    }
+    // 두꺼비는 한 마리로는 가장 세다.
+    for (const id of ALLY_ORDER) if (id !== 'toad') expect(power('toad'), id).toBeGreaterThan(power(id));
   });
 
   it('모양은 밭 안에서 한쪽에만 서고, 물총을 넘어 양쪽에 걸치지 않는다', () => {
@@ -187,6 +213,16 @@ describe('텃밭의 칸', () => {
     expect(shapeCells('hedgehog', 0)).toEqual([0, 8, 9]);
     expect(shapeCells('hedgehog', 3)).toBeNull();
     expect(shapeCells('frog', 7)).toBeNull();
+    // 네모난 네 칸은 위의 두 줄에서만 서고(맨 아래 줄에서는 아래로 넘친다), 한쪽 안에서만 선다.
+    expect(shapeCells('toad', 0)).toEqual([0, 1, 8, 9]);
+    expect(shapeCells('toad', 10)).toEqual([10, 11, 18, 19]);
+    expect(shapeCells('toad', 12)).toEqual([12, 13, 20, 21]);
+    expect(shapeCells('toad', 3)).toBeNull();
+    expect(shapeCells('toad', 7)).toBeNull();
+    expect(shapeCells('toad', 16)).toBeNull();
+    expect(shapeCells('toad', 22)).toBeNull();
+    expect(shapeCells('mantis', 6)).toEqual([6, 14, 22]);
+    expect(shapeCells('mantis', 14)).toBeNull();
     expect(shapeCells('can', 16)).toBeNull();
     expect(shapeCells('sunflower', -1)).toBeNull();
     expect(shapeCells('sunflower', 24)).toBeNull();
@@ -198,9 +234,10 @@ describe('텃밭의 칸', () => {
 
   it('누르기만 하면 물총에 가까운 빈칸부터 서고, 끌어다 놓으면 놓은 칸에 선다', () => {
     const state = quiet([]);
-    expect(placeAlly(state, 'sunflower')?.cell).toBe(3);
-    expect(placeAlly(state, 'sunflower')?.cell).toBe(4);
-    expect(placeAlly(state, 'sunflower')?.cell).toBe(11);
+    // 참새끼리는 짝이 아니라서 물총에 가까운 차례대로 선다.
+    expect(placeAlly(state, 'sparrow')?.cell).toBe(3);
+    expect(placeAlly(state, 'sparrow')?.cell).toBe(4);
+    expect(placeAlly(state, 'sparrow')?.cell).toBe(11);
     // 놓은 칸이 비어 있으면 그 칸에, 겹치면 놓지 않는다.
     expect(placeAlly(state, 'cactus', 1, 0)?.cell).toBe(0);
     expect(placeAlly(state, 'hedgehog', 1, 2)).toBeNull();
@@ -208,6 +245,28 @@ describe('텃밭의 칸', () => {
     expect(cellsValid(state.allies)).toBe(true);
     expect(state.allies.map((ally) => ally.cell)).toEqual([0, 3, 4, 5, 11]);
     expect(freeCells(state.allies)).toBe(CELL_COUNT - 9);
+  });
+
+  it('두꺼비(2 × 2)는 물총에 가까운 네모난 빈자리에 서고, 자리가 없으면 서지 못한다', () => {
+    const state = quiet([]);
+    // 물총 바로 옆 두 줄(왼쪽 2·3·10·11)이 가장 가깝다.
+    expect(placeAlly(state, 'toad')?.cell).toBe(2);
+    // 다음은 오른쪽 4·5·12·13
+    expect(placeAlly(state, 'toad')?.cell).toBe(4);
+    expect(state.allies.map((ally) => shapeCells(ally.id, ally.cell))).toEqual([
+      [2, 3, 10, 11],
+      [4, 5, 12, 13],
+    ]);
+    // 사마귀(세로 3칸)는 두꺼비 둘을 피해 세 줄이 다 빈 곳에 선다.
+    expect(placeAlly(state, 'mantis')?.cell).toBe(1);
+    // 물뿌리개(세로 2칸)로 위의 두 줄을 채우면, 맨 아래 줄만 남은 곳에는 네모가 들어가지 않는다.
+    const low = quiet([]);
+    for (const cell of [0, 1, 2, 3, 4, 5, 6, 7]) placeAlly(low, 'can', 1, cell);
+    expect(freeCells(low.allies)).toBe(8);
+    expect(canPlace(low, 'toad')).toBe(false);
+    expect(placeAlly(low, 'toad', 1, 16)).toBeNull();
+    expect(canPlace(low, 'pumpkin')).toBe(true);
+    expect(cellsValid(state.allies)).toBe(true);
   });
 
   it('빈칸이 모자라거나 모양이 들어갈 자리가 없으면 새로 놓을 수 없다', () => {
@@ -248,7 +307,7 @@ describe('텃밭의 칸', () => {
   it('가게가 열려 있으면 밭의 동료를 다른 칸으로 옮기고, 같은 동료끼리 합친다', () => {
     const state = shopAt(30);
     placeAlly(state, 'frog', 1, 0);
-    placeAlly(state, 'frog', 3, 16);
+    placeAlly(state, 'frog', 4, 16);
     placeAlly(state, 'sunflower', 1, 3);
     // 자기 칸과 겹쳐도 옮길 수 있다(한 칸 오른쪽으로).
     expect(fitsAt(state.allies, 'frog', 1, 0)).toBe(true);
@@ -262,16 +321,16 @@ describe('텃밭의 칸', () => {
     // 다른 동료와 겹치거나 밭 밖으로 나가면 옮기지 않는다.
     expect(moveAlly(state, 0, 2)).toBeNull();
     expect(moveAlly(state, 0, 7)).toBeNull();
-    // 같은 동료끼리 합치면 하나가 되고 칸이 빈다. 1 + 3마리면 ★3
+    // 같은 동료끼리 합치면 하나가 되고 칸이 빈다. 1 + 4마리면 ★4
     expect(canJoin(state, 0, 1)).toBe(false);
     const joined = step(state, DT, { aim: null, storm: false, join: { from: 0, to: 2 } });
-    expect(joined).toContainEqual({ type: 'join', id: 'frog', star: 3, ...allySpot({ id: 'frog', cell: 16 }) });
+    expect(joined).toContainEqual({ type: 'join', id: 'frog', star: 4, ...allySpot({ id: 'frog', cell: 16 }) });
     expect(state.allies.map((ally) => [ally.id, ally.cell, ally.copies])).toEqual([
       ['sunflower', 3, 1],
-      ['frog', 16, 4],
+      ['frog', 16, 5],
     ]);
     // 다 모은 수를 넘게는 합치지 않는다.
-    placeAlly(state, 'frog', 13, 0);
+    placeAlly(state, 'frog', 4, 0);
     expect(canJoin(state, 0, 2)).toBe(false);
     // 가게가 닫혀 있으면 옮기지도 합치지도 않는다.
     skipShop(state);
@@ -396,6 +455,14 @@ describe('동료 가게', () => {
       if (ALLIES[id].fromDay > 1) expect(pool(ALLIES[id].fromDay - 1)).not.toContain(id);
     }
     expect(pool(99)).toEqual([...ALLY_ORDER]);
+    // 24일째 고슴도치 뒤로도 30일째에 사마귀, 40일째에 두꺼비가 새로 나온다.
+    expect(pool(29)).not.toContain('mantis');
+    expect(pool(30)).toContain('mantis');
+    expect(pool(39)).not.toContain('toad');
+    expect(pool(40).slice(-2)).toEqual(['mantis', 'toad']);
+    // 나오는 날 차례대로 놓여 있다.
+    const days = ALLY_ORDER.map((id) => ALLIES[id].fromDay);
+    expect(days).toEqual([...days].sort((a, b) => a - b));
     expect(drawShop(shopAt(1))).toHaveLength(SHOP.cards);
   });
 
@@ -440,17 +507,17 @@ describe('동료 가게', () => {
   });
 
   it('카드에 새 동료인지, 지금 별과 모은 수, 합치면 별이 오르는지 적는다', () => {
-    const state = quiet([['frog', 1], ['mint', 2], ['can', 16]]);
+    const state = quiet([['frog', 1], ['mint', 3], ['can', 8]]);
     expect(cardStatus(state, 'sunflower').text).toBe(SHOP_TEXT.fresh);
     expect(cardStatus(state, 'frog').text).toBe('사면 ★2!');
-    expect(cardStatus(state, 'mint').text).toBe('★2 · 2/4');
+    expect(cardStatus(state, 'mint').text).toBe('★3 · 3/5');
     expect(cardStatus(state, 'can').text).toBe('★5 다 모았어요');
     // 같은 동료가 여럿이면 가장 많이 모은 것에 합친다.
     placeAlly(state, 'mint');
-    expect(cardStatus(state, 'mint').text).toBe('★2 · 2/4');
+    expect(cardStatus(state, 'mint').text).toBe('★3 · 3/5');
   });
 
-  it('자동 플레이는 빈칸이 있으면 값진 동료를 새로 놓고, 칸이 차면 합치고, 살 것이 없으면 가게를 닫는다', () => {
+  it('자동 플레이는 사면 별이 오르는 동료를 먼저 합치고, 빈칸이 있으면 값진 동료를 새로 놓고, 칸이 차면 합치고, 살 것이 없으면 가게를 닫는다', () => {
     const state = shopAt(30, 3);
     state.fruit = 100;
     state.shop = [
@@ -461,6 +528,8 @@ describe('동료 가게', () => {
     expect(botShop(state)).toEqual({ buy: { card: 1, mode: 'place' } });
     expect(botShop(state, 'first')).toEqual({ buy: { card: 0, mode: 'place' } });
     placeAlly(state, 'mint', 1, 0);
+    // 박하가 하나 있으면 박하 카드를 사서 합친다(★2로 오른다).
+    expect(botShop(state)).toEqual({ buy: { card: 0, mode: 'merge' } });
     placeAlly(state, 'can', 1, 8);
     for (let cell = 1; cell < 8; cell += 1) placeAlly(state, 'cactus', 1, cell);
     expect(freeCells(state.allies)).toBe(0);
@@ -529,6 +598,29 @@ describe('동료마다의 솜씨', () => {
     expect(lone.hp).toBe(lone.maxHp);
   });
 
+  it('사마귀는 대장과 튼튼한 벌레를 베고 껍데기도 뚫으며, 두꺼비는 울타리에 가까운 벌레를 쳐서 늦춘다', () => {
+    const state = quiet([]);
+    const tough = put(state, 'snail', 60, 120, 500);
+    put(state, 'ant', 200, 300, 10);
+    expect(allyTarget(state, { id: 'mantis', cell: 0 })).toBe(tough);
+    const front = put(state, 'ant', 150, 310, 10);
+    expect(allyTarget(state, { id: 'toad', cell: 4 })).toBe(front);
+
+    const shell = quiet([['mantis', 1]]);
+    const beetle = put(shell, 'beetle', 100, 200);
+    run(shell, 1.5);
+    const hits = (beetle.maxHp - beetle.hp) / allyDamage('mantis', 1, shell.stats.damage, 1);
+    expect(hits).toBeGreaterThanOrEqual(1);
+    expect(hits).toBeCloseTo(Math.round(hits), 5);
+
+    const slow = quiet([['toad', 1]]);
+    const ant = put(slow, 'ant', 100, 250);
+    run(slow, 1);
+    expect(ant.hp).toBeLessThan(ant.maxHp);
+    expect(ant.slowLeft).toBeGreaterThan(0);
+    expect(ant.slow).toBeCloseTo(ALLIES.toad.chill?.slow ?? 0);
+  });
+
   it('겨눌 벌레가 없으면 쏘지 않고 기다렸다가, 벌레가 오면 바로 쏜다', () => {
     const state = quiet([['sunflower', 1], ['frog', 1]]);
     const idle = run(state, 1);
@@ -545,7 +637,7 @@ describe('동료마다의 솜씨', () => {
     expect([...ALLY_ORDER].sort()).toEqual(Object.keys(ALLIES).sort());
     for (const id of ALLY_ORDER) {
       expect(ALLIES[id].cells, id).toBeGreaterThanOrEqual(1);
-      expect(ALLIES[id].cells, id).toBeLessThanOrEqual(3);
+      expect(ALLIES[id].cells, id).toBeLessThanOrEqual(4);
       expect(ALLIES[id].name.length, id).toBeLessThanOrEqual(5);
       expect(ALLIES[id].blurb.length, id).toBeLessThanOrEqual(17);
       expect(ALLIES[id].price, id).toBeGreaterThan(0);

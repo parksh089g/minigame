@@ -4,13 +4,14 @@
  */
 import Phaser from 'phaser';
 import { mascotTexture } from '../../art/cosmetics';
-import { GAME_WIDTH, THEME_CSS } from '../../config';
+import { FONT_SIZE, GAME_WIDTH, THEME_CSS } from '../../config';
 import { addText } from '../../core/ui';
 import { store } from '../../core/store';
-import { allySpot, cellCorner, shapeCells, shapeSize, starOf, type Ally } from './allies';
+import { allySpot, cellCorner, pairLinks, shapeCells, shapeSize, starOf, type Ally } from './allies';
 import { ALLY_SHOT, allyTexture, ENEMY_TINT, enemyTexture, LOOK, TEX } from './art';
 import { ALLIES, CELL_COUNT, ENEMIES, GARDEN_CELLS, HOP, SHOOTER, type AllyId, type EnemyKind } from './data';
 import { toScreenY, type FieldLayout } from './layout';
+import { drawHeart } from './pair-mark';
 import { chargePhase, isBuried, type Enemy, type RunState, type SimEvent } from './sim';
 
 export { aimDots, GARDEN_HEIGHT, layoutField, toScreenY, toSim, type FieldLayout } from './layout';
@@ -54,10 +55,12 @@ interface AllyView {
 
 /**
  * 동료의 그림을 줄이는 배율. 칸을 많이 차지하는 동료일수록 크게 그리되(1칸, 2칸, 3칸),
- * 한 줄짜리 모양은 위아래 줄을 너무 가리지 않게 줄인다.
+ * 한 줄짜리 모양은 위아래 줄을 너무 가리지 않게 줄인다. 네모난 네 칸(2 × 2)은 세 칸보다 조금 더 크게 그려서
+ * 가장 큰 동료로 보이게 한다.
  */
 export function allyScale(id: AllyId): number {
-  const size = Math.min(1.08, 0.54 + ALLIES[id].cells * 0.18);
+  const cells = ALLIES[id].cells;
+  const size = Math.min(cells >= 4 ? 1.16 : 1.08, 0.54 + cells * 0.18);
   const rows = shapeSize(id).height;
   return Math.min(size, (rows * GARDEN_CELLS.cell + 14) / 38);
 }
@@ -85,6 +88,9 @@ export class FieldView {
   private readonly gun: Phaser.GameObjects.Image;
   private readonly shooter: Phaser.GameObjects.Image;
   private readonly allies = new Map<Ally, AllyView>();
+  /** 짝이 된 동료가 맞닿은 자리의 하트(짝 효과)와, 그때의 동료와 칸(바뀌면 다시 그린다) */
+  private readonly hearts: Phaser.GameObjects.Graphics;
+  private heartKey = '';
   private readonly particles: Particle[] = [];
   private clock = 0;
   /** 울타리가 갉혀서 흔들리는 남은 시간(초)과 갉힌 자리 */
@@ -100,6 +106,8 @@ export class FieldView {
     this.fence = scene.add.graphics().setDepth(depth + 3);
     this.bars = scene.add.graphics().setDepth(depth + 2.5);
     this.sparks = scene.add.graphics().setDepth(depth + 5);
+    // 동료의 그림 위, 별 글자 밑
+    this.hearts = scene.add.graphics().setDepth(depth + 4.5);
 
     const shooterY = toScreenY(layout, SHOOTER.y);
     this.shooter = scene.add
@@ -459,8 +467,9 @@ export class FieldView {
           .setOrigin(0.5, 1)
           .setScale(scale)
           .setDepth(this.depth + 4);
+        // 가장 작은 글자 크기(10px)보다 작게 쓰지 않는다(11차 검토 G16).
         const stars = addText(scene, spot.x, foot + ALLY_FOOT - 2, '', {
-          size: 9,
+          size: FONT_SIZE.small,
           color: THEME_CSS.accent,
           originX: 0.5,
           originY: 0.5,
@@ -502,6 +511,18 @@ export class FieldView {
       view.image.setAngle(sway).setPosition(x, baseY - (view.kick / 0.12) * 2.5);
       view.stars.setPosition(x, baseY + ALLY_FOOT - 2);
     });
+    this.drawHearts(state);
+  }
+
+  /** 짝이 된 동료가 맞닿은 자리에 하트를 그린다. 동료나 칸이 바뀔 때만 다시 그리고, 늘 천천히 깜박인다. */
+  private drawHearts(state: RunState): void {
+    const key = state.allies.map((ally) => `${ally.id}@${ally.cell}`).join(',');
+    if (key !== this.heartKey) {
+      this.heartKey = key;
+      this.hearts.clear();
+      for (const link of pairLinks(state.allies)) drawHeart(this.hearts, link.x, toScreenY(this.layout, link.y));
+    }
+    this.hearts.setAlpha(0.8 + 0.2 * Math.sin(this.clock * 3));
   }
 
   private drawBars(state: RunState): void {

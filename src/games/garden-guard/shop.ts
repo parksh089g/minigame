@@ -16,8 +16,10 @@ import {
   cellCorner,
   cellMap,
   fitsAt,
+  formsPair,
   mergeTarget,
   owns,
+  pairReady,
   refundFor,
   shapeCells,
   starOf,
@@ -25,9 +27,11 @@ import {
   type BuyAt,
   type BuyMode,
 } from './allies';
+import { openAllyInfo, type InfoPanel } from './ally-info';
 import { allyTexture, TEX } from './art';
-import { ALLIES, CELL_COUNT, FIELD, GARDEN_CELLS, SHOP, type AllyId } from './data';
-import { cardStatus, mergedStar, purseLine, SHOP_TEXT } from './shop-text';
+import { ALLIES, CELL_COUNT, FIELD, GARDEN_CELLS, PAIRS, SHOP, type AllyId } from './data';
+import { drawHeart } from './pair-mark';
+import { allyInfo, cardStatus, mergedStar, purseLine, SHOP_TEXT } from './shop-text';
 import type { RunState } from './sim';
 
 export { cardStatus, SHOP_TEXT } from './shop-text';
@@ -38,6 +42,12 @@ const CARD = { margin: 10, height: 46, gap: 5 } as const;
 const CHOICE = { width: 66, height: 18, gap: 4, top: 22 } as const;
 /** 카드 이름 옆의 칸 표시(작은 네모) */
 const PIP = { size: 6, gap: 2 } as const;
+/**
+ * 카드의 왼쪽 위 모서리에 걸친 자물쇠 단추. 동그라미(radius)는 카드 모서리에 반쯤 걸치고,
+ * 누르는 자리(hit, 네모의 한 변)는 손가락에 넉넉하게 동그라미보다 크며 카드 밖의 여백까지 닿는다.
+ * 위의 카드와 겹치지 않게 카드 사이의 틈에서 시작한다. 그림과 이름, 값은 가리지 않는다.
+ */
+const LOCK = { x: 5, y: 5, radius: 8, hit: 26 } as const;
 /** 아래의 단추 줄 */
 const BUTTON = { height: 30, gap: 8, top: 7 } as const;
 /** 카드 위의 글 한 줄 */
@@ -58,6 +68,16 @@ const ICON_SCALE = 0.68;
 const DRAG_START = 12;
 /** 끌고 있는 동료의 그림은 손가락보다 이만큼 위에 보이고, 놓을 자리도 그 그림이 가리키는 칸이다. 손가락에 가리지 않게 한다. */
 const DRAG_LIFT = 26;
+/**
+ * 카드나 밭의 동료를 움직이지 않고(DRAG_START 안에서) 이만큼(ms) 누르고 있으면 그 동료의 정보 창이 뜬다.
+ * 그 뒤에 손을 떼도 사거나 고르지 않는다. 그보다 먼저 끌기 시작하면 정보 창은 뜨지 않는다.
+ */
+const HOLD_MS = 450;
+/**
+ * 꾹 누른 것으로 치려면 손가락이 이 안(px)에 머물러야 한다. 끌기가 시작되는 거리(DRAG_START)보다 좁게 잡아서,
+ * 천천히 끌기 시작한 손가락(프레임이 느린 기기에서는 움직임이 띄엄띄엄 들어온다)이 끌기 전에 정보 창을 띄우지 않게 한다.
+ */
+const HOLD_SLOP = DRAG_START / 2;
 /** 끌 때 밭에 칠하는 색: 놓을 수 있는 자리, 놓을 수 없는 자리, 합치는 동료 */
 const DROP_COLOR = { place: THEME.mintDeep, blocked: THEME.coral, merge: THEME.pink } as const;
 
@@ -73,6 +93,8 @@ export interface ShopHandlers {
   /** 그 자리(0부터)의 카드를 합치거나(merge) 새로 놓아(place) 산다. 끌어다 놓았으면 놓은 칸이나 합칠 동료도 넘긴다. */
   buy(index: number, mode: BuyMode, at?: BuyAt): void;
   reroll(): void;
+  /** 그 자리(0부터)의 카드를 묶거나 푼다. 묶어 둔 카드는 다시 뽑아도, 다음 날에도 남는다. */
+  lock(index: number): void;
   /** 텃밭의 그 동료(state.allies의 차례)를 다른 칸(첫 칸)으로 옮긴다. */
   move(ally: number, cell: number): void;
   /** 텃밭의 같은 동료 둘을 합친다(from이 to에 합쳐진다). */
@@ -90,6 +112,8 @@ interface Drag {
   ghost: Phaser.GameObjects.Image;
   marks: Phaser.GameObjects.Graphics;
   label: Phaser.GameObjects.Text;
+  /** 끌고 있는 손가락. 다른 손가락이 움직이거나 떨어져도 끌던 것은 그대로 둔다(11차 검토 G15). */
+  pointer: number;
 }
 
 /** 끌던 것을 놓으면 할 일 */
@@ -107,9 +131,35 @@ export interface ShopPanel {
 type Faded = Phaser.GameObjects.GameObject & { setAlpha(alpha: number): unknown };
 
 /**
+ * 자물쇠 단추를 그린다. 묶었으면 짙은 라일락 동그라미에 닫힌 흰 자물쇠, 풀었으면 흰 동그라미에 고리가 열린 옅은 자물쇠다.
+ * (cx, cy)는 동그라미의 한가운데다.
+ */
+function drawLock(g: Phaser.GameObjects.Graphics, cx: number, cy: number, locked: boolean, pressed: boolean): void {
+  g.clear();
+  const y = cy + (pressed ? 1 : 0);
+  g.fillStyle(locked ? THEME.lilacDeep : THEME.card, 1);
+  g.fillCircle(cx, y, LOCK.radius);
+  g.lineStyle(1.5, locked ? THEME.lilacDeep : THEME.shadow, 1);
+  g.strokeCircle(cx, y, LOCK.radius);
+  const ink = locked ? THEME.card : THEME.faint;
+  // 몸통
+  g.fillStyle(ink, 1);
+  g.fillRoundedRect(cx - 4, y - 1, 8, 6, 1.5);
+  // 고리: 묶었으면 몸통에 꽂히고, 풀었으면 들려서 왼쪽이 떠 있다.
+  const lift = locked ? 0 : 2;
+  g.lineStyle(1.6, ink, 1);
+  g.beginPath();
+  g.arc(cx, y - 2.5 - lift, 2.6, Math.PI, 0, false);
+  g.strokePath();
+  g.lineBetween(cx + 2.6, y - 2.5 - lift, cx + 2.6, y - 1);
+  if (locked) g.lineBetween(cx - 2.6, y - 2.5, cx - 2.6, y - 1);
+}
+
+/**
  * 판 위(top과 bottom 사이)에 동료 가게를 띄운다. bottom은 울타리이고, 그 아래 텃밭은 가리지 않는다.
  * 처음 보는 동료의 카드는 누르면 바로 빈칸에 놓는다. 이미 있는 동료의 카드는 누르면 "합치기"와 "새로 놓기"가 나와서 고른다.
- * 텃밭의 동료를 누르면 왼쪽 아래 단추가 "내보내기"로 바뀐다. 판이 바뀌면 부른 쪽이 refresh로 다시 그린다.
+ * 텃밭의 동료를 누르면 왼쪽 아래 단추가 "내보내기"로 바뀐다. 카드 왼쪽 위의 자물쇠를 누르면 그 카드를 묶거나 푼다.
+ * 판이 바뀌면 부른 쪽이 refresh로 다시 그린다.
  * cleared가 있으면 방금 지킨 날의 알림을 맨 위에 적는다(판의 첫날 앞과 이어 한 판에서는 없다).
  */
 export function openShopPanel(
@@ -130,10 +180,26 @@ export function openShopPanel(
   const armed = (): boolean => !closed && scene.time.now - openedAt >= ARM_MS;
 
   // ---------------------------------------------------------- 끌어다 놓기
-  /** 누르고 있는 카드나 동료(아직 끌기 전). 손가락이 DRAG_START만큼 움직이면 끌기가 시작된다. */
-  let pending: { from: Drag['from']; id: AllyId; grip: readonly [number, number]; x: number; y: number; pointer: number } | null =
-    null;
+  /**
+   * 누르고 있는 카드나 동료(아직 끌기 전). 손가락이 DRAG_START만큼 움직이면 끌기가 시작되고(canDrag가 아니면 그냥 그친다),
+   * 움직이지 않고 HOLD_MS만큼 누르고 있으면 정보 창이 뜬다.
+   */
+  let pending: {
+    from: Drag['from'];
+    id: AllyId;
+    grip: readonly [number, number];
+    x: number;
+    y: number;
+    pointer: number;
+    canDrag: boolean;
+    /** 누른 때(performance.now()) */
+    at: number;
+    /** 손가락이 아직 HOLD_SLOP 안에 머물러 있는지. 한 번 벗어나면 정보 창은 뜨지 않는다. */
+    still: boolean;
+  } | null = null;
   let drag: Drag | null = null;
+  /** 떠 있는 동료 정보 창 */
+  let info: InfoPanel | null = null;
 
   /** 화면의 한 점이 가리키는 밭의 칸. 밭 밖이면 null */
   const cellUnder = (x: number, y: number): number | null => {
@@ -194,7 +260,12 @@ export function openShopPanel(
       g.fillRoundedRect(corner.x + 1, top + 1, GARDEN_CELLS.cell - 2, GARDEN_CELLS.cell - 2, 5);
       g.strokeRoundedRect(corner.x + 1, top + 1, GARDEN_CELLS.cell - 2, GARDEN_CELLS.cell - 2, 5);
     }
-    now.label.setText(drop.kind === 'merge' ? SHOP_TEXT.mergeSame : '').setPosition(x, y - DRAG_LIFT - 26);
+    // 놓으면 짝이 생기는 자리면 "짝!"이라고 알려 준다.
+    const ignore = now.from.kind === 'ally' ? now.from.index : -1;
+    const paired = drop.kind === 'place' && formsPair(current.allies, now.id, drop.cell, ignore);
+    now.label
+      .setText(drop.kind === 'merge' ? SHOP_TEXT.mergeSame : paired ? SHOP_TEXT.pair : '')
+      .setPosition(x, y - DRAG_LIFT - 26);
     now.ghost.setPosition(x, y - DRAG_LIFT);
   };
   const startDrag = (pointer: Phaser.Input.Pointer): void => {
@@ -204,6 +275,7 @@ export function openShopPanel(
       from: pending.from,
       id: pending.id,
       grip: pending.grip,
+      pointer: pending.pointer,
       ghost: scene.add.image(pointer.worldX, pointer.worldY, allyTexture(pending.id)).setScale(scale).setAlpha(0.9).setDepth(depth + 3),
       marks: scene.add.graphics().setDepth(depth + 2),
       label: addText(scene, pointer.worldX, pointer.worldY, '', {
@@ -229,16 +301,20 @@ export function openShopPanel(
   };
   const onMove = (pointer: Phaser.Input.Pointer): void => {
     if (drag) {
-      paintDrop(drag, pointer.worldX, pointer.worldY);
+      if (pointer.id === drag.pointer) paintDrop(drag, pointer.worldX, pointer.worldY);
       return;
     }
-    if (pending && pointer.id === pending.pointer && Math.hypot(pointer.worldX - pending.x, pointer.worldY - pending.y) > DRAG_START) {
-      startDrag(pointer);
+    if (!pending || pointer.id !== pending.pointer) return;
+    const moved = Math.hypot(pointer.worldX - pending.x, pointer.worldY - pending.y);
+    if (moved > HOLD_SLOP) pending.still = false;
+    if (moved > DRAG_START) {
+      if (pending.canDrag) startDrag(pointer);
+      else pending = null;
     }
   };
   const onUp = (pointer: Phaser.Input.Pointer): void => {
-    pending = null;
-    if (!drag) return;
+    if (pending && pointer.id === pending.pointer) pending = null;
+    if (!drag || pointer.id !== drag.pointer) return;
     const now = drag;
     const drop = dropAt(now, pointer.worldX, pointer.worldY);
     endDrag();
@@ -252,12 +328,56 @@ export function openShopPanel(
   scene.input.on(Phaser.Input.Events.POINTER_MOVE, onMove);
   scene.input.on(Phaser.Input.Events.POINTER_UP, onUp);
   scene.input.on(Phaser.Input.Events.POINTER_UP_OUTSIDE, onUp);
-  /** 그 자리(카드나 밭의 칸)를 누르면 끌기를 준비한다. 손가락이 움직이지 않고 떼면 누른 것이 된다. */
-  const grabbable = (zone: Phaser.GameObjects.Zone, from: Drag['from'], id: AllyId, grip: readonly [number, number]): void => {
+  /**
+   * 그 자리(카드나 밭의 칸)를 누르면 끌기를 준비한다. 손가락이 움직이지 않고 떼면 누른 것이 되고,
+   * 움직이지 않고 누르고 있으면 정보 창이 뜬다. canDrag가 아니면(열매가 모자란 카드) 끌 수는 없고 정보만 본다.
+   */
+  const grabbable = (
+    zone: Phaser.GameObjects.Zone,
+    from: Drag['from'],
+    id: AllyId,
+    grip: readonly [number, number],
+    canDrag = true,
+  ): void => {
     zone.on(Phaser.Input.Events.GAMEOBJECT_POINTER_DOWN, (pointer: Phaser.Input.Pointer) => {
-      if (!armed() || drag) return;
-      pending = { from, id, grip, x: pointer.worldX, y: pointer.worldY, pointer: pointer.id };
+      if (!armed() || drag || info) return;
+      pending = { from, id, grip, x: pointer.worldX, y: pointer.worldY, pointer: pointer.id, canDrag, at: performance.now(), still: true };
     });
+  };
+  /**
+   * 누른 채로 HOLD_MS가 지났는지 프레임마다 본다. 손을 떼거나 끌기 시작하면 pending이 비고, 손가락이 HOLD_SLOP을 벗어났으면 still이 꺼지므로 띄우지 않는다.
+   * 타이머(time.delayedCall)는 프레임이 느린 기기에서 게임 시간이 실제 시간보다 느리게 흘러 늦게 뜨므로, 실제 시각(performance.now())으로 잰다.
+   * scene.time.now는 그 프레임이 시작된 때여서, 느린 프레임에서는 누른 때가 한 프레임만큼 앞으로 잡혀 일찍 뜬다.
+   */
+  const onUpdate = (): void => {
+    if (pending && pending.still && !drag && !info && !closed && performance.now() - pending.at >= HOLD_MS) showInfo(pending.from, pending.id);
+  };
+  scene.events.on(Phaser.Scenes.Events.UPDATE, onUpdate);
+  // 장면의 이벤트는 장면을 다시 열어도 남으므로, 가게를 닫지 않은 채 장면이 끝나도 떼어 낸다.
+  scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => scene.events.off(Phaser.Scenes.Events.UPDATE, onUpdate));
+  /**
+   * 정보 창을 띄운다. 가게의 것은 모두 감춰서(감춘 누르는 자리는 눌리지 않는다) 누르고 있던 손을 떼도 사거나 고르지 않는다.
+   * 창을 닫으면 가게를 새로 그린다.
+   */
+  const showInfo = (from: Drag['from'], id: AllyId): void => {
+    pending = null;
+    const ally = from.kind === 'ally' ? current.allies[from.index] : undefined;
+    if (from.kind === 'ally' && !ally) return;
+    for (const object of objects) (object as Phaser.GameObjects.GameObject & Phaser.GameObjects.Components.Visible).setVisible(false);
+    const ring = ally
+      ? (shapeCells(ally.id, ally.cell) ?? []).map((cell) => {
+          const corner = cellCorner(cell);
+          return { x: corner.x, y: area.bottom + (corner.y - FIELD.depth), size: GARDEN_CELLS.cell };
+        })
+      : [];
+    info = openAllyInfo(scene, area, depth + 4, allyInfo(current, id, ally?.copies, ally ? from.index : undefined), ring, () => {
+      closeInfo();
+      if (!closed) build(current, false);
+    });
+  };
+  const closeInfo = (): void => {
+    info?.destroy();
+    info = null;
   };
 
   const build = (run: RunState, fade: boolean): void => {
@@ -327,7 +447,7 @@ export function openShopPanel(
           depth: 3,
           radius: 12,
           fill: card.sold ? THEME.bg : undefined,
-          border: (pressed && affordable) || picked ? THEME.pinkDeep : undefined,
+          border: (pressed && affordable) || picked ? THEME.pinkDeep : card.locked && !card.sold ? THEME.lilacDeep : undefined,
         });
       };
       draw(false);
@@ -358,8 +478,14 @@ export function openShopPanel(
         );
       }
       if (!picked) {
+        // 누르기만 해도 제 짝 효과가 맞는 자리에 서는 카드에는 설명 대신 그 짝 효과를 하트와 함께 적는다.
+        const paired = !card.sold && pairReady(run.allies, card.id);
+        if (paired) drawHeart(keep(scene.add.graphics().setDepth(depth)), CARD.margin + 46, y + 31);
         keep(
-          addText(scene, CARD.margin + 42, y + 25, ally.blurb, { size: FONT_SIZE.small, color: THEME_CSS.sub })
+          addText(scene, CARD.margin + (paired ? 53 : 42), y + 25, paired ? PAIRS[card.id].line : ally.blurb, {
+            size: FONT_SIZE.small,
+            color: paired ? THEME_CSS.pinkDeep : THEME_CSS.sub,
+          })
             .setDepth(depth)
             .setAlpha(fade),
         );
@@ -403,8 +529,24 @@ export function openShopPanel(
         rebuild();
       }).setDepth(depth);
       // 카드를 밭으로 끌어다 놓으면 그 자리에 선다(같은 동료 위에 놓으면 합쳐진다). 열매가 모자란 카드는 끌 수 없다.
-      if (!card.sold && run.fruit >= ally.price) grabbable(zone, { kind: 'card', index }, card.id, ally.shape[Math.floor(ally.shape.length / 2)]);
+      // 꾹 누르면 정보 창이 뜨는 것은 모든 카드가 같다.
+      grabbable(zone, { kind: 'card', index }, card.id, ally.shape[Math.floor(ally.shape.length / 2)], !card.sold && run.fruit >= ally.price);
       objects.push(zone);
+      // 사지 않은 카드의 왼쪽 위 자물쇠: 누르면 묶거나 푼다. 카드보다 위에 있어서 누른 손가락이 카드를 사거나 끌지 않는다.
+      if (!card.sold) {
+        const locked = card.locked === true;
+        const cx = CARD.margin + LOCK.x;
+        const cy = y + LOCK.y;
+        const lock = keep(scene.add.graphics().setDepth(depth + 1));
+        drawLock(lock, cx, cy, locked, false);
+        const drawPressed = (pressed: boolean): void => drawLock(lock, cx, cy, locked, pressed);
+        objects.push(
+          addTapZone(scene, cx - LOCK.hit / 2, y - CARD.gap, LOCK.hit, LOCK.hit, drawPressed, () => {
+            if (!armed()) return;
+            handlers.lock(index);
+          }).setDepth(depth + 1),
+        );
+      }
       if (picked) {
         const merged = mergedStar(run, card.id);
         const choices: Array<{ label: string; mode: BuyMode }> = [
@@ -571,12 +713,15 @@ export function openShopPanel(
       // 판이 바뀌면 끌던 것은 내려놓는다(다른 카드나 동료를 가리키게 될 수 있다).
       endDrag();
       pending = null;
+      closeInfo();
       build(run, false);
     },
     destroy: () => {
       closed = true;
       endDrag();
       pending = null;
+      closeInfo();
+      scene.events.off(Phaser.Scenes.Events.UPDATE, onUpdate);
       scene.input.off(Phaser.Input.Events.POINTER_MOVE, onMove);
       scene.input.off(Phaser.Input.Events.POINTER_UP, onUp);
       scene.input.off(Phaser.Input.Events.POINTER_UP_OUTSIDE, onUp);

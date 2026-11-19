@@ -9,7 +9,7 @@ import { MiniGameScene, type PauseExtra, type ResultStat } from '../../scenes/Mi
 import { LOOK, registerGardenTextures, TEX } from './art';
 import { ALLIES, ENEMIES, GARDEN_GAME_ID, GARDEN_SCENE, type EnemyKind } from './data';
 import { buildLobby } from './lobby';
-import { openShopPanel, teamInfo, type ClearedNote, type ShopPanel } from './shop';
+import { openShopPanel, SHOP_TEXT, teamInfo, type ClearedNote, type ShopPanel } from './shop';
 import {
   applyRun,
   bankSeeds,
@@ -71,6 +71,28 @@ const SAVE_EVERY = 10;
 const RESUME_HOLD = 1.2;
 /** 날을 지킨 뒤 동료 가게가 뜨기까지의 시간(초). 마지막 벌레가 쫓겨나는 것을 보여 주고 띄운다. */
 const SHOP_DELAY = 0.6;
+/**
+ * 빠르게 돌리기 버튼. 일시정지 버튼 오른쪽, 날 글자의 왼쪽에 놓인다. 누를 때마다 1배와 2배를 오간다.
+ * 고른 빠르기는 이 기기에 남아서 다음 판에도 그대로다.
+ */
+export const SPEED = { x: 44, y: 8, width: 24, height: 26, fast: 2, key: 'pocket-arcade-garden-speed' } as const;
+
+/** 이 기기에 남긴 빠르기(1 또는 2). 읽을 수 없으면 1이다. */
+export function loadSpeed(): number {
+  try {
+    return localStorage.getItem(SPEED.key) === String(SPEED.fast) ? SPEED.fast : 1;
+  } catch {
+    return 1;
+  }
+}
+
+function keepSpeed(speed: number): void {
+  try {
+    localStorage.setItem(SPEED.key, String(speed));
+  } catch {
+    // 저장할 곳이 없으면 이번 세션 동안만 유지된다.
+  }
+}
 
 /** 화면에 적는 글. 글꼴에 들어 있는 글자만 쓰는지 테스트가 확인한다. */
 export const TEXT = {
@@ -91,6 +113,8 @@ export const TEXT = {
   over: '울타리가 무너졌어요',
   fence: '울타리',
   backToLobby: '준비 화면으로',
+  /** 빠르기 버튼에 적는 지금의 빠르기 */
+  speed: (speed: number) => `×${speed}`,
   resumed: (day: number) => `${day}일째 이어서!`,
   /** 대장을 처음 물리친 날에 띄운다. 다음 판은 그다음 날부터 시작한다. */
   nextStart: (day: number) => `다음 판은 ${day}일째부터!`,
@@ -142,7 +166,7 @@ export class GardenGuardScene extends MiniGameScene {
   private stormAsked = false;
   /** 동료 가게 창과, 거기서 누른 것. 누른 것은 다음 걸음에 시뮬레이션으로 넘긴다. */
   private shop: ShopPanel | null = null;
-  private shopAsked: Pick<Input, 'buy' | 'reroll' | 'ready' | 'dismiss' | 'move' | 'join'> = {};
+  private shopAsked: Pick<Input, 'buy' | 'reroll' | 'ready' | 'dismiss' | 'move' | 'join' | 'lock'> = {};
   /** 동료 가게를 띄울 때(판 안의 초). 판의 첫날 앞과 이어 한 판은 0이라 바로 뜬다. */
   private shopAt = 0;
   /** 방금 지킨 날의 알림. 가운데에 띄우는 대신 가게 창의 맨 위에 적는다. */
@@ -158,6 +182,9 @@ export class GardenGuardScene extends MiniGameScene {
   private aimLine!: Phaser.GameObjects.Graphics;
   private stormButton?: PixelButton;
   private stormText?: Phaser.GameObjects.Text;
+  /** 판이 흐르는 빠르기(1 또는 SPEED.fast). 벌레, 동료, 물방울과 판 안의 시간이 모두 이만큼 빨리 간다. */
+  private speed = 1;
+  private speedButton?: PixelButton;
   private hint?: Phaser.GameObjects.Text;
   /** 첫날이 시작되면 조작 안내를 띄울지 */
   private hintPending = false;
@@ -193,6 +220,8 @@ export class GardenGuardScene extends MiniGameScene {
     this.seen.clear();
     this.stormButton = undefined;
     this.stormText = undefined;
+    this.speed = loadSpeed();
+    this.speedButton = undefined;
     this.hint = undefined;
     this.hintPending = false;
     this.tip = undefined;
@@ -334,6 +363,16 @@ export class GardenGuardScene extends MiniGameScene {
     // HUD 뒤를 바탕색으로 덮어서, 위에서 나타나는 벌레가 HUD 밑에서 걸어 나오게 한다.
     this.add.rectangle(0, 0, GAME_WIDTH, HUD_HEIGHT, THEME.bg).setOrigin(0, 0).setDepth(DEPTH.hudBack);
     this.addPauseButton();
+    this.speedButton = new PixelButton(this, {
+      x: SPEED.x,
+      y: SPEED.y,
+      width: SPEED.width,
+      height: SPEED.height,
+      label: TEXT.speed(this.speed),
+      style: this.speed > 1 ? 'pink' : 'neutral',
+      hitPadding: 3,
+      onTap: () => this.setSpeed(this.speed > 1 ? 1 : SPEED.fast),
+    });
     this.bars = this.add.graphics().setDepth(DEPTH.hud);
     this.dayText = addText(this, GAME_WIDTH / 2, 6, '', {
       size: 18,
@@ -379,6 +418,13 @@ export class GardenGuardScene extends MiniGameScene {
         stroke: THEME_CSS.white,
       }).setDepth(DEPTH.hud);
     }
+  }
+
+  /** 판이 흐르는 빠르기를 바꾸고 이 기기에 남긴다. */
+  private setSpeed(speed: number): void {
+    this.speed = speed;
+    keepSpeed(speed);
+    this.speedButton?.setLabel(TEXT.speed(speed)).setStyle(speed > 1 ? 'pink' : 'neutral');
   }
 
   /** 물벼락 버튼이 놓인 자리인지. 그 위를 누른 것은 겨누는 것으로 치지 않는다. */
@@ -474,7 +520,9 @@ export class GardenGuardScene extends MiniGameScene {
       this.refreshHud();
       return;
     }
-    this.pending += frame;
+    // 빠르게 돌리면 한 프레임에 판의 시간이 그만큼 더 흐른다(걸음의 길이는 그대로, 걸음 수가 는다).
+    const sim = frame * this.speed;
+    this.pending += sim;
     if (this.hint && state.dayTime > HINT.seconds) this.dropHint();
 
     const input: Input = {
@@ -487,11 +535,15 @@ export class GardenGuardScene extends MiniGameScene {
       this.pending -= STEP;
       const events = step(state, STEP, input);
       stepped = true;
-      // 물벼락과 가게에서 누른 것은 한 번만 넘긴다.
+      // 물벼락과 가게에서 누른 것은 한 번만 넘긴다. 한 프레임에 여러 걸음이 돌아도(초당 30번 그리는 기기) 두 번 들어가지 않는다(11차 검토 G12).
       input.storm = false;
       input.buy = undefined;
       input.reroll = undefined;
       input.ready = undefined;
+      input.move = undefined;
+      input.join = undefined;
+      input.dismiss = undefined;
+      input.lock = undefined;
       if (events.length > 0) this.react(events);
     }
     // 화면이 빨리 바뀌는 기기에서는 한 프레임에 한 걸음도 못 갈 때가 있다. 그때 누른 것은 다음 프레임으로 넘긴다.
@@ -500,7 +552,7 @@ export class GardenGuardScene extends MiniGameScene {
       this.shopAsked = {};
     }
     if (state.shopping && !this.shop && state.t >= this.shopAt) this.openShop(state);
-    this.view.sync(state, frame);
+    this.view.sync(state, sim);
     this.drawAim(state);
     this.refreshHud();
     if (state.phase === 'over') this.endRun();
@@ -612,6 +664,13 @@ export class GardenGuardScene extends MiniGameScene {
           this.shop?.refresh(this.run as RunState);
           this.saveRun();
           break;
+        case 'lock':
+          sfx.click();
+          this.shopToast(event.locked ? SHOP_TEXT.locked : SHOP_TEXT.unlocked);
+          this.shop?.refresh(this.run as RunState);
+          // 묶은 것이 저장에 남아야 이어 해도 그 카드가 남는다.
+          this.saveRun();
+          break;
         case 'dayStart': {
           this.closeShop();
           if (this.hintPending) this.showHint();
@@ -683,6 +742,9 @@ export class GardenGuardScene extends MiniGameScene {
         },
         reroll: () => {
           this.shopAsked = { ...this.shopAsked, reroll: true };
+        },
+        lock: (index) => {
+          this.shopAsked = { ...this.shopAsked, lock: index };
         },
         ready: () => {
           sfx.click();

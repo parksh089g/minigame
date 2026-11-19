@@ -102,7 +102,8 @@ const SHOT_SHAPE: Record<keyof Shot, Kind> = {
 };
 
 const ALLY_SHAPE: Record<keyof Ally, Kind> = { id: 'string', copies: 'number', fireIn: 'number', cell: 'number' };
-const CARD_SHAPE: Record<keyof ShopCard, Kind> = { id: 'string', sold: 'boolean' };
+/** 가게의 카드. 묶임(locked)은 묶기가 생기기 전에 적은 판에는 없어서 따로 본다(isCard). */
+const CARD_SHAPE: Record<Exclude<keyof ShopCard, 'locked'>, Kind> = { id: 'string', sold: 'boolean' };
 
 const SPAWN_SHAPE: Record<keyof Spawn, Kind> = { at: 'number', kind: 'string', x: 'number' };
 
@@ -171,6 +172,11 @@ const LIMIT = {
   list: 4000,
   /** 동료 거름의 배율의 위쪽 끝 */
   allyPower: 100,
+  /**
+   * 동료 하나에 모은 수의 위쪽 끝. ★5가 열여섯 마리이던 때 적은 판도 읽도록 그때의 끝으로 두고,
+   * 읽은 뒤에 지금의 ★5(copiesFor(ALLY_STARS.max))로 줄인다.
+   */
+  copies: 16,
 } as const;
 
 const inRange = (value: unknown, low: number, high: number): boolean =>
@@ -200,7 +206,7 @@ function valuesFit(state: Record<string, unknown>): boolean {
     (state.queue as unknown[]).length <= LIMIT.list &&
     (state.enemies as unknown[]).length <= LIMIT.list &&
     (state.shots as unknown[]).length <= LIMIT.list &&
-    (state.allies as Array<Record<string, number>>).every((ally) => inRange(ally.copies, 1, copiesFor(ALLY_STARS.max))) &&
+    (state.allies as Array<Record<string, number>>).every((ally) => inRange(ally.copies, 1, LIMIT.copies)) &&
     (state.shop as unknown[]).length <= SHOP.cards &&
     // 가게는 날을 지키고 쉬는 동안(판의 첫날 앞도)에만 열린다.
     (!state.shopping || state.phase === 'rest') &&
@@ -218,7 +224,9 @@ function isRunState(value: unknown): value is RunState {
   // 같은 동료가 여럿 설 수 있지만, 칸을 겹치거나 한쪽 끝을 넘어서 설 수는 없다.
   if (!allies.every((ally) => fits(ally, ALLY_SHAPE) && isAlly(ally.id))) return false;
   if (!cellsValid(allies as Ally[])) return false;
-  if (!(value.shop as unknown[]).every((card) => fits(card, CARD_SHAPE) && isAlly(card.id))) return false;
+  const isCard = (card: unknown): boolean =>
+    fits(card, CARD_SHAPE) && isAlly(card.id) && (card.locked === undefined || typeof card.locked === 'boolean');
+  if (!(value.shop as unknown[]).every(isCard)) return false;
   const queue = value.queue as unknown[];
   const enemies = value.enemies as unknown[];
   const shots = value.shots as unknown[];
@@ -309,6 +317,8 @@ export function readRunRecord(raw: unknown): { savedAt: number; run: SavedRun | 
   if (!known || !isObject(run) || !isRunState(run.state)) return { savedAt, run: null };
   // 옛 판에서 강화를 고르던 중이었으면, 그 자리에 가게의 카드를 놓는다.
   if (run.state.shopping && run.state.shop.length === 0) openShop(run.state);
+  // ★5에 모으는 수가 줄기 전(열여섯 마리)에 적은 판은 지금의 ★5로 줄인다.
+  for (const ally of run.state.allies) ally.copies = Math.min(Math.floor(ally.copies), copiesFor(ALLY_STARS.max));
   const whole = (value: unknown): number => (kindOf(value) === 'number' ? Math.max(0, Math.floor(value as number)) : 0);
   return { savedAt, run: { state: run.state, banked: whole(run.banked), bankedShards: whole(run.bankedShards) } };
 }

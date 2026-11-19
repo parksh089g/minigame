@@ -2,7 +2,7 @@
  * 자동 플레이. 테스트에서 "강화 없이는 며칠째에 막히고, 강화를 사면 얼마나 더 가는지"를 숫자로 확인한다.
  * 화면에서 하는 판과 같은 step을 돌린다.
  */
-import { canBuyCard, canReroll } from './allies';
+import { canBuyCard, canReroll, mergeTarget, starOf } from './allies';
 import { ALLIES, ENEMIES, RELIC_ORDER, SHOOTER, SHOP, UPGRADE_ORDER } from './data';
 import {
   applyRun,
@@ -28,7 +28,7 @@ export type BotStyle = 'idle' | 'active';
 const STEP = 1 / 60;
 
 /**
- * 동료 가게에서 사는 법. keen은 빈칸이 있으면 값진(큰) 동료부터 새로 놓고, 칸이 차면 같은 동료를 사서 합치고,
+ * 동료 가게에서 사는 법. keen은 사면 별이 오르는 동료가 있으면 그것부터 합치고, 빈칸이 있으면 값진(큰) 동료부터 새로 놓고, 칸이 차면 같은 동료를 사서 합치고,
  * 살 것이 없으면 한 번 다시 뽑아 보는 사람이다. first는 놓인 차례대로 살 수 있는 것을 사는(아무거나 사는) 사람이다.
  * 둘 다 놓을 수 있으면 새로 놓고, 아니면 합친다.
  */
@@ -44,6 +44,12 @@ export function botShop(state: RunState, picks: PickStyle = 'keen'): Pick<Input,
     const first = cards.find((index) => placeable.includes(index) || mergeable.includes(index));
     if (first !== undefined) return { buy: { card: first, mode: placeable.includes(first) ? 'place' : 'merge' } };
   } else {
+    // 사면 별이 오르는 카드가 있으면 그것부터 합친다. 별이 오르면 새로 하나 놓는 것보다 세다.
+    const rising = mergeable.find((index) => {
+      const target = mergeTarget(state, state.shop[index].id);
+      return target !== undefined && starOf(target.copies + 1) > starOf(target.copies);
+    });
+    if (rising !== undefined) return { buy: { card: rising, mode: 'merge' } };
     if (placeable.length > 0) {
       const price = (index: number): number => ALLIES[state.shop[index].id].price;
       const best = placeable.reduce((a, b) => (price(b) > price(a) ? b : a));

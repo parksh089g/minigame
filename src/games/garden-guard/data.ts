@@ -263,8 +263,11 @@ export const GUN = {
   /** 물방울이 한 초에 날아가는 거리 */
   shotSpeed: 380,
   shotRadius: 4,
-  /** 화면을 누르고 직접 겨누는 동안에는 쏘는 간격이 이만큼으로 줄어든다. */
-  manualRate: 0.75,
+  /**
+   * 화면을 누르고 직접 겨누는 동안에는 쏘는 간격이 이만큼으로 줄어든다(3분의 2쯤 더 빠르게 쏜다).
+   * 동료가 생긴 뒤 손을 떼고 하는 판이 직접 하는 판만큼 가서(11차 검토 G17), 0.75에서 0.6으로 내려 직접 겨누는 값어치를 되살렸다.
+   */
+  manualRate: 0.6,
   /** 치명타의 피해 배율 */
   critMult: 2.5,
   /** 갈래 물총의 곁가지 물방울이 벌어지는 각도(라디안)와 피해 비율 */
@@ -378,7 +381,17 @@ export const FENCE_BASE = 100;
  * 같은 동료를 또 사면 합쳐져서 별이 오른다(ALLY_STARS). 동료의 피해는 물총 한 발의 피해(Stats.damage)에 비율을 곱해서,
  * 영구 강화와 새 밭으로 물총이 세지는 만큼 동료도 같이 세진다. 값은 여기만 고치면 된다.
  */
-export type AllyId = 'sunflower' | 'frog' | 'mint' | 'can' | 'sparrow' | 'cactus' | 'pumpkin' | 'hedgehog';
+export type AllyId =
+  | 'sunflower'
+  | 'frog'
+  | 'mint'
+  | 'can'
+  | 'sparrow'
+  | 'cactus'
+  | 'pumpkin'
+  | 'hedgehog'
+  | 'mantis'
+  | 'toad';
 
 /**
  * 동료가 겨누는 벌레. near는 제게 가까운 것, boss는 체력이 가장 많은 것(대장이 먼저), front는 울타리에 가장 가까운 것,
@@ -389,7 +402,7 @@ export type AllyAim = 'near' | 'boss' | 'front' | 'crowd' | 'far';
 /** 동료가 차지하는 칸의 모양. [가로, 세로]의 목록이고 [0, 0]이 첫 칸이다. */
 export type AllyShape = ReadonlyArray<readonly [number, number]>;
 
-/** 동료의 모양들: 한 칸, 가로 두 칸, 세로 두 칸, 세로 세 칸, 가로 세 칸, ㄴ자 세 칸 */
+/** 동료의 모양들: 한 칸, 가로 두 칸, 세로 두 칸, 세로 세 칸, 가로 세 칸, ㄴ자 세 칸, 네모난 네 칸(2 × 2) */
 export const SHAPES = {
   dot: [[0, 0]],
   row2: [
@@ -412,6 +425,12 @@ export const SHAPES = {
   ],
   ell3: [
     [0, 0],
+    [0, 1],
+    [1, 1],
+  ],
+  square4: [
+    [0, 0],
+    [1, 0],
     [0, 1],
     [1, 1],
   ],
@@ -550,10 +569,92 @@ export const ALLIES: Readonly<Record<AllyId, AllyDef>> = {
     cells: 3,
     shape: SHAPES.ell3,
   },
+  /**
+   * 사마귀: 개구리처럼 대장과 튼튼한 벌레를 겨누지만 훨씬 자주 벤다. 대장이 질겨지는 뒤쪽 날을 위한 동료다.
+   * 열매와 칸 하나에 드는 힘이 고슴도치보다 조금 낫다(뒤에 나오는 동료일수록 들일 만하게).
+   */
+  mantis: {
+    name: '사마귀',
+    blurb: '대장을 앞발로 재빨리 베어요',
+    fromDay: 30,
+    price: 7,
+    interval: 1,
+    damage: 1.75,
+    aim: 'boss',
+    shotSpeed: 520,
+    pierceShell: true,
+    cells: 3,
+    shape: SHAPES.col3,
+  },
+  /**
+   * 두꺼비: 한 마리로는 가장 센 동료. 울타리에 다가온 벌레를 혀로 쳐서 조금 늦춘다.
+   * 네 칸(2 × 2)을 차지하고 값도 가장 비싸서, 열매와 칸 하나에 드는 힘은 고슴도치보다 조금만 낫다.
+   */
+  toad: {
+    name: '두꺼비',
+    blurb: '다가온 벌레를 쳐서 늦춰요',
+    fromDay: 40,
+    price: 9,
+    interval: 0.75,
+    damage: 1.7,
+    aim: 'front',
+    shotSpeed: 560,
+    pierceShell: true,
+    chill: { slow: 0.3, seconds: 1.2 },
+    cells: 4,
+    shape: SHAPES.square4,
+  },
+};
+
+/**
+ * 짝 효과의 덤. 짝이 된 동료의 피해가 damage만큼 커지거나(0.15면 15%), 쏘는 빠르기가 rate만큼 빨라진다(간격 ÷ (1 + rate)).
+ */
+export interface PairDef {
+  /** 짝이 되는 동료. any면 어느 동료와 붙어도 짝이다. */
+  with: 'any' | readonly AllyId[];
+  /** 덤을 받는 쪽: self는 이 동료, other는 붙은 짝, both는 둘 다 */
+  gives: 'self' | 'other' | 'both';
+  damage?: number;
+  rate?: number;
+  /** 가게의 카드에 적는 한 줄(이 짝 효과가 맞는 빈자리가 있으면 설명 대신 적는다) */
+  line: string;
+}
+
+/** 식물인 동료. 물뿌리개와 사마귀가 짝으로 삼는다. */
+const PLANTS: readonly AllyId[] = ['sunflower', 'mint', 'cactus', 'pumpkin'];
+
+/**
+ * 동료마다 하나씩 있는 짝 효과. 텃밭에서 칸의 변이 맞닿은 두 동료(물총의 같은 쪽)가 짝이 되면 덤을 받는다.
+ * 어디에 세우느냐가 거리만이 아니라 이웃으로도 정해져서, 세 줄짜리 텃밭이 작은 퍼즐이 된다.
+ * 같은 동료의 같은 덤은 한 번만 받는다(해바라기 둘에 붙어도 10%). 덤은 10~15%로 작게 두었다:
+ * 80판을 하는 자동 플레이가 닿는 날은 짝 효과가 없을 때와 같다(69일째).
+ */
+export const PAIRS: Readonly<Record<AllyId, PairDef>> = {
+  sunflower: { with: 'any', gives: 'other', rate: 0.1, line: '붙은 동료가 10% 빨리 쏴요' },
+  frog: { with: ['frog'], gives: 'self', damage: 0.15, line: '개구리끼리 붙으면 15% 세게' },
+  mint: { with: 'any', gives: 'other', damage: 0.1, line: '붙은 동료가 10% 세게 쏴요' },
+  can: { with: PLANTS, gives: 'both', damage: 0.1, line: '식물과 붙으면 둘 다 10% 세게' },
+  sparrow: { with: ['sunflower'], gives: 'self', rate: 0.1, line: '해바라기와 붙으면 10% 빨리' },
+  cactus: { with: ['hedgehog'], gives: 'self', damage: 0.15, line: '고슴도치와 붙으면 15% 세게' },
+  pumpkin: { with: ['sunflower'], gives: 'self', damage: 0.15, line: '해바라기와 붙으면 15% 세게' },
+  hedgehog: { with: ['cactus'], gives: 'self', rate: 0.1, line: '선인장과 붙으면 10% 빨리' },
+  mantis: { with: PLANTS, gives: 'self', damage: 0.1, line: '식물과 붙으면 10% 세게' },
+  toad: { with: ['frog'], gives: 'both', damage: 0.1, line: '개구리와 붙으면 둘 다 10% 세게' },
 };
 
 /** 가게에 나오는 차례 */
-export const ALLY_ORDER: readonly AllyId[] = ['sunflower', 'frog', 'mint', 'can', 'sparrow', 'cactus', 'pumpkin', 'hedgehog'];
+export const ALLY_ORDER: readonly AllyId[] = [
+  'sunflower',
+  'frog',
+  'mint',
+  'can',
+  'sparrow',
+  'cactus',
+  'pumpkin',
+  'hedgehog',
+  'mantis',
+  'toad',
+];
 
 /**
  * 동료가 서는 텃밭의 칸. 물총의 왼쪽과 오른쪽에 cols칸씩, 세로로 rows줄이고 칸마다 크기가 cell이다.
@@ -566,10 +667,11 @@ export const GARDEN_CELLS = { cols: 4, rows: 3, cell: 22, left: 10, right: 142, 
 export const CELL_COUNT = GARDEN_CELLS.cols * 2 * GARDEN_CELLS.rows;
 
 /**
- * 같은 동료를 모은 수에 따른 별. 두 마리가 모이면 ★2, 넷이면 ★3, 여덟이면 ★4, 열여섯이면 ★5다.
+ * 같은 동료를 모은 수에 따른 별. copies[별 - 1]마리가 모이면 그 별이다: 둘이면 ★2, 셋이면 ★3, 다섯이면 ★4, 여덟이면 ★5.
+ * 한 판에 버는 열매(보통 아흐레에 40~50개)로 ★5까지 닿을 수 있게 잡았다. 전에는 1·2·4·8·16마리라서 ★5는 한 판으로 닿지 않았다.
  * 별이 하나 오를 때마다 피해는 damage배, 쏘는 간격은 interval배가 된다.
  */
-export const ALLY_STARS = { max: 5, damage: 1.75, interval: 0.9 } as const;
+export const ALLY_STARS = { max: 5, copies: [1, 2, 3, 5, 8], damage: 1.5, interval: 0.9 } as const;
 
 /** 동료 가게 */
 export const SHOP = {

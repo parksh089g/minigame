@@ -5,6 +5,7 @@ import { readRunRecord, RUN_VERSION, runRecord, settleSavedRun, type SavedRun } 
 import { botInput, botShop } from './bot';
 import { SHOP } from './data';
 import { toVersion3 } from './legacy-run.testutil';
+import { placeAlly } from './allies';
 import { createRun, runScore, skipShop, step, type RunState } from './sim';
 
 const STEP = 1 / 60;
@@ -63,6 +64,27 @@ describe('하던 판의 저장', () => {
     expect(again.fruit).toBe(restored.fruit);
   });
 
+  it('뒤쪽 날에 나오는 사마귀와 두꺼비(2 × 2)도 적었다가 읽으면 그대로다', () => {
+    const { state } = createRun({ seed: 7, startDay: 40, levels: { power: 20 }, bestBefore: 45 });
+    expect(state.shopping).toBe(true);
+    state.shop = [
+      { id: 'toad', sold: false },
+      { id: 'mantis', sold: true },
+      { id: 'hedgehog', sold: false },
+    ];
+    state.fruit = 30;
+    expect(placeAlly(state, 'toad', 2)?.cell).toBe(2);
+    expect(placeAlly(state, 'mantis', 1, 7)?.cell).toBe(7);
+    const restored = readRunRecord(throughDisk(runRecord({ state, banked: 0, bankedShards: 0 }, T))).run!.state;
+    expect(restored.allies).toEqual(state.allies);
+    expect(restored.shop).toEqual(state.shop);
+    // 사서 새로 놓아도 저장과 읽기가 그대로 이어진다.
+    step(restored, STEP, { aim: null, storm: false, buy: { card: 0, mode: 'place' } });
+    expect(restored.allies.filter((ally) => ally.id === 'toad')).toHaveLength(2);
+    const again = readRunRecord(throughDisk(runRecord({ state: restored, banked: 0, bankedShards: 0 }, T))).run!.state;
+    expect(again.allies).toEqual(restored.allies);
+  });
+
   it('동료가 생기기 전(버전 3)에 적은 판은 해바라기를 동료로 옮기고, 고르던 강화 대신 가게를 열어 이어 한다', () => {
     const { state } = createRun({ seed: 42, startDay: 4, levels: { power: 6, rapid: 3 }, bestBefore: 3 });
     skipShop(state);
@@ -119,6 +141,8 @@ describe('하던 판의 저장', () => {
       // 같은 칸에 둘이 서거나, 한쪽 끝을 넘어 선 동료
       broken((record) => (record.run.state.allies = [{ id: 'frog', copies: 1, fireIn: 0, cell: 0 }, { id: 'frog', copies: 1, fireIn: 0, cell: 1 }])),
       broken((record) => (record.run.state.allies = [{ id: 'frog', copies: 1, fireIn: 0, cell: 3 }])),
+      // 네모난 두꺼비가 맨 아래 줄에서 밭 밖으로 넘친 판
+      broken((record) => (record.run.state.allies = [{ id: 'toad', copies: 1, fireIn: 0, cell: 16 }])),
       broken((record) => (record.run.state.shop = [{ id: 'frog', sold: 'yes' }])),
       broken((record) => delete record.run.state.fruit),
       broken((record) => (record.run.state = [] as unknown as Record<string, unknown>)),
