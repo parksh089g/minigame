@@ -7,10 +7,13 @@
  * RunState, Enemy, Shot, Spawn, Stats에 필드를 더하면 아래의 *_SHAPE에도 적어야 타입 검사를 통과한다.
  * 필드를 더했으면 RUN_VERSION도 올린다. 옛 저장에는 새 필드가 없어서 그대로는 버려지므로,
  * 빠진 값을 채워서 이어 할 수 있으면 readRunRecord에서 채운다(버전 2의 판에 유물의 값을 채우는 fillRelicFields처럼).
+ * 오늘의 판의 표(RunState.daily)는 여느 판에는 없는 필드라 버전을 올리지 않고 따로 본다: 없으면 여느 판이고,
+ * 있으면 모양이 맞아야 한다. 그래서 오늘의 판이 생기기 전에 적은 판도 그대로 읽힌다.
  */
 import { cellsValid, copiesFor, openShop, placeAlly, type Ally, type ShopCard } from './allies';
+import { isDailyTag } from './daily';
 import { ALLIES, ALLY_STARS, GUN, SHOP, STEP, ENEMIES, type AllyId, type EnemyKind } from './data';
-import { applyRun, bankSeeds, bankShards, MAX_DAY, type GardenMeta, type Spawn, type Stats } from './rules';
+import { applyRun, bankSeeds, bankShards, countRun, MAX_DAY, type GardenMeta, type Spawn, type Stats } from './rules';
 import type { Enemy, Phase, RunState, Shot } from './sim';
 
 /**
@@ -37,7 +40,8 @@ export interface RunRecord {
 
 type Kind = 'number' | 'boolean' | 'string' | 'array' | 'object';
 
-const STATE_SHAPE: Record<keyof RunState, Kind> = {
+/** 판의 필드. 오늘의 판의 표(daily)는 여느 판에는 없어서 따로 본다(isRunState). */
+const STATE_SHAPE: Record<Exclude<keyof RunState, 'daily'>, Kind> = {
   rng: 'number',
   startDay: 'number',
   bestBefore: 'number',
@@ -220,6 +224,7 @@ function valuesFit(state: Record<string, unknown>): boolean {
 function isRunState(value: unknown): value is RunState {
   if (!fits(value, STATE_SHAPE)) return false;
   if (!LIVE_PHASES.includes(value.phase as Phase) || !fits(value.stats, STATS_SHAPE)) return false;
+  if (value.daily !== undefined && !isDailyTag(value.daily)) return false;
   const allies = value.allies as unknown[];
   // 같은 동료가 여럿 설 수 있지만, 칸을 겹치거나 한쪽 끝을 넘어서 설 수는 없다.
   if (!allies.every((ally) => fits(ally, ALLY_SHAPE) && isAlly(ally.id))) return false;
@@ -325,10 +330,10 @@ export function readRunRecord(raw: unknown): { savedAt: number; run: SavedRun | 
 
 /**
  * 이어 하지 않기로 한 판을 마친다. 아직 넣지 않은 씨앗과 유물 조각을 넣고 판 수와 쫓아낸 벌레를 더한다.
- * 가장 멀리 지킨 날은 날을 넘길 때마다 이미 넣었다.
+ * 가장 멀리 지킨 날은 날을 넘길 때마다 이미 넣었다. 오늘의 판은 가장 멀리 지킨 날에 들지 않는다(rules.ts의 countRun).
  */
 export function settleSavedRun(meta: GardenMeta, saved: SavedRun): GardenMeta {
   const { state } = saved;
   const banked = bankShards(bankSeeds(meta, Math.floor(state.seeds) - saved.banked), state.shards - saved.bankedShards);
-  return applyRun(banked, state.lastCleared, state.kills);
+  return state.daily ? countRun(banked, state.kills) : applyRun(banked, state.lastCleared, state.kills);
 }

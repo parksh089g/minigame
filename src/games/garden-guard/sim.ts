@@ -44,6 +44,7 @@ import {
   type AllyId,
   type EnemyKind,
 } from './data';
+import { waveSeed, type DailyTag } from './daily';
 import {
   biteScale,
   clearBonus,
@@ -161,6 +162,11 @@ export interface RunState {
   shards: number;
   /** 오늘 울타리가 그냥 막아 낼 수 있는 남은 갉기의 수(울타리 방울). 날이 바뀌면 다시 찬다. */
   guardLeft: number;
+  /**
+   * 오늘의 판(daily.ts)이면 그 판의 날과 지금 가게에서 다시 뽑은 횟수. 여느 판에는 없다.
+   * 오늘의 판은 날마다 벌레 떼를, 가게마다 카드를 그날의 씨앗에서 따로 정해서 누구에게나 같다.
+   */
+  daily?: DailyTag;
 }
 
 export interface RunConfig {
@@ -172,6 +178,8 @@ export interface RunConfig {
   fields?: number;
   /** 유물마다의 단계(rules.ts의 GardenMeta.relics). 없으면 유물이 없는 판이다. */
   relics?: RelicLevels;
+  /** 오늘의 판이면 그 날(daily.ts의 dayIndexOf). 그날의 벌레 떼와 가게가 그날의 씨앗으로 정해진다. */
+  daily?: number;
 }
 
 export interface Input {
@@ -246,6 +254,8 @@ function beginDay(state: RunState, day: number, events: SimEvent[]): void {
   state.day = day;
   state.phase = 'fight';
   state.dayTime = 0;
+  // 오늘의 판은 그날의 벌레 떼를 그날의 씨앗으로 새로 정한다. 앞의 날에 굴린 난수(부하, 걸음)에 기대지 않아서 누구에게나 같다.
+  if (state.daily) state.rng = waveSeed(state.daily.day, day);
   state.queue = planDay(day, () => roll(state));
   state.dayTotal = state.queue.length;
   state.dayKilled = 0;
@@ -289,6 +299,7 @@ export function createRun(config: RunConfig): { state: RunState; events: SimEven
     shards: 0,
     guardLeft: 0,
   };
+  if (config.daily !== undefined) state.daily = { day: config.daily, draws: 0 };
   if (sprouts > 0) placeAlly(state, 'sunflower', sprouts);
   // 첫날 앞에 가게를 먼저 연다. "다음 날"을 누르면 첫날이 시작된다.
   openShop(state);

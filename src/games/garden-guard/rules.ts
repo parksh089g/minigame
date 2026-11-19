@@ -567,7 +567,15 @@ export function bankSeeds(meta: GardenMeta, seeds: number): GardenMeta {
 
 /** 한 판을 마친 기록을 넣는다. lastCleared는 그 판에서 마지막으로 지킨 날(없으면 0)이다. */
 export function applyRun(meta: GardenMeta, lastCleared: number, kills: number): GardenMeta {
-  return raiseBest({ ...meta, runs: meta.runs + 1, kills: meta.kills + count(kills) }, lastCleared);
+  return raiseBest(countRun(meta, kills), lastCleared);
+}
+
+/**
+ * 판 수와 쫓아낸 벌레만 더한다. 가장 멀리 지킨 날은 올리지 않는다.
+ * 오늘의 판(daily.ts)은 강화 없이 1일째부터 하는 따로 겨루는 판이라, 지킨 날이 이 밭의 기록과 출발점에 들지 않는다.
+ */
+export function countRun(meta: GardenMeta, kills: number): GardenMeta {
+  return { ...meta, runs: meta.runs + 1, kills: meta.kills + count(kills) };
 }
 
 // ------------------------------------------------------------ 새 밭 일구기

@@ -6,9 +6,27 @@ import { sfx, tone } from '../../core/sfx';
 import { addText, fadeToScene, PixelButton } from '../../core/ui';
 import { showBanner } from '../../scenes/GameHud';
 import { MiniGameScene, type PauseExtra, type ResultStat } from '../../scenes/MiniGameScene';
+import { noteDayScore, syncScores } from '../../online/online';
+import type { SharedStart, ShareOverride } from '../../share/link';
 import { LOOK, registerGardenTextures, TEX } from './art';
+import {
+  addDailyRun,
+  boardDayOf,
+  DAILY_OFF_RECORD,
+  DAILY_TEXT,
+  dailyConfig,
+  dailyResumed,
+  dailyShare,
+  dailyVerdict,
+  dayIndexOf,
+  friendScoreOf,
+  friendVerdict,
+} from './daily';
+import { buildDailyPage } from './daily-page';
+import { gardenDailyStore } from './daily-store';
 import { ALLIES, ENEMIES, GARDEN_GAME_ID, GARDEN_SCENE, type EnemyKind } from './data';
 import { buildLobby } from './lobby';
+import { buildRankPage } from './rank-page';
 import { openShopPanel, SHOP_TEXT, teamInfo, type ClearedNote, type ShopPanel } from './shop';
 import {
   applyRun,
@@ -17,6 +35,7 @@ import {
   bossKind,
   clampStartDay,
   countHoldHint,
+  countRun,
   daysKept,
   isBossDay,
   learnHoldHint,
@@ -36,10 +55,26 @@ import { aimDots, FieldView, layoutField, toSim, type FieldLayout } from './view
  */
 let freshStart: number | null = null;
 
-/** 씬을 시작할 때 넘기는 값. 없으면 준비 화면부터 연다. */
-interface StartData {
-  /** run이면 준비 화면을 거치지 않고 바로 새 판을 시작하고, resume이면 두고 간 판을 이어 한다. */
-  mode?: 'run' | 'resume';
+/**
+ * 공유받은 주소에 실려 온, 오늘 넘어 볼 친구의 점수(daily.ts의 friendScoreOf). 그날 동안 오늘의 판 쪽과 결과 화면에 보인다.
+ * 준비 화면과 판을 오가며 씬이 여러 번 다시 시작되므로 씬 밖에 둔다. 기기에는 남기지 않는다.
+ */
+let friend: { day: number; score: number } | null = null;
+/** 공유받은 주소의 날이 이미 지나서, 다음에 여는 오늘의 판 쪽에 그렇다고 한 번 알릴지 */
+let sharedPassed = false;
+
+/** 준비 화면에서 여는 쪽: 오늘의 판 쪽과 오늘의 랭킹 쪽 */
+type LobbyPage = 'daily' | 'rank';
+
+/**
+ * 씬을 시작할 때 넘기는 값. 없으면 준비 화면부터 연다.
+ * 오늘의 판을 공유한 주소로 들어오면 그날(sharedDay)과 보낸 사람의 점수(sharedScore)가 오고, 오늘의 판 쪽이 열린다.
+ */
+interface StartData extends SharedStart {
+  /** run이면 준비 화면을 거치지 않고 바로 새 판을, daily면 오늘의 판을 시작하고, resume이면 두고 간 판을 이어 한다. */
+  mode?: 'run' | 'resume' | 'daily';
+  /** 준비 화면 대신 열 쪽 */
+  lobby?: LobbyPage;
 }
 
 type Phase = 'loading' | 'lobby' | 'run' | 'over';
@@ -119,6 +154,8 @@ export const TEXT = {
   /** 빠르기 버튼에 적는 지금의 빠르기 */
   speed: (speed: number) => `×${speed}`,
   resumed: (day: number) => `${day}일째 이어서!`,
+  /** 오늘의 판을 하는 동안 HUD의 씨앗 아래에 붙는 표시 */
+  daily: DAILY_TEXT.badge,
   /** 대장을 처음 물리친 날에 띄운다. 다음 판은 그다음 날부터 시작한다. */
   nextStart: (day: number) => `다음 판은 ${day}일째부터!`,
   /** 대장의 날을 지켜서 유물 조각을 받았을 때, 받은 씨앗 옆에 적는다. */
@@ -148,6 +185,8 @@ export class GardenGuardScene extends MiniGameScene {
   protected readonly gameId = GARDEN_GAME_ID;
 
   private phase: Phase = 'loading';
+  /** 준비 화면에서 띄운 쪽. 준비 화면이면 null이다. 뒤로 가기가 한 쪽 앞으로 돌아간다. */
+  private lobbyPage: LobbyPage | null = null;
   /** 하고 있는 판. 준비 화면에서는 null이다. 자동 점검이 들여다본다. */
   run: RunState | null = null;
   private view!: FieldView;
@@ -206,6 +245,7 @@ export class GardenGuardScene extends MiniGameScene {
     this.beginMiniGame();
     registerGardenTextures(this);
     this.phase = 'loading';
+    this.lobbyPage = null;
     this.run = null;
     this.pending = 0;
     this.banked = 0;
@@ -232,11 +272,22 @@ export class GardenGuardScene extends MiniGameScene {
     // 판을 하다가 나가면(그만하기, 준비 화면으로) 그때까지 번 씨앗을 넣고 판을 저장해 둔다. 준비 화면에서 이어 한다.
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.keepRun());
 
+    // 오늘의 판을 공유한 주소로 들어왔으면 오늘의 판 쪽을 연다. 지난 날의 판은 다시 할 수 없어서 오늘의 판을 열고 그렇다고 알린다.
+    let page = data.lobby ?? null;
+    if (data.sharedDay !== undefined) {
+      const today = dayIndexOf(new Date());
+      sharedPassed = data.sharedDay !== today;
+      const score = friendScoreOf(data.sharedDay, data.sharedScore, today);
+      if (score !== null && !(friend?.day === today && friend.score >= score)) friend = { day: today, score };
+      page = 'daily';
+    }
+
     // 다른 곳에서 그사이 저장한 것이 있으면 그것을 읽어 와서 연다.
-    void gardenStore.refresh().then(() => {
+    void Promise.all([gardenStore.refresh(), gardenDailyStore.refresh()]).then(() => {
       // 불러오는 사이에 씬을 떠났으면 아무것도 하지 않는다.
       if (!this.sys.isActive() || this.phase !== 'loading') return;
-      if (mode === 'run' || mode === 'resume') this.startRun(mode === 'resume');
+      if (mode === 'run' || mode === 'resume' || mode === 'daily') this.startRun(mode === 'resume', mode === 'daily');
+      else if (page) this.openPage(page);
       else this.openLobby();
     });
   }
@@ -259,7 +310,12 @@ export class GardenGuardScene extends MiniGameScene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, unwatch);
     buildLobby(this, {
       notice: opened !== null ? lobbyNotice(opened) : null,
-      saved: saved ? { day: saved.state.day } : null,
+      saved: saved ? { day: saved.state.day, daily: saved.state.daily !== undefined } : null,
+      daily: {
+        record: gardenDailyStore.data,
+        today: dayIndexOf(new Date()),
+        onOpen: () => this.scene.restart({ lobby: 'daily' } satisfies StartData),
+      },
       getMeta: () => gardenStore.data,
       setMeta: (meta) => gardenStore.set(meta),
       refresh: async () => (await gardenStore.refresh()) || stale,
@@ -273,17 +329,51 @@ export class GardenGuardScene extends MiniGameScene {
     });
   }
 
-  /** 두고 간 판을 이어 하지 않고 마친다. 아직 넣지 않은 씨앗과 판의 기록을 넣고 저장을 지운다. */
+  /** 준비 화면 대신 오늘의 판 쪽이나 오늘의 랭킹 쪽을 연다. 돌아가면 한 쪽 앞(준비 화면, 오늘의 판 쪽)이 다시 열린다. */
+  private openPage(page: LobbyPage): void {
+    this.phase = 'lobby';
+    this.lobbyPage = page;
+    const today = dayIndexOf(new Date());
+    if (page === 'rank') {
+      buildRankPage(this, today, () => this.backFromPage());
+      return;
+    }
+    const passed = sharedPassed;
+    sharedPassed = false;
+    const saved = gardenStore.run;
+    buildDailyPage(this, {
+      today,
+      record: gardenDailyStore.data,
+      friend: friend?.day === today ? friend.score : null,
+      sharedPassed: passed,
+      savedDay: saved ? saved.state.day : null,
+      onBack: () => this.backFromPage(),
+      onRank: () => this.scene.restart({ lobby: 'rank' } satisfies StartData),
+      onStart: () => this.scene.restart({ mode: 'daily' } satisfies StartData),
+    });
+  }
+
+  /** 띄운 쪽에서 한 쪽 앞으로 돌아간다: 오늘의 랭킹 쪽에서는 오늘의 판 쪽으로, 오늘의 판 쪽에서는 준비 화면으로 */
+  private backFromPage(): void {
+    this.scene.restart((this.lobbyPage === 'rank' ? { lobby: 'daily' } : {}) satisfies StartData);
+  }
+
+  /**
+   * 두고 간 판을 이어 하지 않고 마친다. 아직 넣지 않은 씨앗과 판의 기록을 넣고 저장을 지운다.
+   * 오늘 시작한 오늘의 판이면 거기까지를 그날의 기록에도 남기고 오늘의 랭킹에 올린다.
+   */
   private closeSaved(): void {
     const saved = gardenStore.run;
     if (!saved) return;
     this.save(settleSavedRun(gardenStore.data, saved));
     gardenStore.setRun(null);
+    this.recordDaily(saved.state);
   }
 
-  /** 준비 화면에서는 뒤로 가기가 허브로 나가고, 판을 하는 동안에는 일시정지한다. */
+  /** 준비 화면에서는 뒤로 가기가 허브로 나가고(띄운 쪽에서는 한 쪽 앞으로), 판을 하는 동안에는 일시정지한다. */
   override onBackRequest(): void {
-    if (this.phase === 'lobby') fadeToScene(this, homeScene());
+    if (this.phase === 'lobby' && this.lobbyPage) this.backFromPage();
+    else if (this.phase === 'lobby') fadeToScene(this, homeScene());
     else this.pauseGame();
   }
 
@@ -315,8 +405,11 @@ export class GardenGuardScene extends MiniGameScene {
 
   // ------------------------------------------------------------ 판
 
-  /** resume이면 두고 간 판을 이어 하고, 아니면(또는 이어 할 판이 없으면) 새 판을 시작한다. */
-  private startRun(resume: boolean): void {
+  /**
+   * resume이면 두고 간 판을 이어 하고, 아니면(또는 이어 할 판이 없으면) 새 판을 시작한다.
+   * daily면 새 판은 오늘의 판이다: 1일째부터, 영구 강화와 새 밭의 덤과 유물 없이, 그날의 씨앗으로(daily.ts의 dailyConfig).
+   */
+  private startRun(resume: boolean, daily = false): void {
     const { height } = this.scale;
     const saved = resume ? gardenStore.run : null;
     let state: RunState;
@@ -329,14 +422,18 @@ export class GardenGuardScene extends MiniGameScene {
       // 두고 간 판이 남아 있으면 마치고 새로 시작한다.
       this.closeSaved();
       const meta = gardenStore.data;
-      ({ state, events } = createRun({
-        seed: Math.floor(Math.random() * 0x7fffffff),
-        startDay: clampStartDay(meta.startDay, meta.best),
-        levels: meta.levels,
-        bestBefore: meta.best,
-        fields: meta.fields,
-        relics: meta.relics,
-      }));
+      ({ state, events } = createRun(
+        daily
+          ? dailyConfig(dayIndexOf(new Date()))
+          : {
+              seed: Math.floor(Math.random() * 0x7fffffff),
+              startDay: clampStartDay(meta.startDay, meta.best),
+              levels: meta.levels,
+              bestBefore: meta.best,
+              fields: meta.fields,
+              relics: meta.relics,
+            },
+      ));
     }
     this.run = state;
     this.layout = layoutField(height, HUD_HEIGHT);
@@ -351,7 +448,8 @@ export class GardenGuardScene extends MiniGameScene {
     if (saved) {
       this.hold = RESUME_HOLD;
       const fieldMiddle = (this.layout.top + this.layout.fenceY) / 2;
-      showBanner(this, fieldMiddle - 30, TEXT.resumed(state.day), THEME_CSS.good, 1400, DEPTH.banner, FONT_SIZE.large);
+      const resumed = state.daily ? dailyResumed(state.day) : TEXT.resumed(state.day);
+      showBanner(this, fieldMiddle - 30, resumed, THEME_CSS.good, 1400, DEPTH.banner, FONT_SIZE.large);
       this.view.sync(state, 0);
     } else {
       // 조작 안내는 가게를 닫고 첫날이 시작될 때 띄운다.
@@ -399,6 +497,15 @@ export class GardenGuardScene extends MiniGameScene {
       originY: 0.5,
       stroke: THEME_CSS.white,
     }).setDepth(DEPTH.hud);
+    // 오늘의 판이면 씨앗 아래에 작은 표시를 붙여 둔다.
+    if (state.daily) {
+      addText(this, GAME_WIDTH - 8, 38, TEXT.daily, {
+        size: FONT_SIZE.small,
+        color: THEME_CSS.good,
+        originX: 1,
+        originY: 0.5,
+      }).setDepth(DEPTH.hud);
+    }
 
     if (state.stats.stormCooldown > 0) {
       const { x, y, size } = this.stormSpot();
@@ -843,7 +950,8 @@ export class GardenGuardScene extends MiniGameScene {
     const banked = bankShards(bankSeeds(gardenStore.data, whole - this.banked), state.shards - this.bankedShards);
     this.banked = whole;
     this.bankedShards = state.shards;
-    this.save(raiseBest(banked, clearedDay));
+    // 오늘의 판에서 지킨 날은 이 밭의 기록과 출발점에 들지 않는다(rules.ts의 countRun).
+    this.save(state.daily ? banked : raiseBest(banked, clearedDay));
   }
 
   /** 하던 판을 저장해 둔다. 끝난 판은 저장하지 않는다. */
@@ -867,7 +975,8 @@ export class GardenGuardScene extends MiniGameScene {
     if (!state || this.settled) return;
     this.settled = true;
     this.bankSoFar();
-    this.save(applyRun(gardenStore.data, state.lastCleared, state.kills));
+    const meta = gardenStore.data;
+    this.save(state.daily ? countRun(meta, state.kills) : applyRun(meta, state.lastCleared, state.kills));
     gardenStore.setRun(null);
   }
 
@@ -911,6 +1020,52 @@ export class GardenGuardScene extends MiniGameScene {
     ];
     // 대장을 물리친 판에만 적는다.
     if (state.shards > 0) stats.push(['받은 유물 조각', `${state.shards}개`]);
-    this.finishMiniGame(runScore(state), stats, state.phase === 'over' ? ENDING_MS : 600);
+    const daily = this.recordDaily(state);
+    this.finishMiniGame(
+      runScore(state),
+      [...(daily?.stats ?? []), ...stats],
+      state.phase === 'over' ? ENDING_MS : 600,
+      undefined,
+      daily?.share,
+    );
+  }
+
+  // ------------------------------------------------------------ 오늘의 판
+
+  /**
+   * 끝난 판이 오늘 시작한 오늘의 판이면 그날의 기록에 보태고 오늘의 랭킹에 올린 뒤, 결과 화면에 적을 줄과 공유할 것을 돌려준다.
+   * 여느 판이나, 날이 넘어간 뒤에 끝낸 오늘의 판이면 null이다(그날의 기록에도, 최고 기록에도 남지 않는다. offRecordNote).
+   */
+  private recordDaily(state: RunState): { stats: ResultStat[]; share: ShareOverride } | null {
+    const today = dayIndexOf(new Date());
+    if (state.daily?.day !== today) return null;
+    const result = { score: runScore(state), kept: daysKept(state.startDay, state.lastCleared) };
+    const outcome = addDailyRun(gardenDailyStore.data, today, result);
+    gardenDailyStore.set(outcome.record);
+    // 오늘의 판은 최고 기록과 전체 랭킹에 들지 않아서(offRecordNote) 판을 마칠 때의 올리기가 없다. 그래서 여기서 바로 올린다.
+    // 인터넷이 없으면 다음에 올라간다.
+    const day = boardDayOf(state.daily, Date.now());
+    if (day !== null) {
+      noteDayScore(this.gameId, result.score, day);
+      void syncScores();
+    }
+    const stats: ResultStat[] = [[DAILY_TEXT.name, dailyVerdict(outcome)]];
+    if (friend?.day === today) stats.push([DAILY_TEXT.friend, friendVerdict(friend.score, result.score)]);
+    return { stats, share: dailyShare(today, result, outcome.record.streak) };
+  }
+
+  /**
+   * 벌레 떼와 가게가 정해진 판(오늘의 판)은 최고 기록과 랭킹에 넣지 않는다. 같은 판을 몇 번이든 다시 할 수 있어서 여느 판과 견줄 수 없다.
+   * 두었다가 날이 넘어간 뒤에 마친 판도 넣지 않는다.
+   */
+  protected override offRecordNote(): string | null {
+    const day = this.run?.daily?.day;
+    if (day === undefined) return null;
+    return day === dayIndexOf(new Date()) ? DAILY_OFF_RECORD.today : DAILY_OFF_RECORD.past;
+  }
+
+  /** 오늘의 판을 마쳤으면 결과 화면의 "다시 하기"가 오늘의 판 쪽을 다시 연다. 넘어 볼 친구 기록은 그대로 남아 있다. */
+  protected override retryData(): StartData | undefined {
+    return this.run?.daily ? { lobby: 'daily' } : undefined;
   }
 }
