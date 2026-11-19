@@ -23,6 +23,7 @@ import {
   type RoundEvent,
   type RoundRule,
 } from './round-events';
+import { setEffectsOf } from './sets';
 
 // ───────── 그림 ─────────
 
@@ -474,11 +475,13 @@ export function ownsCharm(charms: readonly string[], id: string): boolean {
 export const SLOTS = 5;
 export const SLOTS_MAX = 6;
 
+/** 붙인 부적의 효과에, 그 부적들로 듣는 세트의 덤(sets.ts)까지 더한 것 */
 function effectsOf(charms: readonly string[]): CharmEffect[] {
-  return charms.flatMap((id) => {
+  const own = charms.flatMap((id) => {
     const charm = CHARM_BY_ID.get(id);
     return charm ? [charm.effect] : [];
   });
+  return [...own, ...setEffectsOf(charms)];
 }
 
 // ───────── 확률과 상금 ─────────
@@ -505,7 +508,7 @@ export function oddsOf(charms: readonly string[], rule: RoundRule = NO_RULE): nu
   return weights.map((weight) => weight / total);
 }
 
-/** 붙인 부적을 반영한 그림마다의 상금. rule을 주면 그 라운드의 이벤트가 곱하는 것도 반영한다. */
+/** 붙인 부적(과 세트의 덤)을 반영한 그림마다의 상금. rule을 주면 그 라운드의 이벤트가 곱하는 것도 반영한다. */
 export function valuesOf(charms: readonly string[], rule: RoundRule = NO_RULE): number[] {
   const values = SYMBOLS.map((symbol) => symbol.value);
   for (const effect of effectsOf(charms)) {

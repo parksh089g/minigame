@@ -25,6 +25,7 @@ import {
   type RelicId,
   type SymbolKey,
 } from './rules';
+import type { SetId } from './sets';
 
 type Graphics = Phaser.GameObjects.Graphics;
 
@@ -455,6 +456,24 @@ export function coinTexture(scene: Phaser.Scene): string {
 
 /** 부적 그림의 크기 */
 export const CHARM_BOX = 30;
+
+/**
+ * 부적 세트(sets.ts)마다의 색. 가게의 카드에 다는 표, 가게의 세트 줄, 붙인 부적의 세트 표시에 쓴다.
+ * 그림의 세트는 그 그림의 색을 흰 글자가 읽히게 짙게 쓰고, 7 세트는 체리와 헷갈리지 않게 보라로 한다.
+ */
+export const SET_TONES: Readonly<Record<SetId, number>> = {
+  cherry: 0xc4283e,
+  clover: 0x1f8540,
+  bell: 0xa8730f,
+  horseshoe: 0x56627f,
+  diamond: 0x1c6fbf,
+  seven: 0x8a3fc0,
+};
+
+/** 세트의 색을 글자에 쓸 때의 값 */
+export function setInk(id: SetId): string {
+  return `#${SET_TONES[id].toString(16).padStart(6, '0')}`;
+}
 
 /** 작은 동그란 표시: 더하기나 빼기 */
 function drawBadge(g: Graphics, x: number, y: number, sign: 'plus' | 'minus'): void {

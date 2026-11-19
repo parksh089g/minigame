@@ -218,6 +218,8 @@ export interface BubbleLayout {
   shop: { remove: Box; lead: Point; rule: number } | null;
   /** 강화하면 바뀌는 설명의 왼쪽 위와 강화 버튼. 강화할 것이 없으면(가게가 아니거나 이미 강화했으면) null */
   upgrade: { body: Point; button: Box } | null;
+  /** 세트의 한 줄(sets.ts)의 왼쪽 끝과 한가운데 높이. 세트에 들지 않는 부적이면 null */
+  set: Point | null;
 }
 
 /** 설명 창의 왼쪽 끝과 폭, 부적 줄과의 틈(꼬리가 들어가는 자리) */
@@ -226,6 +228,8 @@ const BUBBLE = { x: 16, gap: 6, pad: 10 } as const;
 const BUBBLE_BUTTON = { width: 70, height: 28, inset: 8, gap: 6 } as const;
 /** 설명 창의 높이: 이름과 설명만 있을 때와, 가게에서 강화 칸까지 있을 때 */
 const BUBBLE_HEIGHT = { plain: 44, shop: 74 } as const;
+/** 세트에 드는 부적의 설명 창은 맨 아래에 세트의 한 줄이 붙어 이만큼 길어진다. */
+const BUBBLE_SET_LINE = 16;
 
 /**
  * 설명 창의 자리. slotsTop은 부적 줄의 위쪽 끝이고, 창은 그 바로 위에 뜬다(아래쪽 끝이 늘 같은 높이다).
@@ -234,17 +238,20 @@ const BUBBLE_HEIGHT = { plain: 44, shop: 74 } as const;
  * 이미 강화한 부적의 창(done)도 크기와 떼는 버튼의 자리는 강화 칸이 있는 창(upgrade)과 같고, 강화 버튼만 없다.
  * 강화하면 창이 그 자리에서 done으로 바뀌는데, 강화 버튼을 잇달아 누르던 손이 떼는 버튼에 닿지 않게 하려는 것이다.
  */
-export function bubbleLayout(kind: BubbleKind, slotsTop: number, screenWidth: number): BubbleLayout {
-  const height = kind === 'plain' ? BUBBLE_HEIGHT.plain : BUBBLE_HEIGHT.shop;
+export function bubbleLayout(kind: BubbleKind, slotsTop: number, screenWidth: number, setLine = false): BubbleLayout {
+  const base = kind === 'plain' ? BUBBLE_HEIGHT.plain : BUBBLE_HEIGHT.shop;
+  const height = base + (setLine ? BUBBLE_SET_LINE : 0);
   const box: Box = { x: BUBBLE.x, y: slotsTop - BUBBLE.gap - height, width: screenWidth - BUBBLE.x * 2, height };
   const left = box.x + BUBBLE.pad;
   const title = { x: left, y: box.y + 6 };
+  // 세트의 한 줄은 원래의 창 아래에 덧붙는다. 그 위의 것들은 창의 위쪽 끝에서 잰 자리 그대로다.
+  const set = setLine ? { x: left, y: box.y + base + BUBBLE_SET_LINE / 2 - 4 } : null;
   if (kind === 'plain') {
-    return { box, title, body: { x: left, y: box.y + 24 }, textWidth: box.width - BUBBLE.pad * 2, shop: null, upgrade: null };
+    return { box, title, body: { x: left, y: box.y + 24 }, textWidth: box.width - BUBBLE.pad * 2, shop: null, upgrade: null, set };
   }
   const buttonLeft = box.x + box.width - BUBBLE_BUTTON.inset - BUBBLE_BUTTON.width;
   const button = (y: number): Box => ({ x: buttonLeft, y, width: BUBBLE_BUTTON.width, height: BUBBLE_BUTTON.height });
-  const shared = { box, title, body: { x: left, y: box.y + 23 }, textWidth: buttonLeft - BUBBLE_BUTTON.gap - left };
+  const shared = { box, title, body: { x: left, y: box.y + 23 }, textWidth: buttonLeft - BUBBLE_BUTTON.gap - left, set };
   const remove = button(box.y + 7);
   const rule = box.y + 38.5;
   if (kind === 'done') {

@@ -92,6 +92,7 @@ import {
   COLLECTION_TEXT,
   collectionEntries,
   collectionLabel,
+  entrySet,
   entryText,
   foundCount,
   type CollectionEntry,
@@ -140,6 +141,9 @@ import {
   type ChipTone,
   type PreviewChip,
 } from './shop-text';
+import { setInk } from './art';
+import { newSetBonuses, setCheerText, setOf } from './sets';
+import { addSetNote, addSetRibbon, drawSetMarks, drawSetRibbon, SET_RIBBON, SetLine, type SetRibbon } from './set-views';
 
 // ───────── 움직임 ─────────
 
@@ -199,6 +203,11 @@ const BIG_WIN_RATIO = 0.5;
 /** 가게의 창이 길 때 부적 한 줄이 더 커질 수 있는 높이와, 줄 아래에 안내를 적으려면 남아야 하는 높이 */
 const SHOP_ROW_GROW = 8;
 const SHOP_FOOT_MIN = 20;
+/** 줄 아래의 안내 위에 세트 줄("체리 세트 2/3")을 놓으려면 더 남아야 하는 높이와, 세트 줄 아래에 안내가 차지하는 높이 */
+const SHOP_SET_MIN = 13;
+const SHOP_SET_FOOT = 24;
+/** 세트의 덤이 새로 들었다는 알림이 세트 줄에 머무는 시간(ms) */
+const SET_CHEER_MS = 1400;
 
 /** 지금 강화할 수 있다는 표시가 부적의 아래 끝에서 내려와 놓이는 거리와, 오르내리는 폭 */
 const READY_MARK_DROP = 2;
@@ -439,6 +448,8 @@ interface OfferRow {
   priceBack: Graphics;
   coin: Image;
   price: Text;
+  /** 부적이 드는 세트의 표(set-views.ts). 그림의 아래 끝에 걸린다. */
+  ribbon: SetRibbon;
   pressed: boolean;
 }
 
@@ -505,6 +516,10 @@ export class CandySlotScene extends MiniGameScene {
   /** 가게가 열려 있는 동안 떠 있는 것들 */
   private shopViews: Disposable[] = [];
   private offerRows: Array<OfferRow | null> = [];
+  /** 붙인 부적의 세트 표시(점과 테두리)를 그리는 곳 */
+  private setMarks: Graphics | null = null;
+  /** 가게의 세트 줄. 창이 낮아 자리가 없으면 null */
+  private setLine: SetLine | null = null;
   private rerollButton: SoftButton | null = null;
   private shopGuardUntil = 0;
   /** 붙인 부적을 눌렀을 때 뜨는 설명 */
@@ -639,6 +654,8 @@ export class CandySlotScene extends MiniGameScene {
     this.hints = [];
     this.shopViews = [];
     this.offerRows = [];
+    this.setMarks = null;
+    this.setLine = null;
     this.rerollButton = null;
     this.shopGuardUntil = 0;
     this.bubble = null;
@@ -735,11 +752,14 @@ export class CandySlotScene extends MiniGameScene {
       // 지금 강화할 수 있는 부적의 아래 끝에 걸리는 표시. 부적의 그림은 가리지 않는다.
       const ready = this.add
         .image(slot.x + slotSize / 2, slot.y + slotSize + READY_MARK_DROP, upgradeReadyTexture(this))
-        .setDepth(DEPTH.panel)
+        .setDepth(DEPTH.panel + 0.2)
         .setVisible(false);
       this.readyMarks.push(ready);
       this.slotViews.push(image, zone, ready);
     });
+    // 세트의 점과 테두리는 부적의 그림 위, 강화 표시 아래에 놓는다.
+    this.setMarks = this.add.graphics().setDepth(DEPTH.panel + 0.1);
+    this.slotViews.push(this.setMarks);
     // 표시가 가만히 오르내려서 눈에 띈다. 움직임을 줄인 기기에서는 가만히 있는다.
     if (!reducedMotion()) {
       this.tweens.add({ targets: this.readyMarks, y: `-=${READY_MARK_BOB}`, duration: 520, ease: 'Sine.InOut', yoyo: true, repeat: -1 });
@@ -810,6 +830,7 @@ export class CandySlotScene extends MiniGameScene {
       const id = this.run.charms[index];
       image.setTexture(id ? charmTexture(this, id) : emptySlotTexture(this)).setScale(1);
     });
+    if (this.setMarks) drawSetMarks(this.setMarks, this.run.charms, this.layout.slots, this.layout.slotSize);
     this.refreshReadyMarks();
   }
 
@@ -1502,6 +1523,7 @@ export class CandySlotScene extends MiniGameScene {
     for (const view of this.shopViews) view.destroy();
     this.shopViews = [];
     this.shopFoot = null;
+    this.setLine = null;
     this.offerRows = [];
     this.rerollButton = null;
     vibrate([20, 40, 20]);
@@ -1603,10 +1625,12 @@ export class CandySlotScene extends MiniGameScene {
     this.shopViews.push(panel, blocker, title, guide);
     this.addShopBook(title, guide);
 
-    // 창에 남는 자리가 있으면 먼저 맨 아래에 한 줄 안내를 적을 자리를 떼고, 그래도 남으면 줄을 조금 키운다.
+    // 창에 남는 자리가 있으면 먼저 맨 아래에 한 줄 안내를 적을 자리를, 다음으로 그 위에 세트 줄의 자리를 떼고,
+    // 그래도 남으면 줄을 조금 키운다.
     const spare = shop.height - SHOP_HEAD - OFFERS * SHOP_ROW - 4;
     const foot = spare >= SHOP_FOOT_MIN ? SHOP_FOOT_MIN : 0;
-    const pitch = SHOP_ROW + Phaser.Math.Clamp(Math.floor((spare - foot) / OFFERS), 0, SHOP_ROW_GROW);
+    const setRoom = foot > 0 && spare - foot >= SHOP_SET_MIN ? SHOP_SET_MIN : 0;
+    const pitch = SHOP_ROW + Phaser.Math.Clamp(Math.floor((spare - foot - setRoom) / OFFERS), 0, SHOP_ROW_GROW);
     const top = shop.y + SHOP_HEAD;
     this.offerRows = [];
     for (let offer = 0; offer < OFFERS; offer += 1) {
@@ -1615,10 +1639,17 @@ export class CandySlotScene extends MiniGameScene {
       );
     }
     const rowsBottom = top + OFFERS * pitch;
-    const footRoom = shop.y + shop.height - rowsBottom;
+    // 세트 줄은 줄과 안내 사이의 남는 자리를 다 쓰고, 안내는 창의 맨 아래에 붙는다.
+    const footTop = setRoom > 0 ? Math.max(rowsBottom + setRoom, shop.y + shop.height - SHOP_SET_FOOT) : rowsBottom;
+    this.setLine = null;
+    if (setRoom > 0) {
+      this.setLine = new SetLine(this, { x: shop.x + 8, y: rowsBottom, width: shop.width - 16, height: footTop - rowsBottom }, DEPTH.shop);
+      this.shopViews.push(this.setLine);
+    }
+    const footRoom = shop.y + shop.height - footTop;
     this.shopFoot = null;
     if (footRoom >= SHOP_FOOT_MIN) {
-      this.shopFoot = addText(this, shop.x + shop.width / 2, rowsBottom + (footRoom - 4) / 2, '', {
+      this.shopFoot = addText(this, shop.x + shop.width / 2, footTop + (footRoom - 4) / 2, '', {
         size: FONT_SIZE.small,
         color: LOOK.text.faint,
         originX: 0.5,
@@ -1668,6 +1699,8 @@ export class CandySlotScene extends MiniGameScene {
         .image(box.x + box.width - pill.width - 5 + 4 + COIN_ICON.width / 2, middle, coinTexture(this))
         .setDepth(depth),
       price: addText(this, box.x + box.width - 5 - 6, middle, '', { originX: 1, originY: 0.5 }).setDepth(depth),
+      // 그림보다 나중에 만들어서 그림 위에 걸린다.
+      ribbon: addSetRibbon(this, depth),
       pressed: false,
     };
     const zone = addTapZone(
@@ -1682,7 +1715,8 @@ export class CandySlotScene extends MiniGameScene {
       },
       () => this.tryBuy(offer),
     ).setDepth(depth);
-    this.shopViews.push(row.back, row.icon, row.name, row.description, row.priceBack, row.coin, row.price, zone);
+    this.shopViews.push(row.back, row.icon, row.name, row.description, row.priceBack, row.coin, row.price, row.ribbon.back);
+    this.shopViews.push(row.ribbon.text, zone);
     return row;
   }
 
@@ -1703,6 +1737,9 @@ export class CandySlotScene extends MiniGameScene {
 
     const sold = !charm;
     for (const part of [row.icon, row.description, row.coin, row.price]) part.setVisible(!sold);
+    // 세트에 드는 부적이면 그림의 아래 끝에 세트의 표를 걸고, 표가 그림을 덜 가리게 그림을 조금 올린다.
+    const ribbon = drawSetRibbon(row.ribbon, charm?.id ?? null, row.icon.x, middle);
+    row.icon.setY(middle - (ribbon ? SET_RIBBON.lift : 0));
     if (!charm) {
       row.name.setText('붙였어요').setColor(LOOK.text.faint).setY(Math.round(middle - row.name.height / 2));
       return;
@@ -1725,6 +1762,7 @@ export class CandySlotScene extends MiniGameScene {
   private refreshShop(): void {
     for (let offer = 0; offer < OFFERS; offer += 1) this.drawOfferRow(offer);
     this.refreshOfferChips();
+    this.setLine?.refresh(this.run.charms, this.run.shop?.offers ?? []);
     this.refreshReadyMarks();
     this.refreshShopFoot();
     const cost = this.run.shop?.rerollCost ?? 0;
@@ -1747,6 +1785,7 @@ export class CandySlotScene extends MiniGameScene {
       else this.note('금화가 모자라요', LOOK.text.bad, y);
       return;
     }
+    const before = this.run.charms;
     this.run = buy(this.run, offer);
     this.keepRun(this.run.charms[this.run.charms.length - 1]);
     sfx.coin();
@@ -1755,9 +1794,22 @@ export class CandySlotScene extends MiniGameScene {
     this.refreshSlots();
     this.refreshOdds(true);
     this.refreshShop();
+    this.cheerSets(before);
     // 방금 붙인 부적이 제자리에서 톡 튄다.
     const image = this.slotImages[this.run.charms.length - 1];
     this.tweens.add({ targets: image, scale: { from: 1.4, to: 1 }, duration: 260, ease: 'Back.Out' });
+  }
+
+  /**
+   * 붙인 부적이 before에서 지금으로 바뀌며 새로 든 세트의 덤을 알린다. 가게의 세트 줄이 있으면 그 줄에 잠깐 적어서
+   * 다른 글을 가리지 않고, 창이 낮아 세트 줄이 없으면 부적 줄 바로 위에 띄운다.
+   */
+  private cheerSets(before: readonly string[]): void {
+    for (const bonus of newSetBonuses(before, this.run.charms)) {
+      sfx.gold();
+      if (this.setLine) this.setLine.cheer(setCheerText(bonus), setInk(bonus.set.id), SET_CHEER_MS);
+      else this.note(setCheerText(bonus), setInk(bonus.set.id), this.layout.slots[0].y - 14);
+    }
   }
 
   /**
@@ -1793,6 +1845,7 @@ export class CandySlotScene extends MiniGameScene {
     for (const view of this.shopViews) view.destroy();
     this.shopViews = [];
     this.shopFoot = null;
+    this.setLine = null;
     this.offerRows = [];
     this.rerollButton = null;
     this.run = nextRound(this.run);
@@ -2282,7 +2335,9 @@ export class CandySlotScene extends MiniGameScene {
     this.hideBubble();
     const { slots, slotSize } = this.layout;
     const shop = this.busy ? null : bubbleShop(this.run, slot);
-    const place = bubbleLayout(bubbleKindOf(shop), slots[0].y, GAME_WIDTH);
+    const id = this.run.charms[slot];
+    // 세트에 드는 부적이면 창의 맨 아래에 세트의 한 줄이 붙는다.
+    const place = bubbleLayout(bubbleKindOf(shop), slots[0].y, GAME_WIDTH, id !== undefined && setOf(id) !== undefined);
     const { box } = place;
     const depth = DEPTH.bubble;
 
@@ -2300,6 +2355,7 @@ export class CandySlotScene extends MiniGameScene {
       return text.setScale(Math.min(1, place.textWidth / Math.max(1, text.width)));
     };
     const views: Disposable[] = [back, title, small(place.body, description, LOOK.text.sub)];
+    if (place.set && id !== undefined) views.push(...addSetNote(this, this.run.charms, id, place.set.x, place.set.y, depth));
     for (let mark = 0; mark < upgradeMarks(this.run.charms[slot]); mark += 1) {
       const markX = title.x + Math.ceil(title.width) + 2 + UPGRADE_MARK_BOX / 2 + mark * (UPGRADE_MARK_BOX - 2);
       views.push(this.add.image(markX, title.y + title.height / 2, upgradeMarkTexture(this)).setDepth(depth));
@@ -2795,8 +2851,14 @@ export class CandySlotScene extends MiniGameScene {
       size: FONT_SIZE.small,
       color: LOOK.text.sub,
     }).setDepth(depth);
+    // 찾은 부적이 세트에 들면 이름 줄의 오른쪽 끝에 세트의 이름을 그 색으로 적는다.
+    const setName = addText(this, detail.x + detail.width - 10, detail.y + 13, '', {
+      size: FONT_SIZE.small,
+      originX: 1,
+      originY: 0.5,
+    }).setDepth(depth);
     const ring = this.add.graphics().setDepth(depth);
-    views.push(detailBack, name, description, ring);
+    views.push(detailBack, name, description, setName, ring);
     // 설명 칸에 글을 적는다. 설명이 없으면(아무 칸도 누르지 않았을 때의 안내) 한 줄을 칸의 가운데 높이에 놓는다.
     const write = (head: string, body: string, color: string): void => {
       name.setText(head).setColor(color);
@@ -2811,6 +2873,9 @@ export class CandySlotScene extends MiniGameScene {
     const select = (entry: CollectionEntry, x: number, y: number): void => {
       const text = entryText(entry);
       write(text.name, text.description, entry.found ? LOOK.text.ink : LOOK.text.faint);
+      const set = entrySet(entry);
+      setName.setText(set?.name ?? '').setVisible(set !== undefined);
+      if (set) setName.setColor(setInk(set.id));
       const half = BOOK.pitch / 2;
       ring.clear();
       ring.lineStyle(2, THEME.accent, 1);

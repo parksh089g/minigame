@@ -44,6 +44,7 @@ import {
   upgradeChip,
   type PreviewChip,
 } from '../src/games/candy-slot/shop-text';
+import { setNoteOf } from '../src/games/candy-slot/sets';
 import { hiddenTexts, it, openApp, startScene, tapAt, tapText, textPoint, textsOutsideCards, waitForScene } from './app';
 
 const KEY = SCENE.candySlot;
@@ -199,7 +200,13 @@ function offerTexts(run: RunState, slot: number): string[] {
   if (!shop) throw new Error('가게가 열린 판이 아니다');
   const offer = shop.upgrade;
   const step = offer.description !== null && offer.cost !== null ? [offer.description, BUBBLE_TEXT.upgrade, String(offer.cost)] : [];
-  return [charm.name, charm.description, BUBBLE_TEXT.remove, `+${shop.refund}`, offer.lead, ...step].sort();
+  return [charm.name, charm.description, BUBBLE_TEXT.remove, `+${shop.refund}`, offer.lead, ...step, ...setTexts(run.charms, charm.id)].sort();
+}
+
+/** 세트에 드는 부적의 설명 창 맨 아래에 붙는 세트의 한 줄(sets.ts): 모은 정도와 덤의 글 */
+function setTexts(charms: readonly string[], id: string): string[] {
+  const note = setNoteOf(charms, id);
+  return note ? [note.progress, note.bonus] : [];
 }
 
 /**
@@ -390,6 +397,7 @@ it('행운 슬롯: 금화가 모자라거나 끝까지 강화한 부적은 강�
       charm.upgrades[0].description,
       BUBBLE_TEXT.upgrade,
       String(cost),
+      ...setTexts([charm.id], charm.id),
     ].sort(),
   );
   expect(await hiddenTexts(page, KEY, { from: BUBBLE_TEXT.remove }), '금화가 모자란 설명 창').toEqual([]);
@@ -462,6 +470,7 @@ it('행운 슬롯: 강화하고 나면 다음 목표보다 적게 남을 때는 
       charm.upgrades[0].description,
       BUBBLE_TEXT.upgrade,
       String(cost),
+      ...setTexts([charm.id], charm.id),
     ].sort(),
   );
   expect(await hiddenTexts(page, KEY, { from: BUBBLE_TEXT.remove }), '알리는 글이 있는 설명 창').toEqual([]);
@@ -496,6 +505,7 @@ it('행운 슬롯: 유물이 있는 판에서도 버튼에 적힌 강화 값과 
       charm.upgrades[0].description,
       BUBBLE_TEXT.upgrade,
       String(cost),
+      ...setTexts([charm.id], charm.id),
     ].sort(),
   );
 

@@ -655,7 +655,8 @@ it('행운 슬롯 해금: 가게에서 여섯째 부적을 붙일 수 있고, �
   expect(now.slots.map((slot) => slot.key), '자리마다 붙인 부적의 그림').toEqual(
     [...five, sixth.id].map((id) => `candy-slot-charm-${id}`),
   );
-  expect(await hiddenTexts(page, KEY), '부적 여섯 장을 붙인 가게').toEqual([]);
+  // 쌍둥이 줄로 체리 세트의 덤이 들어 잠깐 뜨는 알림(sets.ts)이 사라진 뒤에 잰다.
+  await expect.poll(() => hiddenTexts(page, KEY), { ...WAIT, message: '부적 여섯 장을 붙인 가게' }).toEqual([]);
 
   // 양 끝 자리의 부적을 눌러도 설명이 제대로 뜬다.
   for (const index of [0, SLOTS_MAX - 1]) {

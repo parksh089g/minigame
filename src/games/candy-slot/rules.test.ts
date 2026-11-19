@@ -12,6 +12,7 @@ import {
   CELLS,
   CENTER,
   centerWildOf,
+  type CharmEffect,
   charmOf,
   CHARMS,
   clearedRounds,
@@ -54,6 +55,7 @@ import {
   SHOP_ROW,
   SIZE,
   SLOTS,
+  slotsOf,
   spin,
   type SpinContext,
   spinsOf,
@@ -63,6 +65,7 @@ import {
   targetOf,
   takePieces,
   upgrade,
+  upgradeBlock,
   UPGRADE_MAX,
   upgradeCostOf,
   upgradedOf,
@@ -70,6 +73,7 @@ import {
   weightsOf,
   WILD,
 } from './rules';
+import { setBonusesOf } from './sets';
 
 /** 테스트마다 같은 순서의 수를 내는 작은 난수기 */
 function seeded(seed: number): () => number {
@@ -1273,4 +1277,190 @@ describe('밸런스', () => {
     expect(maxed.rounds).toBeLessThanOrEqual(23);
     expect(maxed.score).toBeLessThan(MAX_SCORE / 5);
   }, 60_000);
+});
+
+// ───────── 세트를 보고 고르는 자동 플레이 ─────────
+
+/** 어림에 쓰는 라운드의 수와, 한 라운드에 셈하는 가장 많은 스핀 */
+const QUICK_ROUNDS = 300;
+const QUICK_SPINS = 20;
+/** 어림에 쓰는 운. 모든 조합이 같은 운으로 셈해서, 조합끼리 견줄 때 운의 차이가 끼지 않는다. */
+const QUICK_LUCK = (() => {
+  const random = seeded(777);
+  return Float64Array.from({ length: QUICK_ROUNDS * QUICK_SPINS * 10 }, () => random());
+})();
+
+/** 부적 하나하나의 효과(세트의 덤은 뺀 것) */
+const ownEffects = (charms: readonly string[]): CharmEffect[] =>
+  charms.flatMap((id) => {
+    const charm = charmOf(id);
+    return charm ? [charm.effect] : [];
+  });
+
+/**
+ * 붙인 부적으로 한 라운드에 버는 금화를 빠르게 어림한다(열은 잠그지 않는다). 가게에서 고를 때마다 수십 가지 조합을
+ * 견줘야 해서 spin을 부르지 않고 같은 셈을 짧게 한다. withSets가 false면 세트의 덤을 모르는 사람의 어림이다.
+ */
+function quickRound(charms: readonly string[], withSets: boolean): number {
+  const effects = ownEffects(charms);
+  let weights = weightsOf(charms);
+  let values = valuesOf(charms);
+  let times = lineTimesOf(charms);
+  let spins = spinsOf(charms);
+  if (!withSets) {
+    weights = SYMBOLS.map((symbol) => symbol.weight);
+    values = SYMBOLS.map((symbol) => symbol.value);
+    times = { row: 1, col: 1, diag: 1 };
+    spins = BASE_SPINS;
+    for (const effect of effects) {
+      if (effect.weight) weights[effect.weight[0]] += effect.weight[1];
+      if (effect.value) values[effect.value[0]] += effect.value[1];
+      if (effect.lineTimes) times[effect.lineTimes[0]] *= effect.lineTimes[1];
+      spins += effect.spins ?? 0;
+    }
+    weights = weights.map((weight) => Math.max(MIN_WEIGHT, weight));
+  }
+  const total = weights.reduce((sum, weight) => sum + weight, 0);
+  const lineTimes = LINES.map((line) => times[line.kind]);
+  const centerWild = centerWildOf(charms);
+  const rounds = Math.min(QUICK_SPINS, spins);
+  const combos = effects.flatMap((effect) => (effect.combo ? [effect.combo] : []));
+  const exacts = effects.flatMap((effect) => (effect.comboExact ? [effect.comboExact] : []));
+  const lastTimes = effects.reduce((product, effect) => product * (effect.lastTimes ?? 1), 1);
+  const reboundTimes = effects.reduce((product, effect) => product * (effect.reboundTimes ?? 1), 1);
+  const consolation = effects.reduce((sum, effect) => sum + (effect.consolation ?? 0), MISS_COIN);
+  const grid = new Array<number>(CELLS).fill(0);
+  let earned = 0;
+  for (let round = 0; round < QUICK_ROUNDS; round += 1) {
+    let afterMiss = false;
+    for (let at = 0; at < rounds; at += 1) {
+      const luck = (round * QUICK_SPINS + at) * 10;
+      for (let cell = 0; cell < CELLS; cell += 1) {
+        if (cell === CENTER && QUICK_LUCK[luck + 9] < centerWild) {
+          grid[cell] = WILD;
+          continue;
+        }
+        let left = QUICK_LUCK[luck + cell] * total;
+        let symbol = 0;
+        while (symbol < weights.length - 1 && left >= weights[symbol]) left -= weights[symbol++];
+        grid[cell] = symbol;
+      }
+      let base = 0;
+      let hits = 0;
+      LINES.forEach((line, index) => {
+        const symbol = lineSymbol(grid, line);
+        if (symbol === null) return;
+        hits += 1;
+        base += values[symbol] * lineTimes[index];
+      });
+      if (hits === 0) {
+        earned += consolation;
+        afterMiss = true;
+        continue;
+      }
+      let won = hits === LINES.length ? base * JACKPOT_TIMES : base;
+      for (const [lines, by] of combos) if (hits >= lines) won *= by;
+      for (const [lines, by] of exacts) if (hits === lines) won *= by;
+      if (at === rounds - 1) won *= lastTimes;
+      if (afterMiss) won *= reboundTimes;
+      afterMiss = false;
+      earned += won;
+    }
+  }
+  return earned / QUICK_ROUNDS;
+}
+
+const quickCache = new Map<string, number>();
+function quickWorth(charms: readonly string[], withSets: boolean): number {
+  const key = `${withSets ? 'set' : 'plain'}:${[...charms].sort().join(',')}`;
+  let worth = quickCache.get(key);
+  if (worth === undefined) {
+    worth = quickRound(charms, withSets);
+    quickCache.set(key, worth);
+  }
+  return worth;
+}
+
+/**
+ * 잘 고르는 사람: 가게에 나온 부적마다 사서 붙이면(자리가 찼으면 한 장을 떼고) 벌이가 얼마나 느는지 어림해서,
+ * 넉넉히 느는 것 가운데 가장 많이 느는 것을 산다. 살 것이 없고 금화가 남으면 몇 번까지 다시 뽑는다.
+ * 다음 목표를 낼 수 없을 만큼은 쓰지 않는다. upgrades면 남는 금화로 강화도 한다.
+ * withSets가 true면 세트의 덤까지 넣어 어림한다(세트를 보고 모으는 사람), false면 세트를 모르는 사람이다.
+ */
+function wiseShopper(random: () => number, withSets: boolean, upgrades = false): (run: RunState) => RunState {
+  return (start) => {
+    let run = start;
+    let rerolls = 0;
+    const target = targetFor(run, run.round + 1);
+    for (let guard = 0; guard < 30; guard += 1) {
+      const now = quickWorth(run.charms, withSets);
+      let best: { gain: number; next: RunState } | null = null;
+      (run.shop?.offers ?? []).forEach((id, offer) => {
+        const charm = id ? charmOf(id) : undefined;
+        if (!id || !charm) return;
+        const choices = run.charms.length >= slotsOf(run) ? run.charms.map((_, slot) => slot) : [-1];
+        for (const slot of choices) {
+          const from = slot < 0 ? run : discard(run, slot);
+          const coinAfter = from.coin - charm.price;
+          if (coinAfter < 0) continue;
+          const after = [...from.charms, id];
+          const worth = quickWorth(after, withSets);
+          if (coinAfter < target && coinAfter + worth < target * 1.1) continue;
+          const gain = worth - now;
+          if (gain <= Math.max(0.5, now * 0.04)) continue;
+          if (!best || gain > best.gain) best = { gain, next: buy(from, offer) };
+        }
+      });
+      if (best) {
+        run = (best as { next: RunState }).next;
+        continue;
+      }
+      const cost = run.shop?.rerollCost ?? 0;
+      const room = run.charms.length < slotsOf(run);
+      if (rerolls >= 4 || run.coin - cost < Math.max(cost * 3, room ? 0 : target)) break;
+      run = reroll(run, random);
+      rerolls += 1;
+    }
+    // upgrades면 남는 금화로, 금화 한 개마다 벌이가 가장 많이 느는 부적부터 강화한다(다음 목표를 낼 금화는 남긴다).
+    for (let guard = 0; upgrades && guard < 20; guard += 1) {
+      const now = quickWorth(run.charms, withSets);
+      let pick = -1;
+      let rate = 0;
+      run.charms.forEach((id, slot) => {
+        const cost = upgradeCostOf(id, run);
+        if (upgradeBlock(run, slot) !== null || run.coin - cost < target) return;
+        const gain = (quickWorth(upgrade(run, slot).charms, withSets) - now) / cost;
+        if (gain > rate) {
+          rate = gain;
+          pick = slot;
+        }
+      });
+      if (pick < 0) break;
+      run = upgrade(run, pick);
+    }
+    return run;
+  };
+}
+
+describe('세트의 밸런스', () => {
+  it('세트를 보고 모으는 사람은 세트를 훨씬 자주 다 모으고, 세트가 없던 때보다 조금 멀리 가며, 판의 흐름은 그대로다', () => {
+    const mean = (rounds: readonly number[]): number => rounds.reduce((sum, cleared) => sum + cleared, 0) / rounds.length;
+    const roundsIn = (runs: readonly RunState[]): number[] => runs.map((run) => clearedRounds(run)).sort((a, b) => a - b);
+    const fullShare = (runs: readonly RunState[]): number =>
+      runs.filter((run) => setBonusesOf(run.charms).some((bonus) => bonus.tier.count >= 3)).length / runs.length;
+    const blindRuns = runsOf(300, 117, wiseShopper(seeded(118), false));
+    const awareRuns = runsOf(300, 117, wiseShopper(seeded(118), true));
+    const blind = roundsIn(blindRuns);
+    const aware = roundsIn(awareRuns);
+    // 세트를 보고 고르면 열에 아홉은 한 세트를 다 모으고 끝난다. 모르고 고르면 셋에 하나쯤이다.
+    expect(fullShare(awareRuns)).toBeGreaterThan(0.75);
+    expect(fullShare(awareRuns)).toBeGreaterThan(fullShare(blindRuns) * 2);
+    // 같은 사람이 세트가 없던 때에는 평균 10.1 라운드(가운데 값 10)에서 끝났다. 세트를 보고 모으면 그보다 한 라운드쯤 더 가고
+    // (10.9, 가운데 값 11), 세트를 모르고 골라도 우연히 든 덤만큼은 간다. 세트를 보고 모은다고 처지지는 않는다.
+    expect(mean(aware)).toBeGreaterThan(10.5);
+    expect(mean(aware)).toBeGreaterThan(mean(blind) - 0.25);
+    expect(middleOf(aware)).toBeGreaterThanOrEqual(11);
+    expect(middleOf(aware)).toBeLessThanOrEqual(12);
+    expect(aware[aware.length - 1]).toBeLessThanOrEqual(16);
+  }, 120_000);
 });

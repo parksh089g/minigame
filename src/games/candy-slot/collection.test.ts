@@ -5,6 +5,7 @@ import {
   COLLECTION_TEXT,
   collectionEntries,
   collectionLabel,
+  entrySet,
   entryText,
   foundCount,
   isFound,
@@ -94,6 +95,14 @@ describe('도감의 칸', () => {
     if (!piggy) throw new Error('저금통이 없다');
     expect(piggy.found).toBe(true);
     expect(entryText(piggy)).toEqual({ name: piggy.charm.name, description: piggy.charm.description });
+  });
+
+  it('찾은 부적은 드는 세트도 보여 주고, 찾지 못한 부적은 세트도 알려 주지 않는다', () => {
+    const entries = collectionEntries(['more-cherry', 'wide']);
+    const byId = (id: string) => entries.find((entry) => entry.charm.id === id);
+    expect(entrySet(byId('more-cherry')!)?.id).toBe('cherry');
+    expect(entrySet(byId('wide')!)).toBeUndefined();
+    expect(entrySet(byId('gold-cherry')!)).toBeUndefined();
   });
 
   it('찾지 못한 부적은 이름도 설명도 알려 주지 않는다', () => {
