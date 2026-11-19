@@ -414,6 +414,11 @@ export interface GardenMeta {
   shards: number;
   /** 유물마다의 단계. 새 밭을 일궈도 남는다. */
   relics: RelicLevels;
+  /**
+   * 가게에 "꾹 누르면 자세히" 안내를 띄운 가게 수. HOLD_HINT_SHOPS가 되면(또는 꾹 눌러 본 적이 있으면 바로 그 값이 된다) 더 띄우지 않는다.
+   * 이 항목이 생기기 전의 저장에는 없으므로 없어도 된다.
+   */
+  holdHint?: number;
   /** 저장한 때(ms). 같은 기기의 다른 곳이 더 늦게 저장한 것을 가리는 데 쓴다. */
   savedAt: number;
 }
@@ -431,6 +436,7 @@ export function createMeta(): GardenMeta {
     bestEver: 0,
     shards: 0,
     relics: {},
+    holdHint: 0,
     savedAt: 0,
   };
 }
@@ -467,6 +473,7 @@ export function normalizeMeta(raw: unknown): GardenMeta {
   meta.kills = count(data.kills);
   meta.savedAt = count(data.savedAt);
   meta.fields = count(data.fields);
+  meta.holdHint = Math.min(count(data.holdHint), HOLD_HINT_SHOPS);
   // 버전 2까지는 밭이 하나뿐이어서 지금 밭의 기록이 곧 모든 밭의 기록이다.
   meta.bestEver = Math.max(Math.min(count(data.bestEver), MAX_DAY), meta.best);
   const levels = typeof data.levels === 'object' && data.levels !== null ? (data.levels as Record<string, unknown>) : {};
@@ -485,6 +492,24 @@ export function normalizeMeta(raw: unknown): GardenMeta {
   const fromV1 = count(data.version) < 2;
   meta.startDay = fromV1 ? latestStart(meta.best) : clampStartDay(count(data.startDay) || 1, meta.best);
   return meta;
+}
+
+/** "꾹 누르면 자세히" 안내를 띄우는 가게의 수. 그동안 한 번도 꾹 누르지 않았어도 그 뒤로는 띄우지 않는다. */
+export const HOLD_HINT_SHOPS = 3;
+
+/** 이번 가게에 "꾹 누르면 자세히" 안내를 띄우는지 */
+export function showsHoldHint(meta: GardenMeta): boolean {
+  return (meta.holdHint ?? 0) < HOLD_HINT_SHOPS;
+}
+
+/** 안내를 띄운 가게를 하나 센다. 이미 다 띄웠으면 그대로 돌려준다. */
+export function countHoldHint(meta: GardenMeta): GardenMeta {
+  return showsHoldHint(meta) ? { ...meta, holdHint: (meta.holdHint ?? 0) + 1 } : meta;
+}
+
+/** 꾹 눌러 정보 창을 열어 보았으니 안내를 더 띄우지 않는다. 이미 그렇다면 그대로 돌려준다. */
+export function learnHoldHint(meta: GardenMeta): GardenMeta {
+  return showsHoldHint(meta) ? { ...meta, holdHint: HOLD_HINT_SHOPS } : meta;
 }
 
 /** 지금 시작할 수 있는 가장 늦은 날 */

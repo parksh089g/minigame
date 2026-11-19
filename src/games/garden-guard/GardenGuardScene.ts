@@ -16,10 +16,13 @@ import {
   bankShards,
   bossKind,
   clampStartDay,
+  countHoldHint,
   daysKept,
   isBossDay,
+  learnHoldHint,
   openedStart,
   raiseBest,
+  showsHoldHint,
   type GardenMeta,
 } from './rules';
 import { settleSavedRun } from './saved-run';
@@ -721,6 +724,9 @@ export class GardenGuardScene extends MiniGameScene {
   /** 동료 가게를 띄운다. 사거나 다시 뽑거나 닫으면 다음 걸음에 시뮬레이션이 그것을 하고 알린다('buy', 'reroll', 'dayStart'). */
   private openShop(state: RunState): void {
     this.aimPointer = null;
+    // 꾹 누르면 정보가 뜨는 것을 처음 몇 번의 가게에서 말풍선으로 알린다. 띄운 가게를 세어 두어서 끝없이 띄우지 않는다.
+    const holdHint = showsHoldHint(gardenStore.data) && (state.shop.length > 0 || state.allies.length > 0);
+    if (holdHint) gardenStore.set(countHoldHint(gardenStore.data));
     this.shop = openShopPanel(
       this,
       { top: this.layout.top, bottom: this.layout.fenceY },
@@ -752,7 +758,12 @@ export class GardenGuardScene extends MiniGameScene {
           // 누르자마자 닫아서 판이 보이게 한다. 날은 다음 걸음에 시작된다.
           this.closeShop();
         },
+        held: () => {
+          const learned = learnHoldHint(gardenStore.data);
+          if (learned !== gardenStore.data) gardenStore.set(learned);
+        },
       },
+      holdHint,
     );
     this.cleared = null;
   }

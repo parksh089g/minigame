@@ -57,7 +57,11 @@ interface HeadLine {
   color: string;
   /** 이 줄이 차지하는 높이 */
   height: number;
+  /** 말풍선(옅게 커졌다 작아지는 분홍 칸)에 담아 적는 줄 */
+  bubble?: boolean;
 }
+/** "꾹 누르면 자세히" 말풍선: 줄 높이, 풍선의 높이와 좌우 여백, 아래로 뾰족한 꼬리의 길이 */
+const BUBBLE = { line: 16, height: 14, pad: 8, tail: 3 } as const;
 /** 마지막 줄과 첫 카드 사이 */
 const HEAD_GAP = 3;
 /** 창이 뜨고 이 시간(ms)이 지나야 눌린다. 벌레를 겨누던 손가락이 카드를 잘못 누르지 않게 한다. */
@@ -102,6 +106,8 @@ export interface ShopHandlers {
   /** 텃밭의 그 동료(state.allies의 차례)를 내보낸다. */
   dismiss(index: number): void;
   ready(): void;
+  /** 카드나 밭의 동료를 꾹 눌러 정보 창을 열었다. */
+  held?(): void;
 }
 
 /** 끌고 있는 것: 가게의 카드나 밭의 동료. grip은 손가락이 잡은 칸이 모양의 첫 칸에서 떨어진 정도다. */
@@ -161,6 +167,7 @@ function drawLock(g: Phaser.GameObjects.Graphics, cx: number, cy: number, locked
  * 텃밭의 동료를 누르면 왼쪽 아래 단추가 "내보내기"로 바뀐다. 카드 왼쪽 위의 자물쇠를 누르면 그 카드를 묶거나 푼다.
  * 판이 바뀌면 부른 쪽이 refresh로 다시 그린다.
  * cleared가 있으면 방금 지킨 날의 알림을 맨 위에 적는다(판의 첫날 앞과 이어 한 판에서는 없다).
+ * holdHint면 카드 바로 위에 "꾹 누르면 자세히 보여요" 말풍선을 띄운다. 꾹 눌러 정보 창을 한 번 열면 걷힌다.
  */
 export function openShopPanel(
   scene: Phaser.Scene,
@@ -169,8 +176,10 @@ export function openShopPanel(
   state: RunState,
   cleared: ClearedNote | null,
   handlers: ShopHandlers,
+  holdHint = false,
 ): ShopPanel {
   const openedAt = scene.time.now;
+  let hint = holdHint;
   let objects: Phaser.GameObjects.GameObject[] = [];
   let closed = false;
   /** 고른 카드(두 단추를 펼친 카드)와 고른 텃밭의 동료. 둘 가운데 하나만 고른다. */
@@ -363,6 +372,9 @@ export function openShopPanel(
     pending = null;
     const ally = from.kind === 'ally' ? current.allies[from.index] : undefined;
     if (from.kind === 'ally' && !ally) return;
+    // 꾹 누르는 법을 알았으니 말풍선은 걷는다(창을 닫고 새로 그릴 때 빠진다).
+    hint = false;
+    handlers.held?.();
     for (const object of objects) (object as Phaser.GameObjects.GameObject & Phaser.GameObjects.Components.Visible).setVisible(false);
     const ring = ally
       ? (shapeCells(ally.id, ally.cell) ?? []).map((cell) => {
@@ -381,7 +393,10 @@ export function openShopPanel(
   };
 
   const build = (run: RunState, fade: boolean): void => {
-    for (const object of objects) object.destroy();
+    for (const object of objects) {
+      scene.tweens.killTweensOf(object);
+      object.destroy();
+    }
     objects = [];
     current = run;
     if (pickedCard !== null && (!run.shop[pickedCard] || run.shop[pickedCard].sold)) pickedCard = null;
@@ -415,12 +430,36 @@ export function openShopPanel(
       { text: SHOP_TEXT.dragHint, size: FONT_SIZE.small, color: THEME_CSS.faint, height: 15 },
     ];
     const cards = run.shop.length;
-    const headHeight = head.reduce((sum, line) => sum + line.height, 0) + HEAD_GAP;
     const cardsHeight = cards * CARD.height + Math.max(0, cards - 1) * CARD.gap;
-    const height = headHeight + cardsHeight + BUTTON.top + BUTTON.height;
+    const heightOf = (lines: readonly HeadLine[]): number =>
+      lines.reduce((sum, line) => sum + line.height, 0) + HEAD_GAP + cardsHeight + BUTTON.top + BUTTON.height;
+    // 꾹 누르는 법의 말풍선은 카드 바로 위에 한 줄 더 둔다. 판이 짧아 창이 울타리에 닿으면 끌어다 놓는 도움말 자리에 대신 둔다.
+    if (hint && (cards > 0 || run.allies.length > 0)) {
+      const bubble: HeadLine = { text: SHOP_TEXT.holdHint, size: FONT_SIZE.small, color: THEME_CSS.inkDeep, height: BUBBLE.line, bubble: true };
+      if (heightOf([...head, bubble]) <= area.bottom - area.top - 8) head.push(bubble);
+      else head[head.length - 1] = bubble;
+    }
+    const headHeight = head.reduce((sum, line) => sum + line.height, 0) + HEAD_GAP;
+    const height = heightOf(head);
     const top = Math.max(area.top + 4, Math.round((area.top + area.bottom - height) / 2));
     let lineTop = top;
     for (const line of head) {
+      if (line.bubble) {
+        // 말풍선: 분홍 칸에 담고 아래(카드 쪽)로 꼬리를 단다. 가운데를 기준으로 옅게 커졌다 작아진다. 누르는 자리가 없어 아래의 카드를 가리지 않는다.
+        const label = addText(scene, 0, 0, line.text, { size: line.size, color: line.color, originX: 0.5, originY: 0.5 });
+        const w = Math.ceil(label.width) + BUBBLE.pad * 2;
+        const h = BUBBLE.height;
+        const g = scene.add.graphics();
+        g.fillStyle(THEME.pink, 1);
+        g.lineStyle(1.5, THEME.pinkDeep, 1);
+        g.fillRoundedRect(-w / 2, -h / 2, w, h, h / 2);
+        g.strokeRoundedRect(-w / 2, -h / 2, w, h, h / 2);
+        g.fillTriangle(-4, h / 2 - 1, 4, h / 2 - 1, 0, h / 2 + BUBBLE.tail);
+        const box = keep(scene.add.container(GAME_WIDTH / 2, lineTop + h / 2, [g, label]).setDepth(depth));
+        scene.tweens.add({ targets: box, scale: 1.05, duration: 650, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
+        lineTop += line.height;
+        continue;
+      }
       keep(
         addText(scene, GAME_WIDTH / 2, lineTop, line.text, {
           size: line.size,
