@@ -121,6 +121,9 @@ import {
 } from './perk-views';
 import { UPGRADE_MARK_BOX, upgradeMarkTexture, upgradeReadyTexture } from './art';
 import { nextSpinTimes, upgrade } from './rules';
+import { claimReward, goalRound, roundHoldsOf, ruleAt, ruleNow, rewardBlock, takePieces } from './rules';
+import { bossPiecesOf, eventInfoOf, type RoundEvent } from './round-events';
+import { eventHeadline, eventLine, eventTag, isBoss, REWARD_TEXT } from './round-event-text';
 import {
   BUBBLE_TEXT,
   bubbleKindOf,
@@ -169,6 +172,13 @@ const HOLD_TIP_MS = 2600;
 const HOLD_NOTES = {
   first: '한 번 돌린 뒤에 잠글 수 있어요',
 } as const;
+/**
+ * 라운드 이벤트의 표: HUD의 "라운드" 아래 오른쪽 끝에 붙는다. 오늘의 판의 표(DAILY_BADGE)와 같은 높이이고,
+ * 이름을 다섯 글자 안쪽으로 지어서 "다음"을 붙여도 가운데의 그 표에 닿지 않는다.
+ */
+const EVENT_TAG = { right: 4, y: 46, height: 14, pad: 7 } as const;
+/** 라운드가 시작될 때 이벤트를 알리는 글이 떠 있는 시간(ms) */
+const EVENT_BANNER_MS = 2200;
 /** 곱해진 상금을 알리는 글이 떠 있는 시간(ms) */
 const BOOST_MS = 620;
 /** 꽝을 보여 준 뒤 다음 스핀을 받을 때까지(ms) */
@@ -530,6 +540,9 @@ export class CandySlotScene extends MiniGameScene {
   private sharedDayPassed = false;
   /** 공유받은 주소에 실려 온 친구의 오늘 점수. 없으면 null */
   private friendScore: number | null = null;
+  /** 라운드 이벤트의 표와, 지금 표에 적힌 이벤트(바뀌었을 때만 확률 줄을 튀게 한다) */
+  private eventTagView: { back: Graphics; text: Text; zone: Phaser.GameObjects.Zone } | null = null;
+  private shownEvent = '';
 
   constructor() {
     super(SCENE.candySlot);
@@ -560,6 +573,7 @@ export class CandySlotScene extends MiniGameScene {
 
     this.addPauseButton();
     this.hud = new GameHud(this, DEPTH.hud);
+    this.addEventTag();
     this.spinButton = new SoftButton(this, this.layout.button, 'gold', DEPTH.panel, '돌리기', () => this.trySpin());
 
     this.refreshNumbers();
@@ -628,6 +642,8 @@ export class CandySlotScene extends MiniGameScene {
     this.rerollButton = null;
     this.shopGuardUntil = 0;
     this.bubble = null;
+    this.eventTagView = null;
+    this.shownEvent = '';
     this.resetSaveViews();
   }
 
@@ -767,7 +783,7 @@ export class CandySlotScene extends MiniGameScene {
     this.hud.setScore(Math.max(0, scoreOf(run) - this.pending));
     this.hud.setSide(`라운드 ${run.round}`);
     this.goalLabel.setText(shopping ? '다음 목표' : '목표');
-    this.spinsText.setText(`스핀 ${shopping ? spinsOf(run.charms) : run.spinsLeft}`);
+    this.spinsText.setText(`스핀 ${shopping ? spinsOf(run.charms, ruleNow(run)) : run.spinsLeft}`);
 
     const barLeft = Math.ceil(this.goalLabel.x + this.goalLabel.width) + 6;
     const barRight = Math.floor(this.spinsText.x - this.spinsText.width) - 6;
@@ -786,6 +802,7 @@ export class CandySlotScene extends MiniGameScene {
     this.refreshHold();
     this.refreshDailyBadge();
     this.refreshPerks();
+    this.refreshEventTag();
   }
 
   private refreshSlots(): void {
@@ -809,8 +826,9 @@ export class CandySlotScene extends MiniGameScene {
 
   /** 그림마다의 상금과 확률을 적는다. bounce면 바뀐 칸이 톡 튄다(부적을 붙이거나 뗐을 때). */
   private refreshOdds(bounce: boolean): void {
-    const odds = wholePercents(oddsOf(this.run.charms));
-    const values = valuesOf(this.run.charms);
+    // 목표 카드가 말하는 라운드의 이벤트(가게에서는 다음 라운드의 것)까지 넣은 수를 적는다.
+    const odds = wholePercents(oddsOf(this.run.charms, ruleNow(this.run)));
+    const values = valuesOf(this.run.charms, ruleNow(this.run));
     this.oddsTexts.forEach((texts, symbol) => {
       const changed = [
         [texts.value, values[symbol], this.shownValues[symbol]] as const,
@@ -1309,12 +1327,19 @@ export class CandySlotScene extends MiniGameScene {
   /** 지금 열을 잠글 수 있는지, 없으면 왜인지를 알린다. 처음의 도움말이 떠 있는 동안에는 말을 보태지 않는다. */
   private explainHold(): void {
     if (!this.playing || this.busy || this.run.phase !== 'spin' || this.hints.length > 0) return;
+    // 이번 라운드의 이벤트가 더하거나 막은 잠그기까지 센다.
+    const rule = ruleAt(this.run, this.run.round);
+    const holds = roundHoldsOf(this.run, rule);
     if (canHold(this.run)) {
-      this.holdNote(holdHowText(holdsOf(this.run), this.run.holdsLeft));
+      this.holdNote(holdHowText(holds, this.run.holdsLeft));
       return;
     }
     sfx.deny();
-    this.holdNote(this.run.holdsLeft > 0 ? HOLD_NOTES.first : holdUsedText(holdsOf(this.run)));
+    if (rule.noHolds && this.run.event) {
+      this.holdNote(eventLine(this.run.event));
+      return;
+    }
+    this.holdNote(this.run.holdsLeft > 0 ? HOLD_NOTES.first : holdUsedText(holds));
   }
 
   /** 첫 라운드에서 열을 잠글 수 있게 된 첫 순간에 한 번, 잠그는 법을 알린다. */
@@ -1555,6 +1580,11 @@ export class CandySlotScene extends MiniGameScene {
     this.shopGuardUntil = this.time.now + SHOP_GUARD_MS;
     this.spinButton.setVisible(false);
     this.refreshNumbers();
+    // 대장 라운드를 넘겼으면 상부터 고른다. 고르고 나면 여느 가게가 열린다.
+    if (this.run.reward) {
+      this.openReward();
+      return;
+    }
 
     const panel = this.add.graphics().setDepth(DEPTH.shop);
     drawPanel(panel, shop.x, shop.y, shop.width, shop.height, { radius: 14 });
@@ -1772,6 +1802,223 @@ export class CandySlotScene extends MiniGameScene {
     this.refreshNumbers();
     showBanner(this, this.machineMiddle, `라운드 ${this.run.round}`, LOOK.text.good, 700, DEPTH.banner, FONT_SIZE.large);
     sfx.go();
+    this.time.delayedCall(600, () => this.announceEvent());
+  }
+
+  // ───────── 라운드 이벤트와 대장의 상 ─────────
+
+  /** 이벤트의 느낌에 맞춘 표의 색: 좋은 것은 초록, 나쁜 것은 분홍, 비트는 것은 노랑, 대장은 빨간 몸통의 색 */
+  private eventLook(event: RoundEvent): { face: number; edge: number; text: string } {
+    if (isBoss(event)) return { face: LOOK.machine.body, edge: LOOK.machine.lip, text: LOOK.text.outline };
+    const tone = eventInfoOf(event.id)?.tone ?? 'twist';
+    if (tone === 'good') return { face: THEME.mintSoft, edge: THEME.mintDeep, text: LOOK.text.good };
+    if (tone === 'bad') return { face: THEME.pinkSoft, edge: THEME.pinkDeep, text: LOOK.text.bad };
+    return { face: THEME.butterSoft, edge: THEME.butterDeep, text: LOOK.text.ink };
+  }
+
+  /** HUD의 "라운드" 아래에 이벤트의 표를 놓는다. 누르면 이벤트가 하는 일을 알린다. 걸린 이벤트가 없으면 감춰 둔다. */
+  private addEventTag(): void {
+    const back = this.add.graphics().setDepth(DEPTH.hud - 0.5);
+    const text = addText(this, GAME_WIDTH - EVENT_TAG.right - EVENT_TAG.pad, EVENT_TAG.y, '', {
+      size: FONT_SIZE.small,
+      originX: 1,
+      originY: 0.5,
+    })
+      .setDepth(DEPTH.hud)
+      .setVisible(false);
+    const zone = addTapZone(this, 0, 0, 1, 1, () => undefined, () => this.explainEvent())
+      .setDepth(DEPTH.hud)
+      .disableInteractive();
+    this.eventTagView = { back, text, zone };
+  }
+
+  /** 목표 카드가 말하는 라운드(가게에서는 다음 라운드)에 걸린 이벤트를 표에 적는다. 이벤트가 바뀌면 확률 줄도 맞춘다. */
+  private refreshEventTag(): void {
+    const view = this.eventTagView;
+    if (!view) return;
+    const { run } = this;
+    const event = run.event && run.event.round === goalRound(run) && run.phase !== 'over' ? run.event : undefined;
+    const key = event ? `${event.round}:${event.id}:${event.symbol ?? ''}:${run.phase}` : '';
+    if (key === this.shownEvent) return;
+    const changed = this.shownEvent !== '' || key !== '';
+    this.shownEvent = key;
+    view.back.clear();
+    if (!event) {
+      view.text.setText('').setVisible(false);
+      view.zone.disableInteractive();
+    } else {
+      const look = this.eventLook(event);
+      view.text.setText(eventTag(event, run.phase === 'shop')).setColor(look.text).setVisible(true);
+      const width = Math.ceil(view.text.width) + EVENT_TAG.pad * 2 - 2;
+      const left = GAME_WIDTH - EVENT_TAG.right - width;
+      const top = EVENT_TAG.y - EVENT_TAG.height / 2;
+      view.back.fillStyle(look.edge, 1);
+      view.back.fillRoundedRect(left, top + 2, width, EVENT_TAG.height, EVENT_TAG.height / 2);
+      view.back.fillStyle(look.face, 1);
+      view.back.fillRoundedRect(left, top, width, EVENT_TAG.height, EVENT_TAG.height / 2);
+      view.zone.setPosition(left - 2, top - 4).setSize(width + 4, EVENT_TAG.height + 8).setInteractive();
+    }
+    // 이벤트가 그림의 상금이나 확률을 바꾸면 확률 줄의 수가 바뀐 것을 톡 튀어 알린다.
+    if (changed && this.oddsTexts.length > 0) this.refreshOdds(true);
+  }
+
+  /** 표를 눌렀을 때: 이벤트가 하는 일을 한 줄로 알린다. */
+  private explainEvent(): void {
+    const { event } = this.run;
+    if (!this.playing || !event || event.round !== goalRound(this.run)) return;
+    sfx.click();
+    this.note(eventLine(event), isBoss(event) ? LOOK.text.bad : this.eventLook(event).text);
+  }
+
+  /** 라운드가 시작될 때, 그 라운드에 걸린 이벤트의 이름과 하는 일을 기계 위에 띄운다. 대장이면 더 크게 알린다. */
+  private announceEvent(): void {
+    const { event } = this.run;
+    if (!this.playing || this.run.phase !== 'spin' || !event || event.round !== this.run.round) return;
+    const boss = isBoss(event);
+    const color = boss ? LOOK.text.bad : this.eventLook(event).text;
+    const middle = this.machineMiddle;
+    // 그림 위에서도 잘 읽히게 흰 판에 얹어 띄운다(처음의 도움말과 같다). 판과 글은 함께 스르르 사라진다.
+    const head = addText(this, GAME_WIDTH / 2, middle - 11, eventHeadline(event), {
+      size: FONT_SIZE.normal + 6,
+      color,
+      originX: 0.5,
+      originY: 0.5,
+    }).setDepth(DEPTH.banner);
+    const line = addText(this, GAME_WIDTH / 2, middle + 13, eventLine(event), {
+      size: FONT_SIZE.normal,
+      color: LOOK.text.ink,
+      originX: 0.5,
+      originY: 0.5,
+    }).setDepth(DEPTH.banner);
+    const width = Math.min(GAME_WIDTH - 12, Math.ceil(Math.max(head.width, line.width)) + 24);
+    const board = this.add.graphics().setDepth(DEPTH.banner - 0.5);
+    drawPanel(board, Math.round(GAME_WIDTH / 2 - width / 2), middle - 28, width, 56, { radius: 12, depth: 2 });
+    const views = [board, head, line];
+    this.tweens.add({
+      targets: views,
+      alpha: 0,
+      delay: EVENT_BANNER_MS * 0.7,
+      duration: EVENT_BANNER_MS * 0.3,
+      onComplete: () => views.forEach((view) => view.destroy()),
+    });
+    if (boss) vibrate([20, 30, 20]);
+  }
+
+  /**
+   * 대장을 넘기고 연 가게: 먼저 상을 고른다. 한 단계 강화한 부적 세 장 가운데 한 장을 공짜로 붙이거나,
+   * 그 대신 판이 끝날 때 받는 행운 조각을 고른다. 자리가 다 찼으면 붙인 부적을 눌러 떼고 고른다. 고르면 여느 가게가 열린다.
+   */
+  private openReward(): void {
+    const { shop, button } = this.layout;
+    const reward = this.run.reward ?? [];
+    const depth = DEPTH.shop;
+    const panel = this.add.graphics().setDepth(depth);
+    drawPanel(panel, shop.x, shop.y, shop.width, shop.height, { radius: 14 });
+    const blocker = this.add.zone(shop.x, shop.y, shop.width, shop.height).setOrigin(0, 0).setInteractive().setDepth(depth);
+    const title = addText(this, shop.x + 12, shop.y + 6, REWARD_TEXT.title, { color: LOOK.text.bad }).setDepth(depth);
+    const guide = addText(this, shop.x + shop.width - 12, shop.y + 8, REWARD_TEXT.guide, {
+      size: FONT_SIZE.small,
+      color: LOOK.text.sub,
+      originX: 1,
+    }).setDepth(depth);
+    this.shopViews.push(panel, blocker, title, guide);
+
+    const pitch = SHOP_ROW;
+    const top = shop.y + SHOP_HEAD;
+    reward.forEach((id, offer) => {
+      const charm = charmOf(id);
+      if (!charm) return;
+      const box = { x: shop.x + 6, y: top + offer * pitch, width: shop.width - 12, height: pitch - 4 };
+      const middle = box.y + box.height / 2;
+      const back = this.add.graphics().setDepth(depth);
+      const draw = (pressed: boolean): void => {
+        back.clear();
+        back.fillStyle(pressed ? THEME.dim : THEME.bg, 1);
+        back.fillRoundedRect(box.x, box.y, box.width, box.height, 10);
+        back.fillStyle(THEME.butter, 1);
+        back.fillRoundedRect(box.x + box.width - 45, middle - 11, 40, 22, 11);
+      };
+      draw(false);
+      const icon = this.add.image(box.x + 5 + CHARM_BOX / 2, middle, charmTexture(this, id)).setDepth(depth);
+      const textLeft = box.x + CHARM_BOX + 10;
+      const name = addText(this, textLeft, middle - 15, charm.name, { color: LOOK.text.ink }).setDepth(depth);
+      const description = addText(this, textLeft, middle + 2, charm.description, {
+        size: FONT_SIZE.small,
+        color: LOOK.text.sub,
+      }).setDepth(depth);
+      // 좁은 줄에서 설명이 "공짜"에 닿지 않게, 넘치면 그만큼 줄인다(가게의 줄과 같다).
+      const room = box.x + box.width - 50 - textLeft;
+      description.setScale(Math.min(1, room / Math.max(1, description.width)));
+      const free = addText(this, box.x + box.width - 25, middle, REWARD_TEXT.free, {
+        color: LOOK.text.ink,
+        originX: 0.5,
+        originY: 0.5,
+      }).setDepth(depth);
+      const zone = addTapZone(this, box.x, box.y, box.width, box.height, draw, () => this.claimOffer(offer)).setDepth(depth);
+      this.shopViews.push(back, icon, name, description, free, zone);
+    });
+    const rowsBottom = top + reward.length * pitch;
+    const footRoom = shop.y + shop.height - rowsBottom;
+    if (footRoom >= SHOP_FOOT_MIN) {
+      const foot = addText(this, shop.x + shop.width / 2, rowsBottom + (footRoom - 4) / 2, REWARD_TEXT.full, {
+        size: FONT_SIZE.small,
+        color: LOOK.text.faint,
+        originX: 0.5,
+        originY: 0.5,
+      }).setDepth(depth);
+      this.shopViews.push(foot);
+    }
+    const pieces = new SoftButton(this, button, 'plain', DEPTH.panel, REWARD_TEXT.pieces(bossPiecesOf(this.run.round)), () =>
+      this.choosePieces(),
+    );
+    this.shopViews.push(pieces);
+    this.refreshReadyMarks();
+    sfx.pop();
+  }
+
+  /** 상을 고른 뒤: 상의 창을 걷고 여느 가게를 연다. */
+  private reopenShop(): void {
+    for (const view of this.shopViews) view.destroy();
+    this.shopViews = [];
+    this.shopFoot = null;
+    this.offerRows = [];
+    this.rerollButton = null;
+    this.openShop();
+  }
+
+  /** 상의 offer번째 부적을 공짜로 붙인다. 자리가 없으면 떼라고 알린다. */
+  private claimOffer(offer: number): void {
+    if (!this.playing || this.busy || this.run.phase !== 'shop' || !this.run.reward) return;
+    this.hideBubble();
+    const block = rewardBlock(this.run, offer);
+    if (block === 'full') {
+      sfx.deny();
+      this.note('자리가 없어요. 부적을 눌러 떼요', LOOK.text.bad, this.layout.slots[0].y - 14);
+      return;
+    }
+    if (block !== null) return;
+    const id = this.run.reward[offer];
+    this.run = claimReward(this.run, offer);
+    this.keepRun(id);
+    sfx.gold();
+    vibrate([10, 20, 10]);
+    this.refreshSlots();
+    this.refreshOdds(true);
+    this.reopenShop();
+    const image = this.slotImages[this.run.charms.length - 1];
+    this.tweens.add({ targets: image, scale: { from: 1.4, to: 1 }, duration: 260, ease: 'Back.Out' });
+  }
+
+  /** 상으로 부적 대신 행운 조각을 고른다. 조각은 판이 끝날 때 넘긴 라운드의 조각과 함께 받는다. */
+  private choosePieces(): void {
+    if (!this.playing || this.busy || this.run.phase !== 'shop' || !this.run.reward || this.shopGuarded()) return;
+    this.hideBubble();
+    const count = bossPiecesOf(this.run.round);
+    this.run = takePieces(this.run);
+    this.keepRun();
+    sfx.coin();
+    this.reopenShop();
+    this.note(REWARD_TEXT.took(count), LOOK.text.good, this.layout.slots[0].y - 14);
   }
 
   // ───────── 오늘의 판 ─────────
@@ -2366,6 +2613,7 @@ export class CandySlotScene extends MiniGameScene {
     }
     const bannerMs = 700;
     showBanner(this, this.machineMiddle, `라운드 ${saved.round}`, LOOK.text.good, bannerMs, DEPTH.banner, FONT_SIZE.large);
+    if (saved.spinsLeft > 0) this.time.delayedCall(bannerMs - 100, () => this.announceEvent());
     if (saved.spinsLeft <= 0) {
       // 금화는 마지막 스핀을 돌릴 때 이미 받았으니, 라운드를 맺기만 하면 된다. 라운드를 알리는 글이 지나간 뒤에 맺는다.
       this.busy = true;

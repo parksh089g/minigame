@@ -11,6 +11,18 @@
  */
 
 import { seededRandom } from '../../core/stages';
+import {
+  bossPiecesOf,
+  drawEvent,
+  eventLuck,
+  isBossRound,
+  NO_RULE,
+  REWARD_OFFERS,
+  rewardLuck,
+  ruleOf,
+  type RoundEvent,
+  type RoundRule,
+} from './round-events';
 
 // ───────── 그림 ─────────
 
@@ -471,28 +483,35 @@ function effectsOf(charms: readonly string[]): CharmEffect[] {
 
 // ───────── 확률과 상금 ─────────
 
-/** 붙인 부적을 반영한 그림마다의 무게 */
-export function weightsOf(charms: readonly string[]): number[] {
+/**
+ * 붙인 부적을 반영한 그림마다의 무게. rule을 주면 그 라운드의 이벤트(round-events.ts)도 반영한다:
+ * 이벤트가 더하는 무게는 부적의 바닥(MIN_WEIGHT) 위에 얹고, 나오지 않는 그림의 무게는 0이다.
+ */
+export function weightsOf(charms: readonly string[], rule: RoundRule = NO_RULE): number[] {
   const weights = SYMBOLS.map((symbol) => symbol.weight);
   for (const effect of effectsOf(charms)) {
     if (effect.weight) weights[effect.weight[0]] += effect.weight[1];
   }
-  return weights.map((weight) => Math.max(MIN_WEIGHT, weight));
+  const floored = weights.map((weight) => Math.max(MIN_WEIGHT, weight));
+  if (rule.weight) floored[rule.weight[0]] += rule.weight[1];
+  if (rule.ban !== undefined) floored[rule.ban] = 0;
+  return floored;
 }
 
-/** 한 칸에 그림마다 나올 확률(0~1). 모두 더하면 1이다. */
-export function oddsOf(charms: readonly string[]): number[] {
-  const weights = weightsOf(charms);
+/** 한 칸에 그림마다 나올 확률(0~1). 모두 더하면 1이다. rule을 주면 그 라운드의 이벤트도 반영한다. */
+export function oddsOf(charms: readonly string[], rule: RoundRule = NO_RULE): number[] {
+  const weights = weightsOf(charms, rule);
   const total = weights.reduce((sum, weight) => sum + weight, 0);
   return weights.map((weight) => weight / total);
 }
 
-/** 붙인 부적을 반영한 그림마다의 상금 */
-export function valuesOf(charms: readonly string[]): number[] {
+/** 붙인 부적을 반영한 그림마다의 상금. rule을 주면 그 라운드의 이벤트가 곱하는 것도 반영한다. */
+export function valuesOf(charms: readonly string[], rule: RoundRule = NO_RULE): number[] {
   const values = SYMBOLS.map((symbol) => symbol.value);
   for (const effect of effectsOf(charms)) {
     if (effect.value) values[effect.value[0]] += effect.value[1];
   }
+  if (rule.valueTimes) values[rule.valueTimes[0]] *= rule.valueTimes[1];
   return values;
 }
 
@@ -538,16 +557,18 @@ export function drawSymbol(weights: readonly number[], random: () => number): nu
 /** 가운데 칸의 번호 */
 export const CENTER = 4;
 
-/** 가운데 칸이 다른 그림 대신 7로 나올 확률(0~1). 그런 부적이 없으면 0이다. */
-export function centerWildOf(charms: readonly string[]): number {
+/** 가운데 칸이 다른 그림 대신 7로 나올 확률(0~1). 그런 부적이나 이벤트가 없으면 0이다. 7이 나오지 않는 라운드에도 0이다. */
+export function centerWildOf(charms: readonly string[], rule: RoundRule = NO_RULE): number {
+  if (rule.ban === WILD) return 0;
   // 부적마다 따로 따지는 것과 같다: 하나라도 걸리면 7이다.
-  return 1 - effectsOf(charms).reduce((miss, effect) => miss * (1 - (effect.centerWild ?? 0)), 1);
+  const miss = effectsOf(charms).reduce((left, effect) => left * (1 - (effect.centerWild ?? 0)), 1);
+  return 1 - miss * (1 - (rule.centerWild ?? 0));
 }
 
-/** 아홉 칸을 칸마다 따로 뽑는다. */
-export function rollGrid(charms: readonly string[], random: () => number): number[] {
-  const weights = weightsOf(charms);
-  const centerWild = centerWildOf(charms);
+/** 아홉 칸을 칸마다 따로 뽑는다. rule을 주면 그 라운드의 이벤트도 반영한다. */
+export function rollGrid(charms: readonly string[], random: () => number, rule: RoundRule = NO_RULE): number[] {
+  const weights = weightsOf(charms, rule);
+  const centerWild = centerWildOf(charms, rule);
   return Array.from({ length: CELLS }, (_, cell) =>
     cell === CENTER && centerWild > 0 && random() < centerWild ? WILD : drawSymbol(weights, random),
   );
@@ -597,16 +618,21 @@ export interface SpinContext {
   last: boolean;
   /** 바로 앞 스핀에서 한 줄도 맞지 않았는지 */
   afterMiss: boolean;
+  /** 그 라운드에 걸린 이벤트의 규칙(round-events.ts). 없으면 아무것도 바꾸지 않는다. */
+  rule?: RoundRule;
 }
 
 /** 나온 판과 붙인 부적으로 받는 금화를 셈한다. */
 export function scoreSpin(grid: Grid, charms: readonly string[], context: SpinContext): SpinOutcome {
-  const values = valuesOf(charms);
+  const rule = context.rule ?? NO_RULE;
+  const values = valuesOf(charms, rule);
   const times = lineTimesOf(charms);
   const effects = effectsOf(charms);
 
   const wins: LineWin[] = [];
   LINES.forEach((line, index) => {
+    // 쉬는 갈래의 줄은 맞아도 맞은 줄로 치지 않는다.
+    if (line.kind === rule.offLine) return;
     const symbol = lineSymbol(grid, line);
     if (symbol === null) return;
     wins.push({ line: index, symbol, amount: values[symbol] * times[line.kind] });
@@ -636,7 +662,9 @@ export function scoreSpin(grid: Grid, charms: readonly string[], context: SpinCo
     }
   }
   const consolation =
-    wins.length === 0 ? effects.reduce((sum, effect) => sum + (effect.consolation ?? 0), MISS_COIN) : 0;
+    wins.length === 0 && !rule.noConsolation
+      ? effects.reduce((sum, effect) => sum + (effect.consolation ?? 0), MISS_COIN)
+      : 0;
   const total = boosts.reduce((amount, item) => amount * item.times, base) + consolation;
   return { grid: [...grid], wins, base, boosts, consolation, total, jackpot };
 }
@@ -663,9 +691,10 @@ export function targetOf(round: number): number {
   return target;
 }
 
-/** 라운드마다 돌릴 수 있는 횟수(부적의 덤까지) */
-export function spinsOf(charms: readonly string[]): number {
-  return BASE_SPINS + effectsOf(charms).reduce((sum, effect) => sum + (effect.spins ?? 0), 0);
+/** 라운드마다 돌릴 수 있는 횟수(부적의 덤까지). rule을 주면 그 라운드의 이벤트가 더하거나 빼는 것도 넣는다(한 번은 돌린다). */
+export function spinsOf(charms: readonly string[], rule: RoundRule = NO_RULE): number {
+  const spins = BASE_SPINS + effectsOf(charms).reduce((sum, effect) => sum + (effect.spins ?? 0), 0);
+  return Math.max(1, spins + (rule.spins ?? 0));
 }
 
 /** 라운드를 넘길 때 남은 금화에 붙는 덤. 저금통이 없으면 0이다. */
@@ -739,6 +768,15 @@ export interface RunState {
   perks: PerkId[];
   /** 이 판을 시작할 때의 유물 단계. 판 도중에는 바뀌지 않고, 정해진 운의 판(오늘의 판)은 늘 비어 있다. */
   relics: RelicLevels;
+  /**
+   * 목표 카드가 말하는 라운드(goalRound: 돌리는 동안은 지금 라운드, 가게에서는 다음 라운드)에 걸린 이벤트
+   * (round-events.ts). 없으면(첫 라운드, 이벤트가 생기기 전에 저장한 판) 비어 있다. event.round로 어느 라운드의 것인지 안다.
+   */
+  event?: RoundEvent;
+  /** 대장 라운드를 넘기고 아직 고르지 않은 상: 공짜로 붙일 수 있는, 한 단계 강화한 부적의 id. 가게에서만 있다. */
+  reward?: string[];
+  /** 대장의 상으로 고른 행운 조각. 판이 끝날 때 넘긴 라운드의 조각과 함께 받는다(perks.ts의 piecesFor). */
+  bonusPieces?: number;
 }
 
 /** 라운드마다 열을 잠글 수 있는 횟수 */
@@ -764,6 +802,26 @@ export function slotsOf(run: Pick<RunState, 'perks'>): number {
 /** 이 판에서 라운드마다 열을 잠글 수 있는 횟수 */
 export function holdsOf(run: Pick<RunState, 'perks'>): number {
   return HOLDS_PER_ROUND + (run.perks.includes('hold') ? 1 : 0);
+}
+
+/** 이벤트까지 넣어서, 그 라운드에 열을 잠글 수 있는 횟수 */
+export function roundHoldsOf(run: Pick<RunState, 'perks'>, rule: RoundRule): number {
+  return rule.noHolds ? 0 : holdsOf(run) + (rule.holds ?? 0);
+}
+
+/** 목표 카드가 말하는 라운드: 돌리는 동안은 지금 라운드, 가게에서는 다음 라운드 */
+export function goalRound(run: Pick<RunState, 'phase' | 'round'>): number {
+  return run.phase === 'shop' ? run.round + 1 : run.round;
+}
+
+/** 그 라운드에 걸린 이벤트의 규칙. 걸린 것이 없으면 NO_RULE이다. */
+export function ruleAt(run: Pick<RunState, 'event'>, round: number): RoundRule {
+  return run.event && run.event.round === round ? ruleOf(run.event) : NO_RULE;
+}
+
+/** 목표 카드가 말하는 라운드(goalRound)에 걸린 이벤트의 규칙 */
+export function ruleNow(run: Pick<RunState, 'event' | 'phase' | 'round'>): RoundRule {
+  return ruleAt(run, goalRound(run));
 }
 
 /** 가게가 열릴 때의 다시 뽑는 값. 해금이 있으면 첫 번은 공짜다. */
@@ -826,9 +884,12 @@ export function cleanRelics(relics: RelicLevels): RelicLevels {
  * 1단계가 첫 라운드의 목표를 다섯에 하나나 덜어 버린다. 그래서 적힌 비율만큼만 깎는다: 1단계는 여덟째 라운드부터,
  * 2단계는 여섯째 라운드부터 목표가 낮아지고, 단계가 오를수록 더 이른 라운드까지 닿는다.
  */
-export function targetFor(run: Pick<RunState, 'relics'>, round: number): number {
+export function targetFor(run: Pick<RunState, 'relics' | 'event'>, round: number): number {
   const cut = RELIC_STEP.scale * relicLevel(run, 'scale');
-  const target = targetOf(round);
+  // 그 라운드의 이벤트가 목표를 바꾸면 그것부터 셈한다(반올림).
+  const rate = ruleAt(run, round).targetRate;
+  const base = targetOf(round);
+  const target = rate === undefined ? base : Math.max(1, Math.floor((base * rate + 50) / 100));
   return Math.max(1, target - Math.floor((target * cut + 500) / 1000));
 }
 
@@ -912,9 +973,10 @@ export function spin(
   if (run.phase !== 'spin' || run.spinsLeft <= 0) return null;
   const last = run.lastGrid;
   const held = hold !== null && last !== null && canHold(run) && Number.isInteger(hold) && hold >= 0 && hold < SIZE;
-  const rolled = rollGrid(run.charms, random);
+  const rule = ruleAt(run, run.round);
+  const rolled = rollGrid(run.charms, random, rule);
   const grid = held && last ? rolled.map((symbol, cell) => (cell % SIZE === hold ? last[cell] : symbol)) : rolled;
-  const outcome = scoreSpin(grid, run.charms, { last: run.spinsLeft === 1, afterMiss: run.afterMiss });
+  const outcome = scoreSpin(grid, run.charms, { last: run.spinsLeft === 1, afterMiss: run.afterMiss, rule });
   return {
     outcome,
     run: {
@@ -946,6 +1008,9 @@ export interface Settlement {
 /**
  * 스핀을 다 쓴 라운드를 맺는다. 가진 금화가 목표 이상이면 목표만큼 내고 가게를 열고, 모자라면 판이 끝난다.
  * 아직 스핀이 남았거나 맺을 라운드가 아니면 null을 돌려준다.
+ *
+ * 가게를 열 때 다음 라운드의 이벤트를 뽑고(round-events.ts), 대장 라운드를 넘겼으면 상으로 고를 공짜 부적(한 단계 강화한 것)도 뽑는다.
+ * 여느 판은 가게의 부적을 뽑은 다음의 random을 이어 쓰고, 정해진 운의 판은 씨앗과 라운드로 정해지는 따로 센 운을 쓴다.
  */
 export function settleRound(run: RunState, random: () => number): Settlement | null {
   if (run.phase !== 'spin' || run.spinsLeft > 0) return null;
@@ -957,6 +1022,13 @@ export function settleRound(run: RunState, random: () => number): Settlement | n
   const savings = savingsFor(left, run.charms);
   // 두 덤은 낸 뒤에 남은 금화를 보고 따로 셈한다(덤에 덤이 붙지 않는다).
   const interest = interestFor(left, run);
+  const offers = drawOffers(run.charms, random);
+  const event = drawEvent(run.round + 1, run.seed === null ? random : eventLuck(run.seed, run.round + 1));
+  const reward = isBossRound(run.round)
+    ? drawOffers(run.charms, run.seed === null ? random : rewardLuck(run.seed, run.round))
+        .slice(0, REWARD_OFFERS)
+        .map(upgradedOf)
+    : [];
   return {
     cleared: true,
     paid: target,
@@ -968,8 +1040,10 @@ export function settleRound(run: RunState, random: () => number): Settlement | n
       coin: left + savings + interest,
       earned: run.earned + savings + interest,
       afterMiss: false,
-      shop: { offers: drawOffers(run.charms, random), rerollCost: firstRerollCost(run) },
+      shop: { offers, rerollCost: firstRerollCost(run) },
       drawCount: run.drawCount + 1,
+      event,
+      reward: reward.length > 0 ? reward : undefined,
     },
   };
 }
@@ -1119,19 +1193,52 @@ export function upgrade(run: RunState, slot: number): RunState {
   };
 }
 
-/** 가게를 닫고 다음 라운드를 시작한다. */
+/**
+ * 가게를 닫고 다음 라운드를 시작한다. 그 라운드의 이벤트가 더하거나 빼는 스핀과 잠그기도 넣는다.
+ * 대장의 상을 고르지 않고 닫으면 행운 조각을 고른 것으로 친다(상은 버려지지 않는다).
+ */
 export function nextRound(run: RunState): RunState {
   if (run.phase !== 'shop') return run;
-  return {
+  const rule = ruleAt(run, run.round + 1);
+  const next: RunState = {
     ...run,
     phase: 'spin',
     round: run.round + 1,
-    spinsLeft: spinsOf(run.charms),
+    spinsLeft: spinsOf(run.charms, rule),
     shop: null,
     afterMiss: false,
     lastGrid: null,
-    holdsLeft: holdsOf(run),
+    holdsLeft: roundHoldsOf(run, rule),
   };
+  return run.reward ? takePieces(run, next) : next;
+}
+
+// ───────── 대장의 상 ─────────
+
+/** 대장의 상에서 offer번째 부적을 고를 수 없는 까닭. 고를 수 있으면 null. full이면 부적을 떼어 자리를 내야 한다. */
+export type RewardBlock = 'closed' | 'sold' | 'full';
+
+export function rewardBlock(run: RunState, offer: number): RewardBlock | null {
+  if (run.phase !== 'shop' || !run.reward) return 'closed';
+  const id = run.reward[offer];
+  if (id === undefined || !charmOf(id) || ownsCharm(run.charms, id)) return 'sold';
+  if (run.charms.length >= slotsOf(run)) return 'full';
+  return null;
+}
+
+/** 대장의 상에서 offer번째 부적을 공짜로 붙인다. 고를 수 없으면 run을 그대로 돌려준다. */
+export function claimReward(run: RunState, offer: number): RunState {
+  if (rewardBlock(run, offer) !== null || !run.reward) return run;
+  return { ...run, charms: [...run.charms, run.reward[offer]], reward: undefined };
+}
+
+/**
+ * 대장의 상으로 부적 대신 행운 조각(bossPiecesOf)을 고른다. 판이 끝날 때 받는다. 고를 상이 없으면 run을 그대로 돌려준다.
+ * into를 주면 그 판에 조각을 얹는다(가게를 닫으면서 고를 때).
+ */
+export function takePieces(run: RunState, into: RunState = run): RunState {
+  if (run.phase !== 'shop' || !run.reward) return run;
+  return { ...into, reward: undefined, bonusPieces: (run.bonusPieces ?? 0) + bossPiecesOf(run.round) };
 }
 
 /**

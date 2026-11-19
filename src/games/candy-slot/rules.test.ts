@@ -6,6 +6,7 @@ import {
   buy,
   buyBlock,
   canHold,
+  claimReward,
   CELL_MAX,
   CELL_MIN,
   CELLS,
@@ -30,6 +31,7 @@ import {
   MISS_COIN,
   newRun,
   nextRound,
+  rewardBlock,
   oddsOf,
   OFFERS,
   PERK_IDS,
@@ -59,6 +61,7 @@ import {
   SYMBOLS,
   targetFor,
   targetOf,
+  takePieces,
   upgrade,
   UPGRADE_MAX,
   upgradeCostOf,
@@ -895,9 +898,16 @@ function playRun(random: () => number, shop: (run: RunState) => RunState, start:
   throw new Error('판이 끝나지 않는다');
 }
 
-/** 살 수 있는 것을 보이는 대로 사는 사람 */
+/**
+ * 살 수 있는 것을 보이는 대로 사는 사람. 대장의 상은 붙일 수 있는 첫 부적을 고르고, 자리가 없으면 조각을 고른다.
+ * 사지 않는 사람((state) => state)은 상을 고르지 않고 가게를 닫아서 조각을 받는다(nextRound).
+ */
 function buyAnything(run: RunState): RunState {
   let next = run;
+  if (next.reward) {
+    const offer = next.reward.findIndex((_, index) => rewardBlock(next, index) === null);
+    next = offer >= 0 ? claimReward(next, offer) : takePieces(next);
+  }
   for (let offer = 0; offer < OFFERS; offer += 1) next = buy(next, offer);
   return next;
 }
