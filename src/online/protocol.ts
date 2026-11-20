@@ -35,6 +35,7 @@ export const RANKED_GAMES = [
   'garden-guard',
   'cloud-tower',
   'high-low',
+  'one-card',
 ] as const;
 
 export type RankedGame = (typeof RANKED_GAMES)[number];

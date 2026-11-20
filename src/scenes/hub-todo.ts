@@ -24,6 +24,7 @@ import { gardenStore } from '../games/garden-guard/store';
 import { TOWER_GAME_ID } from '../games/cloud-tower/data';
 import { canBuyAny as canBuyTowerUpgrade, type TowerMeta } from '../games/cloud-tower/run';
 import { towerStore } from '../games/cloud-tower/store';
+import { claimableCount as towerClaimable } from '../games/cloud-tower/achievements';
 import { thisWeek } from '../games/registry';
 import type { CompanyStart } from '../games/sprout-company/SproutCompanyScene';
 import { AWAY, COMPANY_GAME_ID } from '../games/sprout-company/data';
@@ -90,6 +91,8 @@ export function gardenTodo(meta: GardenMeta, hasRun = false): Todo | null {
  */
 export function towerTodo(meta: TowerMeta): Todo | null {
   if (meta.run) return { text: `이어하기 ${Math.max(1, meta.run.floor)}층` };
+  // 받을 수 있는 업적이 있으면 도감의 업적 쪽을 바로 연다.
+  if (towerClaimable(meta) > 0) return { text: '업적 받기', start: { mode: 'codex', codexTab: 3 } };
   return meta.runs > 0 && canBuyTowerUpgrade(meta) ? { text: '강화 가능' } : null;
 }
 

@@ -27,9 +27,11 @@ import {
   eventPicker,
   removePicker,
   upgradePicker,
+  type LobbyTab,
   type ScreenHooks,
 } from './screens';
 import { buildMap } from './tower-map';
+import { buildCodex, type CodexTab } from './codex-view';
 import { towerStore } from './store';
 
 /** 판 안에서 덱을 고르는 화면처럼, 판의 화면 위에 잠깐 여는 것 */
@@ -37,8 +39,12 @@ export type Overlay = 'deck' | 'upgrade' | 'remove' | 'event';
 
 /** 씬을 시작할 때 넘기는 값. 없으면 준비 화면부터 연다. */
 export interface TowerStart {
-  /** run이면 하던 판(없으면 새 판)의 지금 화면을 연다. */
-  mode?: 'run';
+  /** run이면 하던 판(없으면 새 판)의 지금 화면을, codex면 도감을 연다. */
+  mode?: 'run' | 'codex';
+  /** 도감에서 연 쪽 */
+  codexTab?: CodexTab;
+  /** 준비 화면에서 연 쪽(강화, 유물) */
+  lobbyTab?: LobbyTab;
   overlay?: Overlay;
   /** 수상한 길에서 카드를 골라야 하는 고르기의 번호 */
   choice?: number;
@@ -46,7 +52,7 @@ export interface TowerStart {
   shopPage?: number;
 }
 
-type Phase = 'loading' | 'lobby' | 'run' | 'over';
+type Phase = 'loading' | 'lobby' | 'codex' | 'run' | 'over';
 
 /**
  * 구름 탑 모험: 카드로 싸우며 구름 탑을 오르는 덱 빌딩 게임.
@@ -79,20 +85,26 @@ export class CloudTowerScene extends MiniGameScene {
     void towerStore.refresh().then(() => {
       if (!this.sys.isActive() || this.phase !== 'loading') return;
       if (data.mode === 'run') this.openRun(data);
-      else this.openLobby();
+      else if (data.mode === 'codex') this.openCodex(data.codexTab ?? 0);
+      else this.openLobby(data.lobbyTab ?? 0);
     });
   }
 
   // ───────── 준비 화면 ─────────
 
-  private openLobby(): void {
+  private openLobby(tab: LobbyTab = 0): void {
     this.phase = 'lobby';
     buildLobby(this, {
       getMeta: () => towerStore.data,
       setMeta: (meta) => towerStore.set(meta),
       onStart: () => {
         const meta = towerStore.data;
-        const run = createRun({ seed: Math.floor(Math.random() * 0x7fffffff), levels: meta.levels, difficulty: meta.difficulty });
+        const run = createRun({
+          seed: Math.floor(Math.random() * 0x7fffffff),
+          levels: meta.levels,
+          relics: meta.relics,
+          difficulty: meta.difficulty,
+        });
         towerStore.set({ ...meta, run });
         this.go();
       },
@@ -104,7 +116,19 @@ export class CloudTowerScene extends MiniGameScene {
         this.go();
       },
       onBack: () => fadeToScene(this, homeScene()),
-    });
+      onCodex: () => this.scene.restart({ mode: 'codex' } satisfies TowerStart),
+      onTab: (next) => this.scene.restart({ lobbyTab: next } satisfies TowerStart),
+    }, tab);
+  }
+
+  private openCodex(tab: CodexTab): void {
+    this.phase = 'codex';
+    buildCodex(this, {
+      getMeta: () => towerStore.data,
+      setMeta: (meta) => towerStore.set(meta),
+      onTab: (next) => this.scene.restart({ mode: 'codex', codexTab: next } satisfies TowerStart),
+      onBack: () => this.scene.restart({} satisfies TowerStart),
+    }, tab);
   }
 
   /** 판의 지금 화면을 연다(씬을 다시 시작한다). */
@@ -115,6 +139,7 @@ export class CloudTowerScene extends MiniGameScene {
   /** 준비 화면에서는 뒤로 가기가 허브로 나가고, 판을 하는 동안에는 일시정지한다. */
   override onBackRequest(): void {
     if (this.phase === 'lobby') fadeToScene(this, homeScene());
+    else if (this.phase === 'codex') this.scene.restart({} satisfies TowerStart);
     else this.pauseGame();
   }
 
