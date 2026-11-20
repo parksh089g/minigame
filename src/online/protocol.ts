@@ -34,6 +34,7 @@ export const RANKED_GAMES = [
   'candy-slot',
   'garden-guard',
   'cloud-tower',
+  'one-card',
   'pyramid',
 ] as const;
 

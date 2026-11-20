@@ -782,6 +782,55 @@ export const UPGRADES: Readonly<Record<UpgradeId, UpgradeDef>> = {
 
 export const UPGRADE_ORDER: readonly UpgradeId[] = ['hp', 'gold', 'rest', 'pack1', 'choice', 'relic', 'pack2'];
 
+// ───────── 유물 ─────────
+
+/**
+ * 유물: 구름 조각으로 단계를 올리는 영구 능력치. 한 단계는 아주 조금이지만 열 단계까지 오르고,
+ * 값이 단계마다 오른다(첫 단계 10, 마지막 단계 46). 하나를 다 올리는 데 280개, 여섯을 다 올리는 데 1,680개가 들어서
+ * 한 판에 15개쯤 모으면 백 판 넘게 걸린다. 영구 강화(UPGRADES)를 다 산 뒤에도 조각을 쓸 곳이 된다.
+ */
+export type RelicId = 'seed' | 'scarf' | 'acorn' | 'shell' | 'coupon' | 'net';
+
+export interface RelicDef {
+  name: string;
+  blurb: string;
+  /** 그 단계에서의 효과를 한 줄로 */
+  effect: (level: number) => string;
+}
+
+export const RELIC_MAX = 10;
+/** 유물 한 단계가 바꾸는 값 */
+export const RELIC_STEP = {
+  /** 생명의 씨앗: 처음 최대 체력 */
+  seed: 2,
+  /** 따뜻한 목도리: 싸움에서 이기면 회복 */
+  scarf: 1,
+  /** 황금 도토리: 싸움에서 받는 별사탕(%) */
+  acorn: 5,
+  /** 조개 방패: 싸움의 첫 차례 방어 */
+  shell: 1,
+  /** 단골 쿠폰: 가게 값 할인(%) */
+  coupon: 3,
+  /** 구름 그물: 판이 끝나면 받는 구름 조각(%) */
+  net: 5,
+} as const satisfies Record<RelicId, number>;
+
+export const RELICS: Readonly<Record<RelicId, RelicDef>> = {
+  seed: { name: '생명의 씨앗', blurb: '처음 최대 체력이 단계마다 2 늘어요', effect: (level) => `최대 체력 +${level * RELIC_STEP.seed}` },
+  scarf: { name: '따뜻한 목도리', blurb: '싸움에서 이기면 단계마다 체력 1 회복', effect: (level) => `이기면 체력 +${level * RELIC_STEP.scarf}` },
+  acorn: { name: '황금 도토리', blurb: '싸움에서 받는 별사탕이 단계마다 5% 늘어요', effect: (level) => `별사탕 +${level * RELIC_STEP.acorn}%` },
+  shell: { name: '조개 방패', blurb: '싸움의 첫 차례에 단계마다 방어 1', effect: (level) => `첫 차례 방어 +${level * RELIC_STEP.shell}` },
+  coupon: { name: '단골 쿠폰', blurb: '가게의 값이 단계마다 3% 싸져요', effect: (level) => `가게 값 -${level * RELIC_STEP.coupon}%` },
+  net: { name: '구름 그물', blurb: '판이 끝나면 받는 구름 조각이 단계마다 5% 늘어요', effect: (level) => `구름 조각 +${level * RELIC_STEP.net}%` },
+};
+
+export const RELIC_ORDER: readonly RelicId[] = ['seed', 'shell', 'scarf', 'acorn', 'coupon', 'net'];
+
+/** level단계에서 다음 단계로 올리는 값. 다 올렸으면 null */
+export function relicCost(level: number): number | null {
+  return level >= RELIC_MAX ? null : 10 + level * 4;
+}
+
 /** 값들. 상점과 보상, 점수가 쓴다. */
 export const PRICES = {
   card: { start: 40, common: 45, uncommon: 70, rare: 130 },
