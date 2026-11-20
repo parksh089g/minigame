@@ -8,6 +8,7 @@ import { sfx } from '../../core/sfx';
 import { addText, PixelButton } from '../../core/ui';
 import { nodeTexture, PX, PX_CSS, relicTexture, TEX, treasureTexture, upgradeTexture } from './art';
 import type { Card } from './battle';
+import { DIFFICULTY_TEXT, difficultyOf } from './difficulty';
 import {
   addCardRow,
   addHeading,
@@ -123,7 +124,7 @@ export interface LobbyHooks {
 }
 
 export type LobbyTab = 0 | 1;
-const LOBBY_TAB = { top: 76, height: 22, gap: 4 } as const;
+const LOBBY_TAB = { height: 22, gap: 4 } as const;
 
 const UPGRADE_ROW = { height: 36, gap: 4 } as const;
 
@@ -188,12 +189,19 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks, tab: LobbyTab
     wrapWidth: WIDTH - 16,
     lineSpacing: 0,
   });
-  // 강화와 유물 쪽
+  // 난이도 줄(해 본 사람에게만), 그 아래에 강화와 유물 쪽
+  const tabTop =
+    meta.runs > 0 || meta.unlocked > 0
+      ? buildDifficultyRow(scene, 76, hooks, () => meta, (next) => {
+          meta = next;
+          info.setText(DIFFICULTY_TEXT.blurb(meta.run ? difficultyOf(meta.run) : meta.difficulty));
+        }) + 4
+      : 76;
   const tabWidth = (WIDTH - LOBBY_TAB.gap) / 2;
   SCREEN_TEXT.lobbyTabs.forEach((label, index) => {
     new PixelButton(scene, {
       x: Math.round(MARGIN + index * (tabWidth + LOBBY_TAB.gap)),
-      y: LOBBY_TAB.top,
+      y: tabTop,
       width: Math.floor(tabWidth),
       height: LOBBY_TAB.height,
       label,
@@ -203,7 +211,7 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks, tab: LobbyTab
       },
     });
   });
-  const listTop = LOBBY_TAB.top + LOBBY_TAB.height + 6;
+  const listTop = tabTop + LOBBY_TAB.height + 6;
   if (tab === 1) {
     info.setText(SCREEN_TEXT.relicHint);
     let pickedRelic: RelicId | null = null;
@@ -305,6 +313,69 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks, tab: LobbyTab
   } else {
     new PixelButton(scene, { x: MARGIN, y: footTop, width: WIDTH, height: 36, label: SCREEN_TEXT.start, style: 'green', onTap: hooks.onStart });
   }
+}
+
+const DIFFICULTY_ROW = 26;
+
+/**
+ * 준비 화면의 난이도 줄: 양옆 화살표로 연 난이도 가운데 하나를 고른다. 가운데를 누르면 규칙이 보인다.
+ * 하던 판이 있으면 그 판의 난이도만 보이고 고를 수 없다. 아래 끝(y)을 돌려준다.
+ */
+function buildDifficultyRow(
+  scene: Phaser.Scene,
+  top: number,
+  hooks: LobbyHooks,
+  getMeta: () => TowerMeta,
+  onChange: (meta: TowerMeta) => void,
+): number {
+  const meta = getMeta();
+  const run = meta.run;
+  const locked = meta.unlocked === 0 && !run;
+  pxPanel(scene.add.graphics(), MARGIN, top, WIDTH, DIFFICULTY_ROW, { depth: 2, radius: 9, fill: PX.ink });
+  const current = (): number => (run ? difficultyOf(run) : getMeta().difficulty);
+  const label = (): string => {
+    if (locked) return DIFFICULTY_TEXT.hint;
+    const level = current();
+    return level > 0 ? `${DIFFICULTY_TEXT.name(level)} · ${DIFFICULTY_TEXT.bonus(level)}` : DIFFICULTY_TEXT.name(0);
+  };
+  const color = (): string => (locked ? PX_CSS.faint : current() > 0 ? PX_CSS.bad : PX_CSS.text);
+  const text = addText(scene, GAME_WIDTH / 2, top + DIFFICULTY_ROW / 2, label(), {
+    size: locked ? 10 : 12,
+    color: color(),
+    originX: 0.5,
+    originY: 0.5,
+  }).setDepth(3);
+  if (locked) {
+    scene.add.image(MARGIN + 14, top + DIFFICULTY_ROW / 2, 'icon-lock').setDepth(3);
+    return top + DIFFICULTY_ROW;
+  }
+  text.setInteractive({ useHandCursor: true }).on(Phaser.Input.Events.GAMEOBJECT_POINTER_UP, () => onChange(getMeta()));
+  if (run) return top + DIFFICULTY_ROW;
+  const size = DIFFICULTY_ROW - 4;
+  let prev: PixelButton | null = null;
+  let next: PixelButton | null = null;
+  const refresh = (): void => {
+    const level = current();
+    text.setText(label()).setColor(color());
+    prev?.setEnabled(level > 0);
+    next?.setEnabled(level < getMeta().unlocked);
+  };
+  const step = (delta: number): void => {
+    const now = getMeta();
+    const level = Math.max(0, Math.min(now.unlocked, now.difficulty + delta));
+    if (level === now.difficulty) {
+      sfx.deny();
+      return;
+    }
+    const changed = { ...now, difficulty: level };
+    hooks.setMeta(changed);
+    onChange(changed);
+    refresh();
+  };
+  prev = new PixelButton(scene, { x: MARGIN + 2, y: top + 2, width: size, height: size, icon: 'icon-prev', hitPadding: 4, onTap: () => step(-1) });
+  next = new PixelButton(scene, { x: MARGIN + WIDTH - size - 2, y: top + 2, width: size, height: size, icon: 'icon-play', hitPadding: 4, onTap: () => step(1) });
+  refresh();
+  return top + DIFFICULTY_ROW;
 }
 
 /** 가진 보물을 한 줄로. 누르면 이름과 설명이 잠깐 뜬다. */

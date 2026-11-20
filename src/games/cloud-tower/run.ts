@@ -37,6 +37,7 @@ import {
   type UpgradeId,
 } from './data';
 import { cardName } from './text';
+import { applyDifficultyBattle, applyDifficultyStart, clampDifficulty, DIFFICULTY_SHARDS, difficultyOf, difficultyPrice, hpAfterBoss } from './difficulty';
 
 // ───────── 판 ─────────
 
@@ -113,6 +114,8 @@ export interface RunState {
   /** 판을 시작할 때의 유물 단계. 판 안의 값은 이것으로 셈해서, 판 중에 유물을 올려도 이 판은 그대로다. */
   relics: RelicLevels;
   result: null | 'win' | 'lose';
+  /** 난이도(0이 보통). 난이도가 생기기 전에 저장한 판에는 없다. */
+  difficulty?: number;
 }
 
 export interface Met {
@@ -128,6 +131,7 @@ export interface RunOptions {
   seed: number;
   levels: Partial<Record<UpgradeId, number>>;
   relics?: RelicLevels;
+  difficulty?: number;
 }
 
 export type RelicLevels = Partial<Record<RelicId, number>>;
@@ -191,7 +195,9 @@ export function createRun(options: RunOptions): RunState {
     met: { cards: [], foes: [] },
     relics,
     result: null,
+    difficulty: clampDifficulty(options.difficulty ?? 0),
   };
+  applyDifficultyStart(run);
   run.deck = START_DECK.map((id) => newCard(run, id));
   if (levelOf(levels, 'relic') > 0) gainTreasure(run, pick(run.rng, COMMON_TREASURES));
   run.choices = choicesFor(run, 1);
@@ -209,9 +215,10 @@ export function runScore(run: RunState): number {
   return floorsCleared(run) * 100 + (run.result === 'win' ? 500 : 0);
 }
 
-/** 판이 끝났을 때 받는 구름 조각: 마친 층마다 1, 강한 적마다 2, 대장마다 8, 꼭대기까지 오르면 15 더 */
+/** 판이 끝났을 때 받는 구름 조각: 마친 층마다 1, 강한 적마다 2, 대장마다 8, 꼭대기까지 오르면 15에 난이도마다 5 더 */
 export function shardsFor(run: RunState): number {
-  const base = floorsCleared(run) + run.stats.elites * 2 + run.stats.bosses * 8 + (run.result === 'win' ? 15 : 0);
+  const base =
+    floorsCleared(run) + run.stats.elites * 2 + run.stats.bosses * 8 + (run.result === 'win' ? 15 + difficultyOf(run) * DIFFICULTY_SHARDS : 0);
   return Math.floor((base * (100 + relicLevel(run.relics, 'net') * RELIC_STEP.net)) / 100);
 }
 
@@ -305,7 +312,7 @@ export function finishNode(run: RunState): void {
   }
   if (floorInAct(run.floor) === FLOORS_PER_ACT) {
     // 대장을 넘으면 체력이 다 차고, 다음 구역이 시작된다.
-    run.hp = run.maxHp;
+    run.hp = hpAfterBoss(run);
     run.actFights = 0;
   }
   run.stage = 'map';
@@ -329,6 +336,7 @@ function beginBattle(run: RunState, kind: BattleKind): void {
   if (kind !== 'boss') run.actFights += kind === 'fight' ? 1 : 0;
   const { battle } = startBattle(kind, enemies, run.deck, run.hp, run.maxHp, ctxOf(run));
   for (const foe of battle.foes) meet(run.met.foes, foe.id);
+  applyDifficultyBattle(run, battle);
   run.battle = battle;
   run.stage = 'battle';
 }
@@ -532,9 +540,9 @@ function makeShop(run: RunState): Shop {
   return {
     cards: ids.map((id) => {
       meet(run.met.cards, id);
-      return { id, price: discounted(run, jitter(run.rng, PRICES.card[CARDS[id].rarity])), sold: false };
+      return { id, price: difficultyPrice(run, discounted(run, jitter(run.rng, PRICES.card[CARDS[id].rarity]))), sold: false };
     }),
-    treasures: treasures.map((id) => ({ id, price: discounted(run, jitter(run.rng, PRICES.treasure)), sold: false })),
+    treasures: treasures.map((id) => ({ id, price: difficultyPrice(run, discounted(run, jitter(run.rng, PRICES.treasure))), sold: false })),
     removed: false,
   };
 }
@@ -702,6 +710,9 @@ export interface TowerMeta {
   claimed: string[];
   /** 유물의 단계 */
   relics: RelicLevels;
+  /** 열린 가장 높은 난이도와 고른 난이도(0이 보통) */
+  unlocked: number;
+  difficulty: number;
   /** 하던 판. 없으면 null */
   run: RunState | null;
   /** 저장한 때(ms). 같은 기기의 다른 곳이 저장한 것과 견준다. */
@@ -720,6 +731,8 @@ export function createMeta(): TowerMeta {
     kills: 0,
     claimed: [],
     relics: {},
+    unlocked: 0,
+    difficulty: 0,
     run: null,
     savedAt: 0,
   };
@@ -770,6 +783,7 @@ export function normalizeMeta(raw: unknown): TowerMeta {
     const level = Math.min(UPGRADES[id].costs.length, count(rawLevels[id]));
     if (level > 0) levels[id] = level;
   }
+  const unlocked = clampDifficulty(value.unlocked);
   const run = looksLikeRun(value.run) && value.run.result === null ? value.run : null;
   // 지나온 길을 적기 전에 저장한 판은 지나온 층을 모르는 채로 둔다.
   if (run && !Array.isArray(run.path)) run.path = [];
@@ -792,6 +806,8 @@ export function normalizeMeta(raw: unknown): TowerMeta {
     kills: count(value.kills),
     relics: relicsOf(value.relics),
     claimed: Array.isArray(value.claimed) ? [...new Set(value.claimed.filter((id): id is string => typeof id === 'string'))] : [],
+    unlocked,
+    difficulty: Math.min(unlocked, clampDifficulty(value.difficulty)),
     run,
     savedAt: count(value.savedAt),
   };
@@ -833,6 +849,7 @@ export function canBuyAny(meta: TowerMeta): boolean {
 
 /** 끝난 판의 결과를 판 밖 진행에 넣는다: 조각, 최고 기록, 판 수. 하던 판은 지운다. */
 export function settleRun(meta: TowerMeta, run: RunState): TowerMeta {
+  const opened = unlockedAfter(meta, run);
   return {
     ...meta,
     codex: codexWith(meta.codex, run),
@@ -841,8 +858,18 @@ export function settleRun(meta: TowerMeta, run: RunState): TowerMeta {
     best: Math.max(meta.best, floorsCleared(run)),
     runs: meta.runs + 1,
     wins: meta.wins + (run.result === 'win' ? 1 : 0),
+    unlocked: opened,
+    // 새 난이도가 열리면 다음 판은 그 난이도로 고른다.
+    difficulty: opened > meta.unlocked ? opened : meta.difficulty,
     run: null,
   };
+}
+
+/** 판이 끝난 뒤 열린 가장 높은 난이도: 연 난이도 가운데 가장 높은 것으로 꼭대기에 오르면 하나 더 열린다. */
+export function unlockedAfter(meta: TowerMeta, run: RunState): number {
+  const level = difficultyOf(run);
+  if (run.result !== 'win' || level < meta.unlocked) return meta.unlocked;
+  return clampDifficulty(level + 1);
 }
 
 /** 허브 카드와 결과 화면에 쓰는 기록: 점수에서 마친 층을 꺼낸다. */

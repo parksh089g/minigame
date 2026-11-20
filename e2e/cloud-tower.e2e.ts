@@ -6,7 +6,7 @@ import './app-globals';
 import { expect, type Page } from '@playwright/test';
 import { TOWER_SCENE } from '../src/games/cloud-tower/data';
 import { CODEX_TEXT } from '../src/games/cloud-tower/text';
-import { hiddenTexts, it, openApp, startScene, tapAt, tapText, waitForScene } from './app';
+import { hiddenTexts, it, openApp, startScene, tapAt, tapText, textPoint, waitForScene } from './app';
 
 const WAIT = { timeout: 20_000 } as const;
 
@@ -112,4 +112,23 @@ it('구름 탑 모험: 준비 화면에서 도감을 열고 쪽을 바꿔 보고
     await waitForScene(page, TOWER_SCENE);
     expect(await hiddenTexts(page, TOWER_SCENE), `도감의 ${tab} 쪽`).toEqual([]);
   }
+});
+
+it('구름 탑 모험: 연 난이도를 준비 화면에서 고르면 그 난이도로 판이 열린다', async ({ page }) => {
+  // 난이도 3까지 연 기록을 기기에 넣어 둔다(처음 읽을 때 IndexedDB가 비어 있으면 이것을 읽는다).
+  await page.addInitScript(() => {
+    const meta = { version: 1, shards: 40, levels: {}, best: 21, runs: 6, wins: 3, unlocked: 3, difficulty: 3, run: null, savedAt: 1 };
+    localStorage.setItem('pocket-arcade:tower-meta', JSON.stringify(meta));
+  });
+  await openApp(page);
+  await startScene(page, TOWER_SCENE);
+  await tapText(page, TOWER_SCENE, '난이도 3 · 꼭대기 조각 +15');
+  expect(await hiddenTexts(page, TOWER_SCENE), '준비 화면').toEqual([]);
+  // 화살표로 하나 낮춘다.
+  const point = await textPoint(page, TOWER_SCENE, '난이도 3 · 꼭대기 조각 +15');
+  if (!point) throw new Error('난이도 줄이 없다');
+  await tapAt(page, 22, point.y);
+  await expect.poll(() => textPoint(page, TOWER_SCENE, '난이도 2 · 꼭대기 조각 +10'), WAIT).not.toBeNull();
+  await tapText(page, TOWER_SCENE, START);
+  await expect.poll(async () => ((await runOf(page)) as { difficulty?: number } | null)?.difficulty, WAIT).toBe(2);
 });

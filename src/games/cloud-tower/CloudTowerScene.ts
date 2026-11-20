@@ -4,6 +4,7 @@ import { MiniGameScene, type ResultStat } from '../../scenes/MiniGameScene';
 import { PX_CSS, registerTowerTextures } from './art';
 import { BattleView } from './battle-view';
 import { drawSky } from './bits';
+import { DIFFICULTY_TEXT, difficultyOf } from './difficulty';
 import { TOWER_GAME_ID, TOWER_SCENE } from './data';
 import {
   abandon,
@@ -98,7 +99,12 @@ export class CloudTowerScene extends MiniGameScene {
       setMeta: (meta) => towerStore.set(meta),
       onStart: () => {
         const meta = towerStore.data;
-        const run = createRun({ seed: Math.floor(Math.random() * 0x7fffffff), levels: meta.levels, relics: meta.relics });
+        const run = createRun({
+          seed: Math.floor(Math.random() * 0x7fffffff),
+          levels: meta.levels,
+          relics: meta.relics,
+          difficulty: meta.difficulty,
+        });
         towerStore.set({ ...meta, run });
         this.go();
       },
@@ -241,13 +247,18 @@ export class CloudTowerScene extends MiniGameScene {
     this.phase = 'over';
     drawSky(this, actOf(Math.max(1, run.floor)));
     const shards = shardsFor(run);
-    towerStore.set(settleRun(towerStore.data, run));
+    const before = towerStore.data.unlocked;
+    const settled = settleRun(towerStore.data, run);
+    towerStore.set(settled);
     const cleared = floorsCleared(run);
     const stats: ResultStat[] = [
       ['오른 층', run.result === 'win' ? '꼭대기!' : `${cleared}층`],
       ['물리친 대장', `${run.stats.bosses}마리`],
       ['받은 구름 조각', `${shards}개`],
     ];
+    const level = difficultyOf(run);
+    if (level > 0) stats.unshift(['난이도', DIFFICULTY_TEXT.name(level)]);
+    if (settled.unlocked > before) stats.push(['새로 열림', DIFFICULTY_TEXT.name(settled.unlocked)]);
     this.finishMiniGame(runScore(run), stats, 300);
   }
 }
