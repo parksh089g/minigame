@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CARD_TYPE_ROWS, FOES, HERO, ITEM_ROWS, NODE_ROWS, RELIC_ROWS, STATUS_ROWS, TREASURE_ROWS, UPGRADE_ROWS, type Rows } from './sprites';
+import { CARD_TYPE_ROWS, FOES, HERO, ITEM_ROWS, NODE_ROWS, POTION_ROWS, RELIC_ROWS, STATUS_ROWS, TREASURE_ROWS, UPGRADE_ROWS, type Rows } from './sprites';
 
 const groups: Record<string, Readonly<Record<string, Rows>>> = {
   hero: { hero: HERO },
@@ -11,6 +11,7 @@ const groups: Record<string, Readonly<Record<string, Rows>>> = {
   relic: RELIC_ROWS,
   type: CARD_TYPE_ROWS,
   item: ITEM_ROWS,
+  potion: POTION_ROWS,
 };
 
 describe('픽셀 그림', () => {

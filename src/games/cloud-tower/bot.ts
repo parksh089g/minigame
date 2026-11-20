@@ -1,8 +1,9 @@
 /**
  * 판을 끝까지 저절로 해 보는 단순한 봇. 테스트가 규칙이 막히지 않고 끝까지 도는지, 난이도가 어느 쪽인지 볼 때 쓴다.
  * 잘하지는 않는다: 낼 수 있는 카드를 차례로 내고(공격은 체력이 가장 적은 적에게), 보상은 첫 카드를 고른다.
+ * 물약은 강한 적·대장과 싸울 때나 체력이 절반 밑일 때 첫 칸부터 쓴다.
  */
-import { canPlay, needsTarget } from './battle';
+import { canPlay, needsTarget, type Battle } from './battle';
 import { CARDS } from './data';
 import {
   canChoose,
@@ -17,6 +18,7 @@ import {
   rewardDone,
   runEndTurn,
   runPlayCard,
+  runUsePotion,
   takeBossTreasure,
   takeRewardCard,
   upgradable,
@@ -42,6 +44,10 @@ export function botStep(run: RunState): void {
     case 'battle': {
       const battle = run.battle;
       if (!battle) return;
+      // 물약은 강한 적이나 대장과 싸울 때, 또는 체력이 절반 밑일 때 바로 쓴다.
+      if (run.potions.length > 0 && (battle.kind !== 'fight' || battle.me.hp * 2 < battle.me.maxHp)) {
+        if (runUsePotion(run, 0, lowestFoe(battle))) return;
+      }
       // 마법 카드와 기술을 먼저, 그다음 공격을 낸다.
       const order = battle.hand
         .map((card, index) => ({ card, index }))
@@ -52,16 +58,7 @@ export function botStep(run: RunState): void {
         runEndTurn(run);
         return;
       }
-      let target: number | null = null;
-      if (needsTarget(first.card.id, first.card.up)) {
-        let lowest = Infinity;
-        battle.foes.forEach((foe, index) => {
-          if (!foe.dead && foe.hp < lowest) {
-            lowest = foe.hp;
-            target = index;
-          }
-        });
-      }
+      const target = needsTarget(first.card.id, first.card.up) ? lowestFoe(battle) : null;
       if (!runPlayCard(run, first.index, target)) runEndTurn(run);
       return;
     }
@@ -94,6 +91,19 @@ export function botStep(run: RunState): void {
     case 'over':
       return;
   }
+}
+
+/** 체력이 가장 적은 살아 있는 적 */
+function lowestFoe(battle: Battle): number | null {
+  let target: number | null = null;
+  let lowest = Infinity;
+  battle.foes.forEach((foe, index) => {
+    if (!foe.dead && foe.hp < lowest) {
+      lowest = foe.hp;
+      target = index;
+    }
+  });
+  return target;
 }
 
 function rank(id: keyof typeof CARDS): number {
