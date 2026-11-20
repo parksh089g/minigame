@@ -27,11 +27,14 @@ import {
   floorsCleared,
   normalizeMeta,
   recordLabel,
+  runPlayCard,
   runScore,
+  runUsePotion,
   settleRun,
   shardsFor,
 } from './run';
-import { cardLines, cardName, moveText, MAP_TEXT } from './text';
+import { addPotion, buyPotion, POTION_IDS, POTION_SLOTS, POTIONS, swapRewardPotion, waitingPotion } from './potions';
+import { cardLines, cardName, moveText, MAP_TEXT, POTION_TEXT, potionText } from './text';
 
 /** 주아 글꼴에 들어 있는 한글: KS X 1001의 완성형 2,350자 */
 function fontSyllables(): Set<string> {
@@ -72,6 +75,8 @@ describe('글', () => {
     MAP_TEXT.climb,
     MAP_TEXT.entrance,
     MAP_TEXT.deck(10),
+    ...POTION_IDS.flatMap((id) => [POTIONS[id].name, potionText(id)]),
+    ...Object.values(POTION_TEXT).map((value) => (typeof value === 'function' ? value('물약') : value)),
   ];
 
   it('화면에 보이는 글은 글꼴에 들어 있는 한글만 쓴다', () => {
@@ -240,6 +245,118 @@ describe('판', () => {
       return total / 30;
     };
     expect(average(full)).toBeGreaterThan(average({}));
+  });
+});
+
+describe('물약', () => {
+  /** 첫 싸움을 연 판. 물약 칸은 비어 있다. */
+  function fightingRun() {
+    const run = createRun({ seed: 5, levels: {} });
+    chooseNode(run, 0);
+    return run;
+  }
+
+  it('판은 빈 물약 칸으로 시작하고, 칸은 3개까지 찬다', () => {
+    const run = createRun({ seed: 1, levels: {} });
+    expect(run.potions).toEqual([]);
+    for (let i = 0; i < POTION_SLOTS; i += 1) expect(addPotion(run, 'berry')).toBe(true);
+    expect(addPotion(run, 'fire')).toBe(false);
+    expect(run.potions).toHaveLength(POTION_SLOTS);
+  });
+
+  it('싸움에서 마력 없이 쓰고, 쓰면 칸에서 사라진다', () => {
+    const run = fightingRun();
+    const battle = run.battle!;
+    battle.me.hp = 30;
+    battle.mana = 0;
+    run.potions = ['berry', 'star'];
+    expect(runUsePotion(run, 0, null)).not.toBeNull();
+    expect(battle.me.hp).toBe(45);
+    expect(run.hp).toBe(45);
+    expect(run.potions).toEqual(['star']);
+    runUsePotion(run, 0, null);
+    expect(battle.mana).toBe(2);
+    expect(run.potions).toEqual([]);
+    expect(runUsePotion(run, 0, null)).toBeNull();
+  });
+
+  it('던지는 물약은 살아 있는 적을 골라야 하고, 적을 쓰러뜨리면 이긴다', () => {
+    const run = fightingRun();
+    const battle = run.battle!;
+    run.potions = ['fire'];
+    expect(runUsePotion(run, 0, null)).toBeNull();
+    expect(run.potions).toEqual(['fire']);
+    battle.foes.forEach((foe, index) => {
+      foe.hp = index === 0 ? 5 : 0;
+      foe.dead = index !== 0;
+    });
+    expect(runUsePotion(run, 0, 0)).not.toBeNull();
+    expect(battle.foes[0].dead).toBe(true);
+    expect(run.stage).toBe('reward');
+  });
+
+  it('싸움 밖에서는 쓸 수 없다', () => {
+    const run = createRun({ seed: 1, levels: {} });
+    run.potions = ['berry'];
+    expect(runUsePotion(run, 0, null)).toBeNull();
+    expect(run.potions).toEqual(['berry']);
+  });
+
+  it('싸움에서 이기면 가끔 물약이 나오고, 칸이 가득 차면 내 물약과 바꿀 수 있다', () => {
+    let got = 0;
+    let waited = 0;
+    for (let seed = 1; seed <= 40; seed += 1) {
+      const run = createRun({ seed, levels: {} });
+      chooseNode(run, 0);
+      run.potions = seed % 2 === 0 ? ['berry', 'berry', 'berry'] : [];
+      const battle = run.battle!;
+      for (const foe of battle.foes) foe.hp = 1;
+      battle.mana = 99;
+      battle.hand.push({ uid: 999, id: 'whirl', up: true });
+      expect(runPlayCard(run, battle.hand.length - 1, null)).not.toBeNull();
+      expect(run.stage).toBe('reward');
+      const potion = run.reward?.potion;
+      if (!potion) continue;
+      got += 1;
+      if (seed % 2 === 1) {
+        expect(potion.taken).toBe(true);
+        expect(run.potions).toEqual([potion.id]);
+      } else {
+        waited += 1;
+        expect(waitingPotion(run)).toBe(potion.id);
+        expect(swapRewardPotion(run, 1)).toBe(true);
+        expect(run.potions).toEqual(['berry', potion.id, 'berry']);
+        expect(waitingPotion(run)).toBeNull();
+        expect(swapRewardPotion(run, 0)).toBe(false);
+      }
+    }
+    expect(got).toBeGreaterThan(5);
+    expect(got).toBeLessThan(40);
+    expect(waited).toBeGreaterThan(0);
+  });
+
+  it('가게에서 물약을 산다. 칸이 가득 차면 못 산다', () => {
+    const run = createRun({ seed: 3, levels: {} });
+    run.choices = ['shop'];
+    chooseNode(run, 0);
+    const items = run.shop?.potions ?? [];
+    expect(items).toHaveLength(2);
+    run.gold = 1000;
+    expect(buyPotion(run, 0)).toBe(true);
+    expect(run.potions).toEqual([items[0].id]);
+    expect(run.gold).toBe(1000 - items[0].price);
+    expect(buyPotion(run, 0)).toBe(false);
+    run.potions = ['berry', 'berry', 'berry'];
+    expect(buyPotion(run, 1)).toBe(false);
+  });
+
+  it('물약이 생기기 전에 저장한 판도 빈 칸으로 이어 한다', () => {
+    const run = createRun({ seed: 9, levels: {} });
+    const old = JSON.parse(JSON.stringify(run));
+    delete old.potions;
+    expect(normalizeMeta({ ...createMeta(), run: old }).run?.potions).toEqual([]);
+    const broken = { ...JSON.parse(JSON.stringify(run)), potions: ['berry', 'nope', 'fire', 'cloud', 'star'] };
+    expect(normalizeMeta({ ...createMeta(), run: broken }).run?.potions).toEqual(['berry', 'fire', 'cloud']);
   });
 });
 

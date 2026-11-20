@@ -3,6 +3,7 @@
  * 싸우는 동안에는 지금의 힘과 단단함, 고른 적의 허점을 셈한 값으로 적을 수 있다(CardTextContext).
  */
 import { CARDS, CARD_TYPE_NAME, ENEMIES, STATUSES, type Act, type CardId, type EnemyId, type StatusId } from './data';
+import { POTIONS, type PotionId } from './potions';
 
 /** 피해와 방어를 지금 싸움의 값으로 바꾸는 것. 없으면 카드에 적힌 그대로다. */
 export interface CardTextContext {
@@ -63,6 +64,11 @@ export function cardText(id: CardId, up: boolean, ctx: CardTextContext | null = 
   return cardLines(id, up, ctx).join(', ');
 }
 
+/** 물약이 하는 일. 싸우는 동안에는 지금의 힘과 단단함을 셈한 값으로 적는다. */
+export function potionText(id: PotionId, ctx: CardTextContext | null = null): string {
+  return POTIONS[id].acts.map((act) => cardActLine(act, ctx)).join(', ');
+}
+
 /** 카드 이름. 강화한 카드는 끝에 +가 붙는다. */
 export function cardName(id: CardId, up: boolean): string {
   return up ? `${CARDS[id].name}+` : CARDS[id].name;
@@ -106,4 +112,13 @@ export const MAP_TEXT = {
   climb: '올라가기!',
   entrance: '입구',
   deck: (count: number) => `덱 ${count}장`,
+} as const;
+
+/** 물약에 쓰는 글 */
+export const POTION_TEXT = {
+  drink: '한 번 더 누르면 써요',
+  throwAt: '누구에게 던질까요? 적을 눌러요',
+  got: (name: string) => `물약: ${name}`,
+  swapHint: '칸이 가득 찼어요. 버릴 물약을 눌러 바꿔요',
+  shopFull: '가득',
 } as const;
