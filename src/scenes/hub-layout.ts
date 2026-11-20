@@ -41,9 +41,11 @@ export const QUICK_CARD = {
 
 /**
  * 꾸준히 하는 게임의 카드: 자리가 넉넉하면 tall까지 키우고, 모자라도 least 밑으로는 낮추지 않는다.
+ * least는 이름과 한 줄 소개(두 줄에 30)가 위아래로 틈을 두고 들어가는 높이다. 가장 짧은 화면에서도 다섯 개가 한 쪽에 들어간다.
+ * 틈을 좁혀야만 다 들어가는 화면에서는 카드 사이를 tightGap으로 좁힌다.
  * 목록 아래에 도움말을 둘 자리는 카드가 roomy보다 낮아지지 않을 때만 비워 둔다.
  */
-export const STEADY_CARD = { tall: 72, roomy: 60, least: 48, gap: 6 } as const;
+export const STEADY_CARD = { tall: 72, roomy: 60, least: 40, gap: 6, tightGap: 4 } as const;
 
 const listTop = (compact: boolean): number =>
   HUB_TABS.height + HUB_TABS.depth + (compact ? BELOW_TABS.compact : BELOW_TABS.roomy);
@@ -83,11 +85,12 @@ export function steadyList(count: number, room: number, pager: number, reserve =
 
 function steadyFill(count: number, room: number, pager: number): HubList {
   const n = Math.max(1, Math.floor(count));
-  const gap = STEADY_CARD.gap;
-  const fits = (compact: boolean): number => Math.floor((room - listTop(compact)) / n) - gap;
+  const gapOf = (compact: boolean): number => (compact ? STEADY_CARD.tightGap : STEADY_CARD.gap);
+  const fits = (compact: boolean): number => Math.floor((room - listTop(compact)) / n) - gapOf(compact);
   // 틈을 좁혀야만 다 들어가는 화면에서는 틈을 좁힌다.
   const compact = fits(false) < STEADY_CARD.least && fits(true) >= STEADY_CARD.least;
   const top = listTop(compact);
+  const gap = gapOf(compact);
   const height = fits(compact);
   if (height >= STEADY_CARD.least) {
     return { top, card: { height: Math.min(STEADY_CARD.tall, height), gap }, rows: n, pages: 1, compact };

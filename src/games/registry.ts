@@ -18,6 +18,8 @@ import { coinsFor as gardenCoins, recordLabel as gardenRecord } from './garden-g
 import { LANTERN_GAME_ID, LANTERN_SCENE } from './lantern-keeper/data';
 import { coinsFor as lanternCoins } from './lantern-keeper/rules';
 import { COMPANY_GAME_ID, COMPANY_SCENE } from './sprout-company/data';
+import { TOWER_GAME_ID, TOWER_SCENE } from './cloud-tower/data';
+import { coinsFor as towerCoins, recordLabel as towerRecord } from './cloud-tower/run';
 
 export interface MiniGameInfo {
   /** 세이브에 쓰이는 고유 id. 한 번 정하면 바꾸지 않는다. */
@@ -328,6 +330,21 @@ export const GAMES: readonly MiniGameInfo[] = [
         [5, 60],
       ],
     },
+  },
+  {
+    id: TOWER_GAME_ID,
+    title: '구름 탑 모험',
+    icon: 'icon-cloudtower',
+    sceneKey: TOWER_SCENE,
+    // 점수는 마친 층마다 100점이다. 층마다 1코인을 준다.
+    coinsFor: towerCoins,
+    // 한 판이 길고 영구 강화에 따라 크게 달라져서 오늘의 도전에는 넣지 않는다.
+    dailyTargets: [],
+    genre: 'puzzle',
+    // 점수보다 몇 층까지 올랐는지가 알기 쉽다.
+    recordLabel: towerRecord,
+    // 판이 끝나도 구름 조각과 강화가 남고, 한 판이 길어서 꾸준히 하는 게임 쪽에 둔다.
+    steady: '카드로 싸우며 탑을 올라요',
   },
   {
     id: COMPANY_GAME_ID,

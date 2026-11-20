@@ -2,7 +2,7 @@
  * 허브 카드의 아랫줄에 띄우는 "오늘 할 일". 큰 게임은 하던 것이 이어지는 게임이라, 최고 기록보다
  * 지금 들어가 볼 까닭을 보여 주는 편이 쓸모 있다: 등불지기는 멈춰 둔 판과 오늘의 판,
  * 새싹 컴퍼니는 다 찬 수익과 오늘의 목표, 텃밭 지키기는 두고 간 판과 씨앗으로 살 수 있는 강화,
- * 행운 슬롯은 두고 간 판과 오늘의 판, 그리고 모두 이번 주의 큰 게임 미션이다.
+ * 행운 슬롯은 두고 간 판과 오늘의 판, 구름 탑 모험은 하던 판과 살 수 있는 강화, 그리고 모두 이번 주의 큰 게임 미션이다.
  * 할 일이 없으면 null이고, 카드에는 원래의 기록 줄이 남는다. 할 일이 있는 카드를 누르면 그 일이 있는 곳을 바로 연다(start).
  *
  * 큰 게임의 저장은 허브 세이브와 따로 기기에 있다. 처음 한 번은 허브를 그린 뒤에 읽어 와서(loadTodos) 아랫줄을 바꾸고,
@@ -21,6 +21,9 @@ import { slotDailyStore } from '../games/candy-slot/daily-store';
 import { GARDEN_GAME_ID } from '../games/garden-guard/data';
 import { canBuyAny, type GardenMeta } from '../games/garden-guard/rules';
 import { gardenStore } from '../games/garden-guard/store';
+import { TOWER_GAME_ID } from '../games/cloud-tower/data';
+import { canBuyAny as canBuyTowerUpgrade, type TowerMeta } from '../games/cloud-tower/run';
+import { towerStore } from '../games/cloud-tower/store';
 import { thisWeek } from '../games/registry';
 import type { CompanyStart } from '../games/sprout-company/SproutCompanyScene';
 import { AWAY, COMPANY_GAME_ID } from '../games/sprout-company/data';
@@ -81,6 +84,15 @@ export function gardenTodo(meta: GardenMeta, hasRun = false): Todo | null {
   return meta.runs > 0 && canBuyAny(meta) ? { text: '강화 가능' } : null;
 }
 
+/**
+ * 구름 탑 모험의 할 일. 하던 판이 있으면 몇 층에서 멈췄는지와 함께 이어 하라고 하고,
+ * 없으면 한 번이라도 해 본 사람에게 구름 조각으로 살 수 있는 강화가 있다고 알린다.
+ */
+export function towerTodo(meta: TowerMeta): Todo | null {
+  if (meta.run) return { text: `이어하기 ${Math.max(1, meta.run.floor)}층` };
+  return meta.runs > 0 && canBuyTowerUpgrade(meta) ? { text: '강화 가능' } : null;
+}
+
 /** 행운 슬롯을 오늘의 판으로 연다(CandySlotScene의 SlotStart). 두고 간 판이 있으면 그 판을 이어 할지 먼저 묻는다. */
 const SLOT_DAILY = { daily: true } as const;
 
@@ -123,6 +135,7 @@ export interface HubRecords {
 let lanternRead = false;
 let companyRead = false;
 let gardenRead = false;
+let towerRead = false;
 let slotDailyRead = false;
 
 /** 지금 이 곳의 저장소가 들고 있는 것으로 할 일을 바로 셈한다. 읽은 적이 없는 게임은 빠진다. */
@@ -148,6 +161,7 @@ export function todosNow(records: HubRecords, now: Date = new Date()): Todos {
   if (gardenRead) {
     pick(GARDEN_GAME_ID, gardenTodo(gardenStore.data, gardenStore.run !== null));
   }
+  if (towerRead) pick(TOWER_GAME_ID, towerTodo(towerStore.data));
   return todos;
 }
 
@@ -156,16 +170,18 @@ export function todosNow(records: HubRecords, now: Date = new Date()): Todos {
  * 그사이 저장한 것이 더 새것이면 그것을 읽는다. 읽지 못한 게임은 빠진다.
  */
 export async function loadTodos(records: HubRecords, now: Date = new Date()): Promise<Todos> {
-  const [lantern, company, garden, slotDaily] = await Promise.allSettled([
+  const [lantern, company, garden, slotDaily, tower] = await Promise.allSettled([
     metaStore.refresh(),
     companyStore.refresh(),
     gardenStore.refresh(),
     slotDailyStore.refresh(),
+    towerStore.refresh(),
   ]);
   if (lantern.status === 'fulfilled') lanternRead = true;
   if (company.status === 'fulfilled') companyRead = true;
   if (garden.status === 'fulfilled') gardenRead = true;
   if (slotDaily.status === 'fulfilled') slotDailyRead = true;
+  if (tower.status === 'fulfilled') towerRead = true;
   return todosNow(records, now);
 }
 
