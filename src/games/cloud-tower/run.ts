@@ -22,10 +22,17 @@ import {
   TOP_FLOOR,
   TREASURES,
   UPGRADES,
+  ENEMIES,
+  RELIC_MAX,
+  RELIC_STEP,
+  RELICS,
+  relicCost,
   type CardId,
+  type EnemyId,
   type EventId,
   type NodeKind,
   type Rarity,
+  type RelicId,
   type TreasureId,
   type UpgradeId,
 } from './data';
@@ -109,16 +116,35 @@ export interface RunState {
   rewardChoices: number;
   packs: number[];
   stats: RunStats;
+  /** 이 판에서 만난 카드(보상과 가게에 나온 것)와 적. 판이 끝나면 도감에 옮긴다. */
+  met: Met;
+  /** 판을 시작할 때의 유물 단계. 판 안의 값은 이것으로 셈해서, 판 중에 유물을 올려도 이 판은 그대로다. */
+  relics: RelicLevels;
   result: null | 'win' | 'lose';
   /** 난이도(0이 보통). 난이도가 생기기 전에 저장한 판에는 없다. */
   difficulty?: number;
 }
 
+export interface Met {
+  cards: CardId[];
+  foes: EnemyId[];
+}
+
+function meet<T>(list: T[], id: T): void {
+  if (!list.includes(id)) list.push(id);
+}
+
 export interface RunOptions {
   seed: number;
   levels: Partial<Record<UpgradeId, number>>;
+  relics?: RelicLevels;
   difficulty?: number;
 }
+
+export type RelicLevels = Partial<Record<RelicId, number>>;
+
+export const relicLevel = (relics: RelicLevels | undefined, id: RelicId): number =>
+  Math.max(0, Math.min(RELIC_MAX, Math.floor(relics?.[id] ?? 0)));
 
 export const levelOf = (levels: Partial<Record<UpgradeId, number>>, id: UpgradeId): number =>
   Math.max(0, Math.min(UPGRADES[id].costs.length, Math.floor(levels[id] ?? 0)));
@@ -128,7 +154,11 @@ export const actOf = (floor: number): number => Math.min(ACTS - 1, Math.floor((M
 /** 구역 안에서 몇째 층인지(1부터) */
 export const floorInAct = (floor: number): number => ((Math.max(1, floor) - 1) % FLOORS_PER_ACT) + 1;
 
-export const ctxOf = (run: RunState): BattleContext => ({ rng: run.rng, treasures: run.treasures });
+export const ctxOf = (run: RunState): BattleContext => ({
+  rng: run.rng,
+  treasures: run.treasures,
+  firstBlock: relicLevel(run.relics, 'shell') * RELIC_STEP.shell,
+});
 
 function newCard(run: RunState, id: CardId, up = false): Card {
   const card: Card = { uid: run.nextUid, id, up };
@@ -138,7 +168,12 @@ function newCard(run: RunState, id: CardId, up = false): Card {
 
 export function createRun(options: RunOptions): RunState {
   const { levels } = options;
-  const hp = PLAYER.hp + levelOf(levels, 'hp') * 5;
+  const relics: RelicLevels = {};
+  for (const id of Object.keys(RELICS) as RelicId[]) {
+    const level = relicLevel(options.relics, id);
+    if (level > 0) relics[id] = level;
+  }
+  const hp = PLAYER.hp + levelOf(levels, 'hp') * 5 + relicLevel(relics, 'seed') * RELIC_STEP.seed;
   const run: RunState = {
     rng: { s: options.seed | 0 },
     floor: 0,
@@ -165,6 +200,8 @@ export function createRun(options: RunOptions): RunState {
     rewardChoices: 3 + levelOf(levels, 'choice'),
     packs: [0, ...(levelOf(levels, 'pack1') > 0 ? [1] : []), ...(levelOf(levels, 'pack2') > 0 ? [2] : [])],
     stats: { kills: 0, elites: 0, bosses: 0, cards: 0 },
+    met: { cards: [], foes: [] },
+    relics,
     result: null,
     difficulty: clampDifficulty(options.difficulty ?? 0),
   };
@@ -188,7 +225,9 @@ export function runScore(run: RunState): number {
 
 /** 판이 끝났을 때 받는 구름 조각: 마친 층마다 1, 강한 적마다 2, 대장마다 8, 꼭대기까지 오르면 15에 난이도마다 5 더 */
 export function shardsFor(run: RunState): number {
-  return floorsCleared(run) + run.stats.elites * 2 + run.stats.bosses * 8 + (run.result === 'win' ? 15 + difficultyOf(run) * DIFFICULTY_SHARDS : 0);
+  const base =
+    floorsCleared(run) + run.stats.elites * 2 + run.stats.bosses * 8 + (run.result === 'win' ? 15 + difficultyOf(run) * DIFFICULTY_SHARDS : 0);
+  return Math.floor((base * (100 + relicLevel(run.relics, 'net') * RELIC_STEP.net)) / 100);
 }
 
 // ───────── 갈림길 ─────────
@@ -304,6 +343,7 @@ function beginBattle(run: RunState, kind: BattleKind): void {
   else enemies = pick(run.rng, run.actFights < 2 ? act.easy : act.normal);
   if (kind !== 'boss') run.actFights += kind === 'fight' ? 1 : 0;
   const { battle } = startBattle(kind, enemies, run.deck, run.hp, run.maxHp, ctxOf(run));
+  for (const foe of battle.foes) meet(run.met.foes, foe.id);
   applyDifficultyBattle(run, battle);
   run.battle = battle;
   run.stage = 'battle';
@@ -360,6 +400,8 @@ function winBattle(run: RunState, battle: Battle): void {
   if (battle.kind === 'elite') run.stats.elites += 1;
   if (battle.kind === 'boss') run.stats.bosses += 1;
   if (run.treasures.includes('cushion')) run.hp = Math.min(run.maxHp, run.hp + 6);
+  const mend = relicLevel(run.relics, 'scarf') * RELIC_STEP.scarf;
+  if (mend > 0) run.hp = Math.min(run.maxHp, run.hp + mend);
   if (battle.kind === 'boss' && run.floor >= TOP_FLOOR) {
     run.result = 'win';
     run.stage = 'over';
@@ -367,9 +409,11 @@ function winBattle(run: RunState, battle: Battle): void {
   }
   const [low, high] = REWARD[battle.kind];
   let gold = randInt(run.rng, low, high);
+  gold = Math.round((gold * (100 + relicLevel(run.relics, 'acorn') * RELIC_STEP.acorn)) / 100);
   if (run.treasures.includes('piggy')) gold += 12;
   run.gold += gold;
   const reward: Reward = { gold, cards: rollCards(run, battle.kind), treasure: null, bossPick: null };
+  for (const id of reward.cards ?? []) meet(run.met.cards, id);
   if (battle.kind === 'elite') {
     reward.treasure = rollTreasure(run);
     if (reward.treasure) gainTreasure(run, reward.treasure);
@@ -496,6 +540,11 @@ export function restUpgrade(run: RunState, uid: number): boolean {
 
 // ───────── 가게 ─────────
 
+/** 유물 단골 쿠폰만큼 깎은 값 */
+function discounted(run: RunState, price: number): number {
+  return Math.round((price * (100 - relicLevel(run.relics, 'coupon') * RELIC_STEP.coupon)) / 100);
+}
+
 function jitter(rng: Rng, price: number): number {
   return Math.round(price * (0.9 + rand(rng) * 0.2));
 }
@@ -512,9 +561,12 @@ function makeShop(run: RunState): Shop {
     COMMON_TREASURES.filter((id) => !run.treasures.includes(id)),
   ).slice(0, 2);
   return {
-    cards: ids.map((id) => ({ id, price: difficultyPrice(run, jitter(run.rng, PRICES.card[CARDS[id].rarity])), sold: false })),
-    treasures: treasures.map((id) => ({ id, price: difficultyPrice(run, jitter(run.rng, PRICES.treasure)), sold: false })),
-    potions: shopPotions(run.rng).map((item) => ({ ...item, price: difficultyPrice(run, item.price) })),
+    cards: ids.map((id) => {
+      meet(run.met.cards, id);
+      return { id, price: difficultyPrice(run, discounted(run, jitter(run.rng, PRICES.card[CARDS[id].rarity]))), sold: false };
+    }),
+    treasures: treasures.map((id) => ({ id, price: difficultyPrice(run, discounted(run, jitter(run.rng, PRICES.treasure))), sold: false })),
+    potions: shopPotions(run.rng).map((item) => ({ ...item, price: difficultyPrice(run, discounted(run, item.price)) })),
     removed: false,
   };
 }
@@ -674,6 +726,14 @@ export interface TowerMeta {
   best: number;
   runs: number;
   wins: number;
+  /** 도감: 만난 카드와 적, 가져 본 보물 */
+  codex: Codex;
+  /** 지금까지 물리친 적의 수 */
+  kills: number;
+  /** 보상을 받은 업적 */
+  claimed: string[];
+  /** 유물의 단계 */
+  relics: RelicLevels;
   /** 열린 가장 높은 난이도와 고른 난이도(0이 보통) */
   unlocked: number;
   difficulty: number;
@@ -684,11 +744,42 @@ export interface TowerMeta {
 }
 
 export function createMeta(): TowerMeta {
-  return { version: META_VERSION, shards: 0, levels: {}, best: 0, runs: 0, wins: 0, unlocked: 0, difficulty: 0, run: null, savedAt: 0 };
+  return {
+    version: META_VERSION,
+    shards: 0,
+    levels: {},
+    best: 0,
+    runs: 0,
+    wins: 0,
+    codex: { cards: [], foes: [], treasures: [] },
+    kills: 0,
+    claimed: [],
+    relics: {},
+    unlocked: 0,
+    difficulty: 0,
+    run: null,
+    savedAt: 0,
+  };
 }
 
 const count = (value: unknown): number =>
   typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+
+function relicsOf(value: unknown): RelicLevels {
+  const raw = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+  const relics: RelicLevels = {};
+  for (const id of Object.keys(RELICS) as RelicId[]) {
+    const level = Math.min(RELIC_MAX, count(raw[id]));
+    if (level > 0) relics[id] = level;
+  }
+  return relics;
+}
+
+/** 목록 가운데 아는 이름만, 겹치지 않게 남긴다. */
+function known<K extends string>(value: unknown, table: Readonly<Record<K, unknown>>): K[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((id): id is K => typeof id === 'string' && id in table))];
+}
 
 /** 하던 판이 지금의 규칙으로 읽을 수 있는 모양인지 대강 본다. 아니면 버린다. */
 function looksLikeRun(value: unknown): value is RunState {
@@ -722,6 +813,10 @@ export function normalizeMeta(raw: unknown): TowerMeta {
   if (run && !Array.isArray(run.path)) run.path = [];
   // 물약이 생기기 전에 저장한 판은 빈 칸으로 시작한다.
   if (run) run.potions = Array.isArray(run.potions) ? run.potions.filter(isPotionId).slice(0, POTION_SLOTS) : [];
+  // 도감을 만들기 전에 저장한 판은 만난 것이 비어 있는 채로 이어 한다.
+  if (run && (!run.relics || typeof run.relics !== 'object')) run.relics = {};
+  if (run && !(run.met && Array.isArray(run.met.cards) && Array.isArray(run.met.foes))) run.met = { cards: [], foes: [] };
+  const rawCodex = value.codex && typeof value.codex === 'object' ? (value.codex as Record<string, unknown>) : {};
   return {
     version: META_VERSION,
     shards: count(value.shards),
@@ -729,6 +824,14 @@ export function normalizeMeta(raw: unknown): TowerMeta {
     best: Math.min(TOP_FLOOR, count(value.best)),
     runs: count(value.runs),
     wins: count(value.wins),
+    codex: {
+      cards: known(rawCodex.cards, CARDS),
+      foes: known(rawCodex.foes, ENEMIES),
+      treasures: known(rawCodex.treasures, TREASURES),
+    },
+    kills: count(value.kills),
+    relics: relicsOf(value.relics),
+    claimed: Array.isArray(value.claimed) ? [...new Set(value.claimed.filter((id): id is string => typeof id === 'string'))] : [],
     unlocked,
     difficulty: Math.min(unlocked, clampDifficulty(value.difficulty)),
     run,
@@ -749,10 +852,23 @@ export function buyUpgrade(meta: TowerMeta, id: UpgradeId): TowerMeta {
   return { ...meta, shards: meta.shards - cost, levels: { ...meta.levels, [id]: levelOf(meta.levels, id) + 1 } };
 }
 
-/** 가진 구름 조각으로 살 수 있는 강화가 있는지 */
+/** 유물을 한 단계 올린다. 올릴 수 없으면 meta를 그대로 돌려준다. */
+export function buyRelic(meta: TowerMeta, id: RelicId): TowerMeta {
+  const level = relicLevel(meta.relics, id);
+  const cost = relicCost(level);
+  if (cost === null || meta.shards < cost) return meta;
+  return { ...meta, shards: meta.shards - cost, relics: { ...meta.relics, [id]: level + 1 } };
+}
+
+/** 가진 구름 조각으로 살 수 있는 강화나 유물이 있는지 */
 export function canBuyAny(meta: TowerMeta): boolean {
-  return (Object.keys(UPGRADES) as UpgradeId[]).some((id) => {
+  const upgrade = (Object.keys(UPGRADES) as UpgradeId[]).some((id) => {
     const cost = upgradeCost(meta.levels, id);
+    return cost !== null && meta.shards >= cost;
+  });
+  if (upgrade) return true;
+  return (Object.keys(RELICS) as RelicId[]).some((id) => {
+    const cost = relicCost(relicLevel(meta.relics, id));
     return cost !== null && meta.shards >= cost;
   });
 }
@@ -762,6 +878,8 @@ export function settleRun(meta: TowerMeta, run: RunState): TowerMeta {
   const opened = unlockedAfter(meta, run);
   return {
     ...meta,
+    codex: codexWith(meta.codex, run),
+    kills: meta.kills + run.stats.kills,
     shards: meta.shards + shardsFor(run),
     best: Math.max(meta.best, floorsCleared(run)),
     runs: meta.runs + 1,
@@ -790,3 +908,24 @@ export function recordLabel(best: number): string {
 export function coinsFor(score: number): number {
   return Math.floor(score / 100);
 }
+
+export interface Codex {
+  cards: CardId[];
+  foes: EnemyId[];
+  treasures: TreasureId[];
+}
+
+const union = <T>(base: readonly T[], more: readonly T[]): T[] => [...new Set([...base, ...more])];
+
+/** 도감에 판에서 만난 것(덱의 카드, 나온 카드, 만난 적, 가진 보물)을 더한다. */
+export function codexWith(codex: Codex, run: RunState | null): Codex {
+  if (!run) return codex;
+  return {
+    cards: union(codex.cards, [...run.deck.map((card) => card.id), ...run.met.cards]),
+    foes: union(codex.foes, run.met.foes),
+    treasures: union(codex.treasures, run.treasures),
+  };
+}
+
+/** 하던 판까지 넣은 도감. 준비 화면의 도감은 이것을 보여 준다. */
+export const codexNow = (meta: TowerMeta): Codex => codexWith(meta.codex, meta.run);

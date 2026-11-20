@@ -5,6 +5,7 @@
 import './app-globals';
 import { expect, type Page } from '@playwright/test';
 import { TOWER_SCENE } from '../src/games/cloud-tower/data';
+import { CODEX_TEXT } from '../src/games/cloud-tower/text';
 import { hiddenTexts, it, openApp, startScene, tapAt, tapText, textPoint, waitForScene } from './app';
 
 const WAIT = { timeout: 20_000 } as const;
@@ -123,6 +124,18 @@ it('구름 탑 모험: 싸움에서 물약 칸을 두 번 누르면 물약을 �
   await expect
     .poll(() => page.evaluate((key) => (window.__pocketArcade?.scene.getScene(key) as unknown as { run: { potions: string[]; hp: number } }).run, TOWER_SCENE), WAIT)
     .toMatchObject({ potions: ['star'], hp: 35 });
+});
+
+it('구름 탑 모험: 준비 화면에서 도감을 열고 쪽을 바꿔 보고, 글이 가려지지 않는다', async ({ page }) => {
+  await openApp(page);
+  await startScene(page, TOWER_SCENE);
+  await tapText(page, TOWER_SCENE, CODEX_TEXT.title);
+  await waitForScene(page, TOWER_SCENE);
+  for (const tab of CODEX_TEXT.tabs) {
+    await tapText(page, TOWER_SCENE, tab);
+    await waitForScene(page, TOWER_SCENE);
+    expect(await hiddenTexts(page, TOWER_SCENE), `도감의 ${tab} 쪽`).toEqual([]);
+  }
 });
 
 it('구름 탑 모험: 연 난이도를 준비 화면에서 고르면 그 난이도로 판이 열린다', async ({ page }) => {

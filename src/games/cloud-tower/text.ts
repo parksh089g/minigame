@@ -122,3 +122,16 @@ export const POTION_TEXT = {
   swapHint: '칸이 가득 찼어요. 버릴 물약을 눌러 바꿔요',
   shopFull: '가득',
 } as const;
+
+/** 도감 화면의 글 */
+export const CODEX_TEXT = {
+  title: '도감',
+  tabs: ['카드', '적', '보물', '업적'],
+  unknown: '???',
+  hints: ['카드 보상이나 가게에서 만나면 열려요', '싸움에서 만나면 열려요', '보물을 가지면 열려요'],
+  count: ['만난 카드', '만난 적', '가져 본 보물'],
+  claim: (reward: number) => `받기 +${reward}`,
+  claimed: '받음',
+  reward: (reward: number) => `조각 ${reward}`,
+  hp: (low: number, high: number) => (low === high ? `체력 ${low}` : `체력 ${low}~${high}`),
+} as const;

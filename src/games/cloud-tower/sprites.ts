@@ -3,7 +3,7 @@
  * 테두리(0번 색)는 그릴 때 둘레에 자동으로 붙으니 여기에는 그리지 않는다.
  * 등불지기와 같은 팔레트를 써서 어두운 바탕에서 또렷하게 보인다.
  */
-import type { CardType, EnemyLook, NodeKind, StatusId, TreasureId, UpgradeId } from './data';
+import type { CardType, EnemyLook, NodeKind, RelicId, StatusId, TreasureId, UpgradeId } from './data';
 import type { PotionId } from './potions';
 
 export type Rows = readonly string[];
@@ -401,6 +401,15 @@ export const UPGRADE_ROWS: Readonly<Record<UpgradeId, Rows>> = {
   relic: CLOVER,
   pack1: CARD_BACK,
   pack2: recolor(recolor(CARD_BACK, '1', '2'), '9', '3'),
+};
+
+export const RELIC_ROWS: Readonly<Record<RelicId, Rows>> = {
+  seed: ['....5....', '...565...', '....6....', '..33333..', '.3344433.', '.3444443.', '.3344433.', '..33333..'],
+  scarf: ['.2222222.', '222222222', '2c22c22c2', '222222222', '......22.', '......2c.', '......22.', '......2c.', '......22.'],
+  acorn: ['....3....', '..33333..', '.3333333.', '.4444444.', '.4444c44.', '.4444444.', '..44444..', '...444...', '....4....'],
+  shell: ['...444...', '..4c4c4..', '.4c4c4c4.', '4c4c4c4c4', '4c4c4c4c4', '.4c4c4c4.', '..33333..'],
+  coupon: ['aaaaaaaaa', 'accc4ccca', '.cc444cc.', 'accc4ccca', 'aaaaaaaaa'],
+  net: ['..ccc....', '.ccccc.cc', 'ccccccccc', 'ccccbcccc', 'cccbbbccc', '.cccbccc.'],
 };
 
 export const CARD_TYPE_ROWS: Readonly<Record<CardType, Rows>> = {

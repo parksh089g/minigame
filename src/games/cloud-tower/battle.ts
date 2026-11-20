@@ -116,6 +116,8 @@ export type BattleEvent =
 export interface BattleContext {
   rng: Rng;
   treasures: readonly TreasureId[];
+  /** 싸움의 첫 차례에 더 얻는 방어(유물 조개 방패) */
+  firstBlock?: number;
 }
 
 const has = (ctx: BattleContext, id: TreasureId): boolean => ctx.treasures.includes(id);
@@ -391,6 +393,7 @@ function startTurn(battle: Battle, ctx: BattleContext): BattleEvent[] {
       events.push({ t: 'treasure', id: 'badge' });
       gainBlock(battle, 'me', 10, events);
     }
+    if ((ctx.firstBlock ?? 0) > 0) gainBlock(battle, 'me', ctx.firstBlock ?? 0, events);
     if (has(ctx, 'candy')) battle.mana += 1;
     if (has(ctx, 'hourglass')) count += 2;
   }
