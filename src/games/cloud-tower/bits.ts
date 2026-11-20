@@ -11,6 +11,7 @@ import type { RunState } from './run';
 import { actOf } from './run';
 import { cardName, cardText, cardTypeName, type CardTextContext } from './text';
 import { ACT_NAMES } from './data';
+import { DIFFICULTY_TEXT, difficultyOf } from './difficulty';
 
 export const MARGIN = 8;
 export const WIDTH = GAME_WIDTH - MARGIN * 2;
@@ -98,7 +99,12 @@ export function addPill(scene: Phaser.Scene, right: number, y: number, texture: 
 export function drawTopBar(scene: Phaser.Scene, run: RunState): void {
   const floor = Math.max(1, run.floor);
   addText(scene, 40, 14, `${floor}층`, { size: 14, color: PX_CSS.text, originY: 0.5 });
-  addText(scene, 40, 29, ACT_NAMES[actOf(floor)], { size: 9, color: PX_CSS.sub, originY: 0.5 });
+  const level = difficultyOf(run);
+  addText(scene, 40, 29, level > 0 ? `${ACT_NAMES[actOf(floor)]} · ${DIFFICULTY_TEXT.name(level)}` : ACT_NAMES[actOf(floor)], {
+    size: 9,
+    color: PX_CSS.sub,
+    originY: 0.5,
+  });
   const goldLeft = addPill(scene, GAME_WIDTH - MARGIN, 8, TEX.candy, String(run.gold), PX_CSS.accent);
   addPill(scene, goldLeft - 4, 8, TEX.heart, `${run.hp}/${run.maxHp}`, PX_CSS.bad);
 }
