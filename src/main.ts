@@ -29,6 +29,7 @@ import { MemoryCardsScene } from './games/memory-cards/MemoryCardsScene';
 import { MergeTilesScene } from './games/merge-tiles/MergeTilesScene';
 import { NemoLogicScene } from './games/nemo-logic/NemoLogicScene';
 import { NumberPuzzleScene } from './games/number-puzzle/NumberPuzzleScene';
+import { OneCardScene } from './games/one-card/OneCardScene';
 import { ParkingOutScene } from './games/parking-out/ParkingOutScene';
 import { MatchThreeScene } from './games/match-three/MatchThreeScene';
 import { PathLinkScene } from './games/path-link/PathLinkScene';
@@ -127,6 +128,7 @@ async function boot(): Promise<void> {
       ChosungQuizScene,
       BrickBreakScene,
       CandySlotScene,
+      OneCardScene,
       DuelScene,
       HulaScene,
       LanternKeeperScene,

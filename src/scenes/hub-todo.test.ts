@@ -154,5 +154,8 @@ describe('구름 탑 모험의 할 일', () => {
     expect(towerTodo({ ...meta, run })).toEqual({ text: '이어하기 4층' });
     expect(towerTodo({ ...meta, shards: 999 })).toBeNull();
     expect(towerTodo({ ...meta, shards: 999, runs: 1 })).toEqual({ text: '강화 가능' });
+    // 7층 대장을 물리쳤으면 업적을 받으라고 하고, 도감의 업적 쪽을 연다.
+    expect(towerTodo({ ...meta, runs: 1, best: 7 })).toEqual({ text: '업적 받기', start: { mode: 'codex', codexTab: 3 } });
+    expect(towerTodo({ ...meta, runs: 1, best: 7, claimed: ['boss1'] })).toBeNull();
   });
 });
