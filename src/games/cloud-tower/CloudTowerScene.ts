@@ -26,6 +26,7 @@ import {
   eventPicker,
   removePicker,
   upgradePicker,
+  type LobbyTab,
   type ScreenHooks,
 } from './screens';
 import { buildMap } from './tower-map';
@@ -41,6 +42,8 @@ export interface TowerStart {
   mode?: 'run' | 'codex';
   /** 도감에서 연 쪽 */
   codexTab?: CodexTab;
+  /** 준비 화면에서 연 쪽(강화, 유물) */
+  lobbyTab?: LobbyTab;
   overlay?: Overlay;
   /** 수상한 길에서 카드를 골라야 하는 고르기의 번호 */
   choice?: number;
@@ -82,20 +85,20 @@ export class CloudTowerScene extends MiniGameScene {
       if (!this.sys.isActive() || this.phase !== 'loading') return;
       if (data.mode === 'run') this.openRun(data);
       else if (data.mode === 'codex') this.openCodex(data.codexTab ?? 0);
-      else this.openLobby();
+      else this.openLobby(data.lobbyTab ?? 0);
     });
   }
 
   // ───────── 준비 화면 ─────────
 
-  private openLobby(): void {
+  private openLobby(tab: LobbyTab = 0): void {
     this.phase = 'lobby';
     buildLobby(this, {
       getMeta: () => towerStore.data,
       setMeta: (meta) => towerStore.set(meta),
       onStart: () => {
         const meta = towerStore.data;
-        const run = createRun({ seed: Math.floor(Math.random() * 0x7fffffff), levels: meta.levels });
+        const run = createRun({ seed: Math.floor(Math.random() * 0x7fffffff), levels: meta.levels, relics: meta.relics });
         towerStore.set({ ...meta, run });
         this.go();
       },
@@ -108,7 +111,8 @@ export class CloudTowerScene extends MiniGameScene {
       },
       onBack: () => fadeToScene(this, homeScene()),
       onCodex: () => this.scene.restart({ mode: 'codex' } satisfies TowerStart),
-    });
+      onTab: (next) => this.scene.restart({ lobbyTab: next } satisfies TowerStart),
+    }, tab);
   }
 
   private openCodex(tab: CodexTab): void {

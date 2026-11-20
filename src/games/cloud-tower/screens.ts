@@ -6,7 +6,7 @@ import Phaser from 'phaser';
 import { GAME_WIDTH } from '../../config';
 import { sfx } from '../../core/sfx';
 import { addText, PixelButton } from '../../core/ui';
-import { nodeTexture, PX, PX_CSS, TEX, treasureTexture, upgradeTexture } from './art';
+import { nodeTexture, PX, PX_CSS, relicTexture, TEX, treasureTexture, upgradeTexture } from './art';
 import type { Card } from './battle';
 import {
   addCardRow,
@@ -30,6 +30,11 @@ import {
   TREASURES,
   UPGRADE_ORDER,
   UPGRADES,
+  RELIC_MAX,
+  RELIC_ORDER,
+  RELICS,
+  relicCost,
+  type RelicId,
   type TreasureId,
   type UpgradeId,
 } from './data';
@@ -37,6 +42,7 @@ import {
   actOf,
   buyCard,
   buyTreasure,
+  buyRelic,
   buyUpgrade,
   canChoose,
   canRemove,
@@ -47,6 +53,7 @@ import {
   floorInAct,
   leaveEvent,
   levelOf,
+  relicLevel,
   removePrice,
   rest,
   restAmount,
@@ -97,6 +104,8 @@ export const SCREEN_TEXT = {
   removeDone: '이 가게에서는 이미 뺐어요',
   chestTitle: '보물 상자',
   codex: '도감',
+  lobbyTabs: ['강화', '유물'],
+  relicHint: '유물은 열 단계까지 조금씩 세져요',
 } as const;
 
 // ───────── 준비 화면 ─────────
@@ -109,11 +118,16 @@ export interface LobbyHooks {
   onGiveUp: () => void;
   onBack: () => void;
   onCodex: () => void;
+  /** 강화(0)와 유물(1) 쪽을 바꾼다. */
+  onTab: (tab: LobbyTab) => void;
 }
+
+export type LobbyTab = 0 | 1;
+const LOBBY_TAB = { top: 76, height: 22, gap: 4 } as const;
 
 const UPGRADE_ROW = { height: 36, gap: 4 } as const;
 
-export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
+export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks, tab: LobbyTab = 0): void {
   const { height } = scene.scale;
   let meta = hooks.getMeta();
   drawSky(scene, 0);
@@ -174,9 +188,59 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
     wrapWidth: WIDTH - 16,
     lineSpacing: 0,
   });
+  // 강화와 유물 쪽
+  const tabWidth = (WIDTH - LOBBY_TAB.gap) / 2;
+  SCREEN_TEXT.lobbyTabs.forEach((label, index) => {
+    new PixelButton(scene, {
+      x: Math.round(MARGIN + index * (tabWidth + LOBBY_TAB.gap)),
+      y: LOBBY_TAB.top,
+      width: Math.floor(tabWidth),
+      height: LOBBY_TAB.height,
+      label,
+      style: index === tab ? 'yellow' : 'neutral',
+      onTap: () => {
+        if (index !== tab) hooks.onTab(index as LobbyTab);
+      },
+    });
+  });
+  const listTop = LOBBY_TAB.top + LOBBY_TAB.height + 6;
+  if (tab === 1) {
+    info.setText(SCREEN_TEXT.relicHint);
+    let pickedRelic: RelicId | null = null;
+    const relics = new PagedList<RelicId>(scene, RELIC_ORDER, listTop, infoTop - 4, UPGRADE_ROW.height, UPGRADE_ROW.gap, (id, y) => {
+      const level = relicLevel(meta.relics, id);
+      const cost = relicCost(level);
+      const def = RELICS[id];
+      return addWideRow(scene, {
+        y,
+        height: UPGRADE_ROW.height,
+        texture: relicTexture(id),
+        title: `${def.name} ${level}/${RELIC_MAX}`,
+        note: def.effect(level),
+        side: cost === null ? '다 올림' : `조각 ${cost}`,
+        sideColor: cost === null ? PX_CSS.good : meta.shards >= cost ? PX_CSS.accent : PX_CSS.faint,
+        border: pickedRelic === id ? PX.yellow : undefined,
+        onTap: () => {
+          pickedRelic = id;
+          const next = buyRelic(meta, id);
+          if (next === meta) {
+            if (cost !== null) sfx.deny();
+            info.setText(def.blurb);
+          } else {
+            sfx.coin();
+            meta = next;
+            hooks.setMeta(meta);
+            info.setText(`${def.name}: ${def.effect(relicLevel(meta.relics, id))}`);
+            drawShards();
+          }
+          relics.show(relics.current);
+        },
+      });
+    });
+  }
   let picked: UpgradeId | null = null;
 
-  const list = new PagedList<UpgradeId>(scene, UPGRADE_ORDER, 78, infoTop - 4, UPGRADE_ROW.height, UPGRADE_ROW.gap, (id, y) => {
+  const list = tab === 1 ? null : new PagedList<UpgradeId>(scene, UPGRADE_ORDER, listTop, infoTop - 4, UPGRADE_ROW.height, UPGRADE_ROW.gap, (id, y) => {
     const level = levelOf(meta.levels, id);
     const cost = upgradeCost(meta.levels, id);
     const affordable = cost !== null && meta.shards >= cost;
@@ -204,7 +268,7 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
           info.setText(`${def.name}: ${def.effect(levelOf(meta.levels, id))}`);
           drawShards();
         }
-        list.show(list.current);
+        list?.show(list.current);
       },
     });
     return objects;

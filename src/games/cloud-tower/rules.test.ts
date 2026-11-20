@@ -15,11 +15,17 @@ import {
   TOP_FLOOR,
   TREASURES,
   UPGRADES,
+  RELICS,
+  RELIC_MAX,
+  relicCost,
   type CardId,
   type EnemyId,
 } from './data';
 import {
+  buyRelic,
   buyUpgrade,
+  canBuyAny,
+  shardsFor as shardsOf,
   chooseNode,
   choicesFor,
   createMeta,
@@ -83,6 +89,11 @@ describe('글', () => {
     ...CODEX_TEXT.hints,
     ...CODEX_TEXT.count,
     '받은 업적',
+    ...Object.values(RELICS).flatMap((def) => [def.name, def.blurb, def.effect(0), def.effect(10)]),
+    '다 올림',
+    '강화',
+    '유물',
+    '유물은 열 단계까지 조금씩 세져요',
     ...ACHIEVEMENTS.flatMap((item) => [item.name, item.blurb]),
   ];
 
@@ -324,5 +335,39 @@ describe('도감과 업적', () => {
     expect(after.shards).toBe(5 + boss1.reward);
     expect(claimAchievement(after, 'boss1')).toBe(after);
     expect(claimAchievement(meta, 'top')).toBe(meta);
+  });
+});
+
+describe('유물', () => {
+  it('단계를 올릴수록 값이 오르고, 열 단계에서 멈춘다. 다 올리려면 조각이 아주 많이 든다', () => {
+    let total = 0;
+    for (let level = 0; level < RELIC_MAX; level += 1) total += relicCost(level) ?? 0;
+    expect(relicCost(RELIC_MAX)).toBeNull();
+    expect(total * Object.keys(RELICS).length).toBeGreaterThanOrEqual(1500);
+    let meta = { ...createMeta(), shards: 10_000 };
+    for (let i = 0; i < RELIC_MAX + 3; i += 1) meta = buyRelic(meta, 'seed');
+    expect(meta.relics.seed).toBe(RELIC_MAX);
+    expect(meta.shards).toBe(10_000 - total);
+    expect(buyRelic({ ...createMeta(), shards: 9 }, 'seed').relics).toEqual({});
+    expect(canBuyAny({ ...createMeta(), shards: 10, levels: { hp: 4, gold: 3, rest: 2, choice: 1, relic: 1, pack1: 1, pack2: 1 } })).toBe(true);
+  });
+
+  it('판을 시작할 때의 단계가 체력, 첫 차례 방어, 가게 값, 받는 조각에 듣는다', () => {
+    const plain = createRun({ seed: 9, levels: {} });
+    const strong = createRun({ seed: 9, levels: {}, relics: { seed: 3, shell: 4, net: 10, coupon: 10 } });
+    expect(strong.maxHp).toBe(plain.maxHp + 6);
+    chooseNode(plain, 0);
+    chooseNode(strong, 0);
+    expect((strong.battle?.me.block ?? 0) - (plain.battle?.me.block ?? 0)).toBe(4);
+    for (const run of [plain, strong]) {
+      run.floor = 3;
+      run.stats.bosses = 1;
+    }
+    expect(shardsOf(strong)).toBe(Math.floor(shardsOf(plain) * 1.5));
+  });
+
+  it('저장한 유물에서 모르는 이름과 범위 밖의 단계는 고친다', () => {
+    const meta = normalizeMeta({ relics: { seed: 99, ghost: 3, net: -1, acorn: 2.7 } });
+    expect(meta.relics).toEqual({ seed: RELIC_MAX, acorn: 2 });
   });
 });
