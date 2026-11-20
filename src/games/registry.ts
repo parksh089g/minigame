@@ -21,6 +21,7 @@ import { COMPANY_GAME_ID, COMPANY_SCENE } from './sprout-company/data';
 import { ONE_CARD_GAME_ID, ONE_CARD_SCENE } from './one-card/text';
 import { TOWER_GAME_ID, TOWER_SCENE } from './cloud-tower/data';
 import { HULA_GAME_ID, HULA_SCENE } from './hula/data';
+import { coinsFor as solitaireCoins, SOLITAIRE_GAME_ID, SOLITAIRE_SCENE } from './solitaire/rules';
 import { coinsFor as towerCoins, recordLabel as towerRecord } from './cloud-tower/run';
 
 export interface MiniGameInfo {
@@ -277,6 +278,16 @@ export const GAMES: readonly MiniGameInfo[] = [
     genre: 'puzzle',
     // 한 판이 여러 라운드에 걸쳐 부적을 모아 가는 긴 판이라, 꾸준히 하는 게임 쪽에 둔다.
     steady: '부적을 모아 큰 상금을 노려요',
+  },
+  {
+    id: SOLITAIRE_GAME_ID,
+    title: '솔리테어',
+    icon: 'icon-solitaire',
+    sceneKey: SOLITAIRE_SCENE,
+    coinsFor: solitaireCoins,
+    // 카드를 절반쯤 모으면 쉬움, 거의 다 모으면 보통, 다 모아 이기면 어려움을 넘는다.
+    dailyTargets: [250, 450, 900],
+    genre: 'puzzle',
   },
   {
     id: ONE_CARD_GAME_ID,

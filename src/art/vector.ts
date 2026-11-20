@@ -891,6 +891,26 @@ const ICONS: Record<string, Art> = {
       oval(c, 17.200, 26.600, 0.550, 0.550, '#9684e0');
     },
   },
+  /** 솔리테어: 뒷면 카드 위에 비스듬히 겹친 하트 A */
+  'icon-solitaire': {
+    width: 32,
+    height: 32,
+    draw(c) {
+      c.save();
+      c.translate(12, 17);
+      c.rotate(-0.2);
+      roundRect(c, -8, -11, 16, 22, 3, '#9dd6ff');
+      roundRect(c, -5.500, -8.500, 11, 17, 2, 'rgba(255, 255, 255, 0.45)');
+      c.restore();
+      c.save();
+      c.translate(20, 16.500);
+      c.rotate(0.14);
+      roundRect(c, -8, -11, 16, 22, 3, '#fffdf6');
+      roundRect(c, -8, -11, 16, 22, 3, 'rgba(255, 159, 181, 0.18)');
+      fillPath(c, 'M0 5.500C-5.500 1.500-5.500-3.500-2.700-3.500C-1.300-3.500-0.400-2.600 0-1.600C0.400-2.600 1.300-3.500 2.700-3.500C5.500-3.500 5.500 1.500 0 5.500z', '#ff7f9c');
+      c.restore();
+    },
+  },
   /** 구름 탑 모험: 구름 위에 부채꼴로 펼친 카드 세 장과 별 */
   'icon-cloudtower': {
     width: 32,
