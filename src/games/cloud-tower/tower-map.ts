@@ -7,11 +7,11 @@
  * 토끼가 그 문으로 폴짝 뛰어오른 뒤 그 층이 열린다.
  */
 import Phaser from 'phaser';
-import { GAME_WIDTH, THEME, THEME_CSS } from '../../config';
+import { GAME_WIDTH } from '../../config';
 import { sfx } from '../../core/sfx';
-import { addTapZone, addText, drawPanel, PixelButton } from '../../core/ui';
-import { enemyTexture, nodeTexture, TEX } from './art';
-import { drawSky, drawTopBar, MARGIN, TOP_BAR, WIDTH } from './bits';
+import { addTapZone, addText, PixelButton } from '../../core/ui';
+import { enemyTexture, nodeTexture, PX, PX_CSS, TEX } from './art';
+import { drawSky, drawTopBar, MARGIN, TOP_BAR, WIDTH, pxPanel } from './bits';
 import { ENCOUNTERS, ENEMIES, FLOORS_PER_ACT, NODE_BLURBS, NODE_NAMES, type NodeKind } from './data';
 import { actOf, chooseNode, floorInAct, type RunState } from './run';
 import { drawTreasureStrip, type ScreenHooks } from './screens';
@@ -24,14 +24,14 @@ const TOWER = { left: 26, right: GAME_WIDTH - 26 } as const;
 const ROW = { next: 76, current: 46, least: 16, most: 40 } as const;
 /** 탑의 색 */
 const LOOK = {
-  wall: 0xfffaf4,
-  wallEdge: 0xf0d9cc,
-  ledge: 0xe8cbbd,
-  window: 0xe3f2ff,
-  done: 0xe2f6ee,
-  fog: 0xffffff,
-  door: [0xffe3ea, 0xe3f2ff, 0xfff0c9] as const,
-  doorEdge: [THEME.pinkDeep, THEME.skyDeep, THEME.butterDeep] as const,
+  wall: PX.panel,
+  wallEdge: PX.edge,
+  ledge: PX.slate,
+  window: PX.navy,
+  done: PX.teal,
+  fog: PX.silver,
+  door: [PX.navy, PX.navy, PX.navy] as const,
+  doorEdge: [PX.yellow, PX.yellow, PX.yellow] as const,
 } as const;
 
 interface Band {
@@ -78,11 +78,11 @@ export function buildMap(scene: Phaser.Scene, run: RunState, hooks: ScreenHooks 
   // 탑의 몸통과 지붕
   const g = scene.add.graphics();
   g.fillStyle(LOOK.wallEdge, 1);
-  g.fillRoundedRect(TOWER.left - 2, topOfTower - 2, TOWER.right - TOWER.left + 4, towerBottom - topOfTower + 6, 12);
+  g.fillRoundedRect(TOWER.left - 2, topOfTower - 2, TOWER.right - TOWER.left + 4, towerBottom - topOfTower + 6, 3);
   g.fillStyle(LOOK.wall, 1);
-  g.fillRoundedRect(TOWER.left, topOfTower, TOWER.right - TOWER.left, towerBottom - topOfTower + 2, 10);
+  g.fillRoundedRect(TOWER.left, topOfTower, TOWER.right - TOWER.left, towerBottom - topOfTower + 2, 2);
   // 지붕 꼭대기의 깃발
-  g.fillStyle(THEME.pinkDeep, 1);
+  g.fillStyle(PX.yellow, 1);
   g.fillTriangle(GAME_WIDTH / 2, topOfTower - 16, GAME_WIDTH / 2 + 14, topOfTower - 11, GAME_WIDTH / 2, topOfTower - 6);
   g.lineStyle(2, LOOK.ledge, 1);
   g.lineBetween(GAME_WIDTH / 2, topOfTower - 17, GAME_WIDTH / 2, topOfTower);
@@ -98,10 +98,10 @@ export function buildMap(scene: Phaser.Scene, run: RunState, hooks: ScreenHooks 
 
   // 설명 칸과 올라가기 버튼
   const panel = scene.add.graphics();
-  drawPanel(panel, MARGIN, infoTop, WIDTH, 26, { fill: THEME.butterSoft, shadow: null, radius: 9 });
+  pxPanel(panel, MARGIN, infoTop, WIDTH, 26, { fill: PX.navy, shadow: null, radius: 9 });
   const info = addText(scene, GAME_WIDTH / 2, infoTop + 13, MAP_TEXT.hint, {
     size: 10,
-    color: THEME_CSS.ink,
+    color: PX_CSS.text,
     originX: 0.5,
     originY: 0.5,
     align: 'center',
@@ -119,7 +119,7 @@ export function buildMap(scene: Phaser.Scene, run: RunState, hooks: ScreenHooks 
     width: WIDTH - 92,
     height: 34,
     label: MAP_TEXT.climb,
-    style: 'pink',
+    style: 'green',
     onTap: () => {
       if (picked !== null) climb(picked);
     },
@@ -194,23 +194,23 @@ function drawBand(
   const floor = at.actStart + position;
   // 층 사이의 턱
   g.fillStyle(LOOK.ledge, 1);
-  g.fillRoundedRect(TOWER.left - 6, top + height - 3, TOWER.right - TOWER.left + 12, 5, 2.5);
+  g.fillRoundedRect(TOWER.left - 6, top + height - 3, TOWER.right - TOWER.left + 12, 5, 0);
   if (position === 0) {
     // 입구: 아치 문
     g.fillStyle(LOOK.wallEdge, 1);
     g.fillRoundedRect(GAME_WIDTH / 2 - 12, top + Math.max(2, height - 26), 24, Math.min(24, height - 4), { tl: 12, tr: 12, bl: 0, br: 0 });
-    addText(scene, TOWER.right - 8, middle, MAP_TEXT.entrance, { size: 9, color: THEME_CSS.faint, originX: 1, originY: 0.5 });
+    addText(scene, TOWER.right - 8, middle, MAP_TEXT.entrance, { size: 9, color: PX_CSS.faint, originX: 1, originY: 0.5 });
     return;
   }
   const label = addText(scene, TOWER.left + 6, middle, `${floor}층`, {
     size: 9,
-    color: position === at.next ? THEME_CSS.accent : THEME_CSS.faint,
+    color: position === at.next ? PX_CSS.accent : PX_CSS.faint,
     originY: 0.5,
   });
   if (position < at.next) {
     // 지나온 층: 고른 일의 아이콘과 별
-    g.fillStyle(LOOK.done, 1);
-    g.fillRoundedRect(TOWER.left + 2, top + 2, TOWER.right - TOWER.left - 4, height - 5, 6);
+    g.fillStyle(LOOK.done, 0.45);
+    g.fillRect(TOWER.left + 2, top + 2, TOWER.right - TOWER.left - 4, height - 5);
     label.setDepth(1);
     const kind = run.path[floor - 1];
     if (kind && position !== at.current) {
@@ -228,7 +228,7 @@ function drawBand(
     const size = Math.min(height, 40);
     scene.add.image(GAME_WIDTH / 2, middle - 1, enemyTexture(boss.look)).setDisplaySize(size, size);
     scene.add.image(GAME_WIDTH / 2 + size / 2 + 6, middle, nodeTexture('boss')).setScale(0.55);
-    addText(scene, TOWER.right - 8, middle, boss.name, { size: 9, color: THEME_CSS.bad, originX: 1, originY: 0.5 });
+    addText(scene, TOWER.right - 8, middle, boss.name, { size: 9, color: PX_CSS.bad, originX: 1, originY: 0.5 });
     return;
   }
   const windowSize = Math.min(10, height - 8);
@@ -237,8 +237,9 @@ function drawBand(
     g.fillRoundedRect(x - windowSize / 2, middle - windowSize / 2, windowSize, windowSize, { tl: windowSize / 2, tr: windowSize / 2, bl: 2, br: 2 });
   }
   g.fillStyle(LOOK.fog, 0.75);
-  g.fillCircle(TOWER.right - 26, middle + 2, Math.min(8, height / 2));
-  g.fillCircle(TOWER.right - 16, middle - 1, Math.min(6, height / 2 - 1));
+  const puff = Math.min(6, Math.floor(height / 2) - 2);
+  g.fillRect(TOWER.right - 34, middle - puff / 2 + 2, 20, puff);
+  g.fillRect(TOWER.right - 28, middle - puff / 2 - 1, 10, puff);
 }
 
 interface DoorView {
@@ -266,7 +267,7 @@ function drawDoors(scene: Phaser.Scene, choices: readonly NodeKind[], band: Band
     const icon = scene.add.image(x + width / 2, floorY - doorHeight + 22, nodeTexture(kind));
     const name = addText(scene, x + width / 2, floorY - 12, NODE_NAMES[kind], {
       size: 10,
-      color: THEME_CSS.inkDeep,
+      color: PX_CSS.text,
       originX: 0.5,
       originY: 0.5,
     });
@@ -278,7 +279,7 @@ function drawDoors(scene: Phaser.Scene, choices: readonly NodeKind[], band: Band
       const radius = { tl: width / 2, tr: width / 2, bl: 4, br: 4 };
       g.fillStyle(picked ? LOOK.doorEdge[color] : LOOK.wallEdge, 1);
       g.fillRoundedRect(x - 2, y - 2, width + 4, doorHeight + 2 + lift, { ...radius, tl: width / 2 + 2, tr: width / 2 + 2 });
-      g.fillStyle(kind === 'boss' ? THEME.pinkSoft : kind === 'elite' ? THEME.butterSoft : LOOK.door[color], 1);
+      g.fillStyle(kind === 'boss' ? PX.plum : kind === 'elite' ? PX.red : LOOK.door[color], 1);
       g.fillRoundedRect(x, y, width, doorHeight + lift, radius);
       icon.setY(floorY - doorHeight + 22 - lift);
       name.setY(floorY - 12 - lift);

@@ -1,8 +1,7 @@
-import { THEME_CSS } from '../../config';
 import { homeScene } from '../../core/home';
 import { fadeToScene } from '../../core/ui';
 import { MiniGameScene, type ResultStat } from '../../scenes/MiniGameScene';
-import { registerTowerTextures } from './art';
+import { PX_CSS, registerTowerTextures } from './art';
 import { BattleView } from './battle-view';
 import { drawSky } from './bits';
 import { TOWER_GAME_ID, TOWER_SCENE } from './data';
@@ -74,7 +73,7 @@ export class CloudTowerScene extends MiniGameScene {
     this.phase = 'loading';
     this.run = null;
     this.battleView = null;
-    this.cameras.main.setBackgroundColor(THEME_CSS.bg);
+    this.cameras.main.setBackgroundColor(PX_CSS.dark);
 
     void towerStore.refresh().then(() => {
       if (!this.sys.isActive() || this.phase !== 'loading') return;

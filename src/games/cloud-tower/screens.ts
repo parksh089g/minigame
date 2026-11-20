@@ -3,10 +3,10 @@
  * 화면마다 판(RunState)을 읽어 그리고, 누르면 run.ts의 함수로 판을 바꾼 뒤 hooks.next()로 다음 화면을 연다.
  */
 import Phaser from 'phaser';
-import { GAME_WIDTH, THEME, THEME_CSS } from '../../config';
+import { GAME_WIDTH } from '../../config';
 import { sfx } from '../../core/sfx';
-import { addText, drawPanel, PixelButton } from '../../core/ui';
-import { nodeTexture, TEX, treasureTexture, upgradeTexture } from './art';
+import { addText, PixelButton } from '../../core/ui';
+import { nodeTexture, PX, PX_CSS, TEX, treasureTexture, upgradeTexture } from './art';
 import type { Card } from './battle';
 import {
   addCardRow,
@@ -20,6 +20,7 @@ import {
   PagedList,
   TOP_BAR,
   WIDTH,
+  pxPanel,
 } from './bits';
 import {
   ACT_NAMES,
@@ -114,32 +115,32 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
   let meta = hooks.getMeta();
   drawSky(scene, 0);
   new PixelButton(scene, { x: 8, y: 8, width: 26, height: 26, icon: 'icon-back', hitPadding: 6, onTap: hooks.onBack });
-  addText(scene, 42, 21, '구름 탑 모험', { size: 16, originY: 0.5 });
+  addText(scene, 42, 21, '구름 탑 모험', { size: 16, color: PX_CSS.accent, originY: 0.5 });
   let shardLeft = 0;
   let shardObjects: Phaser.GameObjects.GameObject[] = [];
   const drawShards = (): void => {
     for (const object of shardObjects) object.destroy();
     const before = scene.children.list.length;
-    shardLeft = addPill(scene, GAME_WIDTH - MARGIN, 10, TEX.shard, String(meta.shards), THEME_CSS.accent);
+    shardLeft = addPill(scene, GAME_WIDTH - MARGIN, 10, TEX.shard, String(meta.shards), PX_CSS.accent);
     shardObjects = scene.children.list.slice(before);
   };
   drawShards();
   void shardLeft;
 
   // 기록 칸
-  drawPanel(scene.add.graphics(), MARGIN, 40, WIDTH, 30, { depth: 2, radius: 10 });
+  pxPanel(scene.add.graphics(), MARGIN, 40, WIDTH, 30, { depth: 2, radius: 10 });
   if (meta.runs > 0) {
-    addText(scene, MARGIN + 10, 55, meta.wins > 0 ? `꼭대기 ${meta.wins}번` : `최고 ${meta.best}층`, { color: THEME_CSS.accent, originY: 0.5 });
+    addText(scene, MARGIN + 10, 55, meta.wins > 0 ? `꼭대기 ${meta.wins}번` : `최고 ${meta.best}층`, { color: PX_CSS.accent, originY: 0.5 });
     addText(scene, GAME_WIDTH - MARGIN - 10, 55, `${meta.runs}판 · 최고 ${meta.best}층`, {
       size: 10,
-      color: THEME_CSS.sub,
+      color: PX_CSS.sub,
       originX: 1,
       originY: 0.5,
     });
   } else {
     addText(scene, GAME_WIDTH / 2, 55, SCREEN_TEXT.intro, {
       size: 10,
-      color: THEME_CSS.sub,
+      color: PX_CSS.sub,
       originX: 0.5,
       originY: 0.5,
       align: 'center',
@@ -150,10 +151,10 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
   const footTop = height - 8 - 36;
   const infoTop = footTop - 34;
   const infoPanel = scene.add.graphics();
-  drawPanel(infoPanel, MARGIN, infoTop, WIDTH, 28, { fill: THEME.butterSoft, shadow: null, radius: 9 });
+  pxPanel(infoPanel, MARGIN, infoTop, WIDTH, 28, { fill: PX.navy, shadow: null, radius: 9 });
   const info = addText(scene, GAME_WIDTH / 2, infoTop + 14, SCREEN_TEXT.upgradeHint, {
     size: 10,
-    color: THEME_CSS.ink,
+    color: PX_CSS.text,
     originX: 0.5,
     originY: 0.5,
     align: 'center',
@@ -175,8 +176,8 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
       title: def.costs.length === 1 ? def.name : `${def.name} ${level >= def.costs.length ? '끝' : `${level}단계`}`,
       note: def.effect(level),
       side: cost === null ? '다 올림' : `조각 ${cost}`,
-      sideColor: cost === null ? THEME_CSS.good : affordable ? THEME_CSS.accent : THEME_CSS.faint,
-      border: picked === id ? THEME.pinkDeep : undefined,
+      sideColor: cost === null ? PX_CSS.good : affordable ? PX_CSS.accent : PX_CSS.faint,
+      border: picked === id ? PX.yellow : undefined,
       onTap: () => {
         picked = id;
         const next = buyUpgrade(meta, id);
@@ -221,11 +222,11 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
       width: WIDTH - 70,
       height: 36,
       label: `${SCREEN_TEXT.resume} (${Math.max(1, run.floor)}층)`,
-      style: 'pink',
+      style: 'green',
       onTap: hooks.onResume,
     });
   } else {
-    new PixelButton(scene, { x: MARGIN, y: footTop, width: WIDTH, height: 36, label: SCREEN_TEXT.start, style: 'pink', onTap: hooks.onStart });
+    new PixelButton(scene, { x: MARGIN, y: footTop, width: WIDTH, height: 36, label: SCREEN_TEXT.start, style: 'green', onTap: hooks.onStart });
   }
 }
 
@@ -241,12 +242,12 @@ export function drawTreasureStrip(scene: Phaser.Scene, treasures: readonly Treas
       note?.destroy();
       const text = addText(scene, GAME_WIDTH / 2, top - 6, `${TREASURES[id].name}: ${TREASURES[id].blurb}`, {
         size: 10,
-        color: THEME_CSS.inkDeep,
+        color: PX_CSS.text,
         originX: 0.5,
         originY: 1,
         align: 'center',
         wrapWidth: WIDTH,
-        stroke: THEME_CSS.white,
+        stroke: PX_CSS.text,
       }).setDepth(5);
       note = text;
       scene.tweens.add({ targets: text, alpha: 0, delay: 2600, duration: 400, onComplete: () => text.destroy() });
@@ -320,13 +321,13 @@ export function buildReward(scene: Phaser.Scene, run: RunState, hooks: ScreenHoo
       texture: treasureTexture(reward.treasure),
       title: TREASURES[reward.treasure].name,
       note: TREASURES[reward.treasure].blurb,
-      fill: THEME.butterSoft,
+      fill: PX.navy,
     });
     top += 48;
   }
   const footTop = height - 44;
   if (reward.bossPick) {
-    addText(scene, GAME_WIDTH / 2, top + 6, SCREEN_TEXT.pickBoss, { color: THEME_CSS.inkDeep, originX: 0.5, originY: 0.5 });
+    addText(scene, GAME_WIDTH / 2, top + 6, SCREEN_TEXT.pickBoss, { color: PX_CSS.text, originX: 0.5, originY: 0.5 });
     reward.bossPick.forEach((id, index) => {
       addWideRow(scene, {
         y: top + 18 + index * 56,
@@ -345,7 +346,7 @@ export function buildReward(scene: Phaser.Scene, run: RunState, hooks: ScreenHoo
     return;
   }
   if (reward.cards) {
-    addText(scene, GAME_WIDTH / 2, top + 6, SCREEN_TEXT.pickCard, { color: THEME_CSS.inkDeep, originX: 0.5, originY: 0.5 });
+    addText(scene, GAME_WIDTH / 2, top + 6, SCREEN_TEXT.pickCard, { color: PX_CSS.text, originX: 0.5, originY: 0.5 });
     const rowHeight = Math.min(52, Math.floor((footTop - top - 24) / reward.cards.length) - 6);
     reward.cards.forEach((id, index) => {
       addCardRow(scene, {
@@ -514,7 +515,7 @@ export function buildShop(scene: Phaser.Scene, run: RunState, hooks: ScreenHooks
           title: TREASURES[item.id].name,
           note: TREASURES[item.id].blurb,
           side: item.sold ? '팔림' : String(item.price),
-          sideColor: !item.sold && run.gold >= item.price ? THEME_CSS.accent : THEME_CSS.faint,
+          sideColor: !item.sold && run.gold >= item.price ? PX_CSS.accent : PX_CSS.faint,
           dim: item.sold,
           onTap: () => {
             if (buyTreasure(run, entry.index)) {
@@ -533,7 +534,7 @@ export function buildShop(scene: Phaser.Scene, run: RunState, hooks: ScreenHooks
         title: SCREEN_TEXT.remove,
         note: shop.removed ? SCREEN_TEXT.removeDone : '덱에서 카드 한 장을 빼요',
         side: shop.removed ? '끝' : String(price),
-        sideColor: able ? THEME_CSS.accent : THEME_CSS.faint,
+        sideColor: able ? PX_CSS.accent : PX_CSS.faint,
         dim: shop.removed,
         onTap: () => {
           if (able) hooks.pickRemove();
@@ -549,7 +550,7 @@ export function buildShop(scene: Phaser.Scene, run: RunState, hooks: ScreenHooks
     width: WIDTH,
     height: 34,
     label: SCREEN_TEXT.leave,
-    style: 'pink',
+    style: 'green',
     onTap: () => {
       finishNode(run);
       hooks.next();
@@ -559,7 +560,7 @@ export function buildShop(scene: Phaser.Scene, run: RunState, hooks: ScreenHooks
 
 function priceTag(scene: Phaser.Scene, y: number, label: string, affordable: boolean): Phaser.GameObjects.GameObject {
   return addText(scene, GAME_WIDTH - MARGIN - 8, y + CARD_ROW_HEIGHT / 2, label, {
-    color: affordable ? THEME_CSS.accent : THEME_CSS.faint,
+    color: affordable ? PX_CSS.accent : PX_CSS.faint,
     originX: 1,
     originY: 0.5,
   });
@@ -594,13 +595,13 @@ export function buildChest(scene: Phaser.Scene, run: RunState, hooks: ScreenHook
   sfx.fanfare();
   addText(scene, GAME_WIDTH / 2, TOP_BAR + 150, id ? TREASURES[id].name : `별사탕 ${run.reward?.gold ?? 0}개`, {
     size: 16,
-    color: THEME_CSS.inkDeep,
+    color: PX_CSS.text,
     originX: 0.5,
     originY: 0.5,
   });
   addText(scene, GAME_WIDTH / 2, TOP_BAR + 172, id ? TREASURES[id].blurb : '보물을 다 모아서 별사탕이 들어 있었어요', {
     size: 11,
-    color: THEME_CSS.sub,
+    color: PX_CSS.sub,
     originX: 0.5,
     originY: 0,
     align: 'center',
@@ -612,7 +613,7 @@ export function buildChest(scene: Phaser.Scene, run: RunState, hooks: ScreenHook
     width: WIDTH,
     height: 34,
     label: SCREEN_TEXT.onward,
-    style: 'pink',
+    style: 'green',
     onTap: () => {
       finishNode(run);
       hooks.next();
@@ -631,11 +632,11 @@ export function buildEvent(scene: Phaser.Scene, run: RunState, hooks: ScreenHook
   const def = EVENTS[id];
   addHeading(scene, TOP_BAR + 18, def.title);
   scene.add.image(GAME_WIDTH / 2, TOP_BAR + 62, nodeTexture('event')).setScale(1.6);
-  const story = drawPanel(scene.add.graphics(), MARGIN, TOP_BAR + 86, WIDTH, 50, { radius: 10, depth: 2 });
+  const story = pxPanel(scene.add.graphics(), MARGIN, TOP_BAR + 86, WIDTH, 50, { radius: 10, depth: 2 });
   void story;
   addText(scene, GAME_WIDTH / 2, TOP_BAR + 111, run.eventResult ?? def.story, {
     size: 11,
-    color: run.eventResult ? THEME_CSS.accent : THEME_CSS.ink,
+    color: run.eventResult ? PX_CSS.accent : PX_CSS.text,
     originX: 0.5,
     originY: 0.5,
     align: 'center',
@@ -648,7 +649,7 @@ export function buildEvent(scene: Phaser.Scene, run: RunState, hooks: ScreenHook
       width: WIDTH,
       height: 34,
       label: SCREEN_TEXT.onward,
-      style: 'pink',
+      style: 'green',
       onTap: () => {
         if (leaveEvent(run)) hooks.next();
       },

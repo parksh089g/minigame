@@ -6,12 +6,12 @@
  * 고른 카드가 없을 때 적을 누르면 그 적이 다음에 할 행동과 상태를 설명 칸에 보여 준다.
  */
 import Phaser from 'phaser';
-import { FONT_SIZE, GAME_WIDTH, THEME, THEME_CSS } from '../../config';
+import { FONT_SIZE, GAME_WIDTH } from '../../config';
 import { vibrate } from '../../core/haptics';
 import { sfx, tone } from '../../core/sfx';
-import { addTapZone, addText, drawPanel, PixelButton } from '../../core/ui';
+import { addTapZone, addText, PixelButton } from '../../core/ui';
 import { showBanner } from '../../scenes/GameHud';
-import { CARD_COLOR, cardTypeTexture, enemyTexture, LOOK, statusTexture, TEX } from './art';
+import { CARD_COLOR, cardTypeTexture, enemyTexture, LOOK, PX, PX_CSS, statusTexture, TEX } from './art';
 import {
   attackDamage,
   canPlay,
@@ -25,7 +25,7 @@ import {
   type Fighter,
   type Who,
 } from './battle';
-import { DEPTH, drawTopBar, MARGIN, TOP_BAR, WIDTH } from './bits';
+import { DEPTH, drawTopBar, MARGIN, TOP_BAR, WIDTH, pxPanel } from './bits';
 import { CARDS, ENEMIES, STATUS_ORDER, STATUSES, TREASURES, type Act } from './data';
 import { runEndTurn, runPlayCard, type RunState } from './run';
 import { cardName, cardText, moveText, type CardTextContext } from './text';
@@ -117,10 +117,10 @@ export class BattleView {
   private buildFixed(): void {
     const { infoTop, footTop } = this.layout;
     const panel = this.scene.add.graphics();
-    drawPanel(panel, MARGIN, infoTop, WIDTH, 34, { fill: THEME.butterSoft, shadow: null, radius: 10 });
+    pxPanel(panel, MARGIN, infoTop, WIDTH, 34, { fill: PX.navy, shadow: null, radius: 10 });
     this.info = addText(this.scene, GAME_WIDTH / 2, infoTop + 17, '', {
       size: 10,
-      color: THEME_CSS.ink,
+      color: PX_CSS.text,
       originX: 0.5,
       originY: 0.5,
       align: 'center',
@@ -133,7 +133,7 @@ export class BattleView {
       width: 84,
       height: 30,
       label: BATTLE_TEXT.endTurn,
-      style: 'pink',
+      style: 'green',
       hitPadding: 3,
       onTap: () => this.endTurn(),
     });
@@ -179,11 +179,11 @@ export class BattleView {
       const targeting = this.selected !== null && this.selectedNeedsTarget(battle);
       if (targeting) {
         const ring = this.scene.add.graphics();
-        ring.lineStyle(2, THEME.pinkDeep, 0.9);
+        ring.lineStyle(2, PX.yellow, 0.9);
         ring.strokeEllipse(cx, foeGround - 2, size * 0.9, 10);
       }
       const shadow = this.scene.add.graphics();
-      shadow.fillStyle(0x5b4455, 0.12);
+      shadow.fillStyle(PX.ink, 0.6);
       shadow.fillEllipse(cx, foeGround, size * 0.8, 7);
       const sprite = this.scene.add.image(cx, cy, enemyTexture(def.look)).setScale(scale);
       this.foeSprites.push(sprite);
@@ -211,13 +211,15 @@ export class BattleView {
     const objects: { image: Phaser.GameObjects.Image; text: Phaser.GameObjects.Text | null }[] = parts.map((part) => ({
       image: this.scene.add.image(0, y, part.texture).setDepth(1),
       text: part.label
-        ? addText(this.scene, 0, y, part.label, { size: 11, color: THEME_CSS.bad, originY: 0.5, stroke: THEME_CSS.white }).setDepth(1)
+        ? addText(this.scene, 0, y, part.label, { size: 11, color: PX_CSS.bad, originY: 0.5, stroke: PX_CSS.dark }).setDepth(1)
         : null,
     }));
     const width = objects.reduce((sum, item) => sum + 14 + (item.text ? item.text.width + 1 : 0), 0) + (objects.length - 1) * 2;
     const g = this.scene.add.graphics();
-    g.fillStyle(0xffffff, 0.85);
-    g.fillRoundedRect(cx - width / 2 - 4, y - 9, width + 8, 18, 9);
+    g.fillStyle(PX.edge, 1);
+    g.fillRect(cx - width / 2 - 5, y - 10, width + 10, 20);
+    g.fillStyle(PX.ink, 1);
+    g.fillRect(cx - width / 2 - 4, y - 9, width + 8, 18);
     let x = cx - width / 2;
     for (const item of objects) {
       item.image.setX(x + 7);
@@ -234,26 +236,26 @@ export class BattleView {
     const g = this.scene.add.graphics();
     const height = 9;
     g.fillStyle(LOOK.hpBack, 0.85);
-    g.fillRoundedRect(x, y, width, height, height / 2);
+    g.fillRect(x, y, width, height);
     const ratio = Math.max(0, fighter.hp / fighter.maxHp);
     if (ratio > 0) {
       g.fillStyle(color, 1);
-      g.fillRoundedRect(x, y, Math.max(height, width * ratio), height, height / 2);
+      g.fillRect(x, y, Math.max(2, Math.round(width * ratio)), height);
     }
     if (fighter.block > 0) {
       g.lineStyle(2, LOOK.block, 1);
-      g.strokeRoundedRect(x - 1, y - 1, width + 2, height + 2, (height + 2) / 2);
+      g.strokeRect(x - 1, y - 1, width + 2, height + 2);
       this.scene.add.image(x - 2, y + height / 2, TEX.shield).setScale(1.05);
       addText(this.scene, x - 2, y + height / 2, String(fighter.block), {
         size: 9,
-        color: THEME_CSS.white,
+        color: PX_CSS.text,
         originX: 0.5,
         originY: 0.5,
       });
     }
     addText(this.scene, x + width / 2, y + height / 2, `${fighter.hp}/${fighter.maxHp}`, {
       size: 9,
-      color: THEME_CSS.white,
+      color: PX_CSS.text,
       originX: 0.5,
       originY: 0.5,
     });
@@ -268,9 +270,9 @@ export class BattleView {
       this.scene.add.image(left + 6, y, statusTexture(id));
       addText(this.scene, left + 12, y + 1, String(fighter.st[id]), {
         size: 9,
-        color: STATUSES[id].good ? THEME_CSS.good : THEME_CSS.bad,
+        color: STATUSES[id].good ? PX_CSS.good : PX_CSS.bad,
         originY: 0.5,
-        stroke: THEME_CSS.white,
+        stroke: PX_CSS.dark,
       });
       left += step;
     }
@@ -280,7 +282,7 @@ export class BattleView {
     const { meTop } = this.layout;
     const me = battle.me;
     const g = this.scene.add.graphics();
-    g.fillStyle(0x5b4455, 0.12);
+    g.fillStyle(PX.ink, 0.6);
     g.fillEllipse(MARGIN + 22, meTop + 47, 34, 6);
     this.meSprite = this.scene.add.image(MARGIN + 22, meTop + 24, TEX.bunny).setScale(0.9);
     this.drawHpBar(MARGIN + 52, meTop + 10, 100, me, LOOK.hpMe);
@@ -289,8 +291,8 @@ export class BattleView {
     const manaX = GAME_WIDTH - MARGIN - 26;
     const manaY = meTop + 22;
     this.scene.add.image(manaX, manaY, TEX.mana).setScale(1.5);
-    addText(this.scene, manaX, manaY, String(battle.mana), { size: 18, color: THEME_CSS.inkDeep, originX: 0.5, originY: 0.5 });
-    addText(this.scene, manaX, manaY + 22, '마력', { size: 9, color: THEME_CSS.sub, originX: 0.5, originY: 0.5 });
+    addText(this.scene, manaX, manaY, String(battle.mana), { size: 18, color: PX_CSS.text, originX: 0.5, originY: 0.5 });
+    addText(this.scene, manaX, manaY + 22, '마력', { size: 9, color: PX_CSS.sub, originX: 0.5, originY: 0.5 });
     // 보물
     let x = MARGIN + 52;
     const treasures = this.run.treasures;
@@ -334,20 +336,20 @@ export class BattleView {
     const color = CARD_COLOR[def.type];
     const { width, height } = HAND_CARD;
     const g = this.scene.add.graphics();
-    drawPanel(g, x, y, width, height, {
+    pxPanel(g, x, y, width, height, {
       depth: 3,
       radius: 8,
-      fill: playable ? 0xffffff : THEME.dim,
-      border: lifted ? THEME.pinkDeep : def.rarity === 'rare' ? THEME.gold : color.deep,
+      fill: playable ? PX.panel : PX.ink,
+      border: lifted ? PX.yellow : def.rarity === 'rare' ? PX.yellow : color.deep,
     });
     g.fillStyle(color.face, playable ? 1 : 0.5);
-    g.fillRoundedRect(x + 3, y + 3, width - 6, 25, 6);
+    g.fillRect(x + 3, y + 3, width - 6, 25);
     const alpha = playable ? 1 : 0.6;
     // 이름이 길면 띄어 쓴 곳에서 두 줄로 나눈다.
     const label = cardName(card.id, card.up);
     const name = addText(this.scene, x + width / 2, y + 16, label, {
       size: 10,
-      color: card.up ? THEME_CSS.good : THEME_CSS.inkDeep,
+      color: card.up ? PX_CSS.good : PX_CSS.text,
       originX: 0.5,
       originY: 0.5,
       align: 'center',
@@ -360,7 +362,7 @@ export class BattleView {
     if (badge) {
       const text = addText(this.scene, x + width / 2, y + height - 12, badge, {
         size: 11,
-        color: THEME_CSS.inkDeep,
+        color: PX_CSS.text,
         originX: 0.5,
         originY: 0.5,
       }).setAlpha(alpha);
@@ -369,22 +371,22 @@ export class BattleView {
     // 마력 동그라미
     const cost = cardCost(card);
     const bubble = this.scene.add.graphics();
-    bubble.fillStyle(THEME.lilacDeep, 1);
+    bubble.fillStyle(PX.navy, 1);
     bubble.fillCircle(x + 3, y + 3, 8.5);
-    bubble.fillStyle(playable ? THEME.lilac : THEME.shadow, 1);
+    bubble.fillStyle(playable ? PX.blue : PX.ink, 1);
     bubble.fillCircle(x + 3, y + 2, 7.5);
-    addText(this.scene, x + 3, y + 2, String(cost), { size: 11, color: THEME_CSS.inkDeep, originX: 0.5, originY: 0.5 });
+    addText(this.scene, x + 3, y + 2, String(cost), { size: 11, color: PX_CSS.text, originX: 0.5, originY: 0.5 });
   }
 
   private drawFoot(battle: Battle): void {
     const { footTop } = this.layout;
     const pile = (x: number, texture: string, count: number): void => {
       this.scene.add.image(x, footTop + 16, texture);
-      addText(this.scene, x + 10, footTop + 16, String(count), { size: 11, color: THEME_CSS.sub, originY: 0.5 });
+      addText(this.scene, x + 10, footTop + 16, String(count), { size: 11, color: PX_CSS.sub, originY: 0.5 });
     };
     pile(MARGIN + 8, TEX.deck, battle.draw.length);
     pile(MARGIN + 44, TEX.discard, battle.discard.length);
-    addText(this.scene, MARGIN + 80, footTop + 16, `${battle.turn}번째 차례`, { size: 9, color: THEME_CSS.faint, originY: 0.5 });
+    addText(this.scene, MARGIN + 80, footTop + 16, `${battle.turn}번째 차례`, { size: 9, color: PX_CSS.faint, originY: 0.5 });
   }
 
   // ───────── 설명 칸 ─────────
@@ -503,7 +505,7 @@ export class BattleView {
     const color = CARD_COLOR[CARDS[card.id].type];
     const ghost = this.scene.add.graphics().setDepth(DEPTH.float);
     ghost.fillStyle(color.face, 1);
-    ghost.fillRoundedRect(-14, -20, 28, 40, 6);
+    ghost.fillRect(-14, -20, 28, 40);
     ghost.setPosition(from.x, from.y + 20);
     const to = target !== null ? this.foeCenters[target] : { x: GAME_WIDTH / 2, y: this.layout.meTop };
     this.scene.tweens.add({
@@ -554,12 +556,12 @@ export class BattleView {
     const middle = (this.layout.foeTop + this.layout.foeGround) / 2;
     if (result === 'win') {
       sfx.fanfare();
-      showBanner(this.scene, middle, BATTLE_TEXT.win, THEME_CSS.good, 1100, DEPTH.overlay, FONT_SIZE.large);
+      showBanner(this.scene, middle, BATTLE_TEXT.win, PX_CSS.good, 1100, DEPTH.overlay, FONT_SIZE.large);
       this.scene.time.delayedCall(1000, () => this.hooks.done('win'));
     } else {
       vibrate([30, 50, 60]);
       this.scene.cameras.main.shake(260, 0.012);
-      showBanner(this.scene, middle, BATTLE_TEXT.lose, THEME_CSS.bad, 1500, DEPTH.overlay, FONT_SIZE.large);
+      showBanner(this.scene, middle, BATTLE_TEXT.lose, PX_CSS.bad, 1500, DEPTH.overlay, FONT_SIZE.large);
       this.scene.time.delayedCall(1400, () => this.hooks.done('lose'));
     }
   }
@@ -583,7 +585,7 @@ export class BattleView {
       color,
       originX: 0.5,
       originY: 1,
-      stroke: THEME_CSS.white,
+      stroke: PX_CSS.dark,
     }).setDepth(DEPTH.float);
     this.scene.tweens.add({
       targets: text,
@@ -620,7 +622,7 @@ export class BattleView {
       switch (event.t) {
         case 'hurt':
           if (event.n > 0) {
-            this.float(event.who, `-${event.n}`, THEME_CSS.bad, order);
+            this.float(event.who, `-${event.n}`, PX_CSS.bad, order);
             this.shake(event.who);
             if (!hurtSound) {
               hurtSound = true;
@@ -630,7 +632,7 @@ export class BattleView {
               } else sfx.hit(Math.min(8, event.n / 3));
             }
           } else if (event.blocked > 0) {
-            this.float(event.who, '막음', THEME_CSS.sub, order);
+            this.float(event.who, '막음', PX_CSS.sub, order);
             tone(320, 0.05, { type: 'triangle', volume: 0.2 });
           }
           break;
@@ -643,10 +645,10 @@ export class BattleView {
           tone(520, 0.05, { type: 'triangle', volume: 0.18 });
           break;
         case 'heal':
-          this.float(event.who, `+${event.n}`, THEME_CSS.good, order);
+          this.float(event.who, `+${event.n}`, PX_CSS.good, order);
           break;
         case 'status':
-          this.float(event.who, `${STATUSES[event.s].name} ${event.n > 0 ? '+' : ''}${event.n}`, STATUSES[event.s].good ? THEME_CSS.good : '#8a5fc0', order);
+          this.float(event.who, `${STATUSES[event.s].name} ${event.n > 0 ? '+' : ''}${event.n}`, STATUSES[event.s].good ? PX_CSS.good : '#8a5fc0', order);
           break;
         case 'die': {
           const sprite = this.spriteOf(event.who);
@@ -679,7 +681,7 @@ export class BattleView {
           sfx.flip();
           break;
         case 'treasure':
-          this.float('me', TREASURES[event.id].name, THEME_CSS.accent, order);
+          this.float('me', TREASURES[event.id].name, PX_CSS.accent, order);
           break;
       }
     }
