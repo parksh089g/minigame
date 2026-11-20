@@ -88,7 +88,7 @@ const TILE_STAR = {
  */
 const ROW = {
   /** 아이콘 바탕의 크기: 카드가 높아지면 함께 커진다. 카드의 높이에서 edge를 뺀 만큼이고, 그림은 바탕보다 inset만큼 작다. */
-  icon: { least: 36, most: 46, edge: 14, inset: 8 },
+  icon: { least: 32, most: 46, edge: 14, inset: 8 },
   /** 아이콘 바탕과 카드의 왼쪽 끝 사이. 위아래의 틈과 같게 두되 이보다 벌리지는 않는다. */
   iconLeftMost: 10,
   /** 아이콘 바탕과 글 사이의 틈 */

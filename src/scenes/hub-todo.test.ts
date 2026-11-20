@@ -6,7 +6,8 @@ import { LANTERN_GAME_ID } from '../games/lantern-keeper/data';
 import { AWAY, COMPANY_GAME_ID } from '../games/sprout-company/data';
 import { createGoals } from '../games/sprout-company/goals';
 import { createCompany } from '../games/sprout-company/rules';
-import { companyTodo, gardenTodo, lanternTodo, slotTodo, weeklyTodo } from './hub-todo';
+import { createMeta as createTowerMeta, createRun as createTowerRun } from '../games/cloud-tower/run';
+import { companyTodo, gardenTodo, lanternTodo, slotTodo, towerTodo, weeklyTodo } from './hub-todo';
 
 describe('등불지기의 오늘 할 일', () => {
   it('멈춰 둔 판이 있으면 지난 시간과 함께 이어 하라고 한다', () => {
@@ -141,5 +142,17 @@ describe('큰 게임 주간 미션', () => {
   it('기록이 지난주의 것이면 이번 주는 처음부터 센다', () => {
     const lastWeek = weekly({ [LANTERN_GAME_ID]: 5 }, '2026-11-09');
     expect(weeklyTodo(LANTERN_GAME_ID, week(big(LANTERN_GAME_ID, 3)), lastWeek)).toEqual({ text: '주간 0/3판' });
+  });
+});
+
+describe('구름 탑 모험의 할 일', () => {
+  it('하던 판이 있으면 멈춘 층과 함께 이어하기, 없으면 해 본 사람에게 살 수 있는 강화를 알린다', () => {
+    const meta = createTowerMeta();
+    expect(towerTodo(meta)).toBeNull();
+    const run = createTowerRun({ seed: 1, levels: {} });
+    run.floor = 4;
+    expect(towerTodo({ ...meta, run })).toEqual({ text: '이어하기 4층' });
+    expect(towerTodo({ ...meta, shards: 999 })).toBeNull();
+    expect(towerTodo({ ...meta, shards: 999, runs: 1 })).toEqual({ text: '강화 가능' });
   });
 });

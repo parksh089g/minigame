@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SPRITES } from '../art/sprites';
 import { dateKeyOf } from '../core/daily';
 import { createWeekly, GENRES, recordWeeklyPlay } from '../core/weekly';
+import { TOWER_GAME_ID } from './cloud-tower/data';
 import { GARDEN_GAME_ID } from './garden-guard/data';
 import { LANTERN_GAME_ID } from './lantern-keeper/data';
 import {
@@ -134,9 +135,9 @@ describe('게임 목록', () => {
     for (const group of HUB_GROUPS) expect(HUB_GROUP_LABEL[group].length).toBeGreaterThan(0);
   });
 
-  it('꾸준히 하는 게임은 키운 것이 남는 큰 게임들과 행운 슬롯이고, 나머지는 짧게 즐기는 게임이다', () => {
+  it('꾸준히 하는 게임은 키운 것이 남는 큰 게임들과 행운 슬롯, 구름 탑 모험이고, 나머지는 짧게 즐기는 게임이다', () => {
     const ids = gamesInGroup(GAMES, 'steady').map((game) => game.id);
-    expect([...ids].sort()).toEqual([LANTERN_GAME_ID, GARDEN_GAME_ID, COMPANY_GAME_ID, 'candy-slot'].sort());
+    expect([...ids].sort()).toEqual([LANTERN_GAME_ID, GARDEN_GAME_ID, COMPANY_GAME_ID, 'candy-slot', TOWER_GAME_ID].sort());
     // 큰 게임 미션으로 나오는 게임과 판이 끝나지 않는 게임은 모두 꾸준히 하는 게임이다.
     for (const game of GAMES) {
       if (game.bigMission || game.ongoing) expect(hubGroupOf(game), game.id).toBe('steady');

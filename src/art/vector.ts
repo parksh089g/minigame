@@ -891,6 +891,32 @@ const ICONS: Record<string, Art> = {
       oval(c, 17.200, 26.600, 0.550, 0.550, '#9684e0');
     },
   },
+  /** 구름 탑 모험: 구름 위에 부채꼴로 펼친 카드 세 장과 별 */
+  'icon-cloudtower': {
+    width: 32,
+    height: 32,
+    draw(c) {
+      c.save();
+      c.translate(16, 24);
+      for (const [angle, color] of [
+        [-0.42, '#9dd6ff'],
+        [0.42, '#ffe9a8'],
+        [0, '#ff9fb5'],
+      ] as const) {
+        c.save();
+        c.rotate(angle);
+        roundRect(c, -6.500, -19, 13, 18, 3, color);
+        roundRect(c, -5, -17.500, 10, 15, 2.200, 'rgba(255, 255, 255, 0.55)');
+        c.restore();
+      }
+      c.restore();
+      softPath(c, starPath(16, 14.500, 4.600), '#ffcf5c', 1.600);
+      oval(c, 9, 27, 5, 3.600, WHITE);
+      oval(c, 16, 26, 6, 4.600, WHITE);
+      oval(c, 23, 27, 5, 3.600, WHITE);
+      roundRect(c, 5, 26.500, 22, 3.600, 1.800, WHITE);
+    },
+  },
 };
 
 // ───────── 기억 카드의 그림 ─────────

@@ -38,7 +38,7 @@ describe('허브의 목록 놓기', () => {
   });
 
   it('꾸준히 하는 게임의 카드는 자리가 남는 만큼 커지고, 정한 높이보다 더 커지지는 않는다', () => {
-    expect(steadyList(4, 218, PAGER).card.height).toBe(STEADY_CARD.least);
+    expect(steadyList(4, 214, PAGER).card.height).toBe(STEADY_CARD.least);
     expect(steadyList(4, 274, PAGER).card.height).toBe(55);
     expect(steadyList(4, 2000, PAGER).card.height).toBe(STEADY_CARD.tall);
     expect(steadyList(1, 2000, PAGER)).toMatchObject({ rows: 1, pages: 1 });
