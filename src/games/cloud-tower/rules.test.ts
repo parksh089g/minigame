@@ -24,6 +24,7 @@ import {
   choicesFor,
   createMeta,
   createRun,
+  finishNode,
   floorsCleared,
   normalizeMeta,
   recordLabel,
@@ -32,9 +33,11 @@ import {
   runUsePotion,
   settleRun,
   shardsFor,
+  type RunState,
 } from './run';
 import { addPotion, buyPotion, POTION_IDS, POTION_SLOTS, POTIONS, swapRewardPotion, waitingPotion } from './potions';
 import { cardLines, cardName, moveText, MAP_TEXT, POTION_TEXT, potionText } from './text';
+import { DIFFICULTY_RULES, DIFFICULTY_TEXT, MAX_DIFFICULTY } from './difficulty';
 
 /** 주아 글꼴에 들어 있는 한글: KS X 1001의 완성형 2,350자 */
 function fontSyllables(): Set<string> {
@@ -77,6 +80,9 @@ describe('글', () => {
     MAP_TEXT.deck(10),
     ...POTION_IDS.flatMap((id) => [POTIONS[id].name, potionText(id)]),
     ...Object.values(POTION_TEXT).map((value) => (typeof value === 'function' ? value('물약') : value)),
+    ...DIFFICULTY_RULES.map((rule) => rule.text),
+    ...Array.from({ length: MAX_DIFFICULTY + 1 }, (_, level) => [DIFFICULTY_TEXT.name(level), DIFFICULTY_TEXT.blurb(level), DIFFICULTY_TEXT.bonus(level)]).flat(),
+    DIFFICULTY_TEXT.hint,
   ];
 
   it('화면에 보이는 글은 글꼴에 들어 있는 한글만 쓴다', () => {
@@ -395,5 +401,107 @@ describe('판 밖', () => {
   it('기록은 마친 층으로 적는다', () => {
     expect(recordLabel(700)).toBe('최고 7층');
     expect(recordLabel(TOP_FLOOR * 100 + 500)).toBe('꼭대기 도착');
+  });
+});
+
+describe('난이도', () => {
+  /** 봇으로 꼭대기까지 오른 판을 하나 찾는다. */
+  const winningRun = (difficulty: number): RunState => {
+    const full = { hp: 4, gold: 3, rest: 2, choice: 1, relic: 1, pack1: 1, pack2: 1 };
+    for (let seed = 1; seed < 400; seed += 1) {
+      const run = createRun({ seed, levels: full, difficulty });
+      autoplay(run);
+      if (run.result === 'win') return run;
+    }
+    throw new Error('꼭대기까지 오른 판이 없다');
+  };
+
+  it('규칙마다 한 줄이 있고, 화면에 들어가게 짧다', () => {
+    expect(MAX_DIFFICULTY).toBe(DIFFICULTY_RULES.length);
+    for (const rule of DIFFICULTY_RULES) expect(rule.text.length).toBeLessThanOrEqual(22);
+  });
+
+  it('난이도가 오를수록 처음 별사탕과 쉼터 회복이 줄어든다', () => {
+    const easy = createRun({ seed: 5, levels: {} });
+    const hard = createRun({ seed: 5, levels: {}, difficulty: MAX_DIFFICULTY });
+    expect(hard.gold).toBe(Math.floor(easy.gold / 2));
+    expect(hard.restPercent).toBe(easy.restPercent - 10);
+    expect(createRun({ seed: 5, levels: {}, difficulty: 1 }).gold).toBe(easy.gold);
+  });
+
+  it('보통 적은 체력이 늘고, 마지막 난이도에서는 힘을 갖고 나온다', () => {
+    const easy = createRun({ seed: 11, levels: {} });
+    const hard = createRun({ seed: 11, levels: {}, difficulty: MAX_DIFFICULTY });
+    chooseNode(easy, 0);
+    chooseNode(hard, 0);
+    const [a, b] = [easy.battle!.foes, hard.battle!.foes];
+    expect(b.map((foe) => foe.id)).toEqual(a.map((foe) => foe.id));
+    b.forEach((foe, index) => {
+      expect(foe.maxHp).toBe(Math.round(a[index].maxHp * 1.1));
+      expect(foe.hp).toBe(foe.maxHp);
+      expect(foe.st.strength ?? 0).toBe((a[index].st.strength ?? 0) + 1);
+    });
+  });
+
+  it('난이도 7부터 대장을 넘으면 잃은 체력의 절반만 찬다', () => {
+    const run = createRun({ seed: 1, levels: {}, difficulty: 7 });
+    run.floor = FLOORS_PER_ACT;
+    run.stage = 'reward';
+    run.maxHp = 60;
+    run.hp = 20;
+    finishNode(run);
+    expect(run.hp).toBe(40);
+  });
+
+  it('지금 연 가장 높은 난이도로 꼭대기에 오르면 다음 난이도가 열리고, 그것을 고른다', () => {
+    const run = winningRun(0);
+    const meta = settleRun(createMeta(), run);
+    expect(meta.unlocked).toBe(1);
+    expect(meta.difficulty).toBe(1);
+    // 낮은 난이도로 다시 올라도 더 열리지 않는다.
+    expect(settleRun({ ...createMeta(), unlocked: 3, difficulty: 0 }, run)).toMatchObject({ unlocked: 3, difficulty: 0 });
+    // 지는 판은 열지 않는다.
+    const lost = createRun({ seed: 1, levels: {} });
+    lost.result = 'lose';
+    expect(settleRun(createMeta(), lost).unlocked).toBe(0);
+  });
+
+  it('꼭대기에 오르면 난이도마다 구름 조각을 5개 더 받는다', () => {
+    const run = winningRun(0);
+    const base = shardsFor(run);
+    run.difficulty = 4;
+    expect(shardsFor(run)).toBe(base + 20);
+  });
+
+  it('마지막 난이도보다 더 열리지 않는다', () => {
+    const run = createRun({ seed: 1, levels: {}, difficulty: MAX_DIFFICULTY });
+    run.result = 'win';
+    run.stage = 'over';
+    const meta = settleRun({ ...createMeta(), unlocked: MAX_DIFFICULTY, difficulty: MAX_DIFFICULTY }, run);
+    expect(meta.unlocked).toBe(MAX_DIFFICULTY);
+  });
+
+  it('저장한 난이도는 연 것을 넘지 않고, 난이도가 없던 저장은 보통으로 읽는다', () => {
+    expect(normalizeMeta({ unlocked: 2, difficulty: 6 })).toMatchObject({ unlocked: 2, difficulty: 2 });
+    expect(normalizeMeta({ unlocked: 99 }).unlocked).toBe(MAX_DIFFICULTY);
+    const run = createRun({ seed: 9, levels: {} });
+    const old = JSON.parse(JSON.stringify(run)) as Record<string, unknown>;
+    delete old.difficulty;
+    const meta = normalizeMeta({ ...createMeta(), run: old });
+    expect(meta.run).not.toBeNull();
+    expect(shardsFor(meta.run!)).toBe(0);
+  });
+
+  it('봇은 난이도가 높을수록 덜 오른다', () => {
+    const average = (difficulty: number): number => {
+      let total = 0;
+      for (let seed = 1; seed <= 30; seed += 1) {
+        const run = createRun({ seed, levels: { hp: 4, rest: 2 }, difficulty });
+        autoplay(run);
+        total += floorsCleared(run);
+      }
+      return total / 30;
+    };
+    expect(average(MAX_DIFFICULTY)).toBeLessThan(average(0));
   });
 });
