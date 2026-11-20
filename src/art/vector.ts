@@ -778,6 +778,25 @@ const ICONS: Record<string, Art> = {
       roundRect(c, 4.500, 12, 4, 1.400, 0.700, 'rgba(255, 255, 255, 0.7)');
     },
   },
+  /** 피라미드: 세 줄로 쌓인 카드 여섯 장. 붉은 카드와 흰 카드가 번갈아 놓인다. */
+  'icon-pyramid': {
+    width: 32,
+    height: 32,
+    draw(c) {
+      const card = (x: number, y: number, face: string, mark: string): void => {
+        roundRect(c, x, y + 1.200, 9, 11, 2, '#e6cfc6');
+        roundRect(c, x, y, 9, 11, 2, face);
+        oval(c, x + 4.500, y + 5.500, 1.800, 1.800, mark);
+      };
+      card(11.500, 2, '#ff9fb5', '#ffffff');
+      card(6.500, 9, '#ffffff', '#ff8f8f');
+      card(16.500, 9, '#ff9fb5', '#ffffff');
+      card(1.500, 16, '#ff9fb5', '#ffffff');
+      card(11.500, 16, '#ffffff', '#9684e0');
+      card(21.500, 16, '#ff9fb5', '#ffffff');
+      roundRect(c, 3, 29, 26, 2, 1, '#f2cf73');
+    },
+  },
   /** 벽돌 깨기: 벽돌 두 줄과, 깨져서 난 틈으로 올라가는 공, 아래의 막대 */
   'icon-brick': {
     width: 32,

@@ -19,6 +19,7 @@ import { LANTERN_GAME_ID, LANTERN_SCENE } from './lantern-keeper/data';
 import { coinsFor as lanternCoins } from './lantern-keeper/rules';
 import { COMPANY_GAME_ID, COMPANY_SCENE } from './sprout-company/data';
 import { TOWER_GAME_ID, TOWER_SCENE } from './cloud-tower/data';
+import { PYRAMID_GAME_ID, PYRAMID_SCENE } from './pyramid/data';
 import { coinsFor as towerCoins, recordLabel as towerRecord } from './cloud-tower/run';
 
 export interface MiniGameInfo {
@@ -263,6 +264,15 @@ export const GAMES: readonly MiniGameInfo[] = [
     coinsFor: (score) => Math.floor(score / 15),
     dailyTargets: [80, 170, 280],
     genre: 'action',
+  },
+  {
+    id: PYRAMID_GAME_ID,
+    title: '피라미드',
+    icon: 'icon-pyramid',
+    sceneKey: PYRAMID_SCENE,
+    coinsFor: (score) => Math.floor(score / 20),
+    dailyTargets: [200, 320, 500],
+    genre: 'puzzle',
   },
   {
     id: 'candy-slot',
