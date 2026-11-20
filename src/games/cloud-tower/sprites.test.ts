@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CARD_TYPE_ROWS, FOES, HERO, ITEM_ROWS, NODE_ROWS, STATUS_ROWS, TREASURE_ROWS, UPGRADE_ROWS, type Rows } from './sprites';
+import { CARD_TYPE_ROWS, FOES, HERO, ITEM_ROWS, NODE_ROWS, RELIC_ROWS, STATUS_ROWS, TREASURE_ROWS, UPGRADE_ROWS, type Rows } from './sprites';
 
 const groups: Record<string, Readonly<Record<string, Rows>>> = {
   hero: { hero: HERO },
@@ -8,6 +8,7 @@ const groups: Record<string, Readonly<Record<string, Rows>>> = {
   node: NODE_ROWS,
   treasure: TREASURE_ROWS,
   upgrade: UPGRADE_ROWS,
+  relic: RELIC_ROWS,
   type: CARD_TYPE_ROWS,
   item: ITEM_ROWS,
 };
