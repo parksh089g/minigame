@@ -19,6 +19,7 @@ import { LANTERN_GAME_ID, LANTERN_SCENE } from './lantern-keeper/data';
 import { coinsFor as lanternCoins } from './lantern-keeper/rules';
 import { COMPANY_GAME_ID, COMPANY_SCENE } from './sprout-company/data';
 import { TOWER_GAME_ID, TOWER_SCENE } from './cloud-tower/data';
+import { coinsFor as highLowCoins, GAME_ID as HIGH_LOW_ID } from './high-low/rules';
 import { coinsFor as towerCoins, recordLabel as towerRecord } from './cloud-tower/run';
 
 export interface MiniGameInfo {
@@ -275,6 +276,15 @@ export const GAMES: readonly MiniGameInfo[] = [
     genre: 'puzzle',
     // 한 판이 여러 라운드에 걸쳐 부적을 모아 가는 긴 판이라, 꾸준히 하는 게임 쪽에 둔다.
     steady: '부적을 모아 큰 상금을 노려요',
+  },
+  {
+    id: HIGH_LOW_ID,
+    title: '하이로우',
+    icon: 'icon-highlow',
+    sceneKey: SCENE.highLow,
+    coinsFor: highLowCoins,
+    dailyTargets: [10, 20, 35],
+    genre: 'puzzle',
   },
   {
     id: 'duel',

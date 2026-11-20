@@ -198,4 +198,5 @@ export const SCENE = {
   brickBreak: 'BrickBreak',
   candySlot: 'CandySlot',
   gardenGuard: 'GardenGuard',
+  highLow: 'HighLow',
 } as const;
