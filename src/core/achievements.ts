@@ -176,6 +176,8 @@ export const ACHIEVEMENTS: readonly Achievement[] = [
   { id: 'slot-1500', group: 'score', title: '금화 부자', description: '행운 슬롯 1500점 이상', goal: 1500, reward: 50, measure: bestOf('candy-slot') },
   { id: 'garden-1000', group: 'score', title: '든든한 울타리', description: '텃밭 1000점 이상', goal: 1000, reward: 20, measure: bestOf('garden-guard') },
   { id: 'garden-3000', group: 'score', title: '텃밭의 달인', description: '텃밭 3000점 이상', goal: 3000, reward: 50, measure: bestOf('garden-guard') },
+  { id: 'solitaire-500', group: 'score', title: '카드 정리', description: '솔리테어 500점 이상', goal: 500, reward: 20, measure: bestOf('solitaire') },
+  { id: 'solitaire-1100', group: 'score', title: '빠른 손 딜러', description: '솔리테어 1100점 이상', goal: 1100, reward: 50, measure: bestOf('solitaire') },
   { id: 'lantern-3000', group: 'score', title: '꺼지지 않는 불', description: '등불지기 3000점 이상', goal: 3000, reward: 20, measure: bestOf('lantern-keeper') },
   { id: 'lantern-8000', group: 'score', title: '새벽을 본 등불', description: '등불지기 8000점 이상', goal: 8000, reward: 50, measure: bestOf('lantern-keeper') },
   { id: 'company-200', group: 'score', title: '소문난 회사', description: '새싹 컴퍼니 평판 200', goal: 200, reward: 20, measure: bestOf('sprout-company') },

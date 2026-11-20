@@ -33,6 +33,7 @@ import { MatchThreeScene } from './games/match-three/MatchThreeScene';
 import { PathLinkScene } from './games/path-link/PathLinkScene';
 import { PinPullScene } from './games/pin-pull/PinPullScene';
 import { ScrewSortScene } from './games/screw-sort/ScrewSortScene';
+import { SolitaireScene } from './games/solitaire/SolitaireScene';
 import { StackTowerScene } from './games/stack-tower/StackTowerScene';
 import { TailChaseScene } from './games/tail-chase/TailChaseScene';
 import { initOnline } from './online/online';
@@ -126,6 +127,7 @@ async function boot(): Promise<void> {
       ChosungQuizScene,
       BrickBreakScene,
       CandySlotScene,
+      SolitaireScene,
       DuelScene,
       LanternKeeperScene,
       GardenGuardScene,

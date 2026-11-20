@@ -34,6 +34,7 @@ export const RANKED_GAMES = [
   'candy-slot',
   'garden-guard',
   'cloud-tower',
+  'solitaire',
 ] as const;
 
 export type RankedGame = (typeof RANKED_GAMES)[number];
@@ -189,11 +190,11 @@ export function isRankDay(value: unknown): value is number {
 }
 
 /**
- * 오늘의 랭킹이 있는 게임: 날마다 누구나 같은 조건으로 겨루는 판(등불지기, 행운 슬롯, 텃밭 지키기의 오늘의 판)이 있는 게임이다.
+ * 오늘의 랭킹이 있는 게임: 날마다 누구나 같은 조건으로 겨루는 판(등불지기, 행운 슬롯, 텃밭 지키기, 솔리테어의 오늘의 판)이 있는 게임이다.
  * 그 판에서 낸 점수만 올라가고, 날이 바뀌면 비운다. 게임마다 그날의 판을 정하는 날(각 게임 daily.ts의 dayIndexOf)은
  * rankDayOf와 같아야 한다. 다르면 그날의 판이 아닌 판의 점수가 그날의 랭킹에 섞인다.
  */
-const DAILY_BOARD: readonly string[] = ['lantern-keeper', 'candy-slot', 'garden-guard'] satisfies readonly RankedGame[];
+const DAILY_BOARD: readonly string[] = ['lantern-keeper', 'candy-slot', 'garden-guard', 'solitaire'] satisfies readonly RankedGame[];
 
 /** 이 게임에 오늘의 랭킹이 있는지. 랭킹이 없는 게임이면 false다. */
 export function hasDailyBoard(game: unknown): game is RankedGame {
