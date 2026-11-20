@@ -17,6 +17,7 @@ import { ChosungQuizScene } from './games/chosung-quiz/ChosungQuizScene';
 import { CloudTowerScene } from './games/cloud-tower/CloudTowerScene';
 import { ColorSortScene } from './games/color-sort/ColorSortScene';
 import { DuelScene } from './games/duel/DuelScene';
+import { HulaScene } from './games/hula/HulaScene';
 import { GardenGuardScene } from './games/garden-guard/GardenGuardScene';
 import { GateRunScene } from './games/gate-run/GateRunScene';
 import { JumpRunnerScene } from './games/jump-runner/JumpRunnerScene';
@@ -131,6 +132,7 @@ async function boot(): Promise<void> {
       SolitaireScene,
       OneCardScene,
       DuelScene,
+      HulaScene,
       LanternKeeperScene,
       GardenGuardScene,
       CloudTowerScene,

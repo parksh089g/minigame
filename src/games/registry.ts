@@ -20,6 +20,7 @@ import { coinsFor as lanternCoins } from './lantern-keeper/rules';
 import { COMPANY_GAME_ID, COMPANY_SCENE } from './sprout-company/data';
 import { ONE_CARD_GAME_ID, ONE_CARD_SCENE } from './one-card/text';
 import { TOWER_GAME_ID, TOWER_SCENE } from './cloud-tower/data';
+import { HULA_GAME_ID, HULA_SCENE } from './hula/data';
 import { coinsFor as solitaireCoins, SOLITAIRE_GAME_ID, SOLITAIRE_SCENE } from './solitaire/rules';
 import { coinsFor as towerCoins, recordLabel as towerRecord } from './cloud-tower/run';
 
@@ -308,6 +309,17 @@ export const GAMES: readonly MiniGameInfo[] = [
     coinsFor: () => 3,
     dailyTargets: [],
     versus: true,
+  },
+  {
+    id: HULA_GAME_ID,
+    title: '훌라',
+    icon: 'icon-hula',
+    sceneKey: HULA_SCENE,
+    // 점수는 이긴 판에서 컴퓨터가 낸 점수에 난이도를 곱한 것이다. 진 판은 0점이다.
+    coinsFor: (score) => Math.floor(score / 10),
+    // 카드 운이 커서 목표 점수를 정하기 어려워 오늘의 도전에는 넣지 않는다.
+    dailyTargets: [],
+    genre: 'puzzle',
   },
   {
     id: LANTERN_GAME_ID,
