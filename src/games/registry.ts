@@ -18,6 +18,7 @@ import { coinsFor as gardenCoins, recordLabel as gardenRecord } from './garden-g
 import { LANTERN_GAME_ID, LANTERN_SCENE } from './lantern-keeper/data';
 import { coinsFor as lanternCoins } from './lantern-keeper/rules';
 import { COMPANY_GAME_ID, COMPANY_SCENE } from './sprout-company/data';
+import { ONE_CARD_GAME_ID, ONE_CARD_SCENE } from './one-card/text';
 import { TOWER_GAME_ID, TOWER_SCENE } from './cloud-tower/data';
 import { coinsFor as solitaireCoins, SOLITAIRE_GAME_ID, SOLITAIRE_SCENE } from './solitaire/rules';
 import { coinsFor as towerCoins, recordLabel as towerRecord } from './cloud-tower/run';
@@ -285,6 +286,17 @@ export const GAMES: readonly MiniGameInfo[] = [
     coinsFor: solitaireCoins,
     // 카드를 절반쯤 모으면 쉬움, 거의 다 모으면 보통, 다 모아 이기면 어려움을 넘는다.
     dailyTargets: [250, 450, 900],
+    genre: 'puzzle',
+  },
+  {
+    id: ONE_CARD_GAME_ID,
+    title: '원카드',
+    icon: 'icon-onecard',
+    sceneKey: ONE_CARD_SCENE,
+    // 이기면 난이도에 따라 100~300점에 상대가 남긴 카드만큼 더한다. 지면 0점이다.
+    coinsFor: (score) => Math.floor(score / 50),
+    // 카드 운이 커서 점수 목표를 정하기 어려워 오늘의 도전에는 넣지 않는다.
+    dailyTargets: [],
     genre: 'puzzle',
   },
   {
