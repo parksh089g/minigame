@@ -48,6 +48,7 @@ import {
   TASK_KINDS,
   TIPS,
   TRAINING,
+  TWIN,
   UPDATE_SCALE,
   type DecorDef,
   type DecorId,
@@ -90,6 +91,8 @@ export interface Task {
   total: number;
   /** 급한 의뢰의 카드. 프로젝트의 카드로 세지 않는다. */
   rush?: boolean;
+  /** 이 카드가 속한 프로젝트. 급한 의뢰의 카드에는 없다. 적히지 않은 카드는 먼저 시작한 게임(project)의 것이다. */
+  project?: ProjectId;
   /** 특별한 카드의 종류. 보통 카드에는 없다. */
   special?: SpecialKind;
   /** 버그에 막혀서 일이 멈춘 시간이 얼마나 남았는지(초). 막히지 않았으면 없다. */
@@ -166,7 +169,13 @@ export interface CompanyState {
   desks: Desk[];
   /** 회사에 하나씩 있는 장비 */
   gear: Levels;
+  /** 지금 만드는 게임. 두 게임을 함께 만들 때는 먼저 시작한 것이다. */
   project: ActiveProject | null;
+  /**
+   * 두 번째 칸에서 함께 만드는 게임(TWIN). 먼저 시작한 게임을 출시하면 이것이 project 자리로 올라간다.
+   * project가 없으면 늘 null이다.
+   */
+  second: ActiveProject | null;
   /** 일감함에 꺼내 놓은 카드. 급한 의뢰의 카드는 맨 앞에 놓인다. */
   inbox: Task[];
   /** 일감함에 자리가 없어서 쌓아 둔 프로젝트의 카드. 자리가 나면 차례로 꺼낸다. */
@@ -241,6 +250,7 @@ export function createCompany(boss: StaffId, now = 0): CompanyState {
     desks,
     gear: {},
     project: null,
+    second: null,
     inbox: [],
     backlog: [],
     offer: null,
@@ -585,11 +595,63 @@ export function availableProjects(state: CompanyState): ProjectId[] {
   return PROJECT_ORDER.filter((id) => isUnlocked(state, id));
 }
 
-/** 일감함에 자리가 있으면 쌓아 둔 카드를 차례로 꺼낸다. */
+/**
+ * 일감함에 자리가 있으면 쌓아 둔 카드를 차례로 꺼낸다.
+ * 두 게임을 함께 만들 때는 일감함에 덜 나와 있는 게임의 카드부터 꺼내서, 두 게임의 카드가 고르게 놓인다.
+ */
 function refill(state: CompanyState): void {
   while (state.inbox.length < INBOX_SLOTS && state.backlog.length > 0) {
-    state.inbox.push(state.backlog.shift() as Task);
+    let at = 0;
+    const main = state.project;
+    const second = state.second;
+    if (main && second) {
+      const shown = (project: ActiveProject): number =>
+        state.inbox.filter((task) => ownerOf(state, task) === project).length;
+      const fewer = shown(second) < shown(main) ? second : main;
+      at = Math.max(0, state.backlog.findIndex((task) => ownerOf(state, task) === fewer));
+    }
+    state.inbox.push(state.backlog.splice(at, 1)[0]);
   }
+}
+
+// ───────── 프로젝트 칸 ─────────
+
+/** 게임을 두 개까지 함께 만드는 사무실인가 */
+export function twinOpen(state: CompanyState): boolean {
+  return TWIN.unlockOffice <= state.office;
+}
+
+/** 칸 번호의 게임. 0은 먼저 시작한 게임, 1은 두 번째 칸의 게임이다. 비었으면 null */
+export function projectAt(state: CompanyState, slot: number): ActiveProject | null {
+  return slot === 0 ? state.project : slot === 1 ? state.second : null;
+}
+
+/** 지금 만드는 게임들. 먼저 시작한 것이 앞이다. */
+export function activeProjects(state: CompanyState): ActiveProject[] {
+  return [state.project, state.second].filter((project): project is ActiveProject => project !== null);
+}
+
+/** 새 게임을 바로 시작할 수 있는 빈 칸이 있는가 */
+export function hasFreeSlot(state: CompanyState): boolean {
+  return !state.project || (twinOpen(state) && !state.second);
+}
+
+/** 이 게임을 지금 어느 칸에서 만들고 있는가. 만들고 있지 않으면 -1 */
+export function slotOf(state: CompanyState, id: ProjectId): number {
+  return state.project?.id === id ? 0 : state.second?.id === id ? 1 : -1;
+}
+
+/** 이 카드가 속한 게임. 급한 의뢰의 카드이거나, 지금 만드는 게임의 카드가 아니면 null */
+export function ownerOf(state: CompanyState, task: Task): ActiveProject | null {
+  if (task.rush) return null;
+  if (task.project === undefined) return state.project;
+  return activeProjects(state).find((project) => project.id === task.project) ?? null;
+}
+
+/** 이 카드가 속한 게임의 칸 번호. 급한 의뢰의 카드이거나 지금 만드는 게임의 카드가 아니면 -1 */
+export function cardSlot(state: CompanyState, task: Task): number {
+  const owner = ownerOf(state, task);
+  return owner === null ? -1 : owner === state.project ? 0 : 1;
 }
 
 /** 특별한 카드가 나오는 사무실인가 */
@@ -608,16 +670,36 @@ function sprinkle(state: CompanyState, cards: Task[], random: () => number): voi
 
 /**
  * 프로젝트를 시작한다. 카드가 일감함에 놓이고, 다 놓지 못한 것은 쌓아 둔다.
- * 하던 프로젝트가 있으면 시작하지 못한다.
+ * 빈 칸이 없으면 시작하지 못한다(hasFreeSlot). 두 번째 칸이 열린 사무실에서는 하던 게임이 있어도
+ * 다른 게임 하나를 함께 시작할 수 있다. 같은 게임을 두 칸에서 만들 수는 없다.
  * random을 주면 카드 몇 장이 특별한 카드로 나온다(SPECIAL). 주지 않으면 모두 보통 카드다.
  */
 export function startProject(state: CompanyState, id: ProjectId, random?: () => number): boolean {
-  if (state.project || !isUnlocked(state, id) || departmentsMissing(state, id) > 0) return false;
+  if (!hasFreeSlot(state) || slotOf(state, id) >= 0 || !isUnlocked(state, id) || departmentsMissing(state, id) > 0) {
+    return false;
+  }
   const def: ProjectDef = PROJECTS[id];
   const work = projectWork(state, id);
-  state.backlog = def.cards.map((kind) => ({ kind, left: work, total: work }));
-  if (random) sprinkle(state, state.backlog, random);
-  state.project = { id, done: 0, total: def.cards.length, care: 0 };
+  const cards: Task[] = def.cards.map((kind) => ({ kind, left: work, total: work, project: id }));
+  if (random) sprinkle(state, cards, random);
+  const project: ActiveProject = { id, done: 0, total: def.cards.length, care: 0 };
+  if (!state.project) {
+    state.project = project;
+    state.backlog = cards;
+  } else {
+    state.second = project;
+    // 먼저 시작한 게임의 카드가 일감함을 다 차지하고 있으면 절반만 두고 나머지는 쌓아 둔 줄의 앞으로 돌린다.
+    // 그래야 새 게임의 카드도 곧바로 함께 나온다.
+    const keep = Math.floor(INBOX_SLOTS / 2);
+    const back: Task[] = [];
+    let plain = 0;
+    state.inbox = state.inbox.filter((task) => {
+      if (task.rush || (plain += 1) <= keep) return true;
+      back.push(task);
+      return false;
+    });
+    state.backlog = [...back, ...state.backlog, ...cards];
+  }
   refill(state);
   return true;
 }
@@ -627,9 +709,15 @@ export function cardsWaiting(state: CompanyState): number {
   return state.inbox.length + state.backlog.length;
 }
 
-/** 프로젝트의 카드를 모두 끝내서 출시만 남았는가 */
-export function isReady(state: CompanyState): boolean {
-  return state.project !== null && state.project.done >= state.project.total;
+/** 그 칸(0이면 먼저 시작한 게임)의 카드를 모두 끝내서 출시만 남았는가 */
+export function isReady(state: CompanyState, slot = 0): boolean {
+  const project = projectAt(state, slot);
+  return project !== null && project.done >= project.total;
+}
+
+/** 다 만들어서 출시만 남은 칸의 번호. 먼저 시작한 게임부터 본다. 없으면 -1 */
+export function readySlot(state: CompanyState): number {
+  return isReady(state, 0) ? 0 : isReady(state, 1) ? 1 : -1;
 }
 
 export interface Release {
@@ -672,11 +760,11 @@ export function flowersFor(share: number): number {
 }
 
 /**
- * 지금 만드는 게임이 여태 끝낸 카드만으로 받는 꽃의 수. 남은 카드도 지금처럼 하면 이대로 평가를 받는다.
- * 끝낸 카드가 없으면 0이다.
+ * 그 칸(0이면 먼저 시작한 게임)의 게임이 여태 끝낸 카드만으로 받는 꽃의 수.
+ * 남은 카드도 지금처럼 하면 이대로 평가를 받는다. 끝낸 카드가 없으면 0이다.
  */
-export function flowersNow(state: CompanyState): number {
-  const project = state.project;
+export function flowersNow(state: CompanyState, slot = 0): number {
+  const project = projectAt(state, slot);
   if (!project || project.done <= 0) return 0;
   return flowersFor(Math.min(1, project.care / (project.done * RATING.full)));
 }
@@ -691,11 +779,11 @@ export function flowersBonus(flowers: number): number {
   return RATING.bonus[Math.min(MAX_FLOWERS, Math.max(1, Math.round(flowers))) - 1];
 }
 
-/** 지금 만드는 게임을 지금의 평가대로 내면 받는 잎사귀(대박은 뺀 것). 만드는 게임이 없으면 0 */
-export function ratedBonus(state: CompanyState): number {
-  const project = state.project;
+/** 그 칸의 게임을 지금의 평가대로 내면 받는 잎사귀(대박은 뺀 것). 그 칸이 비었으면 0 */
+export function ratedBonus(state: CompanyState, slot = 0): number {
+  const project = projectAt(state, slot);
   if (!project) return 0;
-  return Math.round(projectBonus(state, project.id) * flowersBonus(flowersNow(state)));
+  return Math.round(projectBonus(state, project.id) * flowersBonus(flowersNow(state, slot)));
 }
 
 /** 꽃이 이만큼일 때 대박이 날 확률. 행운이 있는 친구가 회사에 있으면 더 잘 난다. */
@@ -705,18 +793,20 @@ export function hitChance(state: CompanyState, flowers: number): number {
 }
 
 /**
- * 다 만든 프로젝트를 출시한다. 아직 덜 됐으면 null. 예약해 둔 게임이 있으면 맨 앞의 것을 바로 시작한다.
+ * 그 칸(0이면 먼저 시작한 게임)의 다 만든 프로젝트를 출시한다. 아직 덜 됐으면 null.
+ * 먼저 시작한 게임을 내면 두 번째 칸의 게임이 그 자리로 올라간다. 예약해 둔 게임이 있으면 빈 칸에서 바로 시작한다.
  * 카드마다 쌓인 정성으로 평가(꽃)를 받고, 꽃이 많으면 보너스가 커진다(RATING).
  * random을 주면 꽃의 수에 따라 대박이 날 수 있고, 이어서 시작하는 게임에 특별한 카드가 나온다(startProject).
  * 주지 않으면 대박도 특별한 카드도 없다.
  */
-export function release(state: CompanyState, random?: () => number): Release | null {
-  if (!state.project || !isReady(state)) return null;
-  const id = state.project.id;
-  const flowers = flowersNow(state);
+export function release(state: CompanyState, random?: () => number, slot = 0): Release | null {
+  const project = projectAt(state, slot);
+  if (!project || !isReady(state, slot)) return null;
+  const id = project.id;
+  const flowers = flowersNow(state, slot);
   const chance = hitChance(state, flowers);
   const hit = random !== undefined && chance > 0 && random() < chance;
-  const bonus = ratedBonus(state) * (hit ? RATING.hit.bonus : 1);
+  const bonus = ratedBonus(state, slot) * (hit ? RATING.hit.bonus : 1);
   const reputation = projectReputation(state, id) * (hit ? RATING.hit.reputation : 1);
   const version = versionOf(state, id) + 1;
   state.leaves += bonus;
@@ -726,10 +816,15 @@ export function release(state: CompanyState, random?: () => number): Release | n
   state.flowers[id] = Math.max(bestFlowers(state, id), flowers);
   if (hit) state.hits += 1;
   bumpGoals(state.goals, 'release');
-  state.project = null;
-  // 급한 의뢰의 카드는 프로젝트와 상관없이 남는다.
-  state.inbox = state.inbox.filter((task) => task.rush);
-  state.backlog = [];
+  // 급한 의뢰의 카드와 함께 만드는 다른 게임의 카드는 남는다.
+  const other = slot === 0 ? state.second : state.project;
+  const keep = (task: Task): boolean => task.rush === true || (other !== null && ownerOf(state, task) === other);
+  state.inbox = state.inbox.filter(keep);
+  state.backlog = state.backlog.filter(keep);
+  for (const task of [...state.inbox, ...state.backlog]) if (!task.rush && other) task.project = other.id;
+  state.project = other;
+  state.second = null;
+  refill(state);
   startQueued(state, random);
   return { id, version, bonus, reputation, flowers, hit };
 }
@@ -743,7 +838,7 @@ export function queueBlock(state: CompanyState, id: ProjectId): QueueBlock | nul
   if (QUEUE.unlockOffice > state.office) return 'locked';
   if (!isUnlocked(state, id)) return 'office';
   if (departmentsMissing(state, id) > 0) return 'department';
-  if (!state.project) return 'idle';
+  if (hasFreeSlot(state)) return 'idle';
   if (state.queue.length >= QUEUE.slots) return 'full';
   return null;
 }
@@ -762,16 +857,28 @@ export function dequeue(state: CompanyState, index: number): boolean {
   return true;
 }
 
-/** 만드는 게임이 없으면 예약 줄의 맨 앞부터 시작한다. 시작할 수 없게 된 것은 건너뛴다. */
+/**
+ * 빈 칸이 있으면 예약 줄의 맨 앞부터 시작한다. 시작할 수 없게 된 것은 건너뛴다.
+ * 지금 만드는 게임과 같은 게임은 함께 만들 수 없어서, 그 칸이 빌 때까지 예약 줄에 남겨 둔다.
+ */
 function startQueued(state: CompanyState, random?: () => number): void {
-  while (!state.project && state.queue.length > 0) {
-    startProject(state, state.queue.shift() as ProjectId, random);
+  while (state.queue.length > 0 && hasFreeSlot(state)) {
+    const at = state.queue.findIndex((id) => slotOf(state, id) < 0);
+    if (at < 0) return;
+    const [id] = state.queue.splice(at, 1);
+    startProject(state, id, random);
   }
 }
 
-/** 예약이 있고 지금 게임을 다 만들었으면 저절로 출시한다. 출시했으면 그 결과를 돌려준다. */
-function releaseQueued(state: CompanyState, random?: () => number): Release | null {
-  return state.queue.length > 0 && isReady(state) ? release(state, random) : null;
+/** 예약이 있고 다 만든 게임이 있으면 저절로 출시한다. 출시한 것들의 결과를 돌려준다. */
+function releaseQueued(state: CompanyState, random?: () => number): Release[] {
+  const released: Release[] = [];
+  for (let slot = readySlot(state); slot >= 0 && state.queue.length > 0; slot = readySlot(state)) {
+    const result = release(state, random, slot);
+    if (!result) break;
+    released.push(result);
+  }
+  return released;
 }
 
 // ───────── 일 시키기 ─────────
@@ -899,8 +1006,11 @@ export function tradeReward(state: CompanyState): number {
 
 /** 시간이 흐르는 동안 일어난 일 */
 export type CompanyEvent =
-  /** 업무 하나가 끝났다. care는 그 카드가 받은 정성 점수(급한 의뢰의 카드는 0) */
-  | { type: 'task'; desk: number; kind: TaskKind; rush: boolean; care: number }
+  /**
+   * 업무 하나가 끝났다. care는 그 카드가 받은 정성 점수(급한 의뢰의 카드는 0)이고,
+   * ready는 이 카드로 그 게임의 카드를 모두 끝냈다는 뜻이다.
+   */
+  | { type: 'task'; desk: number; kind: TaskKind; rush: boolean; care: number; ready: boolean }
   /** 아이디어 카드를 끝내서 일하는 친구 모두가 응원을 받았다. */
   | { type: 'idea'; desk: number }
   /** 버그가 나와서 그 자리의 일이 멈췄다. */
@@ -928,8 +1038,7 @@ export function advance(state: CompanyState, dt: number, random: () => number = 
   if (!(dt > 0)) return NOTHING;
   state.leaves += incomePerSecond(state) * dt;
   const events = work(state, dt, random);
-  const released = releaseQueued(state, random);
-  if (released) events.push({ type: 'release', release: released });
+  for (const released of releaseQueued(state, random)) events.push({ type: 'release', release: released });
   tickRush(state, dt, random, events);
   return events;
 }
@@ -1000,8 +1109,14 @@ function work(state: CompanyState, dt: number, random: () => number): CompanyEve
     if (task.left <= 0) {
       desk.task = null;
       desk.cheer = 0;
-      const care = task.rush || !state.project ? 0 : careFor(state, index, task);
-      done.push({ type: 'task', desk: index, kind: task.kind, rush: task.rush === true, care });
+      const owner = ownerOf(state, task);
+      const care = owner ? careFor(state, index, task) : 0;
+      if (owner) {
+        owner.done = Math.min(owner.total, owner.done + 1);
+        owner.care += care;
+      }
+      const ready = owner !== null && owner.done >= owner.total;
+      done.push({ type: 'task', desk: index, kind: task.kind, rush: task.rush === true, care, ready });
       bumpGoals(state.goals, 'task');
       if (task.special === 'idea') {
         // 아이디어가 번뜩이면 그때 일하고 있는 친구 모두가 응원을 받는다.
@@ -1022,9 +1137,6 @@ function work(state: CompanyState, dt: number, random: () => number): CompanyEve
           state.rush = null;
           state.rushIn = nextRushIn(random);
         }
-      } else if (state.project) {
-        state.project.done = Math.min(state.project.total, state.project.done + 1);
-        state.project.care += care;
       }
       // 기운이 바닥난 채로 일을 마쳤으면 다음 일을 받기 전에 쉬러 간다.
       if (open && canRest(state, desk)) desk.resting = true;
@@ -1305,8 +1417,7 @@ export function catchUp(state: CompanyState, seconds: number): Away | null {
   let tasks = 0;
   const releases: Release[] = [];
   const releaseDone = (): void => {
-    const released = releaseQueued(state);
-    if (released) releases.push(released);
+    releases.push(...releaseQueued(state));
   };
   for (let time = 0; time < counted; time += 1) {
     releaseDone();
@@ -1795,7 +1906,8 @@ function normalizeTask(raw: unknown): Task | null {
   const task: Task = { kind: raw.kind, left, total };
   if (raw.cheered === true) task.cheered = true;
   if (raw.rush === true) task.rush = true;
-  else if (isSpecialKind(raw.special)) {
+  else if (isProjectId(raw.project)) task.project = raw.project;
+  if (!task.rush && isSpecialKind(raw.special)) {
     task.special = raw.special;
     if (raw.fixed === true) task.fixed = true;
     if (task.special === 'bug' && task.fixed && raw.caught === true) task.caught = true;
@@ -1930,31 +2042,44 @@ export function normalizeCompany(raw: unknown): CompanyState | null {
   if (typeof raw.rushIn === 'number') state.rushIn = toNumber(raw.rushIn, 0, RUSH.every[1]);
 
   // 하던 프로젝트: 남은 카드를 다시 세어서 맞춘다. 표에서 사라진 프로젝트면 일을 거두고 고르기부터 다시 한다.
+  // 두 번째 칸의 게임은 그 칸이 열린 사무실에서만 잇는다. 칸이 적히지 않은 카드는 먼저 시작한 게임의 것이다.
   const urgent = inbox.filter((task) => task.rush);
   const plain = inbox.filter((task) => !task.rush);
-  if (isObject(raw.project) && isProjectId(raw.project.id)) {
-    const working = desks.filter((desk) => desk.task !== null && !desk.task.rush).length;
-    const cards = PROJECTS[raw.project.id].cards.length;
-    const waiting = [...plain, ...backlog];
-    const left = Math.min(cards, waiting.length + working);
-    const kept = waiting.slice(0, Math.max(0, left - working));
-    const done = cards - left;
-    // 정성은 끝낸 카드가 받을 수 있는 만큼까지만 읽는다. 평가가 생기기 전의 세이브는 카드마다 맞는 친구가 한 것으로 친다.
-    const most = done * (RATING.full + RATING.catch);
-    const care = typeof raw.project.care === 'number' ? toNumber(raw.project.care, 0, most) : done * RATING.fit;
-    state.project = { id: raw.project.id, total: cards, done, care };
-    state.inbox = [...urgent, ...kept.slice(0, plain.length)];
-    state.backlog = kept.slice(plain.length);
-    refill(state);
-  } else {
-    for (const desk of desks) {
-      if (desk.task && !desk.task.rush) {
-        desk.task = null;
-        desk.cheer = 0;
-      }
+  const first = isObject(raw.project) && isProjectId(raw.project.id) ? raw.project : null;
+  const second =
+    first && twinOpen(state) && isObject(raw.second) && isProjectId(raw.second.id) && raw.second.id !== first.id
+      ? raw.second
+      : null;
+  const deskTasks = desks.map((desk) => desk.task).filter((task): task is Task => task !== null && !task.rush);
+  const tagOf = (task: Task): unknown => task.project ?? first?.id;
+  const kept = new Set<Task>();
+  const running = [first, second]
+    .filter((entry): entry is Record<string, unknown> => entry !== null)
+    .map((entry): ActiveProject => {
+      const id = entry.id as ProjectId;
+      const working = deskTasks.filter((task) => tagOf(task) === id).length;
+      const cards = PROJECTS[id].cards.length;
+      const waiting = [...plain, ...backlog].filter((task) => tagOf(task) === id);
+      const left = Math.min(cards, waiting.length + working);
+      for (const task of waiting.slice(0, Math.max(0, left - working))) kept.add(task);
+      const done = cards - left;
+      // 정성은 끝낸 카드가 받을 수 있는 만큼까지만 읽는다. 평가가 생기기 전의 세이브는 카드마다 맞는 친구가 한 것으로 친다.
+      const most = done * (RATING.full + RATING.catch);
+      const care = typeof entry.care === 'number' ? toNumber(entry.care, 0, most) : done * RATING.fit;
+      return { id, total: cards, done, care };
+    });
+  state.project = running[0] ?? null;
+  state.second = running[1] ?? null;
+  for (const desk of desks) {
+    const task = desk.task;
+    if (task && !task.rush && !running.some((project) => project.id === tagOf(task))) {
+      desk.task = null;
+      desk.cheer = 0;
     }
-    state.inbox = urgent;
   }
+  state.inbox = [...urgent, ...plain.filter((task) => kept.has(task))];
+  state.backlog = backlog.filter((task) => kept.has(task));
+  refill(state);
   // 예약은 만드는 게임이 있을 때만 남는다.
   if (state.project && QUEUE.unlockOffice <= state.office && Array.isArray(raw.queue)) {
     state.queue = raw.queue
