@@ -20,7 +20,6 @@ import {
   buildChest,
   buildEvent,
   buildLobby,
-  buildMap,
   buildPicker,
   buildRest,
   buildReward,
@@ -30,6 +29,7 @@ import {
   upgradePicker,
   type ScreenHooks,
 } from './screens';
+import { buildMap } from './tower-map';
 import { towerStore } from './store';
 
 /** 판 안에서 덱을 고르는 화면처럼, 판의 화면 위에 잠깐 여는 것 */

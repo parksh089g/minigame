@@ -82,6 +82,8 @@ export interface RunState {
   choices: NodeKind[];
   /** 지금 층의 일 */
   node: NodeKind | null;
+  /** 지나온 층마다 고른 일(1층부터). 갈림길의 탑 그림에 지나온 층을 보여 준다. */
+  path: NodeKind[];
   battle: Battle | null;
   reward: Reward | null;
   shop: Shop | null;
@@ -138,6 +140,7 @@ export function createRun(options: RunOptions): RunState {
     stage: 'map',
     choices: [],
     node: null,
+    path: [],
     battle: null,
     reward: null,
     shop: null,
@@ -221,6 +224,7 @@ export function chooseNode(run: RunState, index: number): boolean {
   if (!kind) return false;
   run.floor += 1;
   run.node = kind;
+  run.path.push(kind);
   run.choices = [];
   switch (kind) {
     case 'fight':
@@ -679,6 +683,8 @@ export function normalizeMeta(raw: unknown): TowerMeta {
     if (level > 0) levels[id] = level;
   }
   const run = looksLikeRun(value.run) && value.run.result === null ? value.run : null;
+  // 지나온 길을 적기 전에 저장한 판은 지나온 층을 모르는 채로 둔다.
+  if (run && !Array.isArray(run.path)) run.path = [];
   return {
     version: META_VERSION,
     shards: count(value.shards),

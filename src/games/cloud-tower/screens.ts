@@ -25,9 +25,6 @@ import {
   ACT_NAMES,
   CARDS,
   EVENTS,
-  FLOORS_PER_ACT,
-  NODE_BLURBS,
-  NODE_NAMES,
   TOP_FLOOR,
   TREASURES,
   UPGRADE_ORDER,
@@ -45,7 +42,6 @@ import {
   canRest,
   choiceNeedsCard,
   chooseEvent,
-  chooseNode,
   finishNode,
   floorInAct,
   leaveEvent,
@@ -233,75 +229,8 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
   }
 }
 
-// ───────── 갈림길 ─────────
-
-export function buildMap(scene: Phaser.Scene, run: RunState, hooks: ScreenHooks & { showDeck: () => void }): void {
-  const { height } = scene.scale;
-  const nextFloor = run.floor + 1;
-  const act = actOf(nextFloor);
-  drawSky(scene, act);
-  drawTopBar(scene, run);
-
-  // 이 구역의 층들: 지나온 층은 채우고, 갈 층은 테두리, 대장 층은 왕관
-  const y = TOP_BAR + 22;
-  addText(scene, GAME_WIDTH / 2, TOP_BAR + 6, `${ACT_NAMES[act]} · ${nextFloor}층`, { size: 12, color: THEME_CSS.sub, originX: 0.5, originY: 0.5 });
-  const g = scene.add.graphics();
-  const left = 30;
-  const step = (GAME_WIDTH - left * 2) / (FLOORS_PER_ACT - 1);
-  g.lineStyle(3, THEME.shadow, 1);
-  g.lineBetween(left, y, GAME_WIDTH - left, y);
-  for (let i = 1; i <= FLOORS_PER_ACT; i += 1) {
-    const x = left + (i - 1) * step;
-    const position = floorInAct(nextFloor);
-    const done = i < position;
-    if (i === FLOORS_PER_ACT) {
-      scene.add.image(x, y, nodeTexture('boss')).setScale(0.75);
-      continue;
-    }
-    g.fillStyle(done ? THEME.mintDeep : i === position ? THEME.pink : THEME.card, 1);
-    g.fillCircle(x, y, i === position ? 7 : 5);
-    if (i === position) {
-      g.lineStyle(2, THEME.pinkDeep, 1);
-      g.strokeCircle(x, y, 7);
-    }
-  }
-
-  addHeading(scene, y + 30, SCREEN_TEXT.pickRoad);
-  const rowHeight = 58;
-  const top = y + 50;
-  run.choices.forEach((kind, index) => {
-    addWideRow(scene, {
-      y: top + index * (rowHeight + 8),
-      height: rowHeight,
-      texture: nodeTexture(kind),
-      title: NODE_NAMES[kind],
-      note: NODE_BLURBS[kind],
-      fill: kind === 'boss' ? THEME.pinkSoft : kind === 'elite' ? THEME.butterSoft : undefined,
-      onTap: () => {
-        if (chooseNode(run, index)) {
-          sfx.go();
-          hooks.next();
-        }
-      },
-    });
-  });
-
-  // 아래: 보물과 덱 보기
-  const footTop = height - 44;
-  const treasureTop = footTop - 30;
-  drawTreasureStrip(scene, run.treasures, treasureTop);
-  new PixelButton(scene, {
-    x: MARGIN,
-    y: footTop,
-    width: WIDTH,
-    height: 34,
-    label: `${SCREEN_TEXT.deck} ${run.deck.length}장 보기`,
-    onTap: hooks.showDeck,
-  });
-}
-
 /** 가진 보물을 한 줄로. 누르면 이름과 설명이 잠깐 뜬다. */
-function drawTreasureStrip(scene: Phaser.Scene, treasures: readonly TreasureId[], top: number): void {
+export function drawTreasureStrip(scene: Phaser.Scene, treasures: readonly TreasureId[], top: number): void {
   if (treasures.length === 0) return;
   const step = Math.min(26, WIDTH / treasures.length);
   let note: Phaser.GameObjects.Text | null = null;

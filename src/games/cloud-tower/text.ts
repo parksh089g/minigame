@@ -99,3 +99,11 @@ export function moveText(id: EnemyId, move: number, hit: (n: number) => number =
   const lines = def.acts.map((act) => foeActLine(act, hit)).filter((line) => line.length > 0);
   return `${def.name}: ${lines.join(', ')}`;
 }
+
+/** 갈림길(탑) 화면의 글 */
+export const MAP_TEXT = {
+  hint: '문을 눌러 다음 층을 골라요',
+  climb: '올라가기!',
+  entrance: '입구',
+  deck: (count: number) => `덱 ${count}장`,
+} as const;

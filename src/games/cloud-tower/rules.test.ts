@@ -31,7 +31,7 @@ import {
   settleRun,
   shardsFor,
 } from './run';
-import { cardLines, cardName, moveText } from './text';
+import { cardLines, cardName, moveText, MAP_TEXT } from './text';
 
 /** 주아 글꼴에 들어 있는 한글: KS X 1001의 완성형 2,350자 */
 function fontSyllables(): Set<string> {
@@ -68,6 +68,10 @@ describe('글', () => {
     ...Object.values(TREASURES).flatMap((def) => [def.name, def.blurb]),
     ...Object.values(EVENTS).flatMap((def) => [def.title, def.story, ...def.choices.flatMap((choice) => [choice.label, choice.note])]),
     ...Object.values(UPGRADES).flatMap((def) => [def.name, def.blurb, def.effect(0), def.effect(1)]),
+    MAP_TEXT.hint,
+    MAP_TEXT.climb,
+    MAP_TEXT.entrance,
+    MAP_TEXT.deck(10),
   ];
 
   it('화면에 보이는 글은 글꼴에 들어 있는 한글만 쓴다', () => {
@@ -189,6 +193,7 @@ describe('판', () => {
     expect(chooseNode(run, 0)).toBe(true);
     expect(run.stage).toBe('battle');
     expect(run.battle?.foes.length).toBeGreaterThan(0);
+    expect(run.path).toEqual(['fight']);
   });
 
   it('구역의 마지막 층은 대장, 그 앞 층에는 쉼터가 있다', () => {
