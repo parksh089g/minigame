@@ -30,6 +30,8 @@ import {
 import { openAllyInfo, type InfoPanel } from './ally-info';
 import { allyTexture, TEX } from './art';
 import { ALLIES, CELL_COUNT, FIELD, GARDEN_CELLS, PAIRS, SHOP, type AllyId } from './data';
+import { DAMAGE_TEXT, damageRows } from './damage';
+import { dayFinished, drawDaySummary, hasDamage, openDamagePanel, SUMMARY } from './damage-panel';
 import { drawHeart } from './pair-mark';
 import { allyInfo, cardStatus, mergedStar, purseLine, SHOP_TEXT } from './shop-text';
 import type { RunState } from './sim';
@@ -50,6 +52,8 @@ const PIP = { size: 6, gap: 2 } as const;
 const LOCK = { x: 5, y: 5, radius: 8, hit: 26 } as const;
 /** 아래의 단추 줄 */
 const BUTTON = { height: 30, gap: 8, top: 7 } as const;
+/** 맨 위 줄의 오른쪽 끝에 붙는 "피해 보기" 단추. 누르는 자리(hitHeight)는 손가락에 넉넉하게 단추보다 높다. */
+const DAMAGE_BUTTON = { width: 48, height: 18, hitHeight: 26 } as const;
 /** 카드 위의 글 한 줄 */
 interface HeadLine {
   text: string;
@@ -57,7 +61,11 @@ interface HeadLine {
   color: string;
   /** 이 줄이 차지하는 높이 */
   height: number;
+  /** 말풍선(옅게 커졌다 작아지는 분홍 칸)에 담아 적는 줄 */
+  bubble?: boolean;
 }
+/** "꾹 누르면 자세히" 말풍선: 줄 높이, 풍선의 높이와 좌우 여백, 아래로 뾰족한 꼬리의 길이 */
+const BUBBLE = { line: 16, height: 14, pad: 8, tail: 3 } as const;
 /** 마지막 줄과 첫 카드 사이 */
 const HEAD_GAP = 3;
 /** 창이 뜨고 이 시간(ms)이 지나야 눌린다. 벌레를 겨누던 손가락이 카드를 잘못 누르지 않게 한다. */
@@ -102,6 +110,8 @@ export interface ShopHandlers {
   /** 텃밭의 그 동료(state.allies의 차례)를 내보낸다. */
   dismiss(index: number): void;
   ready(): void;
+  /** 카드나 밭의 동료를 꾹 눌러 정보 창을 열었다. */
+  held?(): void;
 }
 
 /** 끌고 있는 것: 가게의 카드나 밭의 동료. grip은 손가락이 잡은 칸이 모양의 첫 칸에서 떨어진 정도다. */
@@ -161,6 +171,7 @@ function drawLock(g: Phaser.GameObjects.Graphics, cx: number, cy: number, locked
  * 텃밭의 동료를 누르면 왼쪽 아래 단추가 "내보내기"로 바뀐다. 카드 왼쪽 위의 자물쇠를 누르면 그 카드를 묶거나 푼다.
  * 판이 바뀌면 부른 쪽이 refresh로 다시 그린다.
  * cleared가 있으면 방금 지킨 날의 알림을 맨 위에 적는다(판의 첫날 앞과 이어 한 판에서는 없다).
+ * holdHint면 카드 바로 위에 "꾹 누르면 자세히 보여요" 말풍선을 띄운다. 꾹 눌러 정보 창을 한 번 열면 걷힌다.
  */
 export function openShopPanel(
   scene: Phaser.Scene,
@@ -169,8 +180,10 @@ export function openShopPanel(
   state: RunState,
   cleared: ClearedNote | null,
   handlers: ShopHandlers,
+  holdHint = false,
 ): ShopPanel {
   const openedAt = scene.time.now;
+  let hint = holdHint;
   let objects: Phaser.GameObjects.GameObject[] = [];
   let closed = false;
   /** 고른 카드(두 단추를 펼친 카드)와 고른 텃밭의 동료. 둘 가운데 하나만 고른다. */
@@ -363,6 +376,9 @@ export function openShopPanel(
     pending = null;
     const ally = from.kind === 'ally' ? current.allies[from.index] : undefined;
     if (from.kind === 'ally' && !ally) return;
+    // 꾹 누르는 법을 알았으니 말풍선은 걷는다(창을 닫고 새로 그릴 때 빠진다).
+    hint = false;
+    handlers.held?.();
     for (const object of objects) (object as Phaser.GameObjects.GameObject & Phaser.GameObjects.Components.Visible).setVisible(false);
     const ring = ally
       ? (shapeCells(ally.id, ally.cell) ?? []).map((cell) => {
@@ -379,9 +395,22 @@ export function openShopPanel(
     info?.destroy();
     info = null;
   };
+  /** 피해 기록 창을 띄운다. 동료 정보 창처럼 가게의 것은 감추고, 닫으면 가게를 새로 그린다. */
+  const showDamage = (): void => {
+    if (!armed() || drag || info) return;
+    pending = null;
+    for (const object of objects) (object as Phaser.GameObjects.GameObject & Phaser.GameObjects.Components.Visible).setVisible(false);
+    info = openDamagePanel(scene, area, depth + 4, current, () => {
+      closeInfo();
+      if (!closed) build(current, false);
+    });
+  };
 
   const build = (run: RunState, fade: boolean): void => {
-    for (const object of objects) object.destroy();
+    for (const object of objects) {
+      scene.tweens.killTweensOf(object);
+      object.destroy();
+    }
     objects = [];
     current = run;
     if (pickedCard !== null && (!run.shop[pickedCard] || run.shop[pickedCard].sold)) pickedCard = null;
@@ -403,33 +432,116 @@ export function openShopPanel(
         .setDepth(depth),
     );
 
-    const head: HeadLine[] = [
-      ...(cleared
-        ? [
-            { text: cleared.title, size: 18, color: THEME_CSS.good, height: 24 },
-            { text: cleared.detail, size: FONT_SIZE.normal, color: THEME_CSS.accent, height: 20 },
-          ]
-        : []),
+    // 방금 지킨 날의 알림 아래에, 자리가 있으면 그날 피해를 많이 준 것 몇을 짧은 막대로 적는다(짧은 화면에서는 "피해 보기"로만 본다).
+    const before: HeadLine[] = cleared
+      ? [
+          { text: cleared.title, size: 18, color: THEME_CSS.good, height: 24 },
+          { text: cleared.detail, size: FONT_SIZE.normal, color: THEME_CSS.accent, height: 20 },
+        ]
+      : [];
+    const after: HeadLine[] = [
       { text: SHOP_TEXT.title, size: cleared ? 14 : 16, color: THEME_CSS.inkDeep, height: cleared ? 19 : 22 },
       { text: purseLine(run), size: FONT_SIZE.small, color: THEME_CSS.sub, height: 15 },
       { text: SHOP_TEXT.dragHint, size: FONT_SIZE.small, color: THEME_CSS.faint, height: 15 },
     ];
+    const lineHeights = (lines: readonly HeadLine[]): number => lines.reduce((sum, line) => sum + line.height, 0);
     const cards = run.shop.length;
-    const headHeight = head.reduce((sum, line) => sum + line.height, 0) + HEAD_GAP;
     const cardsHeight = cards * CARD.height + Math.max(0, cards - 1) * CARD.gap;
+    const room = area.bottom - area.top - 8;
+    const heightOf = (lines: readonly HeadLine[]): number =>
+      lineHeights(before) + lineHeights(lines) + HEAD_GAP + cardsHeight + BUTTON.top + BUTTON.height;
+    // 꾹 누르는 법의 말풍선은 카드 바로 위에 한 줄 더 둔다. 판이 짧아 창이 울타리에 닿으면 끌어다 놓는 도움말 자리에 대신 둔다.
+    if (hint && (cards > 0 || run.allies.length > 0)) {
+      const bubble: HeadLine = { text: SHOP_TEXT.holdHint, size: FONT_SIZE.small, color: THEME_CSS.inkDeep, height: BUBBLE.line, bubble: true };
+      if (heightOf([...after, bubble]) <= room) after.push(bubble);
+      else after[after.length - 1] = bubble;
+    }
+    const baseHeight = heightOf(after);
+    // 그날 피해의 막대는 말풍선까지 놓고도 자리가 남을 때만 둔다.
+    const dayRows = dayFinished(run) ? damageRows(run.dealt.day) : [];
+    const summaryLines = Math.min(SUMMARY.rows, dayRows.length);
+    const summaryHeight = summaryLines > 0 ? summaryLines * SUMMARY.row + SUMMARY.gap : 0;
+    const withSummary = summaryHeight > 0 && baseHeight + summaryHeight <= room;
+    const headHeight = lineHeights(before) + (withSummary ? summaryHeight : 0) + lineHeights(after) + HEAD_GAP;
     const height = headHeight + cardsHeight + BUTTON.top + BUTTON.height;
     const top = Math.max(area.top + 4, Math.round((area.top + area.bottom - height) / 2));
+    // 맨 위 줄의 오른쪽 끝: "피해 보기". 이 판에서 준 피해가 있을 때만 둔다.
+    const damageButton = hasDamage(run);
+    const buttonLeft = GAME_WIDTH - CARD.margin - DAMAGE_BUTTON.width;
     let lineTop = top;
-    for (const line of head) {
+    // 말풍선: 분홍 칸에 담고 아래(카드 쪽)로 꼬리를 단다. 가운데를 기준으로 옅게 커졌다 작아진다. 누르는 자리가 없어 아래의 카드를 가리지 않는다.
+    const drawBubble = (line: HeadLine): void => {
+      const label = addText(scene, 0, 0, line.text, { size: line.size, color: line.color, originX: 0.5, originY: 0.5 });
+      const w = Math.ceil(label.width) + BUBBLE.pad * 2;
+      const h = BUBBLE.height;
+      const g = scene.add.graphics();
+      g.fillStyle(THEME.pink, 1);
+      g.lineStyle(1.5, THEME.pinkDeep, 1);
+      g.fillRoundedRect(-w / 2, -h / 2, w, h, h / 2);
+      g.strokeRoundedRect(-w / 2, -h / 2, w, h, h / 2);
+      g.fillTriangle(-4, h / 2 - 1, 4, h / 2 - 1, 0, h / 2 + BUBBLE.tail);
+      const box = keep(scene.add.container(GAME_WIDTH / 2, lineTop + h / 2, [g, label]).setDepth(depth));
+      scene.tweens.add({ targets: box, scale: 1.05, duration: 650, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
+      lineTop += line.height;
+    };
+    const writeLines = (lines: readonly HeadLine[]): void => {
+      for (const line of lines) {
+        if (line.bubble) {
+          drawBubble(line);
+          continue;
+        }
+        const text = keep(
+          addText(scene, GAME_WIDTH / 2, lineTop, line.text, {
+            size: line.size,
+            color: line.color,
+            originX: 0.5,
+            stroke: THEME_CSS.white,
+          }).setDepth(depth),
+        );
+        // 맨 위 줄이 길면 "피해 보기"에 닿지 않게 왼쪽으로 민다.
+        if (damageButton && lineTop === top) text.setX(Math.min(GAME_WIDTH / 2, buttonLeft - 4 - text.width / 2));
+        lineTop += line.height;
+      }
+    };
+    writeLines(before);
+    if (withSummary) {
+      const summaryTop = lineTop;
+      for (const object of drawDaySummary(scene, dayRows, summaryTop, depth)) keep(object);
+      // 막대를 눌러도 피해 기록 창이 뜬다. 글 상자가 줄보다 조금 높아서 누르는 자리를 위아래로 넉넉하게 둔다.
+      const reach = 4;
+      const zoneHeight = summaryLines * SUMMARY.row + reach * 2;
+      objects.push(
+        addTapZone(scene, CARD.margin, summaryTop - reach, GAME_WIDTH - CARD.margin * 2, zoneHeight, () => undefined, showDamage).setDepth(
+          depth,
+        ),
+      );
+      lineTop += summaryHeight;
+    }
+    writeLines(after);
+    if (damageButton) {
+      const firstHeight = (before[0] ?? after[0]).height;
+      const by = top + Math.round((firstHeight - DAMAGE_BUTTON.height) / 2);
+      const g = keep(scene.add.graphics().setDepth(depth));
+      const paint = (pressed: boolean): void => {
+        g.clear();
+        g.fillStyle(THEME.skyDeep, 1);
+        g.fillRoundedRect(buttonLeft, by + 2, DAMAGE_BUTTON.width, DAMAGE_BUTTON.height - 2, 8);
+        g.fillStyle(THEME.skySoft, 1);
+        g.fillRoundedRect(buttonLeft, by + (pressed ? 2 : 0), DAMAGE_BUTTON.width, DAMAGE_BUTTON.height - 2, 8);
+      };
+      paint(false);
       keep(
-        addText(scene, GAME_WIDTH / 2, lineTop, line.text, {
-          size: line.size,
-          color: line.color,
+        addText(scene, buttonLeft + DAMAGE_BUTTON.width / 2, by + (DAMAGE_BUTTON.height - 2) / 2, DAMAGE_TEXT.open, {
+          size: FONT_SIZE.small,
+          color: THEME_CSS.inkDeep,
           originX: 0.5,
-          stroke: THEME_CSS.white,
+          originY: 0.5,
         }).setDepth(depth),
       );
-      lineTop += line.height;
+      const hitTop = by + DAMAGE_BUTTON.height / 2 - DAMAGE_BUTTON.hitHeight / 2;
+      objects.push(
+        addTapZone(scene, buttonLeft, hitTop, DAMAGE_BUTTON.width, DAMAGE_BUTTON.hitHeight, paint, showDamage).setDepth(depth + 1),
+      );
     }
 
     const width = GAME_WIDTH - CARD.margin * 2;

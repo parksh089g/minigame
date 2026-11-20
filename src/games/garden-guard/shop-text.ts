@@ -16,6 +16,7 @@ import {
   starOf,
   type Ally,
 } from './allies';
+import { DAMAGE_TEXT, damageRows, sharePercent } from './damage';
 import type { RunState } from './sim';
 
 /** 화면에 적는 글. 글꼴에 들어 있는 글자만 쓰는지 테스트가 확인한다. */
@@ -36,6 +37,8 @@ export const SHOP_TEXT = {
   placeButton: '새로 놓기',
   /** 가게의 맨 위에 적는 도움말 */
   dragHint: '밭에 끌어다 놓기 · 같은 동료 위면 합치기',
+  /** 처음 몇 번의 가게에서만 카드 바로 위에 말풍선으로 띄우는 안내. 꾹 눌러 보면 더 띄우지 않는다. */
+  holdHint: '카드나 동료를 꾹 누르면 자세히 보여요',
   /** 고른 동료를 내보내는 단추 */
   dismiss: '내보내기',
   /** 동료가 차지하는 칸 */
@@ -134,6 +137,8 @@ export interface AllyInfo {
   specials: string[];
   /** 짝 효과. 밭의 동료가 지금 짝의 덤을 받고 있으면 그 덤을 한 줄 더 적는다. */
   pairs: string[];
+  /** 밭의 동료가 이 판에서 준 피해("이번 판 피해 1,234 (31%)"). 가게의 카드와 아직 피해를 주지 않은 동료는 null */
+  dealt: string | null;
   /** 한 발의 피해, 1초에 쏘는 수, 다음 별이 되면 바뀌는 것(다 올렸으면 그렇다는 말), 값과 돌려받는 열매 */
   numbers: string[];
 }
@@ -150,7 +155,12 @@ function shortNumber(value: number, digits = 2): string {
  * 피해와 빠르기는 시뮬레이션(sim.ts의 fireAllies)과 같은 셈(allyDamage, allyInterval)에 그 판의 능력치를 넣어서 구한다.
  * 빠른 손은 동료도 함께 빠르게 하고, 동료 거름은 동료의 피해만 키운다.
  */
-export function allyInfo(state: Pick<RunState, 'allies' | 'stats'>, id: AllyId, copies?: number, index?: number): AllyInfo {
+export function allyInfo(
+  state: Pick<RunState, 'allies' | 'stats'> & Partial<Pick<RunState, 'dealt'>>,
+  id: AllyId,
+  copies?: number,
+  index?: number,
+): AllyInfo {
   const def = ALLIES[id];
   const { stats } = state;
   let have: number;
@@ -186,5 +196,12 @@ export function allyInfo(state: Pick<RunState, 'allies' | 'stats'>, id: AllyId, 
     if (bonus.rate > 0) parts.push(INFO_TEXT.pairRate(Math.round(bonus.rate * 100)));
     pairs.push(INFO_TEXT.pairNow(parts));
   }
-  return { id, name: def.name, star, cells: SHOP_TEXT.cells(def.cells), aim: INFO_TEXT.aim(def.aim), specials, pairs, numbers };
+  // 준 피해는 동료의 종류마다 센다(damage.ts). 같은 동료가 여럿이면 몇이 함께 준 것인지도 적는다.
+  let dealt: string | null = null;
+  if (copies !== undefined && index !== undefined && state.dealt) {
+    const row = damageRows(state.dealt.run).find((item) => item.source === id);
+    const together = state.allies.filter((ally) => ally.id === id).length;
+    if (row) dealt = DAMAGE_TEXT.allyRun(row.amount, sharePercent(row.share), together);
+  }
+  return { id, name: def.name, star, cells: SHOP_TEXT.cells(def.cells), aim: INFO_TEXT.aim(def.aim), specials, pairs, dealt, numbers };
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { dayIndexOf as slotDayOf } from '../games/candy-slot/daily';
+import { dayIndexOf as gardenDayOf } from '../games/garden-guard/daily';
 import { dayIndexOf as lanternDayOf } from '../games/lantern-keeper/daily';
 import { GAMES } from '../games/registry';
 import {
@@ -262,10 +263,11 @@ describe('랭킹 날', () => {
     }
   });
 
-  it('오늘의 랭킹은 오늘의 판이 있는 게임(등불지기, 행운 슬롯)에만 있다', () => {
-    expect(DAILY_GAMES).toEqual(['lantern-keeper', 'candy-slot']);
+  it('오늘의 랭킹은 오늘의 판이 있는 게임(등불지기, 행운 슬롯, 텃밭 지키기)에만 있다', () => {
+    expect(DAILY_GAMES).toEqual(['lantern-keeper', 'candy-slot', 'garden-guard']);
     expect(hasDailyBoard('lantern-keeper')).toBe(true);
     expect(hasDailyBoard('candy-slot')).toBe(true);
+    expect(hasDailyBoard('garden-guard')).toBe(true);
     expect(hasDailyBoard('stack-tower')).toBe(false);
     expect(hasDailyBoard('nope')).toBe(false);
     expect(hasDailyBoard(undefined)).toBe(false);
@@ -275,6 +277,7 @@ describe('랭킹 날', () => {
     const gameDays: Record<string, (date: Date) => number> = {
       'lantern-keeper': lanternDayOf,
       'candy-slot': slotDayOf,
+      'garden-guard': gardenDayOf,
     };
     expect(Object.keys(gameDays).sort()).toEqual([...DAILY_GAMES].sort());
     const midnight = kst('2026-11-17T00:00:00');

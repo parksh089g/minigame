@@ -4,6 +4,7 @@
  * 화면이 없는 규칙이라서 시뮬레이션(sim.ts)과 자동 플레이(bot.ts)가 함께 쓴다.
  */
 import { ALLIES, ALLY_ORDER, ALLY_STARS, CELL_COUNT, GARDEN_CELLS, PAIRS, SHOOTER, SHOP, TEAM_HEAT, type AllyId } from './data';
+import { shopSeed } from './daily';
 import { isBossDay, nextRandom } from './rules';
 import type { RunState } from './sim';
 
@@ -456,7 +457,10 @@ export function shopPool(state: Pick<RunState, 'day'>): AllyId[] {
 export function drawShop(state: RunState): ShopCard[] {
   const pool = shopPool(state);
   if (pool.length === 0) return [];
-  let seed = (state.rng ^ Math.imul(state.day + 1, 0x9e3779b1) ^ Math.imul(state.rolls + 1, 0x85ebca6b)) | 0;
+  // 오늘의 판은 그날과 그 가게에서 몇 번째로 뽑는지로만 정해서, 앞에서 어떻게 했든 같은 가게에는 같은 카드가 나온다.
+  let seed = state.daily
+    ? shopSeed(state.daily.day, state.day, state.daily.draws)
+    : (state.rng ^ Math.imul(state.day + 1, 0x9e3779b1) ^ Math.imul(state.rolls + 1, 0x85ebca6b)) | 0;
   const cards: ShopCard[] = [];
   for (let index = 0; index < SHOP.cards; index += 1) {
     const next = nextRandom(seed);
@@ -482,6 +486,7 @@ export function keepLocked(previous: readonly ShopCard[], drawn: ShopCard[]): Sh
 /** 가게를 연다. 판의 첫날 앞과, 날을 지킬 때마다 연다. 전날 묶어 둔 카드는 그 자리에 그대로 있다. */
 export function openShop(state: RunState): void {
   state.shopping = true;
+  if (state.daily) state.daily.draws = 0;
   state.shop = keepLocked(state.shop, drawShop(state));
 }
 
@@ -571,6 +576,7 @@ export function reroll(state: RunState): boolean {
   if (!canReroll(state)) return false;
   state.fruit -= SHOP.reroll;
   state.rolls += 1;
+  if (state.daily) state.daily.draws += 1;
   state.shop = keepLocked(state.shop, drawShop(state));
   return true;
 }

@@ -34,8 +34,11 @@ export type EnemyKind =
   | 'beetle'
   | 'mosquito'
   | 'digger'
+  | 'aphid'
+  | 'nymph'
   | 'mole'
-  | 'rhino';
+  | 'rhino'
+  | 'spider';
 
 /**
  * 벌레가 다가오는 방식. walk는 곧장 걷고, weave는 좌우로 흔들며 날고, hop은 쉬었다가 폴짝 뛰고,
@@ -65,9 +68,14 @@ export interface EnemyDef {
   weight: { first: number; step: number; max: number };
   /** 한 번 뽑히면 이만큼이 한 무리로 붙어서 나온다(모기). 그날 나올 벌레 수에서 그만큼을 쓴다. */
   swarm?: number;
+  /** 쫓아내면 그 자리에서 이 벌레 둘로 나뉜다(진딧물, SPLIT). */
+  splits?: EnemyKind;
   boss?: boolean;
-  /** 대장의 솜씨: summon은 부하를 부르고(SUMMON), charge는 웅크렸다가 돌진한다(CHARGE). */
-  skill?: 'summon' | 'charge';
+  /**
+   * 대장의 솜씨: summon은 부하를 부르고(SUMMON), charge는 웅크렸다가 돌진한다(CHARGE),
+   * web은 판의 가운데에 멈춰서 멀리서 거미줄을 쏘아 울타리를 갉는다(WEB).
+   */
+  skill?: 'summon' | 'charge' | 'web';
 }
 
 export const ENEMIES: Readonly<Record<EnemyKind, EnemyDef>> = {
@@ -169,6 +177,36 @@ export const ENEMIES: Readonly<Record<EnemyKind, EnemyDef>> = {
     fromDay: 24,
     weight: { first: 1.5, step: 0.3, max: 4 },
   },
+  /**
+   * 진딧물: 26일째부터 나온다. 쫓아내면 그 자리에서 아기 진딧물 둘로 나뉜다(SPLIT).
+   * 저 하나의 체력은 땅강아지보다 적지만, 나뉜 둘까지 치면 비슷하다.
+   */
+  aphid: {
+    name: '진딧물',
+    hp: 38,
+    speed: 22,
+    bite: 7,
+    biteEvery: 1.1,
+    radius: 9,
+    seeds: 1,
+    gait: 'walk',
+    splits: 'nymph',
+    fromDay: 26,
+    weight: { first: 2, step: 0.3, max: 4 },
+  },
+  /** 아기 진딧물: 진딧물이 나뉘어 생긴다. 그날 나올 벌레로 뽑히지는 않는다. 작고 빠르다. */
+  nymph: {
+    name: '아기 진딧물',
+    hp: 11,
+    speed: 38,
+    bite: 3,
+    biteEvery: 0.8,
+    radius: 6,
+    seeds: 1,
+    gait: 'walk',
+    fromDay: 26,
+    weight: { first: 0, step: 0, max: 0 },
+  },
   mole: {
     name: '대장 두더지',
     hp: 700,
@@ -197,6 +235,25 @@ export const ENEMIES: Readonly<Record<EnemyKind, EnemyDef>> = {
     boss: true,
     skill: 'charge',
   },
+  /**
+   * 대장 거미: 30일째부터 대장의 차례에 든다(LATE_BOSSES). 판의 가운데(WEB.stopY)까지만 내려와 멈추고,
+   * 거기서 거미줄을 쏘아 울타리를 갉는다. 기다려도 울타리에 오지 않으니 먼저 쫓아내야 한다.
+   * 가시 울타리에 찔리지 않고 선인장의 가시도 닿지 않는 대신, 체력과 갉는 피해가 다른 대장보다 적다.
+   */
+  spider: {
+    name: '대장 거미',
+    hp: 600,
+    speed: 11,
+    bite: 8,
+    biteEvery: 1.8,
+    radius: 17,
+    seeds: 12,
+    gait: 'walk',
+    fromDay: 30,
+    weight: { first: 0, step: 0, max: 0 },
+    boss: true,
+    skill: 'web',
+  },
 };
 
 /** 여느 날에 섞여 나오는 벌레(대장 빼고)를 나오기 시작하는 날 순서로 */
@@ -209,6 +266,7 @@ export const COMMON_KINDS: readonly EnemyKind[] = [
   'beetle',
   'mosquito',
   'digger',
+  'aphid',
 ];
 
 /** 꿀벌이 좌우로 흔들리는 폭(한쪽)과 한 번 오가는 시간(초) */
@@ -226,8 +284,20 @@ export const DIG = { from: 70, to: 225 } as const;
 
 /** 대장이 나오는 날의 간격. 이 날을 지키면 그다음 날부터 시작할 수 있다. */
 export const BOSS_EVERY = 5;
-/** 대장의 날마다 차례로 나오는 대장: 5일째 두더지, 10일째 장수풍뎅이, 15일째 두더지, ... */
+/** 25일째까지 대장의 날마다 차례로 나오는 대장: 5일째 두더지, 10일째 장수풍뎅이, 15일째 두더지, ... 그 뒤는 LATE_BOSSES */
 export const BOSS_ROTATION: readonly EnemyKind[] = ['mole', 'rhino'];
+/**
+ * 25일째 뒤의 대장 차례. from일째까지는 BOSS_ROTATION 그대로이고(25일째 두더지),
+ * 그 뒤로는 rotation을 차례로 돈다: 30일째 거미, 35일째 장수풍뎅이, 40일째 두더지, 45일째 거미, ...
+ */
+export const LATE_BOSSES = { from: 25, rotation: ['spider', 'rhino', 'mole'] as readonly EnemyKind[] } as const;
+/** 진딧물이 나뉠 때 두 마리가 벌어지는 거리(x, 한쪽) */
+export const SPLIT = { spread: 9 } as const;
+/**
+ * 대장 거미가 멈춰서 거미줄을 쏘는 높이(시뮬레이션 y). 울타리(FIELD.depth)에서 한참 위라서
+ * 울타리에 붙은 벌레만 찌르는 가시 울타리와 선인장은 닿지 않는다.
+ */
+export const WEB = { stopY: 150 } as const;
 /** 대장 두더지가 부하를 부르는 간격(초)과 한 번에 부르는 수 */
 export const SUMMON = { every: 7, count: 2, kind: 'ant' as EnemyKind } as const;
 /**

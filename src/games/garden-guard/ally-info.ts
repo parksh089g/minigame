@@ -87,19 +87,28 @@ export function openAllyInfo(
     PANEL.pad + HEAD.height / 2 - 2,
   );
 
-  let y = PANEL.pad + HEAD.height + 2;
-  const line = (text: string, color: string): void => {
-    const object = put(addText(scene, left + PANEL.pad, 0, text, { size: FONT_SIZE.normal, color, wrapWidth: inner }), y);
-    y += object.height + LINE_GAP;
-  };
-  line(info.aim, THEME_CSS.ink);
-  for (const special of info.specials) line(special, THEME_CSS.good);
-  for (const pair of info.pairs) line(pair, THEME_CSS.pinkDeep);
+  const lines: Array<{ text: string; color: string }> = [{ text: info.aim, color: THEME_CSS.ink }];
+  for (const special of info.specials) lines.push({ text: special, color: THEME_CSS.good });
+  for (const pair of info.pairs) lines.push({ text: pair, color: THEME_CSS.pinkDeep });
+  if (info.dealt) lines.push({ text: info.dealt, color: THEME_CSS.accent });
   info.numbers.forEach((text, index) => {
     // 마지막 두 줄(다음 별, 값)은 덜 중요하므로 옅게 적는다.
-    line(text, index >= info.numbers.length - 2 ? THEME_CSS.sub : THEME_CSS.ink);
+    lines.push({ text, color: index >= info.numbers.length - 2 ? THEME_CSS.sub : THEME_CSS.ink });
   });
-  const closeTop = y - LINE_GAP + CLOSE.top;
+  const texts = lines.map(({ text, color }) =>
+    addText(scene, left + PANEL.pad, 0, text, { size: FONT_SIZE.normal, color, wrapWidth: inner }),
+  );
+  // 줄이 많아 판 위에 다 들어가지 않으면(짧은 화면의 두꺼비처럼) 줄 사이를 좁힌다.
+  const linesTop = PANEL.pad + HEAD.height + 2;
+  const textHeight = texts.reduce((sum, text) => sum + text.height, 0);
+  const room = area.bottom - area.top - 8 - linesTop - CLOSE.top - CLOSE.height - PANEL.pad - textHeight;
+  const gap = Math.max(1, Math.min(LINE_GAP, Math.floor(room / Math.max(1, texts.length - 1))));
+  let y = linesTop;
+  for (const text of texts) {
+    put(text, y);
+    y += text.height + gap;
+  }
+  const closeTop = y - gap + CLOSE.top;
   const height = closeTop + CLOSE.height + PANEL.pad;
   const top = Math.max(area.top + 4, Math.round((area.top + area.bottom - height) / 2));
   for (const { object, y: at } of placed) object.y += top + at;

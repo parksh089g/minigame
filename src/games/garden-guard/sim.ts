@@ -38,12 +38,16 @@ import {
   HOP,
   SHOOTER,
   SHOP,
+  SPLIT,
   STORM,
   SUMMON,
   WEAVE,
+  WEB,
   type AllyId,
   type EnemyKind,
 } from './data';
+import { waveSeed, type DailyTag } from './daily';
+import { addDamage, emptyDamage, type DamageLog, type DamageSource } from './damage';
 import {
   biteScale,
   clearBonus,
@@ -161,6 +165,13 @@ export interface RunState {
   shards: number;
   /** 오늘 울타리가 그냥 막아 낼 수 있는 남은 갉기의 수(울타리 방울). 날이 바뀌면 다시 찬다. */
   guardLeft: number;
+  /**
+   * 오늘의 판(daily.ts)이면 그 판의 날과 지금 가게에서 다시 뽑은 횟수. 여느 판에는 없다.
+   * 오늘의 판은 날마다 벌레 떼를, 가게마다 카드를 그날의 씨앗에서 따로 정해서 누구에게나 같다.
+   */
+  daily?: DailyTag;
+  /** 그날과 이 판에서 물총, 물벼락, 가시와 동료마다 준 피해(damage.ts). 이 기록이 생기기 전의 저장은 빈 기록으로 읽는다. */
+  dealt: DamageLog;
 }
 
 export interface RunConfig {
@@ -172,6 +183,8 @@ export interface RunConfig {
   fields?: number;
   /** 유물마다의 단계(rules.ts의 GardenMeta.relics). 없으면 유물이 없는 판이다. */
   relics?: RelicLevels;
+  /** 오늘의 판이면 그 날(daily.ts의 dayIndexOf). 그날의 벌레 떼와 가게가 그날의 씨앗으로 정해진다. */
+  daily?: number;
 }
 
 export interface Input {
@@ -246,10 +259,13 @@ function beginDay(state: RunState, day: number, events: SimEvent[]): void {
   state.day = day;
   state.phase = 'fight';
   state.dayTime = 0;
+  // 오늘의 판은 그날의 벌레 떼를 그날의 씨앗으로 새로 정한다. 앞의 날에 굴린 난수(부하, 걸음)에 기대지 않아서 누구에게나 같다.
+  if (state.daily) state.rng = waveSeed(state.daily.day, day);
   state.queue = planDay(day, () => roll(state));
   state.dayTotal = state.queue.length;
   state.dayKilled = 0;
   state.guardLeft = state.stats.guard;
+  state.dealt.day = {};
   events.push({ type: 'dayStart', day, boss: isBossDay(day) });
 }
 
@@ -288,7 +304,9 @@ export function createRun(config: RunConfig): { state: RunState; events: SimEven
     rolls: 0,
     shards: 0,
     guardLeft: 0,
+    dealt: emptyDamage(),
   };
+  if (config.daily !== undefined) state.daily = { day: config.daily, draws: 0 };
   if (sprouts > 0) placeAlly(state, 'sunflower', sprouts);
   // 첫날 앞에 가게를 먼저 연다. "다음 날"을 누르면 첫날이 시작된다.
   openShop(state);
@@ -344,6 +362,15 @@ function spawnEnemy(state: RunState, kind: EnemyKind, x: number, y: number, even
   events.push({ type: 'spawn', kind, x: homeX });
 }
 
+/**
+ * 그 벌레가 멈춰 서서 갉기 시작하는 높이(시뮬레이션 y). 여느 벌레는 울타리에 몸이 닿는 곳이고,
+ * 대장 거미는 판의 가운데(WEB.stopY)에서 멈춰 거미줄로 갉는다.
+ */
+export function stopYOf(kind: EnemyKind): number {
+  const def = ENEMIES[kind];
+  return def.skill === 'web' ? WEB.stopY : FIELD.depth - def.radius;
+}
+
 /** 땅강아지가 땅속에 숨어 있는지. 숨은 동안에는 물방울도 물벼락도 닿지 않고, 아무도 겨누지 않는다. */
 export function isBuried(enemy: Enemy): boolean {
   return ENEMIES[enemy.kind].gait === 'dig' && enemy.y > DIG.from && enemy.y < DIG.to;
@@ -378,7 +405,7 @@ function moveEnemy(state: RunState, enemy: Enemy, dt: number, events: SimEvent[]
   if (enemy.flash > 0) enemy.flash = Math.max(0, enemy.flash - dt);
   if (enemy.slowLeft > 0) enemy.slowLeft -= dt;
   const slow = enemy.slowLeft > 0 ? 1 - enemy.slow : 1;
-  const stopY = FIELD.depth - def.radius;
+  const stopY = stopYOf(enemy.kind);
 
   if (!enemy.biting) {
     enemy.clock += dt * slow;
@@ -412,7 +439,8 @@ function moveEnemy(state: RunState, enemy: Enemy, dt: number, events: SimEvent[]
         state.fence = Math.max(0, state.fence - damage);
         events.push({ type: 'bite', x: enemy.x, damage });
       }
-      if (state.stats.thorns > 0) hurt(state.stats, enemy, state.stats.thorns, false);
+      // 멀리서 거미줄로 갉는 거미는 가시에 찔리지 않는다.
+      if (state.stats.thorns > 0 && def.skill !== 'web') hurt(state, enemy, state.stats.thorns, false, 'thorns');
     }
   }
 
@@ -436,13 +464,16 @@ function moveEnemy(state: RunState, enemy: Enemy, dt: number, events: SimEvent[]
 /**
  * 벌레에게 피해를 준다. 껍데기가 있는 벌레는 치명타가 아니면 덜 받는다. 껍데기에 막혔으면 true.
  * 유물의 덤도 여기서 붙는다: 대장에게는 bossDamage배, 아직 안 다친(체력이 가득한) 벌레에게는 freshDamage배.
+ * 준 피해는 source의 몫으로 적는다. 남은 체력을 넘는 몫은 적지 않는다.
  */
-function hurt(stats: Stats, enemy: Enemy, amount: number, crit: boolean, pierceShell = false): boolean {
+function hurt(state: RunState, enemy: Enemy, amount: number, crit: boolean, source: DamageSource, pierceShell = false): boolean {
+  const { stats } = state;
   const def = ENEMIES[enemy.kind];
   const blocked = def.shell !== undefined && !crit && !pierceShell;
   let dealt = blocked ? amount * (def.shell as number) : amount;
   if (def.boss) dealt *= stats.bossDamage;
   if (enemy.hp >= enemy.maxHp) dealt *= stats.freshDamage;
+  if (enemy.hp > 0) addDamage(state.dealt, source, Math.min(dealt, enemy.hp));
   enemy.hp -= dealt;
   enemy.flash = 0.12;
   return blocked;
@@ -473,7 +504,7 @@ export function autoAim(state: RunState, from: { x: number; y: number }, nearest
   }
   if (!target) return null;
   const time = Math.hypot(target.x - from.x, target.y - from.y) / GUN.shotSpeed;
-  const stopY = FIELD.depth - ENEMIES[target.kind].radius;
+  const stopY = stopYOf(target.kind);
   return { x: target.x, y: Math.min(stopY, target.y + paceOf(target, state.stats.pace) * time) };
 }
 
@@ -598,7 +629,7 @@ function fireAllies(state: RunState, dt: number, events: SimEvent[]): void {
     const spot = allySpot(ally);
     // 날아가는 동안 벌레가 내려올 만큼 앞을 겨눈다.
     const time = Math.hypot(target.x - spot.x, target.y - spot.y) / def.shotSpeed;
-    const stopY = FIELD.depth - ENEMIES[target.kind].radius;
+    const stopY = stopYOf(target.kind);
     const y = Math.min(stopY, target.y + paceOf(target, state.stats.pace) * time);
     bonuses ??= pairBonuses(state.allies);
     const bonus = bonuses[index];
@@ -614,7 +645,7 @@ function castStorm(state: RunState, events: SimEvent[]): void {
   state.stormIn = state.stats.stormCooldown;
   for (const enemy of state.enemies) {
     if (enemy.y < -ENEMIES[enemy.kind].radius || isBuried(enemy)) continue;
-    hurt(state.stats, enemy, state.stats.stormDamage, true);
+    hurt(state, enemy, state.stats.stormDamage, true, 'storm');
     // 대장은 덩치가 커서 반만 느려진다.
     const slow = ENEMIES[enemy.kind].boss ? STORM.slow / 2 : STORM.slow;
     if (enemy.slowLeft <= 0 || slow >= enemy.slow) enemy.slow = slow;
@@ -635,7 +666,8 @@ function moveShots(state: RunState, dt: number, events: SimEvent[]): void {
       const reach = ENEMIES[enemy.kind].radius + GUN.shotRadius;
       if (Math.hypot(enemy.x - shot.x, enemy.y - shot.y) > reach) continue;
       const def = shot.ally ? ALLIES[shot.ally] : null;
-      const shell = hurt(stats, enemy, shot.damage, shot.crit, def?.pierceShell);
+      const source: DamageSource = shot.ally || 'gun';
+      const shell = hurt(state, enemy, shot.damage, shot.crit, source, def?.pierceShell);
       events.push({ type: 'hit', x: shot.x, y: shot.y, crit: shot.crit, shell });
       // 물총의 물방울에는 영구 강화의 찬물과 물보라가, 동료가 쏜 것에는 그 동료의 솜씨가 붙는다.
       const chill = def ? (def.chill?.slow ?? 0) : stats.chill;
@@ -651,7 +683,7 @@ function moveShots(state: RunState, dt: number, events: SimEvent[]): void {
         for (const other of state.enemies) {
           if (other === enemy || other.hp <= 0 || isBuried(other)) continue;
           const span = splashRadius + ENEMIES[other.kind].radius;
-          if (Math.hypot(other.x - shot.x, other.y - shot.y) <= span) hurt(stats, other, shot.damage * splashRatio, false);
+          if (Math.hypot(other.x - shot.x, other.y - shot.y) <= span) hurt(state, other, shot.damage * splashRatio, false, source);
         }
       }
       shot.hit.push(enemy.id);
@@ -671,6 +703,8 @@ function moveShots(state: RunState, dt: number, events: SimEvent[]): void {
 function sweep(state: RunState, events: SimEvent[]): void {
   if (!state.enemies.some((enemy) => enemy.hp <= 0)) return;
   const alive: Enemy[] = [];
+  /** 쫓아낸 진딧물이 나뉘는 자리. 목록을 다 고른 뒤에 놓는다. */
+  const splits: Enemy[] = [];
   for (const enemy of state.enemies) {
     if (enemy.hp > 0) {
       alive.push(enemy);
@@ -681,8 +715,24 @@ function sweep(state: RunState, events: SimEvent[]): void {
     state.dayKilled += 1;
     state.seeds += seeds;
     events.push({ type: 'kill', x: enemy.x, y: enemy.y, kind: enemy.kind, seeds });
+    if (ENEMIES[enemy.kind].splits) splits.push(enemy);
   }
   state.enemies = alive;
+  for (const parent of splits) splitEnemy(state, parent, events);
+}
+
+/**
+ * 쫓아낸 진딧물이 그 자리에서 둘로 나뉜다. 나뉜 것도 그날 쫓아낼 벌레에 든다(벌레가 남아 있는 동안에는 날이 바뀌지 않으니 체력은 그날의 것이다).
+ * 울타리를 갉던 진딧물이 나뉘면 나뉜 것도 곧바로 울타리에 붙는다.
+ */
+function splitEnemy(state: RunState, parent: Enemy, events: SimEvent[]): void {
+  const kind = ENEMIES[parent.kind].splits as EnemyKind;
+  const y = Math.min(parent.y, stopYOf(kind));
+  for (const side of [-1, 1]) {
+    if (state.enemies.length >= MAX_ENEMIES) return;
+    spawnEnemy(state, kind, parent.x + side * SPLIT.spread, y, events);
+    state.dayTotal += 1;
+  }
 }
 
 /** 판을 dt초만큼 나아가게 하고, 그동안 일어난 일을 돌려준다. */

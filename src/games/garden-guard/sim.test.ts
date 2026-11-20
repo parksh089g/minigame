@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buyCheapest, playCareer, playRun } from './bot';
-import { CHARGE, DAY, DIG, ENEMIES, FIELD, GUN, HOP, SHOOTER, STORM, SUMMON, type EnemyKind } from './data';
+import { botInput, buyCheapest, playCareer, playRun } from './bot';
+import { CHARGE, DAY, DIG, ENEMIES, FIELD, GUN, HOP, SHOOTER, SPLIT, STORM, SUMMON, WEB, type EnemyKind } from './data';
 import { allyDamage, fruitFor } from './allies';
 import { clearBonus, createMeta, hpScale, recordBonus, type Levels } from './rules';
 import {
@@ -11,6 +11,7 @@ import {
   isBuried,
   runScore,
   step,
+  stopYOf,
   stormReady,
   type Enemy,
   type Input,
@@ -406,11 +407,70 @@ describe('새 벌레와 대장', () => {
     for (const [day, kind] of [
       [5, 'mole'],
       [10, 'rhino'],
+      [30, 'spider'],
     ] as const) {
       const state = start({}, day, 0);
       const events = run(state, 3);
       expect(events.some((event) => event.type === 'spawn' && event.kind === kind), `${day}`).toBe(true);
     }
+  });
+
+  it('진딧물은 쫓아내면 그 자리에서 아기 진딧물 둘로 나뉘고, 나뉜 것도 그날 쫓아낼 벌레에 든다', () => {
+    const state = emptied({}, 27);
+    state.fireIn = 1e9;
+    const aphid = put(state, 'aphid', 100, 120, 1);
+    const total = state.dayTotal;
+    aphid.hp = 0;
+    const events = step(state, DT);
+    expect(events.filter((event) => event.type === 'kill').map((event) => event.type === 'kill' && event.kind)).toEqual(['aphid']);
+    const nymphs = state.enemies.filter((enemy) => enemy.kind === 'nymph');
+    expect(nymphs).toHaveLength(2);
+    expect(state.dayTotal).toBe(total + 2);
+    expect(count(events, 'spawn')).toBe(2);
+    expect(nymphs.map((nymph) => Math.round(nymph.x)).sort()).toEqual([100 - SPLIT.spread, 100 + SPLIT.spread].sort());
+    for (const nymph of nymphs) {
+      expect(nymph.y).toBeCloseTo(120, 0);
+      expect(nymph.maxHp).toBeCloseTo(ENEMIES.nymph.hp * hpScale(27), 5);
+    }
+    // 아기 진딧물은 더 나뉘지 않는다.
+    for (const nymph of nymphs) nymph.hp = 0;
+    step(state, DT);
+    expect(state.enemies).toHaveLength(0);
+    // 다 쫓아내야 날을 지킨다.
+    expect(state.lastCleared).toBe(27);
+  });
+
+  it('울타리를 갉던 진딧물이 나뉘면 아기 진딧물도 울타리 앞에 놓인다', () => {
+    const state = emptied({}, 27);
+    state.fireIn = 1e9;
+    const aphid = put(state, 'aphid', 100, stopYOf('aphid'), 1);
+    aphid.biting = true;
+    aphid.hp = 0;
+    step(state, DT);
+    for (const nymph of state.enemies) expect(nymph.y).toBeLessThanOrEqual(stopYOf('nymph'));
+    run(state, 0.2);
+    expect(state.enemies.every((nymph) => nymph.biting)).toBe(true);
+  });
+
+  it('거미는 판의 가운데에 멈춰서 멀리서 울타리를 갉고, 가시 울타리에 찔리지 않는다', () => {
+    const state = emptied({ thorn: 5 }, 30);
+    state.fireIn = 1e9;
+    const spider = put(state, 'spider', 120, 0, 5000);
+    spider.summonIn = 1e9;
+    const fence = state.fence;
+    const events = run(state, 30);
+    expect(spider.y).toBe(WEB.stopY);
+    expect(spider.biting).toBe(true);
+    expect(WEB.stopY).toBeLessThan(FIELD.depth - 100);
+    // 거미줄로 갉는다.
+    expect(count(events, 'bite')).toBeGreaterThan(3);
+    expect(state.fence).toBeLessThan(fence);
+    // 가시는 닿지 않는다.
+    expect(spider.hp).toBe(5000);
+    // 거미는 부하를 부르지 않는다.
+    expect(count(events, 'spawn')).toBe(0);
+    // 물총은 멈춘 거미를 겨눈다.
+    expect(autoAim(state, SHOOTER)).toEqual({ x: spider.x, y: WEB.stopY });
   });
 });
 
@@ -624,6 +684,47 @@ describe('밸런스', () => {
     expect(meta.seeds).toBeLessThan(40);
     expect(Object.keys(meta.levels).length).toBeGreaterThan(4);
   });
+
+  it('25일째에 닿지 않는 판은 새 벌레와 거미를 넣기 전과 똑같이 흘러간다', () => {
+    // 일곱 판 모두 26일째 앞에서 끝난다. 새 벌레와 거미를 넣기 전에 잰 값이다.
+    const career = playCareer(createMeta(), 7, 'active', 3);
+    expect(career.runs.map((played) => [played.start, played.cleared, played.seeds, played.shards])).toEqual([
+      [1, 10, 451, 2],
+      [6, 12, 440, 1],
+      [6, 14, 606, 1],
+      [6, 17, 1076, 2],
+      [11, 19, 1048, 1],
+      [11, 23, 1967, 2],
+      [16, 24, 1554, 1],
+    ]);
+    expect(career.runs.map((played) => Math.round(played.seconds * 60))).toEqual(
+      [235.9, 193.66667, 249.41667, 349.38333, 299.46667, 441.2, 300.93333].map((seconds) => Math.round(seconds * 60)),
+    );
+  }, 30_000);
+
+  it('25일째 뒤의 새 벌레와 거미가 판을 크게 어렵게도 쉽게도 하지 않는다', () => {
+    // 26일째 판을 앞쪽 일곱 판을 한 강화에 씨앗 3만을 더 들인 사람이 한다. 새 벌레와 거미를 넣기 전에는
+    // 열 판(씨앗 1~10) 평균 53.7일째까지 지켰고(50~56), 넣은 뒤에는 52.7일째다. 씨앗 12만을 더 들이면 71.3일째에서 70.2일째로,
+    // 31일째에서 시작하면 48.9일째에서 49.9일째로 바뀌었다(zz- 점검으로 잰 값).
+    const base = playCareer(createMeta(), 7, 'active', 3).meta;
+    const meta = buyCheapest({ ...base, seeds: base.seeds + 30_000 });
+    const kinds = new Set<string>();
+    const cleared: number[] = [];
+    for (const seed of [1, 2, 3, 4, 5, 6]) {
+      const { state } = createRun({ seed, startDay: 26, levels: meta.levels, bestBefore: 99 });
+      while (state.phase !== 'over' && state.t < 3600) {
+        for (const event of step(state, DT, botInput(state, 'active'))) if (event.type === 'kill') kinds.add(event.kind);
+      }
+      cleared.push(state.lastCleared);
+    }
+    // 새 벌레와 거미를 실제로 만나고 쫓아냈다.
+    for (const kind of ['aphid', 'nymph', 'spider']) expect(kinds.has(kind), kind).toBe(true);
+    // 30일째의 거미가 벽이 되지 않는다.
+    for (const days of cleared) expect(days, cleared.join(',')).toBeGreaterThan(40);
+    const mean = cleared.reduce((sum, days) => sum + days, 0) / cleared.length;
+    expect(mean, cleared.join(',')).toBeGreaterThan(53.7 - 4);
+    expect(mean, cleared.join(',')).toBeLessThan(53.7 + 4);
+  }, 90_000);
 
   it('뒤쪽 날에서 시작하면 그날의 벌레가 바로 나온다', () => {
     const state = start({}, 11, 12);

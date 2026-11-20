@@ -4,6 +4,7 @@
  * 두고 간 판이 있으면 맨 아래 줄이 "새 판"과 "이어하기"로 바뀐다.
  * 지금 밭에서 PLOW_FROM일째까지 지켰으면 기록 칸에 "새 밭 일구기" 버튼이 생기고, 누르면 잃는 것과 얻는 것을 보여 주는 쪽이 열린다.
  * 대장을 물리친 적이 있으면 기록 칸에 "유물" 버튼이 생기고, 누르면 유물 화면(relic-page.ts)이 열린다.
+ * 목록과 설명 칸 사이에는 오늘의 판 줄이 있고, 누르면 오늘의 판 쪽(daily-page.ts)이 열린다.
  */
 import Phaser from 'phaser';
 import { GAME_WIDTH, THEME, THEME_CSS } from '../../config';
@@ -11,6 +12,7 @@ import { clampPage, layoutPages, pageSlice } from '../../core/paging';
 import { sfx } from '../../core/sfx';
 import { addBackdrop, addTapZone, addText, drawPanel, Pager, PAGER_HEIGHT, PixelButton } from '../../core/ui';
 import { TEX, upgradeTexture } from './art';
+import { DAILY_TEXT, dailyInfo, dailyResumeInfo, type GardenDaily } from './daily';
 import { UPGRADE_ORDER, UPGRADES, type UpgradeId } from './data';
 import { buildRelicPage, RELIC_LABEL } from './relic-page';
 import {
@@ -36,8 +38,10 @@ import { BUY, drawBuyButton, FOOT, INFO_HEIGHT, LIST_TOP, MARGIN, PillCounter, R
 export interface LobbyHooks {
   /** 처음 열 때 설명 칸에 적을 알림(새 출발점이 열린 것 같은). 없으면 null */
   notice: string | null;
-  /** 두고 간 판(이어 할 수 있는 판). 없으면 null */
-  saved: { day: number } | null;
+  /** 두고 간 판(이어 할 수 있는 판). 없으면 null. daily는 그 판이 오늘의 판인지다. */
+  saved: { day: number; daily: boolean } | null;
+  /** 오늘의 판 줄에 적을 오늘의 기록(today는 daily.ts의 dayIndexOf)과, 그 줄을 눌렀을 때 */
+  daily: { record: GardenDaily; today: number; onOpen: () => void };
   getMeta: () => GardenMeta;
   setMeta: (meta: GardenMeta) => void;
   /**
@@ -59,6 +63,8 @@ const STEPPER_WIDTH = 116;
 const RECORD_BUTTON = { top: 44, height: 24, gap: 4, plow: 88, relic: 42 } as const;
 /** 기록 칸에서 왼쪽의 기록과 오른쪽의 판 수 사이에 남기는 틈 */
 const RECORD_NOTE_GAP = 6;
+/** 목록과 설명 칸 사이의 오늘의 판 줄: 높이와, 설명 칸과의 틈 */
+const DAILY_BAR = { height: 26, gap: 4 } as const;
 
 /** 처음 하는 사람에게 기록 대신 보여 주는 두 줄 */
 export const INTRO_LINES = '벌레 떼가 울타리를 넘지 못하게 물총으로 지켜요.\n판이 끝나도 씨앗과 강화는 그대로 남아요.';
@@ -234,11 +240,13 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
     });
   }
 
-  // 아래에서부터 자리를 잡는다: 시작 줄, 설명 칸, (쪽이 나뉘면) 쪽 넘김 줄, 그 위가 목록이다.
+  // 아래에서부터 자리를 잡는다: 시작 줄, 설명 칸, 오늘의 판 줄, (쪽이 나뉘면) 쪽 넘김 줄, 그 위가 목록이다.
   const footTop = height - FOOT.bottom - FOOT.height;
   const infoTop = footTop - INFO_HEIGHT - 4;
-  const layout = layoutPages(UPGRADE_ORDER.length, infoTop - LIST_TOP, ROW.height + ROW.gap, PAGER_HEIGHT);
-  const pager = new Pager(scene, GAME_WIDTH / 2, infoTop - PAGER_HEIGHT, (next) => {
+  const dailyTop = infoTop - DAILY_BAR.gap - DAILY_BAR.height;
+  addDailyBar(scene, dailyTop, hooks.daily);
+  const layout = layoutPages(UPGRADE_ORDER.length, dailyTop - 4 - LIST_TOP, ROW.height + ROW.gap, PAGER_HEIGHT);
+  const pager = new Pager(scene, GAME_WIDTH / 2, dailyTop - 4 - PAGER_HEIGHT, (next) => {
     page = clampPage(next, layout.pages);
     drawList();
   });
@@ -246,7 +254,7 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
   const infoPanel = scene.add.graphics();
   drawPanel(infoPanel, MARGIN, infoTop, WIDTH, INFO_HEIGHT, { fill: THEME.butterSoft, shadow: null, radius: 9 });
   // 아무 강화도 고르지 않았을 때 설명 칸에 적는 말
-  const idle = hooks.saved ? resumeInfo(hooks.saved.day) : INFO_HINT;
+  const idle = hooks.saved ? (hooks.saved.daily ? dailyResumeInfo : resumeInfo)(hooks.saved.day) : INFO_HINT;
   const plowed = plowedFields !== null ? plowedNotice(plowedFields) : null;
   plowedFields = null;
   const info = addText(scene, GAME_WIDTH / 2, infoTop + (INFO_HEIGHT) / 2, plowed ?? hooks.notice ?? idle, {
@@ -500,6 +508,40 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
     next.setEnabled(at < days.length - 1);
   };
   drawStepper();
+}
+
+/**
+ * 오늘의 판 줄: 왼쪽에 "오늘의 판", 오른쪽에 오늘의 최고 기록(아직 안 했으면 무엇을 하는 판인지)을 적는다.
+ * 줄 어디를 눌러도 오늘의 판 쪽이 열린다.
+ */
+function addDailyBar(scene: Phaser.Scene, top: number, daily: LobbyHooks['daily']): void {
+  const { height } = DAILY_BAR;
+  const panel = scene.add.graphics();
+  const middle = top + (height - 3) / 2;
+  const name = addText(scene, MARGIN + 10, middle, DAILY_TEXT.name, { color: THEME_CSS.good, originY: 0.5 });
+  const note = addText(scene, GAME_WIDTH - MARGIN - 10, middle, dailyInfo(daily.record, daily.today), {
+    size: 10,
+    color: THEME_CSS.sub,
+    originX: 1,
+    originY: 0.5,
+  });
+  // 누르면 줄이 조금 들어가고 글도 같이 내려간다.
+  const draw = (pressed: boolean): void => {
+    panel.clear();
+    drawPanel(panel, MARGIN, top + (pressed ? 2 : 0), WIDTH, height - 3, {
+      depth: pressed ? 1 : 3,
+      radius: 10,
+      border: THEME.mintDeep,
+      fill: THEME.mintSoft,
+    });
+    name.setY(middle + (pressed ? 2 : 0));
+    note.setY(middle + (pressed ? 2 : 0));
+  };
+  draw(false);
+  addTapZone(scene, MARGIN, top, WIDTH, height, draw, () => {
+    sfx.click();
+    daily.onOpen();
+  });
 }
 
 /** 새 밭 쪽에 적는 한 묶음: 머리글과 줄들 */
