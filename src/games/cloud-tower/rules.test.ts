@@ -31,7 +31,8 @@ import {
   settleRun,
   shardsFor,
 } from './run';
-import { cardLines, cardName, moveText, MAP_TEXT } from './text';
+import { cardLines, cardName, CODEX_TEXT, moveText, MAP_TEXT } from './text';
+import { ACHIEVEMENTS, canClaim, claimAchievement, claimableCount } from './achievements';
 
 /** 주아 글꼴에 들어 있는 한글: KS X 1001의 완성형 2,350자 */
 function fontSyllables(): Set<string> {
@@ -72,6 +73,17 @@ describe('글', () => {
     MAP_TEXT.climb,
     MAP_TEXT.entrance,
     MAP_TEXT.deck(10),
+    CODEX_TEXT.title,
+    CODEX_TEXT.unknown,
+    CODEX_TEXT.claimed,
+    CODEX_TEXT.claim(10),
+    CODEX_TEXT.reward(10),
+    CODEX_TEXT.hp(10, 12),
+    ...CODEX_TEXT.tabs,
+    ...CODEX_TEXT.hints,
+    ...CODEX_TEXT.count,
+    '받은 업적',
+    ...ACHIEVEMENTS.flatMap((item) => [item.name, item.blurb]),
   ];
 
   it('화면에 보이는 글은 글꼴에 들어 있는 한글만 쓴다', () => {
@@ -278,5 +290,39 @@ describe('판 밖', () => {
   it('기록은 마친 층으로 적는다', () => {
     expect(recordLabel(700)).toBe('최고 7층');
     expect(recordLabel(TOP_FLOOR * 100 + 500)).toBe('꼭대기 도착');
+  });
+});
+
+describe('도감과 업적', () => {
+  it('싸움에서 만난 적과 보상에 나온 카드를 판에 적고, 판이 끝나면 도감과 물리친 수에 옮긴다', () => {
+    const run = createRun({ seed: 3, levels: {} });
+    chooseNode(run, 0);
+    const foes = run.battle?.foes.map((foe) => foe.id) ?? [];
+    expect(run.met.foes).toEqual([...new Set(foes)]);
+    run.stats.kills = 4;
+    run.met.cards.push(CARD_IDS[20]);
+    run.treasures.push('honey');
+    const meta = settleRun(createMeta(), run);
+    expect(meta.codex.foes).toEqual(run.met.foes);
+    expect(meta.codex.cards).toEqual(expect.arrayContaining([...run.deck.map((card) => card.id), ...run.met.cards]));
+    expect(meta.codex.treasures).toEqual(['honey']);
+    expect(meta.kills).toBe(4);
+  });
+
+  it('저장한 도감에서 모르는 이름과 겹친 이름은 버린다', () => {
+    const meta = normalizeMeta({ codex: { cards: ['zap', CARD_IDS[0], CARD_IDS[0]], foes: ['ghost'], treasures: 'honey' }, claimed: ['boss1', 3] });
+    expect(meta.codex).toEqual({ cards: [CARD_IDS[0]], foes: [], treasures: [] });
+    expect(meta.claimed).toEqual(['boss1']);
+  });
+
+  it('다 채운 업적은 한 번만 조각을 받는다', () => {
+    const meta = { ...createMeta(), best: 7, shards: 5 };
+    const boss1 = ACHIEVEMENTS.find((item) => item.id === 'boss1')!;
+    expect(canClaim(meta, boss1)).toBe(true);
+    expect(claimableCount(meta)).toBe(1);
+    const after = claimAchievement(meta, 'boss1');
+    expect(after.shards).toBe(5 + boss1.reward);
+    expect(claimAchievement(after, 'boss1')).toBe(after);
+    expect(claimAchievement(meta, 'top')).toBe(meta);
   });
 });

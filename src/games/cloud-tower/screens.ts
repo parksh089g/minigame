@@ -61,6 +61,7 @@ import {
   type TowerMeta,
 } from './run';
 import { cardName } from './text';
+import { claimableCount } from './achievements';
 
 export interface ScreenHooks {
   /** 판이 바뀌었으니 저장하고 판의 지금 화면을 다시 연다. */
@@ -95,6 +96,7 @@ export const SCREEN_TEXT = {
   removeHint: '덱에서 뺄 카드를 골라요',
   removeDone: '이 가게에서는 이미 뺐어요',
   chestTitle: '보물 상자',
+  codex: '도감',
 } as const;
 
 // ───────── 준비 화면 ─────────
@@ -106,6 +108,7 @@ export interface LobbyHooks {
   onResume: () => void;
   onGiveUp: () => void;
   onBack: () => void;
+  onCodex: () => void;
 }
 
 const UPGRADE_ROW = { height: 36, gap: 4 } as const;
@@ -125,7 +128,17 @@ export function buildLobby(scene: Phaser.Scene, hooks: LobbyHooks): void {
     shardObjects = scene.children.list.slice(before);
   };
   drawShards();
-  void shardLeft;
+  // 도감 버튼: 받을 수 있는 업적이 있으면 초록으로 알린다.
+  const claimable = claimableCount(meta);
+  new PixelButton(scene, {
+    x: shardLeft - 52,
+    y: 9,
+    width: 48,
+    height: 22,
+    label: claimable > 0 ? `${SCREEN_TEXT.codex} ${claimable}` : SCREEN_TEXT.codex,
+    style: claimable > 0 ? 'green' : 'neutral',
+    onTap: hooks.onCodex,
+  });
 
   // 기록 칸
   pxPanel(scene.add.graphics(), MARGIN, 40, WIDTH, 30, { depth: 2, radius: 10 });

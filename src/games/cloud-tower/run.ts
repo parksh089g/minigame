@@ -22,7 +22,9 @@ import {
   TOP_FLOOR,
   TREASURES,
   UPGRADES,
+  ENEMIES,
   type CardId,
+  type EnemyId,
   type EventId,
   type NodeKind,
   type Rarity,
@@ -101,7 +103,18 @@ export interface RunState {
   rewardChoices: number;
   packs: number[];
   stats: RunStats;
+  /** 이 판에서 만난 카드(보상과 가게에 나온 것)와 적. 판이 끝나면 도감에 옮긴다. */
+  met: Met;
   result: null | 'win' | 'lose';
+}
+
+export interface Met {
+  cards: CardId[];
+  foes: EnemyId[];
+}
+
+function meet<T>(list: T[], id: T): void {
+  if (!list.includes(id)) list.push(id);
 }
 
 export interface RunOptions {
@@ -153,6 +166,7 @@ export function createRun(options: RunOptions): RunState {
     rewardChoices: 3 + levelOf(levels, 'choice'),
     packs: [0, ...(levelOf(levels, 'pack1') > 0 ? [1] : []), ...(levelOf(levels, 'pack2') > 0 ? [2] : [])],
     stats: { kills: 0, elites: 0, bosses: 0, cards: 0 },
+    met: { cards: [], foes: [] },
     result: null,
   };
   run.deck = START_DECK.map((id) => newCard(run, id));
@@ -290,6 +304,7 @@ function beginBattle(run: RunState, kind: BattleKind): void {
   else enemies = pick(run.rng, run.actFights < 2 ? act.easy : act.normal);
   if (kind !== 'boss') run.actFights += kind === 'fight' ? 1 : 0;
   const { battle } = startBattle(kind, enemies, run.deck, run.hp, run.maxHp, ctxOf(run));
+  for (const foe of battle.foes) meet(run.met.foes, foe.id);
   run.battle = battle;
   run.stage = 'battle';
 }
@@ -342,6 +357,7 @@ function winBattle(run: RunState, battle: Battle): void {
   if (run.treasures.includes('piggy')) gold += 12;
   run.gold += gold;
   const reward: Reward = { gold, cards: rollCards(run, battle.kind), treasure: null, bossPick: null };
+  for (const id of reward.cards ?? []) meet(run.met.cards, id);
   if (battle.kind === 'elite') {
     reward.treasure = rollTreasure(run);
     if (reward.treasure) gainTreasure(run, reward.treasure);
@@ -482,7 +498,10 @@ function makeShop(run: RunState): Shop {
     COMMON_TREASURES.filter((id) => !run.treasures.includes(id)),
   ).slice(0, 2);
   return {
-    cards: ids.map((id) => ({ id, price: jitter(run.rng, PRICES.card[CARDS[id].rarity]), sold: false })),
+    cards: ids.map((id) => {
+      meet(run.met.cards, id);
+      return { id, price: jitter(run.rng, PRICES.card[CARDS[id].rarity]), sold: false };
+    }),
     treasures: treasures.map((id) => ({ id, price: jitter(run.rng, PRICES.treasure), sold: false })),
     removed: false,
   };
@@ -643,6 +662,12 @@ export interface TowerMeta {
   best: number;
   runs: number;
   wins: number;
+  /** 도감: 만난 카드와 적, 가져 본 보물 */
+  codex: Codex;
+  /** 지금까지 물리친 적의 수 */
+  kills: number;
+  /** 보상을 받은 업적 */
+  claimed: string[];
   /** 하던 판. 없으면 null */
   run: RunState | null;
   /** 저장한 때(ms). 같은 기기의 다른 곳이 저장한 것과 견준다. */
@@ -650,11 +675,29 @@ export interface TowerMeta {
 }
 
 export function createMeta(): TowerMeta {
-  return { version: META_VERSION, shards: 0, levels: {}, best: 0, runs: 0, wins: 0, run: null, savedAt: 0 };
+  return {
+    version: META_VERSION,
+    shards: 0,
+    levels: {},
+    best: 0,
+    runs: 0,
+    wins: 0,
+    codex: { cards: [], foes: [], treasures: [] },
+    kills: 0,
+    claimed: [],
+    run: null,
+    savedAt: 0,
+  };
 }
 
 const count = (value: unknown): number =>
   typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+
+/** 목록 가운데 아는 이름만, 겹치지 않게 남긴다. */
+function known<K extends string>(value: unknown, table: Readonly<Record<K, unknown>>): K[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((id): id is K => typeof id === 'string' && id in table))];
+}
 
 /** 하던 판이 지금의 규칙으로 읽을 수 있는 모양인지 대강 본다. 아니면 버린다. */
 function looksLikeRun(value: unknown): value is RunState {
@@ -685,6 +728,9 @@ export function normalizeMeta(raw: unknown): TowerMeta {
   const run = looksLikeRun(value.run) && value.run.result === null ? value.run : null;
   // 지나온 길을 적기 전에 저장한 판은 지나온 층을 모르는 채로 둔다.
   if (run && !Array.isArray(run.path)) run.path = [];
+  // 도감을 만들기 전에 저장한 판은 만난 것이 비어 있는 채로 이어 한다.
+  if (run && !(run.met && Array.isArray(run.met.cards) && Array.isArray(run.met.foes))) run.met = { cards: [], foes: [] };
+  const rawCodex = value.codex && typeof value.codex === 'object' ? (value.codex as Record<string, unknown>) : {};
   return {
     version: META_VERSION,
     shards: count(value.shards),
@@ -692,6 +738,13 @@ export function normalizeMeta(raw: unknown): TowerMeta {
     best: Math.min(TOP_FLOOR, count(value.best)),
     runs: count(value.runs),
     wins: count(value.wins),
+    codex: {
+      cards: known(rawCodex.cards, CARDS),
+      foes: known(rawCodex.foes, ENEMIES),
+      treasures: known(rawCodex.treasures, TREASURES),
+    },
+    kills: count(value.kills),
+    claimed: Array.isArray(value.claimed) ? [...new Set(value.claimed.filter((id): id is string => typeof id === 'string'))] : [],
     run,
     savedAt: count(value.savedAt),
   };
@@ -722,6 +775,8 @@ export function canBuyAny(meta: TowerMeta): boolean {
 export function settleRun(meta: TowerMeta, run: RunState): TowerMeta {
   return {
     ...meta,
+    codex: codexWith(meta.codex, run),
+    kills: meta.kills + run.stats.kills,
     shards: meta.shards + shardsFor(run),
     best: Math.max(meta.best, floorsCleared(run)),
     runs: meta.runs + 1,
@@ -740,3 +795,24 @@ export function recordLabel(best: number): string {
 export function coinsFor(score: number): number {
   return Math.floor(score / 100);
 }
+
+export interface Codex {
+  cards: CardId[];
+  foes: EnemyId[];
+  treasures: TreasureId[];
+}
+
+const union = <T>(base: readonly T[], more: readonly T[]): T[] => [...new Set([...base, ...more])];
+
+/** 도감에 판에서 만난 것(덱의 카드, 나온 카드, 만난 적, 가진 보물)을 더한다. */
+export function codexWith(codex: Codex, run: RunState | null): Codex {
+  if (!run) return codex;
+  return {
+    cards: union(codex.cards, [...run.deck.map((card) => card.id), ...run.met.cards]),
+    foes: union(codex.foes, run.met.foes),
+    treasures: union(codex.treasures, run.treasures),
+  };
+}
+
+/** 하던 판까지 넣은 도감. 준비 화면의 도감은 이것을 보여 준다. */
+export const codexNow = (meta: TowerMeta): Codex => codexWith(meta.codex, meta.run);
