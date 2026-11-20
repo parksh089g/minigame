@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { dayIndexOf as slotDayOf } from '../games/candy-slot/daily';
 import { dayIndexOf as gardenDayOf } from '../games/garden-guard/daily';
 import { dayIndexOf as lanternDayOf } from '../games/lantern-keeper/daily';
+import { dayIndexOf as solitaireDayOf } from '../games/solitaire/daily';
 import { dayIndexOf as pyramidDayOf } from '../games/pyramid/daily';
 import { GAMES } from '../games/registry';
 import {
@@ -264,8 +265,9 @@ describe('랭킹 날', () => {
     }
   });
 
-  it('오늘의 랭킹은 오늘의 판이 있는 게임(등불지기, 행운 슬롯, 텃밭 지키기, 피라미드)에만 있다', () => {
-    expect(DAILY_GAMES).toEqual(['lantern-keeper', 'candy-slot', 'garden-guard', 'pyramid']);
+  it('오늘의 랭킹은 오늘의 판이 있는 게임(등불지기, 행운 슬롯, 텃밭 지키기, 솔리테어, 피라미드)에만 있다', () => {
+    expect([...DAILY_GAMES].sort()).toEqual(['candy-slot', 'garden-guard', 'lantern-keeper', 'pyramid', 'solitaire']);
+    expect(hasDailyBoard('solitaire')).toBe(true);
     expect(hasDailyBoard('pyramid')).toBe(true);
     expect(hasDailyBoard('lantern-keeper')).toBe(true);
     expect(hasDailyBoard('candy-slot')).toBe(true);
@@ -280,6 +282,7 @@ describe('랭킹 날', () => {
       'lantern-keeper': lanternDayOf,
       'candy-slot': slotDayOf,
       'garden-guard': gardenDayOf,
+      solitaire: solitaireDayOf,
       pyramid: pyramidDayOf,
     };
     expect(Object.keys(gameDays).sort()).toEqual([...DAILY_GAMES].sort());

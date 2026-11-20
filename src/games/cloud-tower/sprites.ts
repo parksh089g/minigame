@@ -4,6 +4,7 @@
  * 등불지기와 같은 팔레트를 써서 어두운 바탕에서 또렷하게 보인다.
  */
 import type { CardType, EnemyLook, NodeKind, RelicId, StatusId, TreasureId, UpgradeId } from './data';
+import type { PotionId } from './potions';
 
 export type Rows = readonly string[];
 
@@ -415,6 +416,42 @@ export const CARD_TYPE_ROWS: Readonly<Record<CardType, Rows>> = {
   attack: SWORD,
   skill: SHIELD,
   power: SPARK,
+};
+
+/** 물약 병 두 가지: 키 큰 병과 둥근 병. X는 물약 색, Y는 아래쪽의 짙은 색이다. */
+const TALL_BOTTLE: Rows = [
+  '...333...',
+  '...dcd...',
+  '...dcd...',
+  '..dXXXd..',
+  '.dXcXXXd.',
+  '.dXcXXXd.',
+  '.dXXXXXd.',
+  '.dYYYYYd.',
+  '..ddddd..',
+];
+const ROUND_BOTTLE: Rows = [
+  '...333...',
+  '...dcd...',
+  '..dXXXd..',
+  '.dXcXXXd.',
+  'dXcXXXXXd',
+  'dXXXXXXXd',
+  'dYXXXXXYd',
+  '.dYYYYYd.',
+  '..ddddd..',
+];
+const bottle = (rows: Rows, liquid: string, deep: string): Rows => recolor(recolor(rows, 'X', liquid), 'Y', deep);
+
+export const POTION_ROWS: Readonly<Record<PotionId, Rows>> = {
+  berry: bottle(ROUND_BOTTLE, '2', '1'),
+  fire: bottle(TALL_BOTTLE, '3', '2'),
+  cloud: bottle(TALL_BOTTLE, 'a', '9'),
+  toad: bottle(TALL_BOTTLE, '6', '7'),
+  thunder: bottle(ROUND_BOTTLE, '4', '3'),
+  brave: bottle(TALL_BOTTLE, '1', '0'),
+  star: bottle(ROUND_BOTTLE, 'b', 'a'),
+  wise: bottle(ROUND_BOTTLE, '5', '6'),
 };
 
 /** 그 밖의 작은 그림. 열쇠는 art.ts의 TEX 이름과 같다. */

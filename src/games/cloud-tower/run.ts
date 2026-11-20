@@ -5,7 +5,7 @@
  * 판은 통째로 저장돼서, 앱을 닫았다 열어도 하던 자리부터 이어 한다.
  * 판 밖(TowerMeta): 판이 끝나면 오른 층과 물리친 대장만큼 구름 조각을 받고, 그것으로 영구 강화를 산다.
  */
-import { endTurn, pick, playCard, rand, randInt, shuffle, startBattle, type Battle, type BattleContext, type BattleKind, type Card, type FoeStep, type Rng } from './battle';
+import { endTurn, pick, playCard, rand, randInt, shuffle, startBattle, useActs, type Battle, type BattleContext, type BattleKind, type Card, type FoeStep, type Rng } from './battle';
 import {
   ACTS,
   BOSS_TREASURES,
@@ -36,6 +36,7 @@ import {
   type TreasureId,
   type UpgradeId,
 } from './data';
+import { addPotion, isPotionId, POTION_SLOTS, POTIONS, potionsOf, rollPotionDrop, shopPotions, type PotionId } from './potions';
 import { cardName } from './text';
 import { applyDifficultyBattle, applyDifficultyStart, clampDifficulty, DIFFICULTY_SHARDS, difficultyOf, difficultyPrice, hpAfterBoss } from './difficulty';
 
@@ -52,6 +53,8 @@ export interface Reward {
   treasure: TreasureId | null;
   /** 고를 대장 보물. 골랐으면 null */
   bossPick: TreasureId[] | null;
+  /** 받은 물약. 칸이 가득 차서 아직 못 받았으면 taken이 false다. */
+  potion?: { id: PotionId; taken: boolean } | null;
 }
 
 export interface ShopItem<T> {
@@ -63,6 +66,8 @@ export interface ShopItem<T> {
 export interface Shop {
   cards: ShopItem<CardId>[];
   treasures: ShopItem<TreasureId>[];
+  /** 물약. 물약이 생기기 전에 연 가게에는 없다. */
+  potions?: ShopItem<PotionId>[];
   /** 이 가게에서 카드를 이미 뺐는지 */
   removed: boolean;
 }
@@ -85,6 +90,8 @@ export interface RunState {
   deck: Card[];
   nextUid: number;
   treasures: TreasureId[];
+  /** 들고 있는 물약(potions.ts). 많아야 POTION_SLOTS개 */
+  potions: PotionId[];
   stage: Stage;
   /** 갈림길에서 고를 다음 층의 일 */
   choices: NodeKind[];
@@ -176,6 +183,7 @@ export function createRun(options: RunOptions): RunState {
     deck: [],
     nextUid: 1,
     treasures: [],
+    potions: [],
     stage: 'map',
     choices: [],
     node: null,
@@ -362,6 +370,19 @@ export function runEndTurn(run: RunState): FoeStep[] {
   return steps;
 }
 
+/** 싸움에서 slot번째 물약을 쓴다. 적을 골라야 하는 물약은 target을 준다. 쓸 수 없으면 null */
+export function runUsePotion(run: RunState, slot: number, target: number | null): ReturnType<typeof useActs> {
+  const battle = run.battle;
+  const id = potionsOf(run)[slot];
+  if (!battle || run.stage !== 'battle' || !id) return null;
+  const events = useActs(battle, POTIONS[id].acts, target, ctxOf(run));
+  if (events) {
+    run.potions.splice(slot, 1);
+    afterBattleChange(run);
+  }
+  return events;
+}
+
 function afterBattleChange(run: RunState): void {
   const battle = run.battle;
   if (!battle) return;
@@ -401,6 +422,8 @@ function winBattle(run: RunState, battle: Battle): void {
     const left = BOSS_TREASURES.filter((id) => !run.treasures.includes(id));
     reward.bossPick = left.length > 0 ? left : null;
   }
+  const potion = rollPotionDrop(run.rng, battle.kind);
+  if (potion) reward.potion = { id: potion, taken: addPotion(run, potion) };
   run.reward = reward;
   run.stage = 'reward';
 }
@@ -543,6 +566,7 @@ function makeShop(run: RunState): Shop {
       return { id, price: difficultyPrice(run, discounted(run, jitter(run.rng, PRICES.card[CARDS[id].rarity]))), sold: false };
     }),
     treasures: treasures.map((id) => ({ id, price: difficultyPrice(run, discounted(run, jitter(run.rng, PRICES.treasure))), sold: false })),
+    potions: shopPotions(run.rng).map((item) => ({ ...item, price: difficultyPrice(run, discounted(run, item.price)) })),
     removed: false,
   };
 }
@@ -787,6 +811,8 @@ export function normalizeMeta(raw: unknown): TowerMeta {
   const run = looksLikeRun(value.run) && value.run.result === null ? value.run : null;
   // 지나온 길을 적기 전에 저장한 판은 지나온 층을 모르는 채로 둔다.
   if (run && !Array.isArray(run.path)) run.path = [];
+  // 물약이 생기기 전에 저장한 판은 빈 칸으로 시작한다.
+  if (run) run.potions = Array.isArray(run.potions) ? run.potions.filter(isPotionId).slice(0, POTION_SLOTS) : [];
   // 도감을 만들기 전에 저장한 판은 만난 것이 비어 있는 채로 이어 한다.
   if (run && (!run.relics || typeof run.relics !== 'object')) run.relics = {};
   if (run && !(run.met && Array.isArray(run.met.cards) && Array.isArray(run.met.foes))) run.met = { cards: [], foes: [] };

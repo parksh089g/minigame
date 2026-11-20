@@ -5,8 +5,8 @@
 import Phaser from 'phaser';
 import { GAME_WIDTH } from '../../config';
 import { sfx } from '../../core/sfx';
-import { addText, PixelButton } from '../../core/ui';
-import { nodeTexture, PX, PX_CSS, relicTexture, TEX, treasureTexture, upgradeTexture } from './art';
+import { addTapZone, addText, PixelButton } from '../../core/ui';
+import { nodeTexture, potionTexture, PX, PX_CSS, relicTexture, TEX, treasureTexture, upgradeTexture } from './art';
 import type { Card } from './battle';
 import { DIFFICULTY_TEXT, difficultyOf } from './difficulty';
 import {
@@ -68,7 +68,8 @@ import {
   type RunState,
   type TowerMeta,
 } from './run';
-import { cardName } from './text';
+import { buyPotion, hasPotionRoom, POTION_SLOTS, POTIONS, potionsOf, swapRewardPotion, waitingPotion, type PotionId } from './potions';
+import { cardName, POTION_TEXT, potionText } from './text';
 import { claimableCount } from './achievements';
 
 export interface ScreenHooks {
@@ -379,9 +380,9 @@ function buildDifficultyRow(
 }
 
 /** 가진 보물을 한 줄로. 누르면 이름과 설명이 잠깐 뜬다. */
-export function drawTreasureStrip(scene: Phaser.Scene, treasures: readonly TreasureId[], top: number): void {
+export function drawTreasureStrip(scene: Phaser.Scene, treasures: readonly TreasureId[], top: number, width: number = WIDTH): void {
   if (treasures.length === 0) return;
-  const step = Math.min(26, WIDTH / treasures.length);
+  const step = Math.min(26, width / treasures.length);
   let note: Phaser.GameObjects.Text | null = null;
   treasures.forEach((id, index) => {
     const x = MARGIN + 12 + index * step;
@@ -389,6 +390,29 @@ export function drawTreasureStrip(scene: Phaser.Scene, treasures: readonly Treas
     image.on(Phaser.Input.Events.GAMEOBJECT_POINTER_UP, () => {
       note?.destroy();
       const text = addText(scene, GAME_WIDTH / 2, top - 6, `${TREASURES[id].name}: ${TREASURES[id].blurb}`, {
+        size: 10,
+        color: PX_CSS.text,
+        originX: 0.5,
+        originY: 1,
+        align: 'center',
+        wrapWidth: WIDTH,
+        stroke: PX_CSS.text,
+      }).setDepth(5);
+      note = text;
+      scene.tweens.add({ targets: text, alpha: 0, delay: 2600, duration: 400, onComplete: () => text.destroy() });
+    });
+  });
+}
+
+/** 가진 물약을 오른쪽 끝에 한 줄로. 누르면 이름과 하는 일이 잠깐 뜬다. */
+export function drawPotionStrip(scene: Phaser.Scene, potions: readonly PotionId[], top: number): void {
+  let note: Phaser.GameObjects.Text | null = null;
+  potions.forEach((id, index) => {
+    const x = GAME_WIDTH - MARGIN - 10 - (potions.length - 1 - index) * 22;
+    const image = scene.add.image(x, top + 12, potionTexture(id)).setInteractive({ useHandCursor: true });
+    image.on(Phaser.Input.Events.GAMEOBJECT_POINTER_UP, () => {
+      note?.destroy();
+      const text = addText(scene, GAME_WIDTH / 2, top - 6, `${POTIONS[id].name}: ${potionText(id)}`, {
         size: 10,
         color: PX_CSS.text,
         originX: 0.5,
@@ -460,6 +484,7 @@ export function buildReward(scene: Phaser.Scene, run: RunState, hooks: ScreenHoo
   }
   const gotLines = [`별사탕 +${reward.gold}`];
   if (reward.treasure) gotLines.push(`보물: ${TREASURES[reward.treasure].name}`);
+  if (reward.potion?.taken) gotLines.push(POTION_TEXT.got(POTIONS[reward.potion.id].name));
   addHeading(scene, TOP_BAR + 16, '이겼어요!', gotLines.join(' · '));
   let top = TOP_BAR + 46;
   if (reward.treasure) {
@@ -472,6 +497,10 @@ export function buildReward(scene: Phaser.Scene, run: RunState, hooks: ScreenHoo
       fill: PX.navy,
     });
     top += 48;
+  }
+  const waiting = waitingPotion(run);
+  if (waiting) {
+    top = drawPotionSwap(scene, run, waiting, top, hooks);
   }
   const footTop = height - 44;
   if (reward.bossPick) {
@@ -524,6 +553,43 @@ export function buildReward(scene: Phaser.Scene, run: RunState, hooks: ScreenHoo
       },
     });
   }
+}
+
+/** 칸이 가득 차서 못 받은 물약: 그 물약과, 눌러서 바꿀 수 있는 내 물약들. 다음 줄의 위쪽 y를 돌려준다. */
+function drawPotionSwap(scene: Phaser.Scene, run: RunState, id: PotionId, top: number, hooks: ScreenHooks): number {
+  addWideRow(scene, {
+    y: top,
+    height: 40,
+    texture: potionTexture(id),
+    title: `${POTIONS[id].name} · ${potionText(id)}`,
+    note: POTION_TEXT.swapHint,
+    fill: PX.navy,
+  });
+  const potions = potionsOf(run);
+  const gap = 6;
+  const width = (WIDTH - (POTION_SLOTS - 1) * gap) / POTION_SLOTS;
+  const y = top + 46;
+  const height = 26;
+  potions.forEach((own, slot) => {
+    const x = MARGIN + slot * (width + gap);
+    const panel = scene.add.graphics();
+    const draw = (pressed: boolean): void => {
+      panel.clear();
+      pxPanel(panel, x, y + (pressed ? 1 : 0), width, height, { depth: 3, radius: 9 });
+    };
+    draw(false);
+    const label = addText(scene, 0, y + height / 2, POTIONS[own].name.replace(' 물약', ''), { size: 11, color: PX_CSS.text, originY: 0.5 });
+    const left = x + (width - (18 + 3 + label.width)) / 2;
+    scene.add.image(left + 9, y + height / 2, potionTexture(own));
+    label.setX(left + 21);
+    addTapZone(scene, x, y, width, height, draw, () => {
+      if (swapRewardPotion(run, slot)) {
+        sfx.gold();
+        hooks.next();
+      }
+    });
+  });
+  return y + height + 8;
 }
 
 // ───────── 쉼터 ─────────
@@ -605,7 +671,7 @@ export function upgradePicker(run: RunState, hooks: ScreenHooks, back: () => voi
 
 // ───────── 가게 ─────────
 
-type ShopEntry = { kind: 'card'; index: number } | { kind: 'treasure'; index: number } | { kind: 'remove' };
+type ShopEntry = { kind: 'card'; index: number } | { kind: 'treasure'; index: number } | { kind: 'potion'; index: number } | { kind: 'remove' };
 
 export function buildShop(scene: Phaser.Scene, run: RunState, hooks: ScreenHooks & { pickRemove: () => void }, page = 0, onPage?: (page: number) => void): void {
   const { height } = scene.scale;
@@ -617,6 +683,7 @@ export function buildShop(scene: Phaser.Scene, run: RunState, hooks: ScreenHooks
   const entries: ShopEntry[] = [
     ...shop.cards.map((_, index) => ({ kind: 'card', index }) as const),
     ...shop.treasures.map((_, index) => ({ kind: 'treasure', index }) as const),
+    ...(shop.potions ?? []).map((_, index) => ({ kind: 'potion', index }) as const),
     { kind: 'remove' },
   ];
   const footTop = height - 44;
@@ -667,6 +734,27 @@ export function buildShop(scene: Phaser.Scene, run: RunState, hooks: ScreenHooks
           dim: item.sold,
           onTap: () => {
             if (buyTreasure(run, entry.index)) {
+              sfx.coin();
+              redraw();
+            } else sfx.deny();
+          },
+        });
+      }
+      if (entry.kind === 'potion') {
+        const item = shop.potions?.[entry.index];
+        if (!item) return [];
+        const room = hasPotionRoom(run);
+        return addWideRow(scene, {
+          y,
+          height: CARD_ROW_HEIGHT,
+          texture: potionTexture(item.id),
+          title: POTIONS[item.id].name,
+          note: potionText(item.id),
+          side: item.sold ? '팔림' : room ? String(item.price) : POTION_TEXT.shopFull,
+          sideColor: !item.sold && room && run.gold >= item.price ? PX_CSS.accent : PX_CSS.faint,
+          dim: item.sold,
+          onTap: () => {
+            if (buyPotion(run, entry.index)) {
               sfx.coin();
               redraw();
             } else sfx.deny();

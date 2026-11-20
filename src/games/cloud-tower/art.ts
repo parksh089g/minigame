@@ -7,6 +7,7 @@ import Phaser from 'phaser';
 import { COLOR, PALETTE } from '../../config';
 import { addHiResCanvas, renderScale } from '../../core/hidpi';
 import type { CardType, EnemyLook, NodeKind, RelicId, StatusId, TreasureId, UpgradeId } from './data';
+import type { PotionId } from './potions';
 import {
   CARD_TYPE_ROWS,
   FOES,
@@ -14,6 +15,7 @@ import {
   ITEM_ROWS,
   NODE_ROWS,
   placeIn,
+  POTION_ROWS,
   RELIC_ROWS,
   STATUS_ROWS,
   TREASURE_ROWS,
@@ -77,6 +79,7 @@ export const statusTexture = (id: StatusId): string => `ct-st-${id}`;
 export const nodeTexture = (kind: NodeKind): string => `ct-node-${kind}`;
 export const treasureTexture = (id: TreasureId): string => `ct-tr-${id}`;
 export const upgradeTexture = (id: UpgradeId): string => `ct-up-${id}`;
+export const potionTexture = (id: PotionId): string => `ct-po-${id}`;
 export const relicTexture = (id: RelicId): string => `ct-relic-${id}`;
 export const cardTypeTexture = (type: CardType): string => `ct-type-${type}`;
 
@@ -131,6 +134,7 @@ const SIZE = {
   treasure: 22,
   upgrade: 22,
   type: 22,
+  potion: 18,
 } as const;
 const ITEM_SIZE: Readonly<Record<keyof typeof ITEM_ROWS, number>> = {
   candy: 13,
@@ -156,6 +160,7 @@ export function registerTowerTextures(scene: Phaser.Scene): void {
   for (const [kind, rows] of Object.entries(NODE_ROWS)) addRows(scene, nodeTexture(kind as NodeKind), icon(rows), SIZE.node, SIZE.node);
   for (const [id, rows] of Object.entries(TREASURE_ROWS)) addRows(scene, treasureTexture(id as TreasureId), icon(rows), SIZE.treasure, SIZE.treasure);
   for (const [id, rows] of Object.entries(UPGRADE_ROWS)) addRows(scene, upgradeTexture(id as UpgradeId), icon(rows), SIZE.upgrade, SIZE.upgrade);
+  for (const [id, rows] of Object.entries(POTION_ROWS)) addRows(scene, potionTexture(id as PotionId), icon(rows), SIZE.potion, SIZE.potion);
   for (const [id, rows] of Object.entries(RELIC_ROWS)) addRows(scene, relicTexture(id as RelicId), icon(rows), SIZE.upgrade, SIZE.upgrade);
   for (const [type, rows] of Object.entries(CARD_TYPE_ROWS)) addRows(scene, cardTypeTexture(type as CardType), icon(rows), SIZE.type, SIZE.type);
   for (const [name, rows] of Object.entries(ITEM_ROWS)) {

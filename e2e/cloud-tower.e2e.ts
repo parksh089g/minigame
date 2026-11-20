@@ -102,6 +102,30 @@ it('구름 탑 모험: 차례를 마치면 적이 행동하고 다시 내 차례
   await expect.poll(async () => (await runOf(page))?.battle?.hand.length, WAIT).toBe(5);
 });
 
+it('구름 탑 모험: 싸움에서 물약 칸을 두 번 누르면 물약을 쓴다', async ({ page }) => {
+  await openApp(page);
+  await startScene(page, TOWER_SCENE);
+  await tapText(page, TOWER_SCENE, START);
+  await tapText(page, TOWER_SCENE, FIGHT);
+  await expect.poll(async () => (await runOf(page))?.stage, WAIT).toBe('battle');
+  const point = await page.evaluate((key) => {
+    const scene = window.__pocketArcade?.scene.getScene(key) as unknown as {
+      run: { potions: string[]; battle: { me: { hp: number } } };
+      battleView: { render(): void; potionPoint(slot: number): { x: number; y: number } };
+    };
+    scene.run.potions = ['berry', 'star'];
+    scene.run.battle.me.hp = 20;
+    scene.battleView.render();
+    return scene.battleView.potionPoint(0);
+  }, TOWER_SCENE);
+  expect(await hiddenTexts(page, TOWER_SCENE), '물약을 든 싸움 화면').toEqual([]);
+  await tapAt(page, point.x, point.y);
+  await tapAt(page, point.x, point.y);
+  await expect
+    .poll(() => page.evaluate((key) => (window.__pocketArcade?.scene.getScene(key) as unknown as { run: { potions: string[]; hp: number } }).run, TOWER_SCENE), WAIT)
+    .toMatchObject({ potions: ['star'], hp: 35 });
+});
+
 it('구름 탑 모험: 준비 화면에서 도감을 열고 쪽을 바꿔 보고, 글이 가려지지 않는다', async ({ page }) => {
   await openApp(page);
   await startScene(page, TOWER_SCENE);

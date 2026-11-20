@@ -405,7 +405,27 @@ function startTurn(battle: Battle, ctx: BattleContext): BattleEvent[] {
 
 /** 카드가 적 하나를 골라야 하는지 */
 export function needsTarget(id: CardId, up: boolean): boolean {
-  return CARDS[id].acts[up ? 1 : 0].some((act) => act.k === 'hit' || act.k === 'hitBlock' || act.k === 'give' || act.k === 'doublePoison');
+  return actsNeedTarget(CARDS[id].acts[up ? 1 : 0]);
+}
+
+/** 하는 일 가운데 적 하나를 골라야 하는 것이 있는지. 물약도 이것으로 본다. */
+export function actsNeedTarget(acts: readonly Act[]): boolean {
+  return acts.some((act) => act.k === 'hit' || act.k === 'hitBlock' || act.k === 'give' || act.k === 'doublePoison');
+}
+
+/**
+ * 카드 없이 하는 일들을 한다(물약). 마력도 손패도 건드리지 않는다.
+ * 적을 골라야 하면 target에 살아 있는 적의 번호를 준다. 할 수 없으면 null을 돌려주고 아무것도 바꾸지 않는다.
+ */
+export function useActs(battle: Battle, acts: readonly Act[], target: number | null, ctx: BattleContext): BattleEvent[] | null {
+  if (battle.result !== null) return null;
+  if (actsNeedTarget(acts) && (target === null || !battle.foes[target] || battle.foes[target].dead)) return null;
+  const events: BattleEvent[] = [];
+  for (const act of acts) {
+    if (battle.result !== null) break;
+    playAct(battle, act, target, events, ctx);
+  }
+  return events;
 }
 
 export function cardCost(card: Card): number {

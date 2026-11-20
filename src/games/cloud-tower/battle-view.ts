@@ -4,6 +4,7 @@
  * 카드를 누르면 살짝 올라오고 설명 칸에 무엇을 하는지 보인다. 한 번 더 누르면 낸다.
  * 적을 골라야 하는 카드는 적이 하나면 그 적에게, 여럿이면 적을 눌러서 낸다.
  * 고른 카드가 없을 때 적을 누르면 그 적이 다음에 할 행동과 상태를 설명 칸에 보여 준다.
+ * 맨 아래 줄 가운데에 물약 칸 3개가 있다. 물약도 카드처럼 눌러 고르고, 한 번 더 누르거나 적을 눌러서 쓴다.
  */
 import Phaser from 'phaser';
 import { FONT_SIZE, GAME_WIDTH } from '../../config';
@@ -11,8 +12,9 @@ import { vibrate } from '../../core/haptics';
 import { sfx, tone } from '../../core/sfx';
 import { addTapZone, addText, PixelButton } from '../../core/ui';
 import { showBanner } from '../../scenes/GameHud';
-import { CARD_COLOR, cardTypeTexture, enemyTexture, LOOK, PX, PX_CSS, statusTexture, TEX } from './art';
+import { CARD_COLOR, cardTypeTexture, enemyTexture, LOOK, potionTexture, PX, PX_CSS, statusTexture, TEX } from './art';
 import {
+  actsNeedTarget,
   attackDamage,
   canPlay,
   cardBlock,
@@ -27,11 +29,14 @@ import {
 } from './battle';
 import { DEPTH, drawTopBar, MARGIN, TOP_BAR, WIDTH, pxPanel } from './bits';
 import { CARDS, ENEMIES, STATUS_ORDER, STATUSES, TREASURES, type Act } from './data';
-import { runEndTurn, runPlayCard, type RunState } from './run';
-import { cardName, cardText, moveText, type CardTextContext } from './text';
+import { POTION_SLOTS, POTIONS, potionsOf } from './potions';
+import { runEndTurn, runPlayCard, runUsePotion, type RunState } from './run';
+import { cardName, cardText, moveText, POTION_TEXT, potionText, type CardTextContext } from './text';
 
 /** 손패 카드 한 장의 크기 */
 export const HAND_CARD = { width: 44, height: 74, lift: 12 } as const;
+/** 맨 아래 줄의 물약 칸: 왼쪽 끝 x, 한 칸의 크기와 간격 */
+export const POTION_SLOT = { left: MARGIN + 70, size: 22, step: 23 } as const;
 /** 적이 한 마리씩 행동하는 사이(ms) */
 const FOE_STEP_MS = 560;
 
@@ -72,6 +77,8 @@ export class BattleView {
   private readonly layout: Layout;
   private layer: Phaser.GameObjects.GameObject[] = [];
   private selected: number | null = null;
+  /** 고른 물약 칸. 카드와 물약은 하나만 고른다. */
+  private selectedPotion: number | null = null;
   /** 적이 행동하는 동안이라 누를 수 없다. */
   private busy = false;
   private foeSprites: (Phaser.GameObjects.Image | null)[] = [];
@@ -98,6 +105,11 @@ export class BattleView {
     if (x === undefined) return null;
     const right = index < xs.length - 1 ? xs[index + 1] : x + HAND_CARD.width;
     return { x: (x + right) / 2, y: this.layout.handTop + HAND_CARD.height / 2 };
+  }
+
+  /** 물약 칸 slot의 누르는 자리. 자동 점검이 쓴다. */
+  potionPoint(slot: number): { x: number; y: number } {
+    return { x: POTION_SLOT.left + slot * POTION_SLOT.step + POTION_SLOT.size / 2, y: this.layout.footTop + 16 };
   }
 
   /** 적 index의 누르는 자리. 자동 점검이 쓴다. */
@@ -176,7 +188,7 @@ export class BattleView {
         this.foeSprites.push(null);
         return;
       }
-      const targeting = this.selected !== null && this.selectedNeedsTarget(battle);
+      const targeting = this.selectedNeedsTarget(battle);
       if (targeting) {
         const ring = this.scene.add.graphics();
         ring.lineStyle(2, PX.yellow, 0.9);
@@ -386,7 +398,28 @@ export class BattleView {
     };
     pile(MARGIN + 8, TEX.deck, battle.draw.length);
     pile(MARGIN + 44, TEX.discard, battle.discard.length);
-    addText(this.scene, MARGIN + 80, footTop + 16, `${battle.turn}번째 차례`, { size: 9, color: PX_CSS.faint, originY: 0.5 });
+    this.drawPotions(battle);
+  }
+
+  /** 물약 칸 3개. 빈 칸은 흐린 테두리만 보인다. */
+  private drawPotions(battle: Battle): void {
+    const potions = potionsOf(this.run);
+    const { size } = POTION_SLOT;
+    const top = this.layout.footTop + 16 - size / 2;
+    for (let slot = 0; slot < POTION_SLOTS; slot += 1) {
+      const x = POTION_SLOT.left + slot * POTION_SLOT.step;
+      const id = potions[slot];
+      const picked = slot === this.selectedPotion;
+      const g = this.scene.add.graphics();
+      g.fillStyle(picked ? PX.yellow : id ? PX.edge : PX.panelHi, 1);
+      g.fillRect(x, top, size, size);
+      g.fillStyle(id ? PX.navy : PX.ink, 1);
+      g.fillRect(x + 1, top + 1, size - 2, size - 2);
+      if (!id) continue;
+      const usable = !this.busy && battle.result === null;
+      this.scene.add.image(x + size / 2, top + size / 2 - (picked ? 1 : 0), potionTexture(id)).setAlpha(usable ? 1 : 0.6);
+      addTapZone(this.scene, x - 1, top - 6, size + 2, size + 12, () => undefined, () => this.tapPotion(slot));
+    }
   }
 
   // ───────── 설명 칸 ─────────
@@ -399,7 +432,14 @@ export class BattleView {
   private refreshInfo(battle: Battle): void {
     let text: string = BATTLE_TEXT.hint;
     if (this.infoMessage) text = this.infoMessage;
-    else if (this.selected !== null) {
+    else if (this.selectedPotion !== null) {
+      const id = potionsOf(this.run)[this.selectedPotion];
+      if (id) {
+        const ctx = this.textContext(battle, battle.foes.findIndex((foe) => !foe.dead && livingCount(battle) === 1));
+        const targeted = actsNeedTarget(POTIONS[id].acts) && livingCount(battle) > 1;
+        text = `${POTIONS[id].name}: ${potionText(id, ctx)}\n${targeted ? POTION_TEXT.throwAt : POTION_TEXT.drink}`;
+      }
+    } else if (this.selected !== null) {
       const card = battle.hand[this.selected];
       if (card) {
         const ctx = this.textContext(battle, battle.foes.findIndex((foe) => !foe.dead && livingCount(battle) === 1));
@@ -422,6 +462,10 @@ export class BattleView {
   }
 
   private selectedNeedsTarget(battle: Battle): boolean {
+    if (this.selectedPotion !== null) {
+      const id = potionsOf(this.run)[this.selectedPotion];
+      return id ? actsNeedTarget(POTIONS[id].acts) : false;
+    }
     if (this.selected === null) return false;
     const card = battle.hand[this.selected];
     return card ? needsTarget(card.id, card.up) : false;
@@ -437,6 +481,7 @@ export class BattleView {
     if (this.selected !== index) {
       sfx.flip();
       this.selected = index;
+      this.selectedPotion = null;
       this.infoMessage = null;
       this.render();
       return;
@@ -460,6 +505,10 @@ export class BattleView {
     const battle = this.battle;
     const foe = battle.foes[index];
     if (!foe || foe.dead) return;
+    if (this.selectedPotion !== null && this.selectedNeedsTarget(battle)) {
+      this.usePotion(this.selectedPotion, index);
+      return;
+    }
     if (this.selected !== null && this.selectedNeedsTarget(battle)) {
       const card = battle.hand[this.selected];
       if (card && !canPlay(battle, card)) {
@@ -472,6 +521,7 @@ export class BattleView {
     }
     // 고른 카드가 없으면 그 적의 설명을 보여 준다.
     this.selected = null;
+    this.selectedPotion = null;
     const statuses = STATUS_ORDER.filter((id) => (foe.st[id] ?? 0) !== 0)
       .map((id) => `${STATUSES[id].name} ${foe.st[id]}`)
       .join(', ');
@@ -500,6 +550,65 @@ export class BattleView {
     this.checkDone();
   }
 
+  private tapPotion(slot: number): void {
+    if (this.busy) return;
+    const battle = this.battle;
+    const id = potionsOf(this.run)[slot];
+    if (!id || battle.result !== null) return;
+    if (this.selectedPotion !== slot) {
+      sfx.click();
+      this.selectedPotion = slot;
+      this.selected = null;
+      this.infoMessage = null;
+      this.render();
+      return;
+    }
+    if (actsNeedTarget(POTIONS[id].acts)) {
+      const living = battle.foes.flatMap((foe, i) => (foe.dead ? [] : [i]));
+      if (living.length === 1) this.usePotion(slot, living[0]);
+      else this.setInfo(POTION_TEXT.throwAt);
+      return;
+    }
+    this.usePotion(slot, null);
+  }
+
+  private usePotion(slot: number, target: number | null): void {
+    const id = potionsOf(this.run)[slot];
+    if (!id) return;
+    const from = this.potionPoint(slot);
+    const events = runUsePotion(this.run, slot, target);
+    if (!events) {
+      sfx.deny();
+      return;
+    }
+    tone(660, 0.1, { slideTo: 990, type: 'triangle', volume: 0.18 });
+    this.selectedPotion = null;
+    this.selected = null;
+    this.infoMessage = null;
+    this.flyPotion(id, from, target);
+    this.render();
+    this.show(events);
+    this.hooks.save();
+    this.checkDone();
+  }
+
+  /** 쓴 물약이 적(또는 토끼)에게 날아가며 사라진다. */
+  private flyPotion(id: keyof typeof POTIONS, from: { x: number; y: number }, target: number | null): void {
+    const ghost = this.scene.add.image(from.x, from.y, potionTexture(id)).setDepth(DEPTH.float);
+    const to = target !== null ? this.foeCenters[target] : { x: MARGIN + 22, y: this.layout.meTop + 20 };
+    this.scene.tweens.add({
+      targets: ghost,
+      x: to.x,
+      y: to.y,
+      angle: target !== null ? 360 : 0,
+      scale: 1.4,
+      alpha: 0,
+      duration: 300,
+      ease: 'Quad.In',
+      onComplete: () => ghost.destroy(),
+    });
+  }
+
   /** 낸 카드가 적(또는 위)으로 날아가며 사라진다. */
   private flyCard(card: Card, from: { x: number; y: number }, target: number | null): void {
     const color = CARD_COLOR[CARDS[card.id].type];
@@ -526,6 +635,7 @@ export class BattleView {
     if (battle.result !== null) return;
     this.busy = true;
     this.selected = null;
+    this.selectedPotion = null;
     this.infoMessage = null;
     sfx.whoosh();
     const steps = runEndTurn(this.run);
