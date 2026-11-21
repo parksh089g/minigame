@@ -175,6 +175,7 @@ export const SCENE = {
   ranking: 'Ranking',
   result: 'Result',
   pause: 'Pause',
+  ruleBook: 'RuleBook',
   lightningTap: 'LightningTap',
   memoryCards: 'MemoryCards',
   jumpRunner: 'JumpRunner',

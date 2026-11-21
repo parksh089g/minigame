@@ -115,6 +115,9 @@ export class HulaScene extends MiniGameScene {
     new PxButton(this, { x: MARGIN, y: 8, width: 26, height: 26, icon: TEX.back_arrow, hitPadding: 6, onTap: () => this.leave() });
     addText(this, 42, 21, '훌라', { size: 18, color: PX_CSS.accent, originY: 0.5 });
     addText(this, 84, 22, '컴퓨터와 1 대 1', { size: 11, color: PX_CSS.sub, originY: 0.5 });
+    // 규칙을 모르는 사람을 위한 안내서. 처음 하는 사람에게는 한 번 저절로 열린다.
+    new PxButton(this, { x: GAME_WIDTH - MARGIN - 44, y: 8, width: 44, height: 26, label: '규칙', size: 12, style: 'gold', hitPadding: 4, onTap: () => this.openRuleBook() });
+    this.offerRuleBook(() => this.mode === 'lobby');
 
     // 카드 몇 장을 부채처럼 펼쳐 둔다.
     const fan = [cardTexture(0 * 13 + 6), cardTexture(1 * 13 + 6), cardTexture(2 * 13 + 6), cardTexture(3 * 13 + 6)];

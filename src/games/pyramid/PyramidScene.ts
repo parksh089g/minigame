@@ -128,6 +128,7 @@ export class PyramidScene extends MiniGameScene {
     if (data.mode === 'daily' || data.mode === 'free') this.startPlay(data.mode);
     else {
       this.phase = 'lobby';
+      this.offerRuleBook(() => this.phase === 'lobby' && !this.rankView);
       void pyramidDailyStore.load().then(() => {
         if (this.sys.isActive() && this.phase === 'lobby' && !this.rankView) this.openLobby();
       });
@@ -162,6 +163,10 @@ export class PyramidScene extends MiniGameScene {
       return object;
     };
 
+    // 오른쪽 위: 규칙을 모르는 사람을 위한 안내서. 처음 하는 사람에게는 한 번 저절로 열린다.
+    for (const object of addRowButton(this, { x: GAME_WIDTH - 8 - 46, y: 8, width: 46, height: 26, title: T.ruleBook, center: true, onTap: () => this.openRuleBook() })) {
+      add(object);
+    }
     add(this.add.image(GAME_WIDTH / 2, top + 27, TEX.emblem));
     add(addText(this, GAME_WIDTH / 2, top + 66, T.title, { size: 24, color: PX_CSS.accent, originX: 0.5 }));
     add(addText(this, GAME_WIDTH / 2, top + 98, T.tagline, { size: 11, color: PX_CSS.text, originX: 0.5 }));

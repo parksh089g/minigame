@@ -4,7 +4,9 @@ import type { BackAware } from '../core/app-events';
 import { homeScene } from '../core/home';
 import { addPanel, addScrim, addText, fadeToScene, PixelButton, type ButtonStyle } from '../core/ui';
 import { howToFor } from '../games/how-to';
+import { ruleBookFor } from '../games/rule-book';
 import type { PauseData, StageStart } from './MiniGameScene';
+import type { RuleBookData } from './RuleBookScene';
 import type { StagesData } from './StagesScene';
 
 const PANEL_WIDTH = 176;
@@ -72,6 +74,12 @@ export class PauseScene extends Phaser.Scene implements BackAware {
   /** 같은 일시정지 화면의 다른 쪽을 보여 준다. 뒤의 게임은 멈춘 그대로다. */
   private turnTo(page: NonNullable<PauseData['page']>): void {
     this.scene.restart({ ...this.opened, page } satisfies PauseData);
+  }
+
+  /** 규칙 안내서를 이 화면 위에 띄운다. 닫으면 방법을 보던 이 화면으로 돌아온다. */
+  private openRuleBook(gameId: string): void {
+    this.scene.pause();
+    this.scene.launch(SCENE.ruleBook, { gameId, sceneKey: this.scene.key, closeLabel: '돌아가기' } satisfies RuleBookData);
   }
 
   create(data: PauseData): void {
@@ -190,7 +198,11 @@ export class PauseScene extends Phaser.Scene implements BackAware {
     const left = Math.round((GAME_WIDTH - HOW_TO.width) / 2);
     const textLeft = left + HOW_TO.pad + HOW_TO.dot;
     const wrapWidth = HOW_TO.width - HOW_TO.pad * 2 - HOW_TO.dot;
-    const below = HOW_TO.foot + BUTTON.height + HOW_TO.foot;
+    // 규칙 안내서가 있는 게임(카드 게임)은 "돌아가기" 위에 "규칙 자세히"를 하나 더 둔다.
+    const gameId = this.opened.gameId;
+    const hasRuleBook = gameId !== undefined && ruleBookFor(gameId) !== null;
+    const buttonCount = hasRuleBook ? 2 : 1;
+    const below = HOW_TO.foot + BUTTON.height + (buttonCount - 1) * BUTTON.step + HOW_TO.foot;
     // 카드가 화면 위아래로 조금씩 남기고 들어갈 때 글이 쓸 수 있는 높이
     const room = height - 8 - HOW_TO.top - below;
 
@@ -221,9 +233,21 @@ export class PauseScene extends Phaser.Scene implements BackAware {
       y += Math.ceil(text.height) + HOW_TO.gap;
     }
 
+    const buttonsTop = top + HOW_TO.top + bodyHeight + HOW_TO.foot;
+    if (hasRuleBook && gameId !== undefined) {
+      new PixelButton(this, {
+        x: Math.round((GAME_WIDTH - BUTTON.width) / 2),
+        y: buttonsTop,
+        width: BUTTON.width,
+        height: BUTTON.height,
+        label: '규칙 자세히',
+        style: 'yellow',
+        onTap: () => this.openRuleBook(gameId),
+      });
+    }
     new PixelButton(this, {
       x: Math.round((GAME_WIDTH - BUTTON.width) / 2),
-      y: top + HOW_TO.top + bodyHeight + HOW_TO.foot,
+      y: buttonsTop + (buttonCount - 1) * BUTTON.step,
       width: BUTTON.width,
       height: BUTTON.height,
       label: '돌아가기',

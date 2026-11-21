@@ -46,6 +46,7 @@ import { BootScene } from './scenes/BootScene';
 import { HubScene } from './scenes/HubScene';
 import { PauseScene } from './scenes/PauseScene';
 import { RankingScene } from './scenes/RankingScene';
+import { RuleBookScene } from './scenes/RuleBookScene';
 import { ResultScene } from './scenes/ResultScene';
 import { SettingsScene } from './scenes/SettingsScene';
 import { StageResultScene } from './scenes/StageResultScene';
@@ -142,6 +143,7 @@ async function boot(): Promise<void> {
       CloudTowerScene,
       SproutCompanyScene,
       PauseScene,
+      RuleBookScene,
       ResultScene,
       StagesScene,
       StageResultScene,

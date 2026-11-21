@@ -240,6 +240,9 @@ export class SolitaireScene extends MiniGameScene {
     const { height } = this.scale;
     new PixelButton(this, { x: 8, y: 8, width: 26, height: 26, icon: 'icon-back', hitPadding: 6, onTap: () => fadeToScene(this, homeScene()) });
     addText(this, 42, 21, TEXT.title, { size: 16, color: PX_CSS.accent, originY: 0.5 });
+    // 규칙을 모르는 사람을 위한 안내서. 처음 하는 사람에게는 한 번 저절로 열린다.
+    new PixelButton(this, { x: GAME_WIDTH - 8 - 44, y: 8, width: 44, height: 26, label: '규칙', style: 'yellow', hitPadding: 4, onTap: () => this.openRuleBook() });
+    this.offerRuleBook(() => this.phase === 'lobby');
 
     // 가운데: 부채꼴로 펼친 A 네 장
     const fanY = 64 + (height - 400) * 0.25;

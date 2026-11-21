@@ -66,6 +66,7 @@ export const TEXT = {
   bots: '상대 수',
   botCount: ['1명', '2명', '3명'],
   rules: '특수 카드',
+  ruleBook: '규칙',
   start: '시작!',
   record: (wins: number, plays: number) => `${plays}판 ${wins}승`,
   firstTime: '첫 판을 해 봐요',
