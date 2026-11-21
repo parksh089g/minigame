@@ -22,6 +22,7 @@ import { ONE_CARD_GAME_ID, ONE_CARD_SCENE } from './one-card/text';
 import { TOWER_GAME_ID, TOWER_SCENE } from './cloud-tower/data';
 import { HULA_GAME_ID, HULA_SCENE } from './hula/data';
 import { coinsFor as solitaireCoins, SOLITAIRE_GAME_ID, SOLITAIRE_SCENE } from './solitaire/rules';
+import { PYRAMID_GAME_ID, PYRAMID_SCENE } from './pyramid/data';
 import { coinsFor as towerCoins, recordLabel as towerRecord } from './cloud-tower/run';
 
 export interface MiniGameInfo {
@@ -266,6 +267,15 @@ export const GAMES: readonly MiniGameInfo[] = [
     coinsFor: (score) => Math.floor(score / 15),
     dailyTargets: [80, 170, 280],
     genre: 'action',
+  },
+  {
+    id: PYRAMID_GAME_ID,
+    title: '피라미드',
+    icon: 'icon-pyramid',
+    sceneKey: PYRAMID_SCENE,
+    coinsFor: (score) => Math.floor(score / 20),
+    dailyTargets: [200, 320, 500],
+    genre: 'puzzle',
   },
   {
     id: 'candy-slot',

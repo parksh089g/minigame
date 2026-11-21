@@ -15,6 +15,7 @@ import { BrickBreakScene } from './games/brick-break/BrickBreakScene';
 import { CandySlotScene } from './games/candy-slot/CandySlotScene';
 import { ChosungQuizScene } from './games/chosung-quiz/ChosungQuizScene';
 import { CloudTowerScene } from './games/cloud-tower/CloudTowerScene';
+import { PyramidScene } from './games/pyramid/PyramidScene';
 import { ColorSortScene } from './games/color-sort/ColorSortScene';
 import { DuelScene } from './games/duel/DuelScene';
 import { HulaScene } from './games/hula/HulaScene';
@@ -128,6 +129,7 @@ async function boot(): Promise<void> {
       BlockFillScene,
       ChosungQuizScene,
       BrickBreakScene,
+      PyramidScene,
       CandySlotScene,
       SolitaireScene,
       OneCardScene,

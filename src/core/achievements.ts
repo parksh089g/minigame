@@ -172,6 +172,8 @@ export const ACHIEVEMENTS: readonly Achievement[] = [
   { id: 'chosung-1000', group: 'score', title: '초성의 달인', description: '초성 퀴즈 1000점 이상', goal: 1000, reward: 50, measure: bestOf('chosung-quiz') },
   { id: 'brick-300', group: 'score', title: '와르르 벽돌', description: '벽돌 깨기 300점 이상', goal: 300, reward: 20, measure: bestOf('brick-break') },
   { id: 'brick-450', group: 'score', title: '벽돌의 달인', description: '벽돌 깨기 450점 이상', goal: 450, reward: 50, measure: bestOf('brick-break') },
+  { id: 'pyramid-300', group: 'score', title: '짝꿍 찾기', description: '피라미드 300점 이상', goal: 300, reward: 20, measure: bestOf('pyramid') },
+  { id: 'pyramid-600', group: 'score', title: '피라미드의 달인', description: '피라미드 600점 이상', goal: 600, reward: 50, measure: bestOf('pyramid') },
   { id: 'slot-500', group: 'score', title: '행운의 손', description: '행운 슬롯 500점 이상', goal: 500, reward: 20, measure: bestOf('candy-slot') },
   { id: 'slot-1500', group: 'score', title: '금화 부자', description: '행운 슬롯 1500점 이상', goal: 1500, reward: 50, measure: bestOf('candy-slot') },
   { id: 'garden-1000', group: 'score', title: '든든한 울타리', description: '텃밭 1000점 이상', goal: 1000, reward: 20, measure: bestOf('garden-guard') },
