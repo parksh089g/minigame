@@ -10,7 +10,7 @@
  * - 조커 다음에는(공격을 받아 넘긴 뒤에는) 아무 카드나 낼 수 있다.
  * - 낼 카드가 없거나 내기 싫으면 한 장 받고 차례를 넘긴다.
  * - 카드가 한 장 남으면 "원카드!"를 외쳐야 한다. 남이 먼저 외치면 벌로 한 장 받는다(시간은 화면이 잰다).
- * - 손의 카드가 MAX_HAND장을 넘으면 파산해서 그 판에서 빠진다.
+ * - 손의 카드가 MAX_HAND장을 넘으면 파산해서 그 판에서 빠진다. 사람(0번)이 파산하면 판이 바로 끝난다.
  */
 
 export type Suit = 'S' | 'D' | 'H' | 'C';
@@ -233,6 +233,28 @@ function endIfAlone(state: GameState): boolean {
   return true;
 }
 
+/**
+ * 사람(0번)이 파산하면 컴퓨터끼리 계속 둘 까닭이 없으니 판을 바로 끝낸다.
+ * 남은 사람 가운데 카드가 가장 적은 사람이 이기고, 같으면 사람 다음 차례에 가까운 사람이 이긴다.
+ */
+function endIfHumanOut(state: GameState): boolean {
+  if (!state.players[0].out || state.winner !== null) return false;
+  const left = activePlayers(state);
+  if (left.length === 0) return false;
+  let best = nextPlayer(state, 0);
+  let index = best;
+  for (let step = 1; step < left.length; step += 1) {
+    index = nextPlayer(state, index);
+    if (state.players[index].hand.length < state.players[best].hand.length) best = index;
+  }
+  state.winner = best;
+  state.oneCard = null;
+  state.attack = 0;
+  state.choosingSuit = false;
+  state.events.push({ k: 'win', who: best });
+  return true;
+}
+
 /** who가 카드를 낸다. 낼 수 없는 카드면 false를 돌려주고 아무것도 바꾸지 않는다. */
 export function playCard(state: GameState, who: number, cardId: number): boolean {
   if (state.winner !== null || state.turn !== who || state.choosingSuit) return false;
@@ -317,8 +339,8 @@ export function giveCards(state: GameState, who: number, count: number): number 
     state.deck.unshift(...player.hand);
     player.hand = [];
     state.events.push({ k: 'broke', who });
-    if (state.turn === who && !endIfAlone(state)) state.turn = nextPlayer(state, who);
-    else endIfAlone(state);
+    if (endIfHumanOut(state) || endIfAlone(state)) return given;
+    if (state.turn === who) state.turn = nextPlayer(state, who);
   }
   return given;
 }

@@ -13,7 +13,7 @@ import { addTapZone, addText, PixelButton } from '../../core/ui';
 import { enemyTexture, nodeTexture, PX, PX_CSS, TEX } from './art';
 import { drawSky, drawTopBar, MARGIN, TOP_BAR, WIDTH, pxPanel } from './bits';
 import { ENCOUNTERS, ENEMIES, FLOORS_PER_ACT, NODE_BLURBS, NODE_NAMES, type NodeKind } from './data';
-import { potionsOf } from './potions';
+import { discardPotion, potionsOf } from './potions';
 import { actOf, chooseNode, floorInAct, type RunState } from './run';
 import { drawPotionStrip, drawTreasureStrip, type ScreenHooks } from './screens';
 import { MAP_TEXT } from './text';
@@ -111,7 +111,14 @@ export function buildMap(scene: Phaser.Scene, run: RunState, hooks: ScreenHooks 
   // 보물은 왼쪽부터, 물약은 오른쪽 끝에 놓는다.
   const potions = potionsOf(run);
   if (run.treasures.length > 0) drawTreasureStrip(scene, run.treasures, treasureTop, WIDTH - potions.length * 22 - 6);
-  if (potions.length > 0) drawPotionStrip(scene, potions, treasureTop);
+  if (potions.length > 0)
+    drawPotionStrip(scene, potions, treasureTop, (slot) => {
+      // 올라가는 중에는 화면을 다시 열지 않는다.
+      if (!leaving && discardPotion(run, slot)) {
+        sfx.pop();
+        hooks.next();
+      }
+    });
 
   let picked: number | null = null;
   let leaving = false;

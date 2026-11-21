@@ -106,3 +106,12 @@ export function swapRewardPotion(run: RunState, slot: number): boolean {
   potion.taken = true;
   return true;
 }
+
+/** 싸움 밖(지도, 가게 등)에서 slot번째 물약을 버린다. 싸우는 중이거나 판이 끝났으면 false */
+export function discardPotion(run: RunState, slot: number): boolean {
+  const potions = potionsOf(run);
+  if (run.stage === 'battle' || run.stage === 'over' || run.result !== null) return false;
+  if (!Number.isInteger(slot) || slot < 0 || slot >= potions.length) return false;
+  potions.splice(slot, 1);
+  return true;
+}

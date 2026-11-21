@@ -9,7 +9,7 @@ import { floatText, showBanner } from '../../scenes/GameHud';
 import { MiniGameScene, type ResultStat } from '../../scenes/MiniGameScene';
 import { CARD_H, CARD_W, cardTexture, PX, PX_CSS, registerPyramidTextures, TEX } from './art';
 import { PYRAMID_GAME_ID, PYRAMID_SCENE } from './data';
-import { addDailyRun, boardDayOf, dailySeed, dayIndexOf, dayLabel, recordOn } from './daily';
+import { addDailyRun, boardDayOf, dailySeed, dayIndexOf, dayLabel, freeSeed, recordOn } from './daily';
 import { pyramidDailyStore } from './daily-store';
 import { openRankView, type RankView } from './rank-view';
 import {
@@ -97,7 +97,8 @@ export class PyramidScene extends MiniGameScene {
   private maxChain = 0;
   private removed = 0;
   private elapsed = 0;
-  private started = false;
+  /** 판에서 무엇이든 눌렀는지. 오늘의 판을 나갈 때 알릴지 정하는 데만 쓴다(시계는 판이 깔리면 바로 간다). */
+  private touched = false;
   private rankView: RankView | null = null;
 
   constructor() {
@@ -122,7 +123,7 @@ export class PyramidScene extends MiniGameScene {
     this.maxChain = 0;
     this.removed = 0;
     this.elapsed = 0;
-    this.started = false;
+    this.touched = false;
 
     if (data.mode === 'daily' || data.mode === 'free') this.startPlay(data.mode);
     else {
@@ -134,7 +135,8 @@ export class PyramidScene extends MiniGameScene {
   }
 
   override update(_time: number, deltaMs: number): void {
-    if (this.phase !== 'play' || !this.playing || !this.started) return;
+    // 카드가 다 앞면이라 누르기 전에 수를 다 생각해 둘 수 있다. 그래서 첫 탭이 아니라 판이 깔리고 두기 시작할 때부터 잰다.
+    if (this.phase !== 'play' || !this.playing) return;
     // 탭이 가려졌다 돌아와도 시간이 한꺼번에 흐르지 않게 한 프레임의 길이를 제한한다.
     this.elapsed += Math.min(deltaMs, 100) / 1000;
     this.timeText.setText(timeLabel(this.elapsed));
@@ -248,7 +250,7 @@ export class PyramidScene extends MiniGameScene {
   }
 
   protected override quitWarning(): string | null {
-    return this.mode === 'daily' && this.started ? T.quitDaily : null;
+    return this.mode === 'daily' && this.touched ? T.quitDaily : null;
   }
 
   /**
@@ -266,7 +268,7 @@ export class PyramidScene extends MiniGameScene {
     this.phase = 'play';
     this.mode = mode;
     this.day = mode === 'daily' ? dayIndexOf(new Date()) : null;
-    const seed = this.day !== null ? dailySeed(this.day) : Math.floor(Math.random() * 0x7fffffff);
+    const seed = this.day !== null ? dailySeed(this.day) : freeSeed();
     const board = deal(seed);
     this.board = board;
 
@@ -427,7 +429,7 @@ export class PyramidScene extends MiniGameScene {
     // 카메라가 화면을 확대해 그리므로 화면 좌표가 아니라 게임 좌표로 본다.
     const hit = this.spotAt(pointer.worldX, pointer.worldY);
     if (hit === null) return;
-    this.started = true;
+    this.touched = true;
     this.clearHint();
     if (hit === 'stock') {
       this.draw();

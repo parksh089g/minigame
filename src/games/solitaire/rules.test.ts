@@ -16,6 +16,7 @@ import {
   POINTS,
   SOLITAIRE_GAME_ID,
   timeBonus,
+  undoPenalty,
   type Board,
   type Card,
 } from './rules';
@@ -149,10 +150,49 @@ describe('끝내기', () => {
     expect(hasUsefulMove(board)).toBe(true);
   });
 
+  it('앞면 덩어리의 일부를 옮겨 모음 칸에 올릴 카드가 드러나면 막힌 판이 아니다', () => {
+    const board = empty();
+    board.foundations[1] = [1, 2, 3, 4].map((rank) => card(1, rank));
+    board.tableau[0] = [card(0, 6), card(1, 5), card(0, 4)];
+    board.tableau[1] = [card(3, 10, false), card(2, 5)];
+    // 4♠을 5♦ 위로 옮기면 5♥이 드러나 모음 칸에 올라간다.
+    expect(hasUsefulMove(board)).toBe(true);
+  });
+
+  it('일부를 옮겨도 드러난 카드를 쓸 데가 없으면 세지 않는다', () => {
+    const board = empty();
+    board.foundations[1] = [1, 2, 3].map((rank) => card(1, rank));
+    board.tableau[0] = [card(0, 6), card(1, 5), card(0, 4)];
+    board.tableau[1] = [card(3, 10, false), card(2, 5)];
+    // 4♠을 5♥과 5♦ 사이로 오가게 하는 수뿐이다.
+    expect(hasUsefulMove(board)).toBe(false);
+  });
+
   it('시간 보너스는 15분이 지나면 없다', () => {
     expect(timeBonus(0)).toBe(900);
     expect(timeBonus(300)).toBe(600);
     expect(timeBonus(2000)).toBe(0);
+  });
+});
+
+describe('되돌리기 감점', () => {
+  it('되돌릴 때마다 마지막 점수에서 깎고, 0보다 작아지지 않는다', () => {
+    const board = empty();
+    board.score = 40;
+    expect(undoPenalty(0)).toBe(0);
+    expect(undoPenalty(3)).toBe(3 * POINTS.undo);
+    expect(finalScore(board, 0)).toBe(40);
+    expect(finalScore(board, 0, 2)).toBe(40 + 2 * POINTS.undo);
+    expect(finalScore(board, 0, 100)).toBe(0);
+    board.score = -30;
+    expect(finalScore(board, 0, 1)).toBe(0);
+  });
+
+  it('이긴 판에도 보너스를 더한 뒤에 깎는다', () => {
+    const board = empty();
+    board.foundations = [0, 1, 2, 3].map((suit) => Array.from({ length: 13 }, (_, i) => card(suit as Card['suit'], i + 1)));
+    board.score = 100;
+    expect(finalScore(board, 900, 4)).toBe(100 + POINTS.win + 4 * POINTS.undo);
   });
 });
 

@@ -1,5 +1,5 @@
 /**
- * 피라미드의 오늘의 판: 날마다 누구에게나 같은 순서로 섞인 카드가 깔리는 한 판.
+ * 피라미드의 오늘의 판: 날마다 누구에게나 같은 순서로 섞인 카드가 깔리는 한 판. 끝까지 치울 수 있는 판으로 고른다(solver.ts).
  * 몇 번이든 다시 할 수 있고, 그날의 가장 좋은 점수가 남고 오늘의 랭킹에 오른다.
  * 날은 다른 게임의 오늘의 판, 오늘의 랭킹과 같다(online/protocol.ts의 rankDayOf):
  * 기기가 어느 나라에 있든 한국 시각으로 0시에 하루가 넘어간다.
@@ -11,6 +11,7 @@
  */
 import { isRankDay, MAX_SCORE, rankDayOf, rankDayStart } from '../../online/protocol';
 import { PYRAMID_GAME_ID } from './data';
+import { pickWinnableSeed } from './solver';
 
 const DAY_MS = 86_400_000;
 
@@ -44,9 +45,19 @@ function hashSeed(text: string): number {
   return hash >>> 0;
 }
 
-/** 그날의 판의 씨앗(rules.ts의 deal에 넘긴다). 게임 id와 날로만 정해지므로 같은 날에는 누구에게나 같다. */
+/**
+ * 그날의 판의 씨앗(rules.ts의 deal에 넘긴다). 게임 id와 날로만 정해지므로 같은 날에는 누구에게나 같다.
+ * "게임:daily:날:0", "…:1", … 차례로 깔아 보고 처음으로 끝까지 치워지는 판을 고른다(solver.ts).
+ */
 export function dailySeed(day: number): number {
-  return hashSeed(`${PYRAMID_GAME_ID}:daily:${Math.max(0, Math.floor(day))}`);
+  const base = `${PYRAMID_GAME_ID}:daily:${Math.max(0, Math.floor(day))}`;
+  return pickWinnableSeed((attempt) => hashSeed(`${base}:${attempt}`));
+}
+
+/** 여느 판의 씨앗. random으로 씨앗 글을 정하고, 오늘의 판처럼 끝까지 치워지는 판을 고른다. */
+export function freeSeed(random: () => number = Math.random): number {
+  const base = `${PYRAMID_GAME_ID}:free:${Math.floor(random() * 0x7fffffff)}`;
+  return pickWinnableSeed((attempt) => hashSeed(`${base}:${attempt}`));
 }
 
 /**

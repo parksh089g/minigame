@@ -9,6 +9,7 @@
  *
  * 점수(윈도 솔리테어의 셈을 줄여 썼다): 모음 칸에 올리면 +10, 모음 칸에서 내리면 -15, 뒷면 카드를 뒤집으면 +5,
  * 버림 칸에서 줄로 옮기면 +5, 더미를 두 번째부터 다시 뒤집을 때마다 -20. 이기면 판 보너스와 빨리 끝낸 만큼의 보너스가 붙는다.
+ * 오늘의 판에서는 되돌릴 때마다 -5(마지막 점수에서 뺀다). 되돌려서 더미의 차례를 미리 보는 것을 공짜로 두지 않으려고.
  */
 
 export const SOLITAIRE_GAME_ID = 'solitaire';
@@ -62,6 +63,8 @@ export const POINTS = {
   recycle: -20,
   /** 이기면 붙는 판 보너스 */
   win: 300,
+  /** 오늘의 판에서 되돌릴 때마다(마지막 점수에서 뺀다) */
+  undo: -5,
 } as const;
 
 /** 이긴 판의 시간 보너스: 15분 안에 끝내면 남은 초마다 1점. */
@@ -281,7 +284,8 @@ export function nextFoundationMove(board: Board): Move | null {
 
 /**
  * 판을 바꾸는 쓸모 있는 수가 남아 있는지. 없으면 막힌 판이다.
- * 쓸모 있는 수: 모음 칸에 올리기, 뒷면 카드를 드러내거나 줄을 비우는 옮기기, 버림 칸의 카드를 줄에 놓기,
+ * 쓸모 있는 수: 모음 칸에 올리기, 뒷면 카드를 드러내거나 줄을 비우는 옮기기,
+ * 앞면 덩어리의 일부를 옮겨 모음 칸에 올릴 카드를 드러내는 옮기기, 버림 칸의 카드를 줄에 놓기,
  * 그리고 더미와 버림 칸에 아직 어딘가 놓을 수 있는 카드가 있으면 더미를 넘기는 것.
  * 줄끼리 같은 높이의 카드를 오가게 하는 수처럼 판이 나아지지 않는 수는 세지 않는다.
  */
@@ -297,19 +301,36 @@ export function hasUsefulMove(board: Board): boolean {
     if (firstUp < 0) continue;
     const count = column.length - firstUp;
     const revealsOrEmpties = firstUp > 0 || column[firstUp].rank !== 13;
-    if (!revealsOrEmpties) continue;
-    for (let target = 0; target < COLUMNS; target += 1) {
-      if (target === index) continue;
-      if (isLegal(board, { from: { kind: 'tab', index }, count, to: { kind: 'tab', index: target } })) return true;
+    const movable = (n: number): boolean => {
+      for (let target = 0; target < COLUMNS; target += 1) {
+        if (target === index) continue;
+        if (isLegal(board, { from: { kind: 'tab', index }, count: n, to: { kind: 'tab', index: target } })) return true;
+      }
+      return false;
+    };
+    if (revealsOrEmpties && movable(count)) return true;
+    // 앞면 덩어리의 일부만 옮겨서 드러난 앞면 카드를 모음 칸에 올릴 수 있으면 그것도 쓸모 있는 수다.
+    for (let n = 1; n < count; n += 1) {
+      if (canFound(board, column[column.length - n - 1]) && movable(n)) return true;
     }
   }
   return [...board.stock, ...board.waste].some(placeable);
 }
 
-/** 이긴 판의 마지막 점수: 쌓인 점수에 판 보너스와 시간 보너스를 더한다. */
-export function finalScore(board: Board, seconds: number): number {
+/** 되돌린 횟수만큼 깎는 점수(0 또는 음수). 오늘의 판에서만 센다(씬이 여느 판에서는 0번을 넘긴다). */
+export function undoPenalty(undos: number): number {
+  const count = Math.max(0, Math.floor(undos));
+  return count > 0 ? count * POINTS.undo : 0;
+}
+
+/**
+ * 판의 마지막 점수: 쌓인 점수에 (이겼으면) 판 보너스와 시간 보너스를 더하고, 되돌린 만큼 뺀다. 0보다 작아지지 않는다.
+ * undos는 점수를 깎을 되돌리기 횟수다(오늘의 판에서만 넘긴다).
+ */
+export function finalScore(board: Board, seconds: number, undos = 0): number {
   const base = Math.max(0, board.score);
-  return isWon(board) ? base + POINTS.win + timeBonus(seconds) : base;
+  const total = isWon(board) ? base + POINTS.win + timeBonus(seconds) : base;
+  return Math.max(0, total + undoPenalty(undos));
 }
 
 /** 모음 칸에 올린 카드 수 */
