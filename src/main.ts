@@ -21,6 +21,7 @@ import { DuelScene } from './games/duel/DuelScene';
 import { HulaScene } from './games/hula/HulaScene';
 import { GardenGuardScene } from './games/garden-guard/GardenGuardScene';
 import { GateRunScene } from './games/gate-run/GateRunScene';
+import { HighLowScene } from './games/high-low/HighLowScene';
 import { JumpRunnerScene } from './games/jump-runner/JumpRunnerScene';
 import { LanternKeeperScene } from './games/lantern-keeper/LanternKeeperScene';
 import { SproutCompanyScene } from './games/sprout-company/SproutCompanyScene';
@@ -120,6 +121,7 @@ async function boot(): Promise<void> {
       ScrewSortScene,
       MergeTilesScene,
       TailChaseScene,
+      HighLowScene,
       LogicTilesScene,
       NemoLogicScene,
       NumberPuzzleScene,

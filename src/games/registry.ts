@@ -20,6 +20,7 @@ import { coinsFor as lanternCoins } from './lantern-keeper/rules';
 import { COMPANY_GAME_ID, COMPANY_SCENE } from './sprout-company/data';
 import { ONE_CARD_GAME_ID, ONE_CARD_SCENE } from './one-card/text';
 import { TOWER_GAME_ID, TOWER_SCENE } from './cloud-tower/data';
+import { coinsFor as highLowCoins, GAME_ID as HIGH_LOW_ID } from './high-low/rules';
 import { HULA_GAME_ID, HULA_SCENE } from './hula/data';
 import { coinsFor as solitaireCoins, SOLITAIRE_GAME_ID, SOLITAIRE_SCENE } from './solitaire/rules';
 import { PYRAMID_GAME_ID, PYRAMID_SCENE } from './pyramid/data';
@@ -288,6 +289,15 @@ export const GAMES: readonly MiniGameInfo[] = [
     genre: 'puzzle',
     // 한 판이 여러 라운드에 걸쳐 부적을 모아 가는 긴 판이라, 꾸준히 하는 게임 쪽에 둔다.
     steady: '부적을 모아 큰 상금을 노려요',
+  },
+  {
+    id: HIGH_LOW_ID,
+    title: '하이로우',
+    icon: 'icon-highlow',
+    sceneKey: SCENE.highLow,
+    coinsFor: highLowCoins,
+    dailyTargets: [10, 20, 35],
+    genre: 'puzzle',
   },
   {
     id: SOLITAIRE_GAME_ID,
