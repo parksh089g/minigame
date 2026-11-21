@@ -68,7 +68,7 @@ import {
   type RunState,
   type TowerMeta,
 } from './run';
-import { buyPotion, hasPotionRoom, POTION_SLOTS, POTIONS, potionsOf, swapRewardPotion, waitingPotion, type PotionId } from './potions';
+import { buyPotion, discardPotion, hasPotionRoom, POTION_SLOTS, POTIONS, potionsOf, swapRewardPotion, waitingPotion, type PotionId } from './potions';
 import { cardName, POTION_TEXT, potionText } from './text';
 import { claimableCount } from './achievements';
 
@@ -404,15 +404,29 @@ export function drawTreasureStrip(scene: Phaser.Scene, treasures: readonly Treas
   });
 }
 
-/** 가진 물약을 오른쪽 끝에 한 줄로. 누르면 이름과 하는 일이 잠깐 뜬다. */
-export function drawPotionStrip(scene: Phaser.Scene, potions: readonly PotionId[], top: number): void {
+/**
+ * 가진 물약을 오른쪽 끝에 한 줄로. 누르면 이름과 하는 일이 잠깐 뜬다.
+ * onDiscard가 있으면 글이 떠 있는 동안 같은 물약을 한 번 더 눌러 버린다(싸움에서 한 번 더 눌러 쓰는 것과 같다).
+ */
+export function drawPotionStrip(
+  scene: Phaser.Scene,
+  potions: readonly PotionId[],
+  top: number,
+  onDiscard?: (slot: number) => void,
+): void {
   let note: Phaser.GameObjects.Text | null = null;
+  let picked: number | null = null;
   potions.forEach((id, index) => {
     const x = GAME_WIDTH - MARGIN - 10 - (potions.length - 1 - index) * 22;
     const image = scene.add.image(x, top + 12, potionTexture(id)).setInteractive({ useHandCursor: true });
     image.on(Phaser.Input.Events.GAMEOBJECT_POINTER_UP, () => {
+      if (onDiscard && picked === index && note?.active) {
+        onDiscard(index);
+        return;
+      }
       note?.destroy();
-      const text = addText(scene, GAME_WIDTH / 2, top - 6, `${POTIONS[id].name}: ${potionText(id)}`, {
+      const line = `${POTIONS[id].name}: ${potionText(id)}`;
+      const text = addText(scene, GAME_WIDTH / 2, top - 6, onDiscard ? `${line}\n${POTION_TEXT.discard}` : line, {
         size: 10,
         color: PX_CSS.text,
         originX: 0.5,
@@ -422,6 +436,7 @@ export function drawPotionStrip(scene: Phaser.Scene, potions: readonly PotionId[
         stroke: PX_CSS.text,
       }).setDepth(5);
       note = text;
+      picked = index;
       scene.tweens.add({ targets: text, alpha: 0, delay: 2600, duration: 400, onComplete: () => text.destroy() });
     });
   });
@@ -780,10 +795,19 @@ export function buildShop(scene: Phaser.Scene, run: RunState, hooks: ScreenHooks
     },
     page,
   );
+  // 가진 물약은 떠나기 버튼 오른쪽에 놓는다. 칸이 가득 차면 여기서 버리고 살 수 있다.
+  const potions = potionsOf(run);
+  if (potions.length > 0)
+    drawPotionStrip(scene, potions, footTop + 5, (slot) => {
+      if (discardPotion(run, slot)) {
+        sfx.pop();
+        redraw();
+      }
+    });
   new PixelButton(scene, {
     x: MARGIN,
     y: footTop,
-    width: WIDTH,
+    width: potions.length > 0 ? WIDTH - potions.length * 22 - 6 : WIDTH,
     height: 34,
     label: SCREEN_TEXT.leave,
     style: 'green',

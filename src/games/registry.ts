@@ -391,7 +391,7 @@ export const GAMES: readonly MiniGameInfo[] = [
     title: '구름 탑 모험',
     icon: 'icon-cloudtower',
     sceneKey: TOWER_SCENE,
-    // 점수는 마친 층마다 100점이다. 층마다 1코인을 준다.
+    // 점수는 마친 층마다 100점, 꼭대기면 500점에 난이도마다 100점 더. 100점마다 1코인을 준다.
     coinsFor: towerCoins,
     // 한 판이 길고 영구 강화에 따라 크게 달라져서 오늘의 도전에는 넣지 않는다.
     dailyTargets: [],

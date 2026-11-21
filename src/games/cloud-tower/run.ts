@@ -218,9 +218,13 @@ export function floorsCleared(run: RunState): number {
   return run.stage === 'map' ? run.floor : Math.max(0, run.floor - 1);
 }
 
-/** 판의 점수: 마친 층마다 100점, 꼭대기까지 오르면 500점 더 */
+/** 꼭대기에 오르면 더 받는 점수. 난이도마다 TOP_LEVEL_SCORE씩 더 붙는다. */
+export const TOP_SCORE = 500;
+export const TOP_LEVEL_SCORE = 100;
+
+/** 판의 점수: 마친 층마다 100점, 꼭대기까지 오르면 500점에 난이도마다 100점 더(난이도 8 꼭대기는 3400점) */
 export function runScore(run: RunState): number {
-  return floorsCleared(run) * 100 + (run.result === 'win' ? 500 : 0);
+  return floorsCleared(run) * 100 + (run.result === 'win' ? TOP_SCORE + difficultyOf(run) * TOP_LEVEL_SCORE : 0);
 }
 
 /** 판이 끝났을 때 받는 구름 조각: 마친 층마다 1, 강한 적마다 2, 대장마다 8, 꼭대기까지 오르면 15에 난이도마다 5 더 */
@@ -898,13 +902,15 @@ export function unlockedAfter(meta: TowerMeta, run: RunState): number {
   return clampDifficulty(level + 1);
 }
 
-/** 허브 카드와 결과 화면에 쓰는 기록: 점수에서 마친 층을 꺼낸다. */
+/** 허브 카드에 쓰는 기록: 점수에서 마친 층을, 꼭대기면 난이도를 꺼낸다. */
 export function recordLabel(best: number): string {
-  if (best >= TOP_FLOOR * 100 + 500) return '꼭대기 도착';
-  return `최고 ${Math.floor(best / 100)}층`;
+  const top = TOP_FLOOR * 100 + TOP_SCORE;
+  if (best < top) return `최고 ${Math.floor(best / 100)}층`;
+  const level = clampDifficulty(Math.floor((best - top) / TOP_LEVEL_SCORE));
+  return level > 0 ? `난이도 ${level} 꼭대기` : '꼭대기 도착';
 }
 
-/** 점수(마친 층 × 100)에 따라 주는 코인: 층마다 1 */
+/** 점수에 따라 주는 코인: 100점마다 1(층마다 1, 꼭대기면 5에 난이도마다 1 더) */
 export function coinsFor(score: number): number {
   return Math.floor(score / 100);
 }

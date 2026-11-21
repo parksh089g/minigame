@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { chooseDraw, choosePlay } from './bot';
 import { bestMelds, cardOf, handPoints, meldKindOf, seededRandom, type Suit } from './cards';
 import {
+  attachTargets,
+  canLayOff,
+  canMeld,
   canTakeDiscard,
   discard,
   drawStock,
@@ -70,6 +73,58 @@ describe('한 판의 진행', () => {
 
     const none = fixed([cardOf(S, 4), cardOf(C, 9)], [cardOf(S, 2)], cardOf(D, 12));
     expect(canTakeDiscard(none)).toBe(false);
+  });
+
+  it('가져온 카드를 낼 길을 없애는 등록은 받지 않는다(판이 멈추지 않게)', () => {
+    // 9♠ 9♣ 8♠ 10♠ + 쓸모없는 카드를 들고 9♥를 가져온다.
+    const me = [cardOf(S, 9), cardOf(C, 9), cardOf(S, 8), cardOf(S, 10), cardOf(D, 2), cardOf(C, 13)];
+    const state = fixed(me, [cardOf(H, 2)], cardOf(H, 9));
+    expect(takeDiscard(state)).toBe(cardOf(H, 9));
+    const run = [cardOf(S, 8), cardOf(S, 9), cardOf(S, 10)];
+    // 8♠-9♠-10♠부터 내면 9♥의 짝(9♠)이 사라지므로 막는다.
+    expect(canMeld(state, run)).toBe(false);
+    expect(meld(state, run)).toBe(false);
+    expect(state.hands.me).toHaveLength(7);
+    // 9♥와 함께 내면 된다. 그 뒤에는 무엇이든 자유롭다.
+    expect(meld(state, [cardOf(H, 9), cardOf(S, 9), cardOf(C, 9)])).toBe(true);
+    expect(state.taken).toBeNull();
+    expect(discard(state, cardOf(C, 13))).toBe(true);
+  });
+
+  it('가져온 카드를 쓸 길이 남으면 다른 묶음부터 내도 된다', () => {
+    // 9♥는 9♠ 9♣ 9♦로도 묶이므로, 8♠-9♠-10♠를 먼저 내도 9♣ 9♦가 남는다.
+    const me = [cardOf(S, 9), cardOf(C, 9), cardOf(D, 9), cardOf(S, 8), cardOf(S, 10), cardOf(C, 13)];
+    const state = fixed(me, [cardOf(H, 2)], cardOf(H, 9));
+    takeDiscard(state);
+    expect(meld(state, [cardOf(S, 8), cardOf(S, 9), cardOf(S, 10)])).toBe(true);
+    expect(state.taken).toBe(cardOf(H, 9));
+    expect(meld(state, [cardOf(H, 9), cardOf(C, 9), cardOf(D, 9)])).toBe(true);
+    expect(discard(state, cardOf(C, 13))).toBe(true);
+  });
+
+  it('가져온 카드를 낼 길을 없애는 붙이기도 받지 않는다', () => {
+    // 탁자에 J♠-Q♠-K♠가 있고, 손에 10♠ 10♣를 들고 10♥를 가져온다.
+    // 10♠를 J♠-Q♠-K♠에 붙이면 10♥의 짝이 10♣ 하나만 남아 낼 수 없다.
+    const me = [cardOf(S, 10), cardOf(C, 10), cardOf(D, 2), cardOf(C, 13)];
+    const state = fixed(me, [cardOf(H, 2)], cardOf(H, 10));
+    state.melds.push({ cards: [cardOf(S, 11), cardOf(S, 12), cardOf(S, 13)], owner: 'cpu', kind: 'run' });
+    takeDiscard(state);
+    expect(canLayOff(state, cardOf(S, 10), 0)).toBe(false);
+    expect(layOff(state, cardOf(S, 10), 0)).toBe(false);
+    expect(attachTargets(state, cardOf(S, 10))).toEqual([]);
+    expect(meld(state, [cardOf(H, 10), cardOf(S, 10), cardOf(C, 10)])).toBe(true);
+  });
+
+  it('가져온 카드가 있을 때 컴퓨터는 막히는 묶음을 고르지 않는다', () => {
+    const cpu = [cardOf(S, 9), cardOf(C, 9), cardOf(S, 8), cardOf(S, 10), cardOf(D, 2), cardOf(C, 13)];
+    for (const level of LEVELS) {
+      const state = fixed([cardOf(H, 2)], cpu, cardOf(H, 9), 'cpu');
+      expect(takeDiscard(state)).toBe(cardOf(H, 9));
+      const step = choosePlay(state, level, () => 0.5);
+      expect(step.type).toBe('meld');
+      expect(meld(state, (step as { cards: number[] }).cards)).toBe(true);
+      expect(state.taken).toBeNull();
+    }
   });
 
   it('탁자의 묶음에 붙일 수 있고, 손을 다 비우면 이긴다', () => {

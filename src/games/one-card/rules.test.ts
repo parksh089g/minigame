@@ -205,6 +205,49 @@ describe('원카드와 파산', () => {
   });
 });
 
+describe('사람이 파산하면', () => {
+  const many = (from: number, count: number): Card[] => Array.from({ length: count }, (_, i) => card(from + i, 'S', 9));
+
+  it('컴퓨터가 둘 이상 남아도 판이 바로 끝나고 카드가 가장 적은 컴퓨터가 이긴다', () => {
+    const state = setup([many(100, MAX_HAND), [card(1, 'D', 9), card(2, 'D', 8), card(3, 'D', 6)], [card(4, 'C', 9)], [card(5, 'C', 8), card(6, 'C', 6)]], card(0, 'H', 5));
+    drawTurn(state, 0);
+    expect(state.players[0].out).toBe(true);
+    expect(state.winner).toBe(2);
+    expect(matchScore(state, 'hard')).toBe(0);
+    const events = takeEvents(state);
+    expect(events.map((event) => event.k)).toEqual(['broke', 'win', 'draw']);
+    // 끝난 판에서는 아무도 움직이지 못한다.
+    expect(drawTurn(state, state.turn)).toBe(false);
+  });
+
+  it('카드 수가 같으면 다음 차례에 가까운 컴퓨터가 이긴다', () => {
+    const hands = (): Card[][] => [many(100, MAX_HAND), [card(1, 'D', 9), card(2, 'D', 8)], [card(3, 'C', 9)], [card(4, 'C', 8)]];
+    const forward = setup(hands(), card(0, 'H', 5));
+    drawTurn(forward, 0);
+    expect(forward.winner).toBe(2);
+    const backward = setup(hands(), card(0, 'H', 5), { dir: -1 });
+    drawTurn(backward, 0);
+    expect(backward.winner).toBe(3);
+  });
+
+  it('공격을 받아 파산해도 끝나고, 파산한 컴퓨터는 고르지 않는다', () => {
+    const state = setup([many(100, MAX_HAND - 2), [card(1, 'D', 9)], [card(2, 'C', 9), card(3, 'C', 8)], [card(4, 'H', 8), card(5, 'H', 4)]], card(0, 'H', 1), { attack: 3 });
+    state.players[1].out = true;
+    state.players[1].hand = [];
+    drawTurn(state, 0);
+    expect(state.players[0].out).toBe(true);
+    expect(state.winner).toBe(2);
+    expect(state.attack).toBe(0);
+  });
+
+  it('원카드를 들켜 파산해도 끝난다', () => {
+    const state = setup([many(100, MAX_HAND), [card(1, 'D', 9), card(2, 'D', 8)], [card(3, 'C', 9), card(4, 'C', 8)]], card(0, 'H', 5), { oneCard: 0, turn: 1 });
+    catchOneCard(state, 1);
+    expect(state.players[0].out).toBe(true);
+    expect(state.winner).toBe(1);
+  });
+});
+
 describe('컴퓨터 상대', () => {
   /** 컴퓨터끼리(사람 자리도 컴퓨터가) 한 판을 끝까지 둔다. */
   function autoplay(levels: Level[], seed: number): GameState {

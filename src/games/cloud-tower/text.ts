@@ -121,6 +121,7 @@ export const POTION_TEXT = {
   got: (name: string) => `물약: ${name}`,
   swapHint: '칸이 가득 찼어요. 버릴 물약을 눌러 바꿔요',
   shopFull: '가득',
+  discard: '한 번 더 누르면 버려요',
 } as const;
 
 /** 도감 화면의 글 */
