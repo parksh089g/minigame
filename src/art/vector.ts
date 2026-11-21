@@ -778,6 +778,25 @@ const ICONS: Record<string, Art> = {
       roundRect(c, 4.500, 12, 4, 1.400, 0.700, 'rgba(255, 255, 255, 0.7)');
     },
   },
+  /** 피라미드: 세 줄로 쌓인 카드 여섯 장. 붉은 카드와 흰 카드가 번갈아 놓인다. */
+  'icon-pyramid': {
+    width: 32,
+    height: 32,
+    draw(c) {
+      const card = (x: number, y: number, face: string, mark: string): void => {
+        roundRect(c, x, y + 1.200, 9, 11, 2, '#e6cfc6');
+        roundRect(c, x, y, 9, 11, 2, face);
+        oval(c, x + 4.500, y + 5.500, 1.800, 1.800, mark);
+      };
+      card(11.500, 2, '#ff9fb5', '#ffffff');
+      card(6.500, 9, '#ffffff', '#ff8f8f');
+      card(16.500, 9, '#ff9fb5', '#ffffff');
+      card(1.500, 16, '#ff9fb5', '#ffffff');
+      card(11.500, 16, '#ffffff', '#9684e0');
+      card(21.500, 16, '#ff9fb5', '#ffffff');
+      roundRect(c, 3, 29, 26, 2, 1, '#f2cf73');
+    },
+  },
   /** 벽돌 깨기: 벽돌 두 줄과, 깨져서 난 틈으로 올라가는 공, 아래의 막대 */
   'icon-brick': {
     width: 32,
@@ -935,6 +954,27 @@ const ICONS: Record<string, Art> = {
       oval(c, 16, 26, 6, 4.600, WHITE);
       oval(c, 23, 27, 5, 3.600, WHITE);
       roundRect(c, 5, 26.500, 22, 3.600, 1.800, WHITE);
+    },
+  },
+  /** 훌라: 겹쳐 든 카드 두 장. 뒤는 스페이드, 앞은 하트 */
+  'icon-hula': {
+    width: 32,
+    height: 32,
+    draw(c) {
+      c.save();
+      c.translate(12, 17);
+      c.rotate(-0.3);
+      roundRect(c, -8, -11, 16, 22, 3, '#5b4455');
+      roundRect(c, -6.500, -9.500, 13, 19, 2.200, '#fffdf6');
+      softPath(c, 'M0 -5c-2.500 3-5 4.500-5 6.800 0 1.800 1.600 2.800 3.200 2.200L-2.600 6.500h5.200L1.800 4c1.600 .6 3.200-.4 3.200-2.200C5 -.5 2.500 -2 0 -5z', '#5b4455', 0.6);
+      c.restore();
+      c.save();
+      c.translate(20, 16);
+      c.rotate(0.22);
+      roundRect(c, -8, -11, 16, 22, 3, '#e06d75');
+      roundRect(c, -6.500, -9.500, 13, 19, 2.200, '#fffdf6');
+      softPath(c, 'M0 5.500C-3 3-5.500 1-5.500 -1.500c0-2 1.600-3.300 3.300-3.300 1 0 1.800.5 2.200 1.300.4-.8 1.200-1.300 2.200-1.300 1.700 0 3.300 1.300 3.300 3.300C5.500 1 3 3 0 5.500z', '#ff8f8f', 0.8);
+      c.restore();
     },
   },
 };
