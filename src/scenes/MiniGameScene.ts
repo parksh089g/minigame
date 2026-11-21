@@ -10,6 +10,8 @@ import { store } from '../core/store';
 import { holdToasts } from '../core/toast';
 import { fadeIn, PixelButton } from '../core/ui';
 import { getGame, thisWeek, todaysChallenge } from '../games/registry';
+import { shouldOfferRuleBook } from '../games/rule-book';
+import type { RuleBookData } from './RuleBookScene';
 import { floatText } from './GameHud';
 import { announceLastWeek } from './weekly-settle';
 import { syncScores } from '../online/online';
@@ -186,6 +188,28 @@ export abstract class MiniGameScene extends Phaser.Scene implements BackAware {
       icon: 'icon-pause',
       hitPadding: 6,
       onTap: () => this.pauseGame(),
+    });
+  }
+
+  /**
+   * 규칙 안내서(games/rule-book.ts)를 이 씬 위에 띄운다. 보는 동안 이 씬은 멈추고, 닫으면 다시 움직인다.
+   * 준비 화면의 "규칙" 버튼이 부른다.
+   */
+  protected openRuleBook(): void {
+    if (!this.scene.isActive()) return;
+    this.scene.pause();
+    this.scene.launch(SCENE.ruleBook, { gameId: this.gameId, sceneKey: this.scene.key } satisfies RuleBookData);
+  }
+
+  /**
+   * 처음 하는 게임이면 규칙 안내서를 한 번 저절로 띄운다(한 판도 안 했고 아직 안 봤을 때).
+   * create() 안에서 불러도 되게, 화면이 뜨고 잠깐 뒤에 연다. 그 사이에 판을 시작했으면 still()이 false를 돌려주게 해서 띄우지 않는다.
+   */
+  protected offerRuleBook(still: () => boolean = () => true): void {
+    const plays = store.data.games[this.gameId]?.plays ?? 0;
+    if (!shouldOfferRuleBook(this.gameId, plays)) return;
+    this.time.delayedCall(350, () => {
+      if (still() && !this.finished) this.openRuleBook();
     });
   }
 

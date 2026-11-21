@@ -17,6 +17,7 @@ export const PYRAMID_TEXT = {
   rankNote: '오늘의 판 점수로 겨뤄요',
   rankMine: (rank: number) => `내 순위 ${rank}위`,
   back: '나가기',
+  ruleBook: '규칙',
   stockLeft: (count: number) => `더미 ${count}장`,
   passesLeft: (count: number) => `다시 돌리기 ${count}번`,
   noPasses: '다시 돌릴 수 없어요',

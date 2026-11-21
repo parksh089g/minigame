@@ -141,7 +141,11 @@ export class OneCardScene extends MiniGameScene {
     new PixelButton(this, { x: 8, y: 8, width: 26, height: 26, icon: 'icon-back', hitPadding: 6, onTap: () => fadeToScene(this, homeScene()) });
     addText(this, 42, 21, TEXT.title, { size: 16, color: PX_CSS.accent, originY: 0.5 });
     const record = this.prefs.plays > 0 ? TEXT.record(this.prefs.wins, this.prefs.plays) : TEXT.firstTime;
-    addText(this, GAME_WIDTH - MARGIN, 21, record, { size: 10, color: PX_CSS.sub, originX: 1, originY: 0.5 });
+    // 오른쪽 위에 규칙 안내서 버튼을 두고, 전적은 그 왼쪽에 적는다. 처음 하는 사람에게는 안내서가 한 번 저절로 열린다.
+    const rulesX = GAME_WIDTH - MARGIN - 44;
+    new PixelButton(this, { x: rulesX, y: 8, width: 44, height: 26, label: TEXT.ruleBook, style: 'yellow', hitPadding: 4, onTap: () => this.openRuleBook() });
+    addText(this, rulesX - 6, 21, record, { size: 10, color: PX_CSS.sub, originX: 1, originY: 0.5 });
+    this.offerRuleBook(() => this.phase === 'lobby');
     redraw();
     new PixelButton(this, {
       x: MARGIN,

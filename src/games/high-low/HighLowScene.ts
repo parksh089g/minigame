@@ -121,6 +121,8 @@ export class HighLowScene extends MiniGameScene {
 
     this.addPauseButton();
     this.playing = true;
+    // 처음 하는 사람에게는 규칙 안내서를 한 번 띄운다. 그 사이에 이미 골랐으면 띄우지 않는다.
+    this.offerRuleBook(() => this.history.length === 0 && !this.busy);
   }
 
   // ───────── 화면 구성 ─────────

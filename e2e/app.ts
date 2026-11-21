@@ -37,8 +37,26 @@ export async function waitForScene(page: Page, key: string, timeout = 20_000): P
   await page.waitForFunction((k) => window.__pocketArcade?.scene.isActive(k) ?? false, key, { timeout });
 }
 
-/** 앱을 열고 처음 장면(보통은 허브)이 뜰 때까지 기다린다. */
-export async function openApp(page: Page, path = '/', scene = 'Hub'): Promise<void> {
+/** 처음 하는 카드 게임에서 저절로 뜨는 규칙 안내서(src/games/rule-book.ts)를 본 것으로 적어 두는 자리 */
+const RULE_BOOK_SEEN_KEY = 'pocket-arcade:rule-book-seen';
+
+/**
+ * 앱을 열고 처음 장면(보통은 허브)이 뜰 때까지 기다린다.
+ * 카드 게임의 규칙 안내서는 본 것으로 적어 두어서, 다른 점검이 준비 화면을 바로 누를 수 있게 한다.
+ * 안내서가 저절로 뜨는지를 보는 점검은 ruleBooks: 'fresh'로 연다.
+ */
+export async function openApp(page: Page, path = '/', scene = 'Hub', options: { ruleBooks?: 'seen' | 'fresh' } = {}): Promise<void> {
+  if (options.ruleBooks !== 'fresh') {
+    await page.addInitScript((key) => {
+      try {
+        if (localStorage.getItem(key) === null) {
+          localStorage.setItem(key, JSON.stringify(['solitaire', 'pyramid', 'hula', 'one-card', 'high-low']));
+        }
+      } catch {
+        // 저장소를 못 쓰는 곳이면 안내서가 뜰 수 있다.
+      }
+    }, RULE_BOOK_SEEN_KEY);
+  }
   await page.goto(path);
   await waitForScene(page, scene);
 }
