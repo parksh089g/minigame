@@ -182,8 +182,9 @@ export class HulaScene extends MiniGameScene {
     super.pauseGame();
   }
 
+  /** 일시정지는 판을 하는 동안에만 열리고, 그때 이 버튼은 판을 진 것으로 치고 나간다(forfeit). 누르기 전에 알 수 있게 적는다. */
   protected override restartLabel(): string | null {
-    return '상대 다시 고르기';
+    return '진 판으로 하고 상대 고르기';
   }
 
   protected override quitWarning(): string | null {
