@@ -8,7 +8,7 @@
  *   내가 바로 가져가 쓸 수 있는 카드(탁자의 묶음에 붙는 카드, 내가 모으는 숫자 근처의 카드)는 되도록 내주지 않는다.
  *   상대 손이 적게 남으면 큰 카드를 서둘러 버린다.
  */
-import { attachTargets, canDiscard, canTakeDiscard, meldsUsing, other, type HulaState, type Level } from './rules';
+import { attachTargets, canDiscard, canMeld, canTakeDiscard, meldsUsing, other, type HulaState, type Level } from './rules';
 import { bestMelds, canAttach, cardOf, meldCandidates, pointsOf, rankOf, suitOf, SEVEN, type Suit } from './cards';
 
 /** 컴퓨터가 한 차례에 하는 일 하나. 화면은 이것을 하나씩 보여 준다. */
@@ -37,7 +37,9 @@ export function choosePlay(state: HulaState, level: Level, random: () => number)
   // 가져온 카드가 들어간 묶음을 먼저 낸다(그래야 버릴 수 있다).
   const withTaken = state.taken === null ? null : findMeldWith(hand, state.taken);
   if (withTaken) return { type: 'meld', cards: withTaken };
-  if (melds.length > 0) return { type: 'meld', cards: melds[0] };
+  // 가져온 카드를 낼 길을 막는 묶음은 규칙이 받지 않으므로 건너뛴다.
+  const allowed = melds.find((m) => canMeld(state, m));
+  if (allowed) return { type: 'meld', cards: allowed };
 
   // 2. 붙이기
   const order = [...hand].sort((a, b) => pointsOf(b) - pointsOf(a));

@@ -7,7 +7,7 @@ import { addTapZone, addText, fadeToScene } from '../../core/ui';
 import { MiniGameScene, type ResultStat } from '../../scenes/MiniGameScene';
 import { CARD, cardTexture, MINI, PX, PX_CSS, registerHulaTextures, TEX } from './art';
 import { chooseDraw, choosePlay } from './bot';
-import { byRank, bySuit, cardName, objectMark } from './cards';
+import { byRank, bySuit, cardName, meldKindOf, objectMark } from './cards';
 import { HULA_GAME_ID, HULA_SCENE } from './data';
 import {
   attachTargets,
@@ -187,7 +187,17 @@ export class HulaScene extends MiniGameScene {
   }
 
   protected override quitWarning(): string | null {
-    return this.mode === 'round' ? '지금 판은 진 것으로 치지 않고 사라져요' : null;
+    return this.mode === 'round' ? '지금 나가면 진 판으로 쳐요' : null;
+  }
+
+  /**
+   * 판을 나눠 준 뒤에 끝나기 전에 씬을 떠나면(그만하기, 상대 다시 고르기) 그 난이도에서 진 판으로 센다.
+   * 지는 판만 골라 버려서 승률을 부풀리지 못하게 한다. 끝난 판은 endRound()가 이미 기록했다.
+   */
+  private forfeit(): void {
+    if (this.mode !== 'round' || !this.state || this.state.phase === 'over') return;
+    this.mode = 'over';
+    hulaStore.addResult(this.level, false);
   }
 
   protected override retryData(): object | undefined {
@@ -217,6 +227,8 @@ export class HulaScene extends MiniGameScene {
     this.playing = true;
     const first = Math.random() < 0.5 ? 'me' : 'cpu';
     this.state = newRound(Math.random, first);
+    // 판을 나눠 준 순간부터는 끝나기 전에 떠나면 진 판이다.
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.forfeit());
 
     const pause = new PxButton(this, { x: MARGIN, y: 8, width: 26, height: 26, icon: TEX.pause, hitPadding: 6, onTap: () => this.pauseGame() });
     pause.setDepth(5);
@@ -457,6 +469,11 @@ export class HulaScene extends MiniGameScene {
       return;
     }
     if (state.taken !== null && !this.selected.includes(state.taken)) {
+      // 묶음 모양은 맞는데 등록이 안 되면, 그 카드를 내고 나면 가져온 카드를 낼 길이 없어서다.
+      if (meldKindOf(this.selected) !== null && !canMeld(state, this.selected)) {
+        this.say(`그 카드를 내면 가져온 ${cardName(state.taken)}${objectMark(state.taken)} 낼 수 없어요`, true);
+        return;
+      }
       this.say(`가져온 ${cardName(state.taken)}${objectMark(state.taken)} 먼저 내려놓아요`);
       return;
     }

@@ -28,6 +28,7 @@ import {
   shardsFor as shardsOf,
   chooseNode,
   choicesFor,
+  coinsFor,
   createMeta,
   createRun,
   finishNode,
@@ -41,7 +42,7 @@ import {
   shardsFor,
   type RunState,
 } from './run';
-import { addPotion, buyPotion, POTION_IDS, POTION_SLOTS, POTIONS, swapRewardPotion, waitingPotion } from './potions';
+import { addPotion, buyPotion, discardPotion, POTION_IDS, POTION_SLOTS, POTIONS, swapRewardPotion, waitingPotion } from './potions';
 import { cardLines, cardName, CODEX_TEXT, moveText, MAP_TEXT, POTION_TEXT, potionText } from './text';
 import { ACHIEVEMENTS, canClaim, claimAchievement, claimableCount } from './achievements';
 import { DIFFICULTY_RULES, DIFFICULTY_TEXT, MAX_DIFFICULTY } from './difficulty';
@@ -254,7 +255,7 @@ describe('판', () => {
       autoplay(run);
       expect(run.result, `씨앗 ${seed}`).not.toBeNull();
       cleared.push(floorsCleared(run));
-      expect(runScore(run)).toBe(floorsCleared(run) * 100 + (run.result === 'win' ? 500 : 0));
+      expect(runScore(run)).toBe(floorsCleared(run) * 100 + (run.result === 'win' ? 500 + (run.difficulty ?? 0) * 100 : 0));
     }
     // 단순한 봇도 첫 층은 대개 넘지만, 꼭대기까지 늘 가지는 못한다.
     const average = cleared.reduce((sum, value) => sum + value, 0) / cleared.length;
@@ -379,6 +380,34 @@ describe('물약', () => {
     expect(buyPotion(run, 1)).toBe(false);
   });
 
+  it('싸움 밖에서 물약을 버리면 칸이 비어 가게에서 다시 살 수 있다', () => {
+    const run = createRun({ seed: 3, levels: {} });
+    run.choices = ['shop'];
+    chooseNode(run, 0);
+    run.gold = 1000;
+    run.potions = ['berry', 'fire', 'cloud'];
+    expect(buyPotion(run, 0)).toBe(false);
+    expect(discardPotion(run, 3)).toBe(false);
+    expect(discardPotion(run, -1)).toBe(false);
+    expect(discardPotion(run, 1)).toBe(true);
+    expect(run.potions).toEqual(['berry', 'cloud']);
+    expect(buyPotion(run, 0)).toBe(true);
+    expect(run.potions).toHaveLength(POTION_SLOTS);
+  });
+
+  it('지도에서도 버릴 수 있지만, 싸우는 중이나 판이 끝난 뒤에는 못 버린다', () => {
+    const run = createRun({ seed: 5, levels: {} });
+    run.potions = ['star'];
+    expect(discardPotion(run, 0)).toBe(true);
+    expect(run.potions).toEqual([]);
+    expect(discardPotion(run, 0)).toBe(false);
+    chooseNode(run, 0);
+    expect(run.stage).toBe('battle');
+    run.potions = ['berry'];
+    expect(discardPotion(run, 0)).toBe(false);
+    expect(run.potions).toEqual(['berry']);
+  });
+
   it('물약이 생기기 전에 저장한 판도 빈 칸으로 이어 한다', () => {
     const run = createRun({ seed: 9, levels: {} });
     const old = JSON.parse(JSON.stringify(run));
@@ -421,9 +450,33 @@ describe('판 밖', () => {
     expect(meta.run).toEqual(run);
   });
 
-  it('기록은 마친 층으로 적는다', () => {
+  it('기록은 마친 층으로, 꼭대기면 난이도로 적는다', () => {
     expect(recordLabel(700)).toBe('최고 7층');
+    expect(recordLabel(TOP_FLOOR * 100)).toBe(`최고 ${TOP_FLOOR}층`);
     expect(recordLabel(TOP_FLOOR * 100 + 500)).toBe('꼭대기 도착');
+    expect(recordLabel(TOP_FLOOR * 100 + 500 + 300)).toBe('난이도 3 꼭대기');
+    expect(recordLabel(TOP_FLOOR * 100 + 500 + MAX_DIFFICULTY * 100)).toBe(`난이도 ${MAX_DIFFICULTY} 꼭대기`);
+  });
+
+  it('꼭대기 점수는 난이도마다 100점 더 높고, 기록과 코인도 그것을 따른다', () => {
+    const scores: number[] = [];
+    for (let difficulty = 0; difficulty <= MAX_DIFFICULTY; difficulty += 1) {
+      const run = createRun({ seed: 1, levels: {}, difficulty });
+      run.result = 'win';
+      run.stage = 'over';
+      const score = runScore(run);
+      scores.push(score);
+      expect(recordLabel(score)).toBe(difficulty > 0 ? `난이도 ${difficulty} 꼭대기` : '꼭대기 도착');
+      expect(coinsFor(score)).toBe(TOP_FLOOR + 5 + difficulty);
+    }
+    expect(scores[0]).toBe(TOP_FLOOR * 100 + 500);
+    expect(scores[MAX_DIFFICULTY]).toBe(3400);
+    // 진 판의 점수는 난이도와 상관없다.
+    const lost = createRun({ seed: 1, levels: {}, difficulty: MAX_DIFFICULTY });
+    lost.floor = 5;
+    lost.result = 'lose';
+    lost.stage = 'over';
+    expect(runScore(lost)).toBe(400);
   });
 });
 

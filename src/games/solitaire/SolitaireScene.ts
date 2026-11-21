@@ -28,6 +28,7 @@ import {
   SOLITAIRE_GAME_ID,
   SOLITAIRE_SCENE,
   timeBonus,
+  undoPenalty,
   POINTS,
   type Board,
   type Card,
@@ -455,7 +456,9 @@ export class SolitaireScene extends MiniGameScene {
   private refreshHud(): void {
     const board = this.board;
     if (!board) return;
-    this.scoreText.setText(`${Math.max(0, board.score)}점`);
+    // 오늘의 판에서는 되돌린 만큼 깎인 점수를 보인다(finalScore와 같은 셈).
+    const penalty = this.daily !== null ? undoPenalty(this.undos) : 0;
+    this.scoreText.setText(`${Math.max(0, Math.max(0, board.score) + penalty)}점`);
     this.undoButton.setEnabled(this.history.length > 0 && !this.autoFinishing);
   }
 
@@ -690,6 +693,7 @@ export class SolitaireScene extends MiniGameScene {
     this.undos += 1;
     this.board = previous;
     sfx.flip();
+    if (this.daily !== null) this.popPoints(GAME_WIDTH - 8 - 32, 8 + 26 + 14, POINTS.undo);
     this.render(true);
     this.afterAction();
   }
@@ -806,13 +810,15 @@ export class SolitaireScene extends MiniGameScene {
     this.phase = 'over';
     this.clearStuck();
     const won = isWon(board);
-    const score = finalScore(board, this.elapsed);
+    // 오늘의 판에서는 되돌릴 때마다 점수를 깎는다(되돌려서 더미의 차례를 미리 보는 것을 막으려고).
+    const penalized = this.daily !== null ? this.undos : 0;
+    const score = finalScore(board, this.elapsed, penalized);
     const stats: ResultStat[] = [
       ['모은 카드', `${foundCount(board)}장`],
       ['걸린 시간', clock(this.elapsed)],
     ];
     if (won) stats.push(['시간 보너스', `+${timeBonus(this.elapsed)}`]);
-    stats.push(['되돌리기', `${this.undos}번`]);
+    stats.push(['되돌리기', penalized > 0 ? `${this.undos}번 (${undoPenalty(penalized)})` : `${this.undos}번`]);
     if (this.daily !== null) {
       const today = dayIndexOf(new Date());
       if (this.daily === today) {

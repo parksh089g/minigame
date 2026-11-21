@@ -158,8 +158,24 @@ const inHand = (state: HulaState, cards: readonly number[]): boolean =>
  */
 export function canMeld(state: HulaState, cards: readonly number[]): boolean {
   if (state.phase !== 'play' || cards.length === 0 || !inHand(state, cards)) return false;
-  if (meldKindOf(cards) !== null) return true;
-  return cards.length <= 2 && cards.every((card) => rankOf(card) === SEVEN);
+  const kind = meldKindOf(cards);
+  if (kind === null && !(cards.length <= 2 && cards.every((card) => rankOf(card) === SEVEN))) return false;
+  const added = kind === null ? cards.map((card) => [card]) : [sortMeld(cards)];
+  return keepsTakenUsable(state, cards, [...state.melds.map((m) => m.cards), ...added]);
+}
+
+/**
+ * 가져온 카드를 아직 내려놓지 않았는데 다른 카드를 내면, 가져온 카드를 쓸 길이 사라질 수 있다
+ * (9♠ 9♣ 8♠ 10♠를 들고 9♥를 가져와서 8♠-9♠-10♠부터 등록하면 9♥를 낼 수 없어 버리지도 못하고 판이 멈춘다).
+ * 그래서 가져온 카드가 빠진 수는, 그 뒤에도 가져온 카드를 바로 낼 수 있을 때만 허락한다.
+ * played는 이번에 내는 카드, melds는 낸 뒤 탁자에 놓일 묶음들이다.
+ */
+function keepsTakenUsable(state: HulaState, played: readonly number[], melds: readonly number[][]): boolean {
+  const taken = state.taken;
+  if (taken === null || played.includes(taken)) return true;
+  const rest = state.hands[state.turn].filter((card) => !played.includes(card));
+  const after = melds.map((cards) => ({ cards, owner: state.turn, kind: meldKindOf(cards)! }));
+  return usableNow(rest, after, taken);
 }
 
 /** 고른 카드를 등록한다. 해냈으면 true */
@@ -177,7 +193,9 @@ export function meld(state: HulaState, cards: readonly number[]): boolean {
 
 export function canLayOff(state: HulaState, card: number, meldIndex: number): boolean {
   const target = state.melds[meldIndex];
-  return state.phase === 'play' && target !== undefined && inHand(state, [card]) && canAttach(target.cards, card);
+  if (state.phase !== 'play' || target === undefined || !inHand(state, [card]) || !canAttach(target.cards, card)) return false;
+  const melds = state.melds.map((m, i) => (i === meldIndex ? sortMeld([...m.cards, card]) : m.cards));
+  return keepsTakenUsable(state, [card], melds);
 }
 
 /** 탁자의 묶음 하나에 카드 한 장을 붙인다. 해냈으면 true */
@@ -191,9 +209,18 @@ export function layOff(state: HulaState, card: number, meldIndex: number): boole
   return true;
 }
 
-/** 이 카드가 붙을 수 있는 탁자의 묶음 번호들 */
+/**
+ * 이 카드가 붙을 수 있는 탁자의 묶음 번호들. 지금 차례의 손에 있는 카드면, 붙인 뒤에 가져온 카드를 낼 길이
+ * 사라지는 묶음은 뺀다.
+ */
 export function attachTargets(state: HulaState, card: number): number[] {
-  return state.melds.flatMap((meld, i) => (canAttach(meld.cards, card) ? [i] : []));
+  const mine = state.hands[state.turn].includes(card);
+  return state.melds.flatMap((meld, i) => {
+    if (!canAttach(meld.cards, card)) return [];
+    if (!mine) return [i];
+    const melds = state.melds.map((m, j) => (j === i ? sortMeld([...m.cards, card]) : m.cards));
+    return keepsTakenUsable(state, [card], melds) ? [i] : [];
+  });
 }
 
 export function canDiscard(state: HulaState, card: number): boolean {
