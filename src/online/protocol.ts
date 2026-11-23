@@ -35,6 +35,7 @@ export const RANKED_GAMES = [
   'garden-guard',
   'cloud-tower',
   'high-low',
+  'poker',
   'hula',
   'solitaire',
   'one-card',
