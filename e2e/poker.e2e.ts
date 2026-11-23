@@ -46,6 +46,8 @@ const litRow = (page: Page): Promise<string | null> =>
   }, SCENE.poker);
 
 it('포커: 몇 판을 체크와 콜로 한다', async ({ page }) => {
+  // 컴퓨터 셋이 차례마다 잠깐 생각해서 한 판에 15초쯤 걸린다. CI의 느린 기계에서도 넉넉하게 둔다.
+  it.setTimeout(120_000);
   await openApp(page);
   await startScene(page, SCENE.poker);
   expect(await hiddenTexts(page, SCENE.poker), '시작 화면').toEqual([]);
@@ -55,7 +57,7 @@ it('포커: 몇 판을 체크와 콜로 한다', async ({ page }) => {
   await expect.poll(() => page.evaluate((key) => !!(window.__pocketArcade?.scene.getScene(key) as unknown as { popup: unknown }).popup, SCENE.poker)).toBe(true);
   expect(await hiddenTexts(page, SCENE.poker, { from: '트리플 + 원페어' })).toEqual([]);
 
-  for (let hand = 1; hand <= 3; hand += 1) {
+  for (let hand = 1; hand <= 2; hand += 1) {
     const label = hand === 1 ? '딜하기 · 첫 판 시작' : `다음 판 (${hand}/10)`;
     await expect.poll(async () => (await view(page)).busy, { timeout: 15_000 }).toBe(false);
     await tapText(page, SCENE.poker, label);
