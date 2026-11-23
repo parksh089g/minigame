@@ -5,6 +5,7 @@
  */
 import { registerSavePart } from '../../core/bundle';
 import { HULA_GAME_ID } from './data';
+import { cleanName } from '../../online/protocol';
 import { LEVELS, type Level } from './rules';
 
 export interface LevelRecord {
@@ -15,6 +16,10 @@ export interface LevelRecord {
 export interface HulaRecord {
   level: Level;
   records: Record<Level, LevelRecord>;
+  /** 온라인으로 친구와 한 판의 전적. 한 폰으로 번갈아 한 판은 누가 "나"인지 몰라서 세지 않는다. */
+  friends: LevelRecord;
+  /** 친구와 할 때 마지막으로 쓴 이름. 없으면 null */
+  friendName: string | null;
 }
 
 const KEY = 'pocket-arcade:hula';
@@ -23,6 +28,8 @@ export function createRecord(): HulaRecord {
   return {
     level: 'normal',
     records: { easy: { wins: 0, losses: 0 }, normal: { wins: 0, losses: 0 }, hard: { wins: 0, losses: 0 } },
+    friends: { wins: 0, losses: 0 },
+    friendName: null,
   };
 }
 
@@ -33,12 +40,19 @@ const count = (value: unknown): number =>
 export function normalizeRecord(raw: unknown): HulaRecord {
   const base = createRecord();
   if (typeof raw !== 'object' || raw === null) return base;
-  const value = raw as { level?: unknown; records?: Record<string, { wins?: unknown; losses?: unknown } | undefined> };
+  const value = raw as {
+    level?: unknown;
+    records?: Record<string, { wins?: unknown; losses?: unknown } | undefined>;
+    friends?: { wins?: unknown; losses?: unknown };
+    friendName?: unknown;
+  };
   if (LEVELS.includes(value.level as Level)) base.level = value.level as Level;
   for (const level of LEVELS) {
     const record = value.records?.[level];
     if (record) base.records[level] = { wins: count(record.wins), losses: count(record.losses) };
   }
+  if (value.friends) base.friends = { wins: count(value.friends.wins), losses: count(value.friends.losses) };
+  if (typeof value.friendName === 'string') base.friendName = cleanName(value.friendName);
   return base;
 }
 
@@ -73,6 +87,17 @@ export const hulaStore = {
     if (won === false) record.records[level].losses += 1;
     write(record);
     return record;
+  },
+  /** 온라인으로 친구와 한 판을 전적에 넣는다. 비긴 판은 넣지 않는다. */
+  addFriendResult(won: boolean | null): HulaRecord {
+    const record = read();
+    if (won === true) record.friends.wins += 1;
+    if (won === false) record.friends.losses += 1;
+    write(record);
+    return record;
+  },
+  setFriendName(name: string): void {
+    write({ ...read(), friendName: name });
   },
 };
 

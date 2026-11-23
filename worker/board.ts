@@ -12,6 +12,7 @@ import type {
   StashResult,
   SubmitResult,
 } from '../src/online/protocol';
+import type { MoveResult, RoomGame, RoomTicket, RoomView } from '../src/versus/protocol';
 import { BoardService, type BoardApi, type DayEntry, type Limited, type Scores, type WeekEntry } from './service';
 
 /** 이 객체는 다른 자원을 쓰지 않는다. */
@@ -58,5 +59,29 @@ export class ArcadeBoard extends DurableObject<NoBindings> implements BoardApi {
 
   take(ip: string, code: string): Limited<string | null> {
     return this.service.take(ip, code);
+  }
+
+  openRoom(ip: string, game: RoomGame, name: string): Limited<RoomTicket | null> {
+    return this.service.openRoom(ip, game, name);
+  }
+
+  joinRoom(ip: string, code: string, name: string): Limited<RoomTicket | null> {
+    return this.service.joinRoom(ip, code, name);
+  }
+
+  lookRoom(ip: string, code: string, token: string): Limited<RoomView | null> {
+    return this.service.lookRoom(ip, code, token);
+  }
+
+  moveRoom(ip: string, code: string, token: string, version: number, move: unknown): Limited<MoveResult | null> {
+    return this.service.moveRoom(ip, code, token, version, move);
+  }
+
+  againRoom(ip: string, code: string, token: string): Limited<RoomView | null> {
+    return this.service.againRoom(ip, code, token);
+  }
+
+  leaveRoom(ip: string, code: string, token: string): Limited<boolean> {
+    return this.service.leaveRoom(ip, code, token);
   }
 }

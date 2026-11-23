@@ -168,7 +168,7 @@ export const RULE_BOOK: Readonly<Record<string, readonly RulePage[]>> = {
     {
       title: '무엇을 하나요?',
       lines: [
-        '컴퓨터와 카드를 7장씩 나눠 갖고 번갈아 해요',
+        '컴퓨터나 친구와 카드를 7장씩 나눠 갖고 번갈아 해요',
         '손의 카드를 묶음으로 탁자에 내려놓아요',
         '손의 카드를 먼저 다 비우면 이겨요',
       ],

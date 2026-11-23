@@ -19,6 +19,7 @@ import {
   type ApiError,
   type RankSpan,
 } from '../src/online/protocol';
+import { cleanRoomCode, isRoomGame, isSeatToken, MAX_MOVE_CHARS } from '../src/versus/protocol';
 import { placeOf } from './limiter';
 import { TOO_FAST, type BoardApi, type DayEntry, type Scores, type WeekEntry } from './service';
 
@@ -199,5 +200,64 @@ export async function handleApi(request: Request, board: BoardApi): Promise<Resp
     return result === null ? fail('notfound') : json({ bundle: result });
   }
 
+  if (path.startsWith('/api/room') && method === 'POST') return handleRoom(path, request, board, ip);
+
+  return fail('notfound');
+}
+
+/**
+ * 친구와 하는 방(POST /api/room/...). 방의 코드와 자리 열쇠를 본문으로 받는다.
+ * 주소에 열쇠를 적지 않는 것은, 주소는 기록에 남기 쉬워서다.
+ */
+async function handleRoom(path: string, request: Request, board: BoardApi, ip: string): Promise<Response> {
+  const body = await readBody(request);
+  if (!body) return fail('invalid');
+  const answer = <T>(result: T | typeof TOO_FAST | null, wrap: (value: T) => unknown = (value) => value): Response => {
+    if (result === TOO_FAST) return fail('slow');
+    return result === null ? fail('notfound') : json(wrap(result));
+  };
+
+  // 방 만들기: { game, name }
+  if (path === '/api/room') {
+    const name = cleanName(body.name);
+    if (!isRoomGame(body.game) || name === null) return fail('invalid');
+    const result = await board.openRoom(ip, body.game, name);
+    // 방이 너무 많이 열려 있으면 만들지 않는다. 앱은 "지금은 안 됨"으로 받는다.
+    if (result === null) return fail('busy');
+    return answer(result);
+  }
+
+  // 코드로 들어가기: { code, name }
+  if (path === '/api/room/join') {
+    const code = cleanRoomCode(body.code);
+    const name = cleanName(body.name);
+    if (code === null || name === null) return fail('invalid');
+    return answer(await board.joinRoom(ip, code, name));
+  }
+
+  // 나머지는 모두 { code, token }으로 내 자리를 밝힌다.
+  const code = cleanRoomCode(body.code);
+  const token = body.token;
+  if (code === null || !isSeatToken(token)) return fail('invalid');
+
+  if (path === '/api/room/look') {
+    const result = await board.lookRoom(ip, code, token);
+    // 앱이 이미 본 번호와 같으면 방의 모습을 다시 싣지 않는다. 기다리는 동안 2초마다 묻기 때문이다.
+    if (result !== null && result !== TOO_FAST && result.version === body.version) {
+      return json({ same: true, version: result.version });
+    }
+    return answer(result, (room) => ({ room }));
+  }
+  if (path === '/api/room/move') {
+    const version = body.version;
+    if (typeof version !== 'number' || !Number.isInteger(version)) return fail('invalid');
+    if (JSON.stringify(body.move ?? null).length > MAX_MOVE_CHARS) return fail('invalid');
+    return answer(await board.moveRoom(ip, code, token, version, body.move));
+  }
+  if (path === '/api/room/again') return answer(await board.againRoom(ip, code, token), (room) => ({ room }));
+  if (path === '/api/room/leave') {
+    const result = await board.leaveRoom(ip, code, token);
+    return answer(result === false ? null : result, () => ({ ok: true }));
+  }
   return fail('notfound');
 }

@@ -700,3 +700,111 @@ describe('점수 세는 법이 바뀐 게임의 점수', () => {
     expect((await call('GET', '/api/rank/garden-guard')).body.top).toEqual([]);
   });
 });
+
+describe('친구와 하는 방', () => {
+  type Room = {
+    code: string;
+    seat: number;
+    status: string;
+    version: number;
+    names: [string, string | null];
+    wins: [number, number];
+    game: { round: { turn: string; phase: string; hands: { me: number[]; cpu: number[] }; stock: number[] }; theirs: unknown[] } | null;
+  };
+  type Ticket = { token: string; room: Room };
+
+  async function pair(call: ReturnType<typeof server>['call']) {
+    const opened = await call('POST', '/api/room', { game: 'hula', name: '민수' });
+    expect(opened.status).toBe(200);
+    const host = opened.body as unknown as Ticket;
+    const joined = await call('POST', '/api/room/join', { code: host.room.code.toLowerCase(), name: '지원' }, '10.0.0.2');
+    expect(joined.status).toBe(200);
+    const guest = joined.body as unknown as Ticket;
+    return { code: host.room.code, host: host.token, guest: guest.token, hostRoom: host.room, guestRoom: guest.room };
+  }
+
+  it('방을 만들면 코드와 열쇠를 주고 친구를 기다린다', async () => {
+    const { call } = server();
+    const opened = await call('POST', '/api/room', { game: 'hula', name: '민수' });
+    const ticket = opened.body as unknown as Ticket;
+    expect(ticket.room.code).toMatch(/^[2-9A-HJ-NP-Z]{6}$/);
+    expect(ticket.token).toMatch(/^[0-9a-f]{32}$/);
+    expect(ticket.room).toMatchObject({ seat: 0, status: 'waiting', names: ['민수', null], game: null });
+    expect((await call('POST', '/api/room', { game: 'chess', name: '민수' })).status).toBe(400);
+    expect((await call('POST', '/api/room', { game: 'hula', name: 'x' })).status).toBe(400);
+  });
+
+  it('친구가 들어오면 판이 시작되고, 둘 다 자기 패만 본다', async () => {
+    const { call } = server();
+    const { code, host, guestRoom } = await pair(call);
+    expect(guestRoom).toMatchObject({ seat: 1, status: 'playing', names: ['민수', '지원'] });
+    const look = await call('POST', '/api/room/look', { code, token: host });
+    const hostRoom = (look.body as { room: Room }).room;
+    expect(hostRoom.seat).toBe(0);
+    expect(hostRoom.game!.round.hands.cpu.every((card) => card === -1)).toBe(true);
+    expect(guestRoom.game!.round.hands.cpu.every((card) => card === -1)).toBe(true);
+    expect(hostRoom.game!.round.stock.every((card) => card === -1)).toBe(true);
+    for (const card of hostRoom.game!.round.hands.me) expect(guestRoom.game!.round.hands.me).not.toContain(card);
+    // 이미 둘이 찬 방에는 더 들어갈 수 없다.
+    expect((await call('POST', '/api/room/join', { code, name: '셋째' }, '10.0.0.3')).status).toBe(404);
+  });
+
+  it('이미 본 번호로 물으면 방을 다시 싣지 않는다', async () => {
+    const { call } = server();
+    const { code, host, guestRoom } = await pair(call);
+    const same = await call('POST', '/api/room/look', { code, token: host, version: guestRoom.version });
+    expect(same.body).toEqual({ same: true, version: guestRoom.version });
+  });
+
+  it('차례인 자리만, 마지막으로 본 번호로만 둘 수 있다', async () => {
+    const { call } = server();
+    const { code, host, guest, guestRoom } = await pair(call);
+    const hostTurn = guestRoom.game!.round.turn === 'cpu';
+    const [mover, waiter] = hostTurn ? [host, guest] : [guest, host];
+    const version = guestRoom.version;
+    const wrong = await call('POST', '/api/room/move', { code, token: waiter, version, move: { type: 'draw' } });
+    expect(wrong.status).toBe(200);
+    expect((wrong.body as { ok: boolean }).ok).toBe(false);
+    const stale = await call('POST', '/api/room/move', { code, token: mover, version: version - 1, move: { type: 'draw' } });
+    expect((stale.body as { ok: boolean }).ok).toBe(false);
+    const drew = await call('POST', '/api/room/move', { code, token: mover, version, move: { type: 'draw' } });
+    expect(drew.body).toMatchObject({ ok: true, room: { version: version + 1 } });
+    const again = await call('POST', '/api/room/move', { code, token: mover, version, move: { type: 'draw' } });
+    expect((again.body as { ok: boolean }).ok).toBe(false);
+    // 상대는 뽑은 것만 알고 무슨 카드인지는 모른다.
+    const seen = await call('POST', '/api/room/look', { code, token: waiter });
+    expect((seen.body as { room: Room }).room.game!.theirs).toEqual([{ type: 'draw' }]);
+  });
+
+  it('열쇠가 틀리면 방을 보여 주지 않는다', async () => {
+    const { call } = server();
+    const { code } = await pair(call);
+    expect((await call('POST', '/api/room/look', { code, token: 'f'.repeat(32) })).status).toBe(404);
+    expect((await call('POST', '/api/room/look', { code, token: 'nope' })).status).toBe(400);
+    expect((await call('POST', '/api/room/look', { code: 'ZZZZZZ', token: 'f'.repeat(32) })).status).toBe(404);
+  });
+
+  it('나가면 친구에게 방이 닫혔다고 보이고, 판을 하던 중이면 친구가 이긴 것으로 친다', async () => {
+    const { call } = server();
+    const { code, host, guest } = await pair(call);
+    expect((await call('POST', '/api/room/leave', { code, token: guest })).body).toEqual({ ok: true });
+    const seen = (await call('POST', '/api/room/look', { code, token: host })).body as { room: Room & { left: number } };
+    expect(seen.room).toMatchObject({ status: 'closed', left: 1, wins: [1, 0] });
+  });
+
+  it('30분 동안 아무도 두지 않으면 방이 사라진다', async () => {
+    const { call, wait } = server();
+    const { code, host } = await pair(call);
+    wait(29 * 60 * 1000);
+    expect((await call('POST', '/api/room/look', { code, token: host })).status).toBe(200);
+    wait(2 * 60 * 1000);
+    expect((await call('POST', '/api/room/look', { code, token: host })).status).toBe(404);
+  });
+
+  it('방을 너무 자주 만들면 잠깐 막는다', async () => {
+    const { call } = server();
+    const [limit] = LIMITS.roomOpen;
+    for (let i = 0; i < limit; i += 1) expect((await call('POST', '/api/room', { game: 'hula', name: '민수' })).status).toBe(200);
+    expect((await call('POST', '/api/room', { game: 'hula', name: '민수' })).status).toBe(429);
+  });
+});
