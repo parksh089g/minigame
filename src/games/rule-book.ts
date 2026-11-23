@@ -10,6 +10,7 @@
 import { HULA_GAME_ID } from './hula/data';
 import { GAME_ID as HIGH_LOW_ID } from './high-low/rules';
 import { BLACKJACK_GAME_ID } from './blackjack/rules';
+import { POKER_GAME_ID } from './poker/rules';
 import { ONE_CARD_GAME_ID } from './one-card/text';
 import { PYRAMID_GAME_ID } from './pyramid/data';
 import { SOLITAIRE_GAME_ID } from './solitaire/rules';
@@ -366,6 +367,74 @@ export const RULE_BOOK: Readonly<Record<string, readonly RulePage[]>> = {
         '열 판을 하면 남은 칩이 점수예요',
         '칩을 다 잃으면 그 자리에서 끝나요',
         '다음 판은 언제나 칩 100개로 새로 시작해요',
+        '남은 칩 10개마다 코인 1개를 받아요',
+      ],
+    },
+  ],
+  [POKER_GAME_ID]: [
+    {
+      title: '무엇을 하나요?',
+      rows: [
+        { cards: ['*AS', '*KH'], note: '내 카드 두 장은 나만 봐요' },
+        { cards: ['QS', 'JD', '7C', '4H', '2S'], note: '가운데 다섯 장은 모두 같이 써요' },
+      ],
+      lines: [
+        '컴퓨터 셋과 칩을 걸고 겨뤄요',
+        '7장 중 가장 센 5장으로 족보를 만들어요',
+        '끝까지 남아 족보가 가장 세면 팟을 가져요',
+      ],
+    },
+    {
+      title: '판의 흐름',
+      rows: [{ cards: ['back', 'back', 'back', '>', 'back', '>', 'back'], note: '플롭 3장 > 턴 1장 > 리버 1장' }],
+      lines: [
+        '두 사람이 먼저 블라인드(2칩, 4칩)를 내요',
+        '카드를 받으면 차례대로 칩을 걸어요',
+        '가운데 카드가 깔릴 때마다 또 걸어요',
+        '리버까지 남으면 카드를 펼쳐 겨뤄요',
+      ],
+    },
+    {
+      title: '내 차례에 할 일',
+      lines: [
+        '체크: 더 걸지 않고 넘겨요',
+        '콜: 앞사람이 건 만큼 따라가요',
+        '레이즈: 더 올려 걸어요(-, + 로 조절)',
+        '폴드: 이번 판을 접어요. 건 칩은 잃어요',
+        '올인: 가진 칩을 모두 걸어요',
+      ],
+    },
+    {
+      title: '센 족보',
+      rows: [
+        { cards: ['9H', '8H', '7H', '6H', '5H'], note: '스트레이트 플러시' },
+        { cards: ['QC', 'QD', 'QS', '4H', '4S'], note: '풀하우스: 트리플 + 원페어' },
+      ],
+      lines: [
+        '로열 플러시: 같은 무늬 10 J Q K A, 가장 세요',
+        '스트레이트 플러시: 같은 무늬로 이어진 5장',
+        '포카드: 같은 숫자 4장',
+      ],
+    },
+    {
+      title: '자주 나오는 족보',
+      rows: [
+        { cards: ['KD', '9D', '7D', '4D', '2D'], note: '플러시: 같은 무늬 5장' },
+        { cards: ['8C', '7D', '6S', '5H', '4C'], note: '스트레이트: 이어진 숫자 5장' },
+      ],
+      lines: [
+        '그 아래로 트리플, 투페어, 원페어, 하이카드',
+        '같은 족보면 숫자가 큰 쪽이 이겨요',
+        '오른쪽 족보표에 지금 내 패가 빛나요',
+      ],
+    },
+    {
+      title: '칩과 판의 끝',
+      lines: [
+        '칩 100개로 시작해 열 판을 해요',
+        '열 판 뒤 남은 칩이 점수예요',
+        '칩을 다 잃으면 그 자리에서 끝나요',
+        '칩은 이 게임에서만 쓰는 놀이 칩이에요',
         '남은 칩 10개마다 코인 1개를 받아요',
       ],
     },

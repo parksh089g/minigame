@@ -201,4 +201,5 @@ export const SCENE = {
   gardenGuard: 'GardenGuard',
   highLow: 'HighLow',
   blackjack: 'Blackjack',
+  poker: 'Poker',
 } as const;

@@ -36,6 +36,7 @@ export const RANKED_GAMES = [
   'cloud-tower',
   'high-low',
   'blackjack',
+  'poker',
   'hula',
   'solitaire',
   'one-card',

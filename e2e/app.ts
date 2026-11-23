@@ -50,7 +50,7 @@ export async function openApp(page: Page, path = '/', scene = 'Hub', options: { 
     await page.addInitScript((key) => {
       try {
         if (localStorage.getItem(key) === null) {
-          localStorage.setItem(key, JSON.stringify(['solitaire', 'pyramid', 'hula', 'one-card', 'high-low', 'blackjack']));
+          localStorage.setItem(key, JSON.stringify(['solitaire', 'pyramid', 'hula', 'one-card', 'high-low', 'blackjack', 'poker']));
         }
       } catch {
         // 저장소를 못 쓰는 곳이면 안내서가 뜰 수 있다.

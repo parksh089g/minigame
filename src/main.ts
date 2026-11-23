@@ -23,6 +23,7 @@ import { GardenGuardScene } from './games/garden-guard/GardenGuardScene';
 import { GateRunScene } from './games/gate-run/GateRunScene';
 import { HighLowScene } from './games/high-low/HighLowScene';
 import { BlackjackScene } from './games/blackjack/BlackjackScene';
+import { PokerScene } from './games/poker/PokerScene';
 import { JumpRunnerScene } from './games/jump-runner/JumpRunnerScene';
 import { LanternKeeperScene } from './games/lantern-keeper/LanternKeeperScene';
 import { SproutCompanyScene } from './games/sprout-company/SproutCompanyScene';
@@ -125,6 +126,7 @@ async function boot(): Promise<void> {
       TailChaseScene,
       HighLowScene,
       BlackjackScene,
+      PokerScene,
       LogicTilesScene,
       NemoLogicScene,
       NumberPuzzleScene,
