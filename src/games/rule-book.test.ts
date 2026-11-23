@@ -24,7 +24,7 @@ function fontSyllables(): Set<string> {
 }
 
 /** 안내서가 있어야 하는 카드 게임 */
-const CARD_GAMES = ['solitaire', 'pyramid', 'hula', 'one-card', 'high-low'];
+const CARD_GAMES = ['solitaire', 'pyramid', 'hula', 'one-card', 'high-low', 'blackjack'];
 
 describe('규칙 안내서', () => {
   it('카드 게임마다 안내서가 있고, 없는 게임의 안내서는 없다', () => {
