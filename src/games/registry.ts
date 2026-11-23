@@ -21,6 +21,7 @@ import { COMPANY_GAME_ID, COMPANY_SCENE } from './sprout-company/data';
 import { ONE_CARD_GAME_ID, ONE_CARD_SCENE } from './one-card/text';
 import { TOWER_GAME_ID, TOWER_SCENE } from './cloud-tower/data';
 import { coinsFor as highLowCoins, GAME_ID as HIGH_LOW_ID } from './high-low/rules';
+import { BLACKJACK_GAME_ID, coinsFor as blackjackCoins } from './blackjack/rules';
 import { HULA_GAME_ID, HULA_SCENE } from './hula/data';
 import { coinsFor as solitaireCoins, SOLITAIRE_GAME_ID, SOLITAIRE_SCENE } from './solitaire/rules';
 import { PYRAMID_GAME_ID, PYRAMID_SCENE } from './pyramid/data';
@@ -297,6 +298,16 @@ export const GAMES: readonly MiniGameInfo[] = [
     sceneKey: SCENE.highLow,
     coinsFor: highLowCoins,
     dailyTargets: [10, 20, 35],
+    genre: 'puzzle',
+  },
+  {
+    id: BLACKJACK_GAME_ID,
+    title: '블랙잭',
+    icon: 'icon-blackjack',
+    sceneKey: SCENE.blackjack,
+    coinsFor: blackjackCoins,
+    // 칩 100개로 시작해 열 판 뒤에 남은 칩이 점수다.
+    dailyTargets: [110, 150, 200],
     genre: 'puzzle',
   },
   {

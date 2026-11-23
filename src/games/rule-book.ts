@@ -9,6 +9,7 @@
  */
 import { HULA_GAME_ID } from './hula/data';
 import { GAME_ID as HIGH_LOW_ID } from './high-low/rules';
+import { BLACKJACK_GAME_ID } from './blackjack/rules';
 import { ONE_CARD_GAME_ID } from './one-card/text';
 import { PYRAMID_GAME_ID } from './pyramid/data';
 import { SOLITAIRE_GAME_ID } from './solitaire/rules';
@@ -306,6 +307,66 @@ export const RULE_BOOK: Readonly<Record<string, readonly RulePage[]>> = {
         '넘기기로 맞히지 않고 카드를 바꿀 수 있어요',
         '넘기기는 한 판에 두 번이에요',
         '나온 카드는 다시 안 나오니 기억해 두세요',
+      ],
+    },
+  ],
+  [BLACKJACK_GAME_ID]: [
+    {
+      title: '무엇을 하나요?',
+      rows: [
+        { cards: ['10S', '8H', '=', '18'], note: '내 카드는 둘 다 보여요' },
+        { cards: ['9D', 'back'], note: '딜러는 한 장을 엎어 둬요' },
+      ],
+      lines: [
+        '딜러와 겨뤄 카드 합을 21에 가깝게 만들어요',
+        '21을 넘으면 버스트! 바로 져요',
+        '딜러보다 21에 가까우면 이겨요',
+      ],
+    },
+    {
+      title: '카드의 점수',
+      rows: [
+        { cards: ['2C', '...', '9H', '10S'], note: '숫자 카드는 그 숫자만큼' },
+        { cards: ['JD', 'QC', 'KH', '=', '10'], note: 'J, Q, K는 모두 10점' },
+      ],
+      lines: ['A는 1점이나 11점, 유리한 쪽으로 세요', '무늬는 따지지 않아요'],
+    },
+    {
+      title: '칩 걸기',
+      lines: [
+        '칩 100개로 시작해요',
+        '+5, +10, +25, +50 칩을 눌러 걸고 딜해요',
+        '이기면 건 만큼 더 받고, 지면 잃어요',
+        '비기면 건 칩을 그대로 돌려받아요',
+        '칩은 이 게임에서만 쓰는 놀이 칩이에요',
+      ],
+    },
+    {
+      title: '내 차례에 할 일',
+      lines: [
+        '히트: 한 장 더 받아요',
+        '스탠드: 그만 받고 멈춰요',
+        '더블: 건 만큼 더 걸고 딱 한 장만 받아요',
+        '스플릿: 같은 숫자 두 장을 두 손으로 나눠요',
+        '나누거나 두 배로 걸려면 칩이 더 있어야 해요',
+      ],
+    },
+    {
+      title: '블랙잭과 딜러',
+      rows: [{ cards: ['*AS', '*KH', '=', '21'], note: '처음 두 장이 21이면 블랙잭' }],
+      lines: [
+        '블랙잭은 건 칩의 1.5배를 더 받아요',
+        '딜러는 16까지 받고 17부터 멈춰요',
+        '딜러가 21을 넘으면 남은 손이 다 이겨요',
+      ],
+    },
+    {
+      title: '판의 끝',
+      lines: [
+        '열 판을 하면 남은 칩이 점수예요',
+        '칩을 다 잃으면 그 자리에서 끝나요',
+        '다음 판은 언제나 칩 100개로 새로 시작해요',
+        '남은 칩 10개마다 코인 1개를 받아요',
       ],
     },
   ],

@@ -197,3 +197,13 @@ export function rankSize(rank: number): { width: number; height: number } {
   const rows = GLYPHS[RANK_KEYS[rank - 1]];
   return { width: rows[0].length * 2, height: rows.length * 2 };
 }
+
+/**
+ * 같은 생김새의 카드 앞면과 뒷면을 다른 크기로 등록한다(논리 크기, 한 칸 2px).
+ * 블랙잭처럼 카드를 여러 장 펼쳐 놓는 게임이 하이로우의 카드 그림을 작게 쓸 때 부른다.
+ * 숫자와 무늬는 registerHighLowTextures가 등록한 것을 그대로 쓴다.
+ */
+export function registerCardBase(scene: Phaser.Scene, faceKey: string, backKey: string, width: number, height: number): void {
+  addRows(scene, faceKey, faceRows(width / 2, height / 2), width, height);
+  addRows(scene, backKey, backRows(width / 2, height / 2), width, height);
+}
