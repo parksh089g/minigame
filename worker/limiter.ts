@@ -90,6 +90,14 @@ export const LIMITS = {
   stash: [6, 10 * 60 * 1000],
   /** 옮기기 코드 넣기. 코드를 마구 넣어 맞히는 것을 막는다. */
   take: [12, 10 * 60 * 1000],
+  /**
+   * 친구와 하는 방에서 소식 묻기와 수 두기. 기다리는 동안 2초마다 묻고, 같은 와이파이의 두 사람이 함께 셀 수 있어서 넉넉하게 둔다.
+   */
+  room: [240, 60 * 1000],
+  /** 방 만들기 */
+  roomOpen: [12, 10 * 60 * 1000],
+  /** 코드로 방에 들어가기. 코드를 마구 넣어 남의 방에 들어가는 것을 막는다. */
+  roomJoin: [30, 10 * 60 * 1000],
 } as const satisfies Record<string, readonly [number, number]>;
 
 export type LimitKind = keyof typeof LIMITS;

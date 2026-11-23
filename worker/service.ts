@@ -14,6 +14,8 @@ import {
 } from '../src/online/protocol';
 import { BoardDb, type Scores, type SqlRunner } from './board-db';
 import { Limiter, LIMITS, type LimitKind } from './limiter';
+import type { MoveResult, RoomGame, RoomTicket, RoomView } from '../src/versus/protocol';
+import { RoomDb } from './rooms';
 
 /** 요청이 너무 잦아서 받지 않았다는 답 */
 export const TOO_FAST = 'slow';
@@ -58,17 +60,42 @@ export interface BoardApi {
   forget(ip: string, device: string): Limited<true> | Promise<Limited<true>>;
   stash(ip: string, bundle: string): Limited<StashResult | null> | Promise<Limited<StashResult | null>>;
   take(ip: string, code: string): Limited<string | null> | Promise<Limited<string | null>>;
+  /** 친구와 하는 방을 만든다. 방이 너무 많이 열려 있으면 null */
+  openRoom(ip: string, game: RoomGame, name: string): Limited<RoomTicket | null> | Promise<Limited<RoomTicket | null>>;
+  /** 코드로 방에 들어간다. 그런 방이 없거나 이미 찼으면 null */
+  joinRoom(ip: string, code: string, name: string): Limited<RoomTicket | null> | Promise<Limited<RoomTicket | null>>;
+  /** 내 자리에서 본 방. 방이 없거나 열쇠가 틀리면 null */
+  lookRoom(ip: string, code: string, token: string): Limited<RoomView | null> | Promise<Limited<RoomView | null>>;
+  moveRoom(
+    ip: string,
+    code: string,
+    token: string,
+    version: number,
+    move: unknown,
+  ): Limited<MoveResult | null> | Promise<Limited<MoveResult | null>>;
+  againRoom(ip: string, code: string, token: string): Limited<RoomView | null> | Promise<Limited<RoomView | null>>;
+  leaveRoom(ip: string, code: string, token: string): Limited<boolean> | Promise<Limited<boolean>>;
 }
+
+/** 0 이상 1 미만의 예측할 수 없는 수. 서버가 카드를 섞을 때 쓴다. */
+function secureRandom(): number {
+  return crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32;
+}
+
+const randomBytes = (length: number): Uint8Array => crypto.getRandomValues(new Uint8Array(length));
 
 export class BoardService implements BoardApi {
   private readonly db: BoardDb;
+  private readonly rooms: RoomDb;
   private readonly limiter = new Limiter();
 
   constructor(
     sql: SqlRunner,
     private readonly now: () => number = Date.now,
+    private readonly random: () => number = secureRandom,
   ) {
     this.db = new BoardDb(sql);
+    this.rooms = new RoomDb(sql);
   }
 
   private allow(kind: LimitKind, ip: string): boolean {
@@ -131,5 +158,35 @@ export class BoardService implements BoardApi {
   take(ip: string, code: string): Limited<string | null> {
     if (!this.allow('take', ip)) return TOO_FAST;
     return this.db.take(code, this.now());
+  }
+
+  openRoom(ip: string, game: RoomGame, name: string): Limited<RoomTicket | null> {
+    if (!this.allow('roomOpen', ip)) return TOO_FAST;
+    return this.rooms.create(game, name, this.now(), randomBytes);
+  }
+
+  joinRoom(ip: string, code: string, name: string): Limited<RoomTicket | null> {
+    if (!this.allow('roomJoin', ip)) return TOO_FAST;
+    return this.rooms.join(code, name, this.now(), randomBytes, this.random);
+  }
+
+  lookRoom(ip: string, code: string, token: string): Limited<RoomView | null> {
+    if (!this.allow('room', ip)) return TOO_FAST;
+    return this.rooms.look(code, token, this.now());
+  }
+
+  moveRoom(ip: string, code: string, token: string, version: number, move: unknown): Limited<MoveResult | null> {
+    if (!this.allow('room', ip)) return TOO_FAST;
+    return this.rooms.move(code, token, version, move, this.now());
+  }
+
+  againRoom(ip: string, code: string, token: string): Limited<RoomView | null> {
+    if (!this.allow('room', ip)) return TOO_FAST;
+    return this.rooms.again(code, token, this.now(), this.random);
+  }
+
+  leaveRoom(ip: string, code: string, token: string): Limited<boolean> {
+    if (!this.allow('room', ip)) return TOO_FAST;
+    return this.rooms.leave(code, token, this.now());
   }
 }

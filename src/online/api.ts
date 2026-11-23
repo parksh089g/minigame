@@ -13,6 +13,38 @@ import {
   type SubmitRequest,
   type SubmitResult,
 } from './protocol';
+import { readRoomView, type MoveResult, type RoomGame, type RoomTicket, type RoomView } from '../versus/protocol';
+
+/** 방의 판(게임마다 모양이 다르다)을 확인하며 읽는 함수 */
+type ReadGame<V> = (value: unknown) => V | null;
+
+function asTicket<V>(readGame: ReadGame<V>) {
+  return (value: unknown): RoomTicket<V> | null => {
+    if (!isObject(value) || typeof value.token !== 'string') return null;
+    const room = readRoomView(value.room, readGame);
+    return room && { token: value.token, room };
+  };
+}
+
+function asRoom<V>(readGame: ReadGame<V>) {
+  return (value: unknown): RoomView<V> | null => (isObject(value) ? readRoomView(value.room, readGame) : null);
+}
+
+/** 소식 묻기의 답. 앱이 이미 본 번호와 같으면 서버는 방을 다시 싣지 않고 same만 보낸다. */
+function asLook<V>(readGame: ReadGame<V>) {
+  return (value: unknown): RoomView<V> | 'same' | null => {
+    if (isObject(value) && value.same === true) return 'same';
+    return asRoom(readGame)(value);
+  };
+}
+
+function asMove<V>(readGame: ReadGame<V>) {
+  return (value: unknown): MoveResult<V> | null => {
+    if (!isObject(value) || typeof value.ok !== 'boolean') return null;
+    const room = readRoomView(value.room, readGame);
+    return room && { ok: value.ok, room };
+  };
+}
 
 /** offline: 서버에 닿지 못함(인터넷 없음, 시간 초과, 서버가 없는 곳에 올린 경우). 나머지는 서버가 알려 준 이유다. */
 export type ApiFailure = 'offline' | ApiError;
@@ -161,6 +193,24 @@ export function createApi(
     /** 옮기기 코드로 맡겨 둔 세이브를 받는다. */
     take: (code: string): Promise<ApiResult<string>> =>
       call('/api/transfer/take', asBundle, 'POST', { code }),
+    /** 친구와 하는 방을 만들고 0번 자리에 앉는다. */
+    openRoom: <V>(game: RoomGame, name: string, readGame: ReadGame<V>): Promise<ApiResult<RoomTicket<V>>> =>
+      call('/api/room', asTicket(readGame), 'POST', { game, name }),
+    /** 코드로 친구의 방에 들어간다. 없는 방이거나 이미 찼으면 notfound */
+    joinRoom: <V>(code: string, name: string, readGame: ReadGame<V>): Promise<ApiResult<RoomTicket<V>>> =>
+      call('/api/room/join', asTicket(readGame), 'POST', { code, name }),
+    /** 방의 소식을 묻는다. version은 마지막으로 본 방의 번호이고, 그대로면 'same'이 온다. */
+    lookRoom: <V>(code: string, token: string, version: number, readGame: ReadGame<V>): Promise<ApiResult<RoomView<V> | 'same'>> =>
+      call('/api/room/look', asLook(readGame), 'POST', { code, token, version }),
+    /** 수를 둔다. 서버가 받지 않았으면 ok가 false이고, 그때도 지금 방의 모습이 온다. */
+    moveRoom: <V>(code: string, token: string, version: number, move: unknown, readGame: ReadGame<V>): Promise<ApiResult<MoveResult<V>>> =>
+      call('/api/room/move', asMove(readGame), 'POST', { code, token, version, move }),
+    /** 판이 끝난 뒤 "한 판 더"를 누른다. */
+    againRoom: <V>(code: string, token: string, readGame: ReadGame<V>): Promise<ApiResult<RoomView<V>>> =>
+      call('/api/room/again', asRoom(readGame), 'POST', { code, token }),
+    /** 방을 나간다. */
+    leaveRoom: (code: string, token: string): Promise<ApiResult<true>> =>
+      call('/api/room/leave', (value) => (isObject(value) ? true : null), 'POST', { code, token }),
   };
 }
 
