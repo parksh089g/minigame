@@ -100,9 +100,27 @@ export const TEXT = {
 
 /** 이름: 0번은 "나", 나머지는 컴퓨터 이름 */
 export const nameOf = (who: number): string => (who === 0 ? TEXT.me : BOT_NAMES[who - 1]);
+const defaultName = nameOf;
 
-/** 알림 줄에 보일 일. 화면에 따로 알리지 않는 일은 null */
-export function eventLine(event: GameEvent): string | null {
+/** 친구와 할 때의 글 */
+export const FRIEND_TEXT = {
+  myTurn: (name: string) => `${name} 차례예요. 낼 카드를 눌러요`,
+  waiting: (name: string) => `${name} 차례예요. 기다려요`,
+  callNow: (seconds: number) => `한 장 남았어요! ${seconds}초 안에 원카드!`,
+  foeCalling: (name: string) => `${name} 원카드를 외치는 중이에요`,
+  missed: '원카드를 놓쳐서 한 장 받아요',
+  pickSuit: (name: string) => `${name} 무늬를 고르는 중이에요`,
+  winBy: (name: string) => `${name} 이겼어요!`,
+  left: (a: string, an: number, b: string, bn: number) => `남은 카드  ${a} ${an}장 · ${b} ${bn}장`,
+  brokeLine: (name: string) => `${name} 카드가 너무 많아 파산했어요`,
+  emptyLine: (name: string) => `${name} 카드를 다 냈어요`,
+} as const;
+
+/**
+ * 알림 줄에 보일 일. 화면에 따로 알리지 않는 일은 null.
+ * name은 사람 번호를 이름으로 바꾼다. 친구와 할 때는 0번이 "나"(한 폰이면 1P나 2P), 1번이 친구다.
+ */
+export function eventLine(event: GameEvent, nameOf: (who: number) => string = defaultName): string | null {
   switch (event.k) {
     case 'suit':
       return `${nameOf(event.who)}: 무늬를 ${SUIT_NAME[event.suit]}로!`;

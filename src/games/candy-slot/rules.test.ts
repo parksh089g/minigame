@@ -1134,6 +1134,7 @@ describe('밸런스', () => {
     expect(middleOf(reckless)).toBeLessThanOrEqual(middleOf(careful));
   }, 60_000);
 
+  // 부적마다 다섯 단계를 4천 판씩 돌리는 시뮬레이션이라 CI에서 1분 가까이 걸린다. 테스트 파일이 늘면 더 느려져서 2분을 준다.
   it('강화는 단계마다 제 몫을 하지만 꼭 해야 하는 강화는 없고, 금화 한 개마다의 벌이는 단계가 오를수록 준다', () => {
     const rounds = 4_000;
     for (const charm of CHARMS) {
@@ -1165,7 +1166,7 @@ describe('밸런스', () => {
         earned = strong;
       }
     }
-  }, 60_000);
+  }, 120_000);
 
   it('쌍둥이 줄은 여러 길 가운데 하나다: 없이도 센 조합이 여럿이고, 넣은 조합도 뒤지지 않는다', () => {
     const average = (charms: readonly string[], level = 1): number =>
