@@ -330,7 +330,7 @@ export class PixelButton {
   private enabled = true;
 
   constructor(
-    scene: Phaser.Scene,
+    private readonly scene: Phaser.Scene,
     private readonly config: ButtonConfig,
   ) {
     this.style = config.style ?? 'neutral';
@@ -391,6 +391,24 @@ export class PixelButton {
     this.icon?.setAlpha(alpha);
     this.draw();
     return this;
+  }
+
+  /** 다른 것 위에 놓아야 할 때(판 위에 뜨는 창) 깊이를 정한다. 누르는 자리도 같은 깊이로 올린다. */
+  setDepth(depth: number): this {
+    this.graphics.setDepth(depth);
+    this.label?.setDepth(depth + 0.1);
+    this.icon?.setDepth(depth + 0.1);
+    this.zone.setDepth(depth + 0.2);
+    return this;
+  }
+
+  /** 화면의 일부만 지울 때 버튼을 없앤다. */
+  destroy(): void {
+    this.scene.input.off(Phaser.Input.Events.POINTER_UP, this.release, this);
+    this.graphics.destroy();
+    this.zone.destroy();
+    this.label?.destroy();
+    this.icon?.destroy();
   }
 
   setVisible(visible: boolean): this {

@@ -287,6 +287,14 @@ export abstract class MiniGameScene extends Phaser.Scene implements BackAware {
     return null;
   }
 
+  /**
+   * 이 판의 점수로 받는 코인. 기본은 registry에 적은 셈이다.
+   * 한 게임 안에 점수의 뜻이 다른 모드가 있으면(하이로우의 칩 걸기) 그 모드의 셈으로 바꿔 쓴다.
+   */
+  protected coinsForScore(score: number): number {
+    return getGame(this.gameId)?.coinsFor(score) ?? 0;
+  }
+
   /** 판이 끝날 때 나는 소리. 끝맺음 소리가 따로 있는 게임은 이것을 바꿔 쓴다. */
   protected playFinishSound(): void {
     sfx.finish();
@@ -314,7 +322,7 @@ export abstract class MiniGameScene extends Phaser.Scene implements BackAware {
     const result = store.recordPlay(
       this.gameId,
       score,
-      game?.coinsFor(score) ?? 0,
+      this.coinsForScore(score),
       todaysChallenge(),
       thisWeek(store.data.weekly),
       offRecord === null,

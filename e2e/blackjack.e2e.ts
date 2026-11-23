@@ -31,7 +31,8 @@ const view = (page: Page): Promise<TableView> =>
 
 it('블랙잭: 칩을 걸고 몇 판을 한다', async ({ page }) => {
   await openApp(page);
-  await startScene(page, SCENE.blackjack);
+  // 준비 화면을 건너뛰고 혼자 하는 판을 연다(결과 화면의 "다시 하기"와 같다).
+  await startScene(page, SCENE.blackjack, { solo: true });
   expect(await hiddenTexts(page, SCENE.blackjack), '베팅 화면').toEqual([]);
 
   await tapText(page, SCENE.blackjack, '+25');
@@ -63,7 +64,8 @@ it('블랙잭: 칩을 걸고 몇 판을 한다', async ({ page }) => {
 
 it('블랙잭: 칩을 다 잃으면 결과 화면이 뜬다', async ({ page }) => {
   await openApp(page);
-  await startScene(page, SCENE.blackjack);
+  // 준비 화면을 건너뛰고 혼자 하는 판을 연다(결과 화면의 "다시 하기"와 같다).
+  await startScene(page, SCENE.blackjack, { solo: true });
   // 칩을 다섯 개로 줄이고(건 칩 10개는 딜할 때 가진 만큼으로 줄어든다), 딜러가 블랙잭인 슈를 넣는다.
   await page.evaluate((key) => {
     const scene = window.__pocketArcade?.scene.getScene(key) as unknown as {

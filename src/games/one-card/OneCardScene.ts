@@ -4,6 +4,9 @@ import { homeScene } from '../../core/home';
 import { sfx } from '../../core/sfx';
 import { addTapZone, addText, fadeToScene, PixelButton } from '../../core/ui';
 import { MiniGameScene, type ResultStat } from '../../scenes/MiniGameScene';
+import { FriendsKit, type FriendsResult, type FriendsStart } from '../../versus/friends-kit';
+import type { RoomView, Seat } from '../../versus/protocol';
+import { withSubject } from '../../versus/text';
 import { PX, PX_CSS } from '../cloud-tower/art';
 import { drawSky, pxPanel } from '../cloud-tower/bits';
 import { botTexture, CARD, jokerTexture, registerOneCardTextures, suitTexture, TEX } from './art';
@@ -34,8 +37,9 @@ import {
   type Suit,
 } from './rules';
 import {
-  BOT_NAMES,
   cardEffect,
+  cardLabel,
+  FRIEND_TEXT,
   eventLine,
   LEVEL_NAME,
   LEVEL_NOTE,
@@ -47,9 +51,10 @@ import {
   SUIT_NAME,
   TEXT,
 } from './text';
+import { CALL_WINDOW_MS, oneCardVersus, readOneCardView, type OneCardMove, type OneCardView } from './versus';
 
 /** 씬을 열 때 넘기는 값. quick이면 준비 화면을 건너뛰고 지난 설정으로 바로 시작한다("다시 하기"). */
-export interface OneCardStart {
+export interface OneCardStart extends FriendsStart {
   quick?: boolean;
 }
 
@@ -103,6 +108,21 @@ export class OneCardScene extends MiniGameScene {
   /** 원카드를 기다리는 동안 걸어 둔 시계들 */
   private oneCardTimers: Phaser.Time.TimerEvent[] = [];
 
+  // ───────── 친구와 하기 ─────────
+  /** 친구와 하기 화면. 자동 점검이 들여다본다. */
+  friends!: FriendsKit<OneCardView, OneCardMove>;
+  /** 친구와 하는 판의 화면 틀(위쪽 줄, 버튼)을 그렸는지 */
+  private frameBuilt = false;
+  private subLabel: Phaser.GameObjects.Text | null = null;
+  /** 마지막으로 알린 수의 번호. 같은 일을 두 번 알리지 않는다. */
+  private seenMoves = -1;
+  /** 친구가 한 마지막 일. 폰을 넘길 때 가림 판에 적는다. */
+  private lastLine: string | null = null;
+  /** 원카드를 외칠 시간을 재는 시계와, 그 시계를 건 수의 번호 */
+  private callTimer: Phaser.Time.TimerEvent | null = null;
+  private callFor = -1;
+  private suitOpen = false;
+
   constructor() {
     super(ONE_CARD_SCENE);
   }
@@ -120,7 +140,33 @@ export class OneCardScene extends MiniGameScene {
     this.notice = null;
     this.noticeTimer = null;
     this.oneCardTimers = [];
+    this.frameBuilt = false;
+    this.subLabel = null;
+    this.seenMoves = -1;
+    this.lastLine = null;
+    this.callTimer = null;
+    this.callFor = -1;
+    this.suitOpen = false;
     drawSky(this, 0);
+    this.friends = new FriendsKit<OneCardView, OneCardMove>(this, {
+      game: 'one-card',
+      title: TEXT.title,
+      rules: oneCardVersus,
+      readView: readOneCardView,
+      isMyTurn: (room) => {
+        const game = room.game?.game;
+        if (!game || game.winner !== null) return false;
+        return game.oneCard !== null ? game.oneCard === 0 : game.turn === 0;
+      },
+      cover: true,
+      onRoom: (room, fresh) => this.onRoom(room, fresh),
+      result: (room) => this.friendResult(room),
+      onClosed: () => this.friendsClosed(),
+      say: (text) => this.showNotice(text),
+      coverNote: () => this.lastLine,
+      restart: (start) => this.scene.restart(start satisfies OneCardStart),
+    });
+    if (this.friends.begin(data)) return;
     if (data.quick) this.startGame();
     else this.openLobby();
   }
@@ -147,10 +193,13 @@ export class OneCardScene extends MiniGameScene {
     addText(this, rulesX - 6, 21, record, { size: 10, color: PX_CSS.sub, originX: 1, originY: 0.5 });
     this.offerRuleBook(() => this.phase === 'lobby');
     redraw();
+    // 아래 줄: 왼쪽은 친구와 함께, 오른쪽은 컴퓨터와 시작
+    const friendsWidth = 92;
+    this.friends.lobbyButton(MARGIN, height - 8 - 36, friendsWidth, 36);
     new PixelButton(this, {
-      x: MARGIN,
+      x: MARGIN + friendsWidth + 6,
       y: height - 8 - 36,
-      width: WIDTH,
+      width: WIDTH - friendsWidth - 6,
       height: 36,
       label: TEXT.start,
       style: 'green',
@@ -277,7 +326,8 @@ export class OneCardScene extends MiniGameScene {
     const L = this.layout;
     this.addPauseButton();
     addText(this, 40, 14, TEXT.title, { size: 14, color: PX_CSS.text, originY: 0.5 });
-    addText(this, 40, 29, `${LEVEL_NAME[this.prefs.level]} · 상대 ${this.prefs.bots}명`, { size: 9, color: PX_CSS.sub, originY: 0.5 });
+    const sub = this.friends.match ? this.friends.scoreLine() : `${LEVEL_NAME[this.prefs.level]} · 상대 ${this.prefs.bots}명`;
+    this.subLabel = addText(this, 40, 29, sub, { size: 9, color: PX_CSS.sub, originY: 0.5 });
     // 더미가 놓이는 탁자
     const felt = this.add.graphics().setDepth(-5);
     pxPanel(felt, MARGIN, L.pileTop - 8, WIDTH, CARD.bigH + 16, { fill: 0x1f4e55, border: PX.teal, shadow: PX.ink, radius: 4 });
@@ -337,7 +387,7 @@ export class OneCardScene extends MiniGameScene {
       });
       const face = this.add.image(box.x + 16, box.y + 17, botTexture(index - 1));
       if (player.out) face.setAlpha(0.4);
-      addText(this, box.x + 31, box.y + 10, BOT_NAMES[index - 1], { size: 11, color: player.out ? PX_CSS.faint : PX_CSS.text, originY: 0.5 });
+      addText(this, box.x + 31, box.y + 10, this.who(index), { size: 11, color: player.out ? PX_CSS.faint : PX_CSS.text, originY: 0.5 });
       const count = player.out ? TEXT.broke : TEXT.cards(player.hand.length);
       addText(this, box.x + 31, box.y + 24, count, {
         size: 10,
@@ -471,7 +521,14 @@ export class OneCardScene extends MiniGameScene {
   /** 사람이 지금 카드를 내거나 받을 수 있는지 */
   private humanCanAct(): boolean {
     const state = this.state;
+    if (this.friends.match && !this.friends.myTurn()) return false;
     return !!state && this.phase === 'play' && !this.busy && state.winner === null && state.turn === 0 && !state.choosingSuit && state.oneCard === null;
+  }
+
+  /** 사람 번호의 이름. 컴퓨터와 할 때는 "나"와 컴퓨터 이름, 친구와 할 때는 나(한 폰이면 1P, 2P)와 친구 */
+  private who(index: number): string {
+    if (!this.friends.match) return nameOf(index);
+    return index === 0 ? this.friends.myName : this.friends.foeName;
   }
 
   private updateControls(): void {
@@ -480,11 +537,13 @@ export class OneCardScene extends MiniGameScene {
     const canAct = this.humanCanAct();
     this.drawButton.setLabel(state.turn === 0 && state.attack > 0 ? TEXT.takeAttack(state.attack) : TEXT.draw);
     this.drawButton.setEnabled(canAct);
-    this.oneCardButton.setEnabled(state.oneCard !== null && this.phase === 'play');
+    const canCall = this.friends.match ? state.oneCard === 0 && this.friends.myTurn() : state.oneCard !== null;
+    this.oneCardButton.setEnabled(canCall && this.phase === 'play');
     this.message.setText(state.oneCard !== null ? this.defaultMessage(state) : (this.notice ?? this.defaultMessage(state)));
   }
 
   private defaultMessage(state: GameState): string {
+    if (this.friends.match) return this.friendMessage(state);
     if (state.winner !== null) return state.winner === 0 ? TEXT.win : TEXT.lose;
     if (state.oneCard !== null) return state.oneCard === 0 ? TEXT.callNow : TEXT.catchNow(nameOf(state.oneCard));
     if (state.choosingSuit) return state.turn === 0 ? TEXT.pickSuit : TEXT.thinking(nameOf(state.turn));
@@ -516,7 +575,7 @@ export class OneCardScene extends MiniGameScene {
   private handleEvents(events: readonly GameEvent[]): void {
     let line: string | null = null;
     for (const event of events) {
-      line = eventLine(event) ?? line;
+      line = eventLine(event, (who) => this.who(who)) ?? line;
       switch (event.k) {
         case 'play':
           if (event.card.suit === null || event.card.rank <= 2) sfx.whoosh();
@@ -628,6 +687,11 @@ export class OneCardScene extends MiniGameScene {
     this.busy = true;
     this.redrawWithout(card.id);
     this.flyCard(card, from.x, from.y - 8, () => {
+      if (this.friends.match) {
+        this.busy = false;
+        this.sendMove({ type: 'play', card: card.id });
+        return;
+      }
       playCard(state, 0, card.id);
       this.busy = false;
       this.advance();
@@ -652,6 +716,11 @@ export class OneCardScene extends MiniGameScene {
     this.busy = true;
     const count = state.attack > 0 ? state.attack : 1;
     this.flyBacks(count, GAME_WIDTH / 2, this.layout.handBottom - CARD.h / 2, () => {
+      if (this.friends.match) {
+        this.busy = false;
+        this.sendMove({ type: 'draw' });
+        return;
+      }
       drawTurn(state, 0);
       this.busy = false;
       this.advance();
@@ -739,6 +808,12 @@ export class OneCardScene extends MiniGameScene {
   private humanCall(): void {
     const state = this.state;
     if (!state || state.oneCard === null || this.phase !== 'play') return;
+    if (this.friends.match) {
+      if (state.oneCard !== 0 || !this.friends.myTurn()) return;
+      this.stopCallTimer();
+      this.sendMove({ type: 'call' });
+      return;
+    }
     const who = state.oneCard;
     this.resolveOneCard(() => (who === 0 ? callOneCard(state, 0) : catchOneCard(state, 0)));
   }
@@ -747,6 +822,7 @@ export class OneCardScene extends MiniGameScene {
 
   private openSuitPicker(): void {
     const state = this.state!;
+    this.suitOpen = true;
     const { height } = this.scale;
     const top = Math.round(height / 2 - 70);
     const before = this.children.list.length;
@@ -775,6 +851,11 @@ export class OneCardScene extends MiniGameScene {
         sfx.click();
         for (const object of this.overlay) object.destroy();
         this.overlay = [];
+        this.suitOpen = false;
+        if (this.friends.match) {
+          this.sendMove({ type: 'suit', suit });
+          return;
+        }
         chooseSuit(state, suit);
         this.advance();
       });
@@ -814,6 +895,7 @@ export class OneCardScene extends MiniGameScene {
   }
 
   override onBackRequest(): void {
+    if (this.friends.back()) return;
     if (this.phase === 'lobby') fadeToScene(this, homeScene());
     else this.pauseGame();
   }
@@ -821,5 +903,148 @@ export class OneCardScene extends MiniGameScene {
   protected override pauseGame(): void {
     if (this.phase !== 'play') return;
     super.pauseGame();
+  }
+
+  protected override restartLabel(): string | null {
+    return this.friends.restartLabel();
+  }
+
+  protected override quitWarning(): string | null {
+    return this.friends.quitWarning();
+  }
+
+  // ───────── 친구와 하기 ─────────
+
+  /** 친구와 하는 방이 바뀌었다. 판을 다시 그리고, 새로 일어난 일을 알린다. */
+  private onRoom(room: RoomView<OneCardView>, fresh: boolean): void {
+    const view = room.game;
+    if (!view) return;
+    if (!this.frameBuilt) {
+      this.frameBuilt = true;
+      this.phase = 'play';
+      this.playing = true;
+      this.layout = this.computeLayout();
+      this.drawFrame();
+    }
+    if (fresh) {
+      this.phase = 'play';
+      this.selected = null;
+      this.notice = null;
+      this.seenMoves = -1;
+      this.stopCallTimer();
+      this.closeSuitPicker();
+    }
+    this.subLabel?.setText(this.friends.scoreLine());
+    this.state = view.game;
+    if (view.moves !== this.seenMoves) {
+      this.seenMoves = view.moves;
+      this.selected = null;
+      // 내가 한 일은 이미 보았으니 소리만, 상대가 한 일은 알림 줄에도 적는다.
+      const lines = view.events.map((event) => eventLine(event, (who) => this.who(who))).filter((line): line is string => !!line);
+      this.lastLine = lines[lines.length - 1] ?? this.lastPlayLine(view);
+      if (view.events.length > 0) this.handleEvents(view.events);
+    }
+    if (room.status === 'over') {
+      this.phase = 'over';
+      this.stopCallTimer();
+      this.closeSuitPicker();
+    }
+    this.redraw();
+    if (room.status !== 'playing' || this.friends.covered) return;
+    const game = view.game;
+    if (game.oneCard === 0 && this.friends.myTurn()) this.startCallTimer(view.moves);
+    else this.stopCallTimer();
+    if (game.choosingSuit && game.turn === 0 && game.oneCard === null && this.friends.myTurn() && !this.suitOpen) this.openSuitPicker();
+  }
+
+  /** 상대가 낸 카드를 한 줄로(알릴 일이 따로 없을 때) */
+  private lastPlayLine(view: OneCardView): string | null {
+    const play = [...view.events].reverse().find((event) => event.k === 'play');
+    if (!play || play.k !== 'play') return null;
+    return `${withSubject(this.who(play.who))} ${cardLabel(play.card)} 냈어요`;
+  }
+
+  private friendMessage(state: GameState): string {
+    if (state.winner !== null) return state.winner === 0 ? TEXT.win : TEXT.lose;
+    const me = this.friends.kind === 'local' ? this.friends.myName : TEXT.me;
+    const foe = this.friends.foeName;
+    if (state.oneCard === 0) {
+      const left = this.callTimer ? Math.max(1, Math.ceil(this.callTimer.getRemaining() / 1000)) : Math.ceil(CALL_WINDOW_MS / 1000);
+      return FRIEND_TEXT.callNow(left);
+    }
+    if (state.oneCard === 1) return FRIEND_TEXT.foeCalling(withSubject(foe));
+    if (state.choosingSuit) return state.turn === 0 ? TEXT.pickSuit : FRIEND_TEXT.pickSuit(withSubject(foe));
+    if (state.turn !== 0) return FRIEND_TEXT.waiting(foe);
+    if (this.selected !== null) {
+      const card = state.players[0].hand.find((item) => item.id === this.selected);
+      if (card) {
+        const effect = cardEffect(card, state.attack);
+        return effect ? `${effect} · ${TEXT.tapAgain}` : TEXT.tapAgain;
+      }
+    }
+    if (state.attack > 0) return TEXT.attacked(state.attack);
+    return playableCards(state, 0).length > 0 ? FRIEND_TEXT.myTurn(me) : TEXT.noCard;
+  }
+
+  private sendMove(move: OneCardMove): void {
+    this.busy = true;
+    void this.friends.send(move).then((ok) => {
+      this.busy = false;
+      if (!ok && this.state) this.redraw();
+    });
+  }
+
+  /** 한 장 남았을 때 원카드를 외칠 시간을 잰다. 시간이 지나면 놓친 것으로 보내 한 장 받는다. */
+  private startCallTimer(moves: number): void {
+    if (this.callFor === moves && this.callTimer) return;
+    this.stopCallTimer();
+    this.callFor = moves;
+    sfx.gold();
+    const tick = this.time.addEvent({ delay: 250, loop: true, callback: () => this.updateControls() });
+    this.callTimer = this.time.delayedCall(CALL_WINDOW_MS, () => {
+      tick.remove();
+      this.callTimer = null;
+      if (this.state?.oneCard !== 0 || !this.friends.myTurn()) return;
+      this.showNotice(FRIEND_TEXT.missed);
+      this.sendMove({ type: 'miss' });
+    });
+    this.oneCardTimers = [tick];
+  }
+
+  private stopCallTimer(): void {
+    this.callTimer?.remove();
+    this.callTimer = null;
+    for (const timer of this.oneCardTimers) timer.remove();
+    this.oneCardTimers = [];
+  }
+
+  private closeSuitPicker(): void {
+    for (const object of this.overlay) object.destroy();
+    this.overlay = [];
+    this.suitOpen = false;
+  }
+
+  private friendsClosed(): void {
+    this.phase = 'over';
+    this.stopCallTimer();
+    this.closeSuitPicker();
+    if (this.state) this.redraw();
+  }
+
+  /** 친구와의 판이 끝났을 때 결과 판에 적을 것 */
+  private friendResult(room: RoomView<OneCardView>): FriendsResult & { won: boolean | null } {
+    const game = room.game!.game;
+    const winnerIndex = game.winner ?? 0;
+    const won = winnerIndex === 0;
+    const local = this.friends.kind === 'local';
+    const winnerSeat: Seat = (winnerIndex === 0 ? room.seat : room.seat === 0 ? 1 : 0) as Seat;
+    const winnerName = room.names[winnerSeat] ?? '';
+    const loserIndex = winnerIndex === 0 ? 1 : 0;
+    const loser = game.players[loserIndex];
+    const title = local ? FRIEND_TEXT.winBy(withSubject(winnerName)) : won ? TEXT.win : TEXT.lose;
+    const how = loser.out ? FRIEND_TEXT.brokeLine(withSubject(this.who(loserIndex))) : FRIEND_TEXT.emptyLine(withSubject(this.who(winnerIndex)));
+    const lines = [how];
+    if (!loser.out) lines.push(FRIEND_TEXT.left(this.who(0), game.players[0].hand.length, this.who(1), game.players[1].hand.length));
+    return { title, lines, bright: local || won, lost: !local && !won, won };
   }
 }
