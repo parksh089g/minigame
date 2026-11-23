@@ -620,7 +620,8 @@ export class OneCardScene extends MiniGameScene {
       return;
     }
     if (state.turn === 0) {
-      if (state.choosingSuit) this.openSuitPicker();
+      // 이미 열려 있으면 다시 열지 않는다(두 겹으로 열리면 아래 창의 무늬를 누를 수 없다).
+      if (state.choosingSuit && !this.suitOpen) this.openSuitPicker();
       return;
     }
     this.busy = true;
