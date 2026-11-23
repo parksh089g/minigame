@@ -1,9 +1,13 @@
 import Phaser from 'phaser';
 import { GAME_WIDTH, SCENE } from '../../config';
 import { vibrate } from '../../core/haptics';
+import { homeScene } from '../../core/home';
 import { sfx } from '../../core/sfx';
-import { addText, drawPanel, PixelButton } from '../../core/ui';
+import { addText, drawPanel, fadeToScene, PixelButton } from '../../core/ui';
 import { MiniGameScene } from '../../scenes/MiniGameScene';
+import { FriendsKit, type FriendsResult, type FriendsStart } from '../../versus/friends-kit';
+import type { RoomView, Seat as RoomSeat } from '../../versus/protocol';
+import { withSubject } from '../../versus/text';
 import { PX, PX_CSS, rankSize, rankTexture, registerCardBase, registerHighLowTextures, suitTexture } from '../high-low/art';
 import { isRed } from '../high-low/rules';
 import { BOT_STYLES, chooseMove } from './bot';
@@ -30,6 +34,12 @@ import {
   type PokerTable,
   type Street,
 } from './rules';
+import { pokerTurn, pokerVersus, readPokerView, seatPlan, type PokerLog, type PokerVersusMove, type PokerView } from './versus';
+
+/** 씬을 열 때 넘기는 값. solo면 준비 화면을 건너뛰고 컴퓨터와 하는 판을 연다. */
+export interface PokerStart extends FriendsStart {
+  solo?: boolean;
+}
 
 /** 공용 카드(가운데 다섯 장) */
 const BOARD_W = 26;
@@ -126,12 +136,25 @@ export class PokerScene extends MiniGameScene {
   private raiseButton!: PixelButton;
   private moreButton!: PixelButton;
   private dealButton!: PixelButton;
+  /** 친구와 할 때 첫 판에 함께 앉을 컴퓨터 수를 고르는 버튼 */
+  private setupButtons: PixelButton[] = [];
+
+  /** 친구와 하기. 자동 점검이 들여다본다. */
+  friends!: FriendsKit<PokerView, PokerVersusMove>;
+  /** 친구와 하는 판에서 방의 자리마다 앉은 탁자 자리(보는 사람이 0번). 혼자 할 때는 null */
+  private humans: [number, number] | null = null;
+  /** 친구와 하는 판의 화면을 그렸는지 */
+  private versusBuilt = false;
+  /** 마지막으로 알린 수의 번호 */
+  private seenMoves = -1;
+  /** 지난번에 화면에 그린 방의 자리(한 폰이면 차례마다 바뀐다) */
+  private seenSeat: RoomSeat | null = null;
 
   constructor() {
     super(SCENE.poker);
   }
 
-  create(): void {
+  create(data: PokerStart = {}): void {
     this.beginMiniGame();
     registerHighLowTextures(this);
     registerCardBase(this, TEX.board, TEX.boardBack, BOARD_W, BOARD_H);
@@ -144,7 +167,79 @@ export class PokerScene extends MiniGameScene {
     this.shown = new Map();
     this.chartRows = [];
     this.popup = null;
+    this.setupButtons = [];
+    this.humans = null;
+    this.versusBuilt = false;
+    this.seenMoves = -1;
+    this.seenSeat = null;
+    this.friends = new FriendsKit<PokerView, PokerVersusMove>(this, {
+      game: 'poker',
+      title: '포커',
+      rules: pokerVersus,
+      readView: readPokerView,
+      isMyTurn: (room) => !!room.game && pokerTurn(room.game) === room.seat,
+      // 남의 손패를 가려야 하므로 한 폰으로 할 때는 차례가 바뀌면 화면을 가린다.
+      cover: true,
+      onRoom: (room, fresh) => this.onRoom(room, fresh),
+      result: (room) => this.friendResult(room),
+      onClosed: () => this.hideAllControls(),
+      say: (text, warn) => this.say(text, warn ? PX_CSS.bad : PX_CSS.text),
+      coverNote: () => this.coverNote(),
+      restart: (start) => this.scene.restart(start satisfies PokerStart),
+    });
+    if (this.friends.begin(data)) return;
+    if (data.solo) this.startSolo();
+    else this.openLobby();
+  }
 
+  /** 혼자 하는 판: 컴퓨터 셋과 열 판 */
+  private startSolo(): void {
+    this.buildTable();
+    this.addPauseButton();
+    this.betweenHands(true);
+    this.playing = true;
+    // 처음 하는 사람에게는 규칙 안내서를 한 번 띄운다. 그 사이에 이미 딜했으면 띄우지 않는다.
+    this.offerRuleBook(() => this.table.handNo === 0 && !this.busy);
+  }
+
+  /** 준비 화면: 혼자 하기와 친구와 함께 */
+  private openLobby(): void {
+    const { height } = this.scale;
+    this.drawFelt(0, height, false);
+    new PixelButton(this, { x: MARGIN, y: 8, width: 26, height: 26, icon: 'icon-back', hitPadding: 6, onTap: () => fadeToScene(this, homeScene()) });
+    addText(this, 42, 21, '포커', { size: 16, color: PX_CSS.accent, originY: 0.5, shadow: PX_CSS.dark });
+    new PixelButton(this, { x: GAME_WIDTH - MARGIN - 44, y: 8, width: 44, height: 26, label: '규칙', style: 'yellow', hitPadding: 4, onTap: () => this.openRuleBook() });
+    this.offerRuleBook(() => !this.playing && !this.friends.active);
+
+    const mid = Math.round(height * 0.36);
+    // 탁자 위에 펼친 A 두 장과 칩 더미
+    const ace = this.makeFace({ rank: 1, suit: 'spade' }, 'hole').setPosition(GAME_WIDTH / 2 - 18, mid - 40).setAngle(-8);
+    const other = this.makeFace({ rank: 1, suit: 'heart' }, 'hole').setPosition(GAME_WIDTH / 2 + 18, mid - 36).setAngle(8);
+    ace.setDepth(DEPTH.card);
+    other.setDepth(DEPTH.card);
+    const chips = this.add.graphics().setDepth(DEPTH.card + 1);
+    [PX.red, PX.green, PX.blue, PX.white].forEach((color, index) => this.drawChip(chips, GAME_WIDTH / 2 + 56, mid - 10 - index * 3, color, 7));
+    this.panel(this.add.graphics(), MARGIN + 6, mid + 10, GAME_WIDTH - MARGIN * 2 - 12, 74);
+    const lines = ['내 카드 2장 + 공용 카드 5장으로 겨뤄요', `놀이 칩 ${START_CHIPS}개로 ${HANDS}판, 남은 칩이 점수예요`, '친구와 한 탁자에, 빈자리는 컴퓨터가'];
+    lines.forEach((line, index) =>
+      addText(this, GAME_WIDTH / 2, mid + 24 + index * 18, line, { size: 10, color: index === 2 ? PX_CSS.accent : PX_CSS.text, originX: 0.5, originY: 0.5 }),
+    );
+
+    const bottom = height - MARGIN - 36;
+    this.friends.lobbyButton(MARGIN, bottom, 92, 36);
+    new PixelButton(this, {
+      x: MARGIN + 98,
+      y: bottom,
+      width: GAME_WIDTH - MARGIN * 2 - 98,
+      height: 36,
+      label: '혼자 하기',
+      style: 'pink',
+      onTap: () => this.scene.restart({ solo: true } satisfies PokerStart),
+    });
+  }
+
+  /** 판을 하는 화면: 탁자, 위쪽 줄, 족보표, 버튼, 글 */
+  private buildTable(): void {
     const { height } = this.scale;
     const controlsTop = height - MARGIN - BUTTON_H * 2 - GAP;
     this.seatY = 42;
@@ -200,12 +295,6 @@ export class PokerScene extends MiniGameScene {
       originX: 0.5,
       originY: 0.5,
     }).setDepth(DEPTH.label);
-
-    this.addPauseButton();
-    this.betweenHands(true);
-    this.playing = true;
-    // 처음 하는 사람에게는 규칙 안내서를 한 번 띄운다. 그 사이에 이미 딜했으면 띄우지 않는다.
-    this.offerRuleBook(() => this.table.handNo === 0 && !this.busy);
   }
 
   private get me(): PokerSeat {
@@ -214,7 +303,7 @@ export class PokerScene extends MiniGameScene {
 
   // ───────── 화면 구성 ─────────
 
-  private drawFelt(middleTop: number, controlsTop: number): void {
+  private drawFelt(middleTop: number, controlsTop: number, slots = true): void {
     const { height } = this.scale;
     const g = this.add.graphics().setDepth(DEPTH.back);
     g.fillStyle(FELT.rim, 1);
@@ -229,6 +318,7 @@ export class PokerScene extends MiniGameScene {
     }
     g.fillStyle(FELT.rimLight, 1);
     g.fillRect(4, 38, GAME_WIDTH - 8, 2);
+    if (!slots) return;
     // 공용 카드 자리: 다섯 칸을 옅게 그려 둔다.
     g.lineStyle(1, 0xffffff, 0.18);
     for (let i = 0; i < 5; i += 1) {
@@ -416,23 +506,39 @@ export class PokerScene extends MiniGameScene {
     return image;
   }
 
-  /** 컴퓨터 자리 칸의 왼쪽 x */
-  private seatLeft(index: number): number {
-    const width = (GAME_WIDTH - MARGIN * 2 - GAP * 2) / 3;
-    return MARGIN + (index - 1) * (width + GAP);
+  /** 위쪽 자리 칸(나 말고 다른 자리)의 수. 혼자 할 때는 셋, 친구와는 하나에서 셋이다. */
+  private get columns(): number {
+    return Math.max(1, this.table.seats.length - 1);
   }
 
+  /** 위쪽 자리 칸의 폭. 칸이 적어도 셋일 때의 두 칸보다 넓히지 않고 가운데에 모은다. */
   private seatWidth(): number {
-    return (GAME_WIDTH - MARGIN * 2 - GAP * 2) / 3;
+    const third = (GAME_WIDTH - MARGIN * 2 - GAP * 2) / 3;
+    const fit = (GAME_WIDTH - MARGIN * 2 - GAP * (this.columns - 1)) / this.columns;
+    return Math.min(fit, third * 2 + GAP);
   }
 
-  /** 쇼다운에서 첫 팟을 가진 사람의 족보를 이루는 카드(빛낼 카드) */
-  private winningCards(): Set<Card> {
+  /** 위쪽 자리 칸의 왼쪽 x */
+  private seatLeft(index: number): number {
+    const width = this.seatWidth();
+    const row = width * this.columns + GAP * (this.columns - 1);
+    return Math.round((GAME_WIDTH - row) / 2 + (index - 1) * (width + GAP));
+  }
+
+  /** 쇼다운에서 첫 팟을 가진 사람의 족보를 이루는 카드(빛낼 카드). 친구와 하면 판이 JSON으로 오므로 숫자와 무늬로 견준다. */
+  private winningCards(): { has(card: Card): boolean } {
     const result = this.table.result;
-    if (!result?.showdown) return new Set();
-    const winner = result.pots[0]?.winners[0];
-    const value = winner === undefined ? null : result.values[winner];
-    return new Set(value?.cards ?? []);
+    const winner = result?.showdown ? result.pots[0]?.winners[0] : undefined;
+    const value = winner === undefined ? null : result?.values[winner];
+    const keys = new Set((value?.cards ?? []).map((card) => `${card.rank}${card.suit}`));
+    return { has: (card) => keys.has(`${card.rank}${card.suit}`) };
+  }
+
+  /** 자리의 이름. 친구와 할 때 사람 자리는 방의 이름(온라인에서 내 자리는 "나")이다. */
+  seatName(index: number): string {
+    const seat = this.humans?.indexOf(index) ?? -1;
+    if (seat === 0 || seat === 1) return this.friends.nameOf(seat);
+    return this.table.seats[index]?.name ?? '';
   }
 
   private layout(): DrawnCard[] {
@@ -546,9 +652,12 @@ export class PokerScene extends MiniGameScene {
       this.panel(g, left, this.seatY, width, SEAT_H, won ? PX.lime : turn ? PX.yellow : PX.edge);
       if (seat.out || seat.folded) g.setAlpha(0.6);
       this.seatLayer.add(g);
-      this.seatLayer.add(
-        addText(this, left + 5, this.seatY + 9, seat.name, { size: 9, color: PX_CSS.text, originX: 0, originY: 0.5 }),
-      );
+      // 친구 자리는 이름을 노랗게 적어 컴퓨터와 가린다.
+      const friend = this.humans?.includes(index) ?? false;
+      const name = addText(this, left + 5, this.seatY + 9, this.seatName(index), { size: 9, color: friend ? PX_CSS.accent : PX_CSS.text, originX: 0, originY: 0.5 });
+      const room = width - 34;
+      if (name.width > room) name.setScale(room / name.width);
+      this.seatLayer.add(name);
       this.seatLayer.add(
         addText(this, left + width - 5, this.seatY + 9, seat.out ? '-' : String(seat.chips), {
           size: 9,
@@ -591,7 +700,7 @@ export class PokerScene extends MiniGameScene {
       if (gain > 0) return { text: value ? `${rankInfo(value.category).name} +${gain}` : `+${gain}`, color: PX_CSS.good };
       if (value) return { text: rankInfo(value.category).name, color: PX_CSS.sub };
     }
-    if (table.toAct === index) return { text: '생각 중…', color: PX_CSS.accent };
+    if (table.toAct === index) return { text: this.humans?.includes(index) ? '하는 중…' : '생각 중…', color: PX_CSS.accent };
     if (!seat.last) return { text: '', color: PX_CSS.sub };
     const name = ACTION_LABEL[seat.last.type];
     const amount = seat.last.type === 'fold' || seat.last.type === 'check' ? '' : ` ${seat.last.amount}`;
@@ -603,7 +712,11 @@ export class PokerScene extends MiniGameScene {
     const { table } = this;
     const me = this.me;
     this.chipsText.setText(String(me.chips));
-    this.roundText.setText(`${Math.max(1, Math.min(HANDS, table.handNo))}/${HANDS}번째 판`);
+    const hand = `${Math.max(1, Math.min(HANDS, table.handNo))}/${HANDS}`;
+    this.roundText.setText(this.humans ? `${hand}판 · ${this.friends.scoreLine()}` : `${hand}번째 판`);
+    // 위쪽 칩 칸에 닿지 않게 줄인다.
+    const room = GAME_WIDTH - MARGIN - 82 - 6 - 40;
+    this.roundText.setScale(this.roundText.width * this.roundText.scaleX > room ? room / (this.roundText.width) : 1);
     const pot = potTotal(table);
     this.potText.setText(table.handNo === 0 ? `블라인드 ${table.smallBlind}/${table.bigBlind}` : `${STREET_LABEL[table.street]} · 팟 ${pot}`);
     const value = me.hole.length > 0 ? currentHand(table, ME) : null;
@@ -669,6 +782,14 @@ export class PokerScene extends MiniGameScene {
     }
   }
 
+  /** 버튼을 모두 감춘다(친구와의 판이 끝났거나 방이 닫혔을 때) */
+  private hideAllControls(): void {
+    if (!this.versusBuilt) return;
+    this.hideControls();
+    this.dealButton?.setVisible(false);
+    for (const button of this.setupButtons) button.setVisible(false);
+  }
+
   private showMyTurn(): void {
     const can = options(this.table, ME);
     this.dealButton.setVisible(false);
@@ -719,6 +840,10 @@ export class PokerScene extends MiniGameScene {
   }
 
   startNextHand(): void {
+    if (this.humans) {
+      this.sendMove({ type: 'deal' });
+      return;
+    }
     if (!this.playing || this.busy || this.table.phase === 'betting') return;
     if (!startHand(this.table)) return;
     this.hideExample();
@@ -763,7 +888,7 @@ export class PokerScene extends MiniGameScene {
   }
 
   private sayMove(index: number, move: Move): void {
-    const seat = this.table.seats[index];
+    const seat = { ...this.table.seats[index], name: this.seatName(index) };
     const label = seat.last ? ACTION_LABEL[seat.last.type] : ACTION_LABEL[move.type];
     if (move.type === 'raise' || move.type === 'allin') {
       sfx.coin();
@@ -777,6 +902,10 @@ export class PokerScene extends MiniGameScene {
   }
 
   private play(move: Move): void {
+    if (this.humans) {
+      if (this.table.toAct === ME) this.sendMove(move);
+      return;
+    }
     if (!this.playing || this.busy || this.table.toAct !== ME) return;
     if (!act(this.table, ME, move)) {
       sfx.deny();
@@ -803,7 +932,7 @@ export class PokerScene extends MiniGameScene {
       const winners = [...new Set(result.pots.flatMap((pot) => pot.winners))];
       const head = winners[0];
       const value = head === undefined ? null : result.values[head];
-      const names = winners.map((index) => (index === ME ? '나' : table.seats[index].name)).join(', ');
+      const names = winners.map((index) => (index === ME ? '나' : this.seatName(index))).join(', ');
       const how = result.showdown && value ? ` · ${handName(value)}` : result.showdown ? '' : ' · 모두 폴드';
       if (result.payouts[ME] > 0) {
         this.wins += 1;
@@ -872,7 +1001,219 @@ export class PokerScene extends MiniGameScene {
   }
 
   protected override canFinishEarly(): boolean {
-    return this.playing && this.table.handNo > 0;
+    return !this.humans && !this.friends.active && this.playing && this.table.handNo > 0;
+  }
+
+  override onBackRequest(): void {
+    if (this.friends.back()) return;
+    if (!this.playing && !this.friends.active) fadeToScene(this, homeScene());
+    else this.pauseGame();
+  }
+
+  protected override pauseGame(): void {
+    if (!this.playing) return;
+    super.pauseGame();
+  }
+
+  protected override retryData(): object {
+    return { solo: true } satisfies PokerStart;
+  }
+
+  protected override restartLabel(): string | null {
+    return this.friends.restartLabel();
+  }
+
+  protected override quitWarning(): string | null {
+    return this.friends.quitWarning();
+  }
+
+  // ───────── 친구와 하기 ─────────
+
+  /** 친구와 하는 방이 바뀌었다. 탁자를 다시 그리고, 내 차례면 버튼을 보인다. */
+  private onRoom(room: RoomView<PokerView>, fresh: boolean): void {
+    const view = room.game;
+    if (!view) return;
+    if (!this.versusBuilt) {
+      this.versusBuilt = true;
+      this.buildTable();
+      this.buildSetup();
+      this.addPauseButton();
+    }
+    this.playing = room.status === 'playing';
+    if (fresh) {
+      this.shown = new Map();
+      this.seenMoves = -1;
+    }
+    const before = this.table;
+    const newMoves = view.moves !== this.seenMoves;
+    this.seenMoves = view.moves;
+    this.humans = view.humans;
+    this.table = view.table ?? this.setupTable(room);
+    if (view.table && before.handNo !== view.table.handNo) this.shown = new Map();
+    else if (this.seenSeat !== room.seat) {
+      // 한 폰으로 할 때 폰을 넘기면 탁자를 다른 사람 쪽에서 본다. 카드가 다시 날아오지 않게 지금 모습을 그대로 둔다.
+      this.shown = new Map(this.layout().map((item) => [item.key, item.hidden]));
+    }
+    this.seenSeat = room.seat;
+    this.hideExample();
+    this.render();
+    if (newMoves) this.soundFor(view);
+    this.updateVersus(room, view);
+  }
+
+  /** 아직 첫 판을 나누기 전: 두 사람만 앉은 빈 탁자를 보인다. */
+  private setupTable(room: RoomView<PokerView>): PokerTable {
+    const table = createTable(seatPlan(0).names);
+    this.humans = [room.seat === 0 ? 0 : 1, room.seat === 0 ? 1 : 0];
+    return table;
+  }
+
+  /** 첫 판에 함께 앉을 컴퓨터 수를 고르는 버튼. 판 버튼과 같은 자리에 둔다. */
+  private buildSetup(): void {
+    const top = this.scale.height - MARGIN - BUTTON_H * 2 - GAP;
+    const full = GAME_WIDTH - MARGIN * 2;
+    const half = (full - GAP) / 2;
+    const choices = [
+      { bots: 2, x: MARGIN, y: top, width: full, label: '컴퓨터 2명과 넷이서', style: 'pink' as const },
+      { bots: 1, x: MARGIN, y: top + BUTTON_H + GAP, width: half, label: '컴퓨터 1명과', style: 'green' as const },
+      { bots: 0, x: MARGIN + half + GAP, y: top + BUTTON_H + GAP, width: half, label: '둘이서만', style: 'blue' as const },
+    ];
+    this.setupButtons = choices.map(
+      (choice) =>
+        new PixelButton(this, {
+          x: choice.x,
+          y: choice.y,
+          width: choice.width,
+          height: BUTTON_H,
+          label: choice.label,
+          style: choice.style,
+          onTap: () => this.sendMove({ type: 'deal', bots: choice.bots }),
+        }),
+    );
+    for (const button of this.setupButtons) button.setVisible(false);
+  }
+
+  private updateVersus(room: RoomView<PokerView>, view: PokerView): void {
+    const { table } = this;
+    const mine = room.status === 'playing' && pokerTurn(view) === room.seat;
+    const turn = pokerTurn(view);
+    const other = turn === null ? '' : this.friends.nameOf(turn);
+    const who = this.friends.kind === 'local' ? this.friends.nameOf(room.seat) : '내';
+    this.hideAllControls();
+    if (room.status !== 'playing') {
+      const line = this.handLine();
+      if (line) this.say(line.text, line.color);
+      return;
+    }
+    if (!view.table) {
+      if (mine) {
+        for (const button of this.setupButtons) button.setVisible(true).setEnabled(true);
+        this.say('함께 앉을 컴퓨터를 골라요\n고르면 바로 첫 판을 나눠요', PX_CSS.text);
+      } else {
+        this.say(`${withSubject(other)} 자리를 정하는 중…`, PX_CSS.sub);
+      }
+      return;
+    }
+    if (table.phase === 'betting') {
+      const head = this.logLine(view.log);
+      if (mine) {
+        const can = options(table, ME);
+        this.say(`${head ? `${head}\n` : ''}${who} 차례 · ${can.check ? '체크할 수 있어요' : `콜 ${can.call}칩`}`, PX_CSS.text);
+        this.showMyTurn();
+      } else {
+        this.say(`${head ? `${head}\n` : ''}${withSubject(other)} 하는 중…`, PX_CSS.sub);
+      }
+      return;
+    }
+    // 핸드가 끝났다: 결과를 알리고, 딜할 사람에게 "다음 판"을 보인다.
+    const line = this.handLine();
+    if (mine) {
+      this.dealButton.setVisible(true).setEnabled(true).setLabel(`다음 판 (${table.handNo + 1}/${HANDS})`);
+      if (line) this.say(line.text, line.color);
+    } else {
+      this.say(`${line ? `${line.text}\n` : ''}${withSubject(other)} 다음 판을 나눠요`, line?.color ?? PX_CSS.sub);
+    }
+  }
+
+  /** 마지막 수로 일어난 일(블라인드는 빼고) 한 줄. 길면 끝의 셋만 */
+  private logLine(log: readonly PokerLog[]): string {
+    const parts = log
+      .filter((entry) => entry.type !== 'blind')
+      .map((entry) => {
+        const amount = entry.type === 'raise' || entry.type === 'allin' || entry.type === 'call' ? ` ${entry.amount}` : '';
+        return `${this.seatName(entry.who)} ${ACTION_LABEL[entry.type]}${entry.type === 'call' ? '' : amount}`;
+      });
+    return parts.slice(-3).join(' · ');
+  }
+
+  /** 끝난 핸드의 결과 한 줄(보는 사람 쪽에서) */
+  private handLine(): { text: string; color: string } | null {
+    const { table } = this;
+    const result = table.result;
+    if (!result || table.phase !== 'done') return null;
+    const winners = [...new Set(result.pots.flatMap((pot) => pot.winners))];
+    const head = winners[0];
+    const value = head === undefined ? null : result.values[head];
+    const how = result.showdown && value ? ` · ${handName(value)}` : result.showdown ? '' : ' · 모두 폴드';
+    if (result.payouts[ME] > 0) {
+      return { text: `${winners.length > 1 ? '나눠 가져요' : `${this.friends.kind === 'local' ? `${this.seatName(ME)} ` : ''}이겼어요!`} +${result.payouts[ME]}${how}`, color: PX_CSS.good };
+    }
+    const names = winners.map((index) => this.seatName(index)).join(', ');
+    return { text: `${names} 승리${how}`, color: result.payouts[ME] - this.me.committed < 0 ? PX_CSS.bad : PX_CSS.sub };
+  }
+
+  private soundFor(view: PokerView): void {
+    const table = view.table;
+    if (!table) return;
+    if (table.phase === 'done' && table.result) {
+      if (table.result.payouts[ME] > 0) {
+        sfx.coin();
+        vibrate(15);
+      } else if (!this.me.folded && table.result.payouts[ME] - this.me.committed < 0) {
+        sfx.miss();
+      }
+      return;
+    }
+    const last = view.log[view.log.length - 1];
+    if (!last) return;
+    if (last.type === 'raise' || last.type === 'allin') sfx.coin();
+    else if (last.type === 'fold') sfx.miss();
+    else sfx.click();
+  }
+
+  /** 한 폰으로 할 때 폰을 넘기는 판에 덧붙일 한 줄 */
+  private coverNote(): string | null {
+    const view = this.friends.room?.game;
+    if (!view?.table) return null;
+    if (view.table.phase === 'done') return this.handLine()?.text ?? null;
+    return this.logLine(view.log) || null;
+  }
+
+  private sendMove(move: PokerVersusMove): void {
+    if (this.busy || !this.friends.myTurn()) return;
+    this.busy = true;
+    this.hideAllControls();
+    void this.friends.send(move).then((ok) => {
+      this.busy = false;
+      // 받아들여졌으면 방이 이미 바뀌어 다시 그렸다. 답을 기다리는 동안 감춘 버튼을 지금 차례에 맞게 다시 보인다.
+      const room = this.friends.room;
+      if (room?.game && (!ok || this.friends.myTurn())) this.updateVersus(room, room.game);
+    });
+  }
+
+  /** 친구와의 판이 끝났을 때 결과 판에 적을 것 */
+  private friendResult(room: RoomView<PokerView>): FriendsResult & { won: boolean | null } {
+    const view = room.game!;
+    const table = view.table!;
+    const [a, b] = view.humans.map((index) => table.seats[index]);
+    const winner: RoomSeat | null = a.out !== b.out ? (a.out ? 1 : 0) : a.chips === b.chips ? null : a.chips > b.chips ? 0 : 1;
+    const local = this.friends.kind === 'local';
+    const won = winner === null ? null : winner === room.seat;
+    const title = winner === null ? '비겼어요' : local ? `${withSubject(room.names[winner] ?? '')} 이겼어요!` : won ? '이겼어요!' : '졌어요';
+    const broke = a.out ? 0 : b.out ? 1 : -1;
+    const how = broke >= 0 ? `${withSubject(this.friends.nameOf(broke as RoomSeat))} 칩을 다 잃었어요` : `${HANDS}판을 다 했어요`;
+    const line = `남은 칩  ${this.friends.nameOf(0)} ${a.chips} · ${this.friends.nameOf(1)} ${b.chips}`;
+    return { title, lines: [line, how], bright: local ? winner !== null : won === true, lost: !local && won === false, won };
   }
 
   /** 기록하고 끝내기: 지금 가진 칩이 점수다. 판 위에 걸려 있던 칩은 돌려받지 못한다. */
