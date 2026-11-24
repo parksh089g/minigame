@@ -19,7 +19,7 @@ import {
   type ApiError,
   type RankSpan,
 } from '../src/online/protocol';
-import { cleanRoomCode, isRoomGame, isSeatToken, MAX_MOVE_CHARS } from '../src/versus/protocol';
+import { cleanFriendId, cleanRoomCode, isRoomGame, isSeatToken, MAX_MOVE_CHARS } from '../src/versus/protocol';
 import { placeOf } from './limiter';
 import { TOO_FAST, type BoardApi, type DayEntry, type Scores, type WeekEntry } from './service';
 
@@ -217,22 +217,22 @@ async function handleRoom(path: string, request: Request, board: BoardApi, ip: s
     return result === null ? fail('notfound') : json(wrap(result));
   };
 
-  // 방 만들기: { game, name }
+  // 방 만들기: { game, name, id? } (id는 친구 표. 없거나 모양이 틀리면 모르는 친구로 둔다)
   if (path === '/api/room') {
     const name = cleanName(body.name);
     if (!isRoomGame(body.game) || name === null) return fail('invalid');
-    const result = await board.openRoom(ip, body.game, name);
+    const result = await board.openRoom(ip, body.game, name, cleanFriendId(body.id));
     // 방이 너무 많이 열려 있으면 만들지 않는다. 앱은 "지금은 안 됨"으로 받는다.
     if (result === null) return fail('busy');
     return answer(result);
   }
 
-  // 코드로 들어가기: { code, name }
+  // 코드로 들어가기: { code, name, id? }
   if (path === '/api/room/join') {
     const code = cleanRoomCode(body.code);
     const name = cleanName(body.name);
     if (code === null || name === null) return fail('invalid');
-    return answer(await board.joinRoom(ip, code, name));
+    return answer(await board.joinRoom(ip, code, name, cleanFriendId(body.id)));
   }
 
   // 나머지는 모두 { code, token }으로 내 자리를 밝힌다.

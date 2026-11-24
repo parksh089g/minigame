@@ -9,11 +9,13 @@ import { addTapZone, addText, fadeToScene, whileBlocked } from '../../core/ui';
 import { api, failureText, type ApiFailure } from '../../online/api';
 import { cleanName, NAME_MAX, NAME_MIN } from '../../online/protocol';
 import { AwayBanner } from '../../versus/away-banner';
+import { friendStore, recordText, roundKey } from '../../versus/friend-store';
 import { closedText } from '../../versus/friends-kit';
 import { foeSeat, LocalMatch, OnlineMatch, type Match } from '../../versus/match';
 import { cleanRoomCode, formatRoomCode, type RoomView } from '../../versus/protocol';
+import { RematchWatch, type RematchState } from '../../versus/rematch';
 import { savedRoom } from '../../versus/saved-room';
-import { shortName, withSubject } from '../../versus/text';
+import { shortName, withAnd, withSubject } from '../../versus/text';
 import { MiniGameScene, type ResultStat } from '../../scenes/MiniGameScene';
 import { CARD, cardTexture, MINI, PX, PX_CSS, registerHulaTextures, TEX } from './art';
 import { chooseDraw, choosePlay } from './bot';
@@ -136,6 +138,10 @@ export class HulaScene extends MiniGameScene {
   private coverLayer: Phaser.GameObjects.GameObject[] = [];
   /** 판을 마친 방의 번호. 같은 판의 끝을 두 번 기록하지 않는다. */
   private settledRound = -1;
+  /** 친구와 온라인 화면에서 마지막으로 같이 한 친구의 방을 들여다보는 것 */
+  rematch: RematchWatch<HulaView> | null = null;
+  /** 같은 방을 새 화면으로 다시 여는 중이면 true. 씬을 떠나도 방에서 나가지 않는다. */
+  private reopening = false;
 
   constructor() {
     super(HULA_SCENE);
@@ -165,6 +171,8 @@ export class HulaScene extends MiniGameScene {
     this.settledRound = -1;
     this.closedShown = false;
     this.awayBanner = null;
+    this.rematch = null;
+    this.reopening = false;
     this.alive = true;
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.closeFriends());
     if (data.room) this.connectRoom(data.room.code, data.room.token, data.room.view ?? null);
@@ -812,7 +820,7 @@ export class HulaScene extends MiniGameScene {
     new PxButton(this, { x: MARGIN, y: 8, width: 26, height: 26, icon: TEX.back_arrow, hitPadding: 6, onTap: () => this.scene.restart({} satisfies HulaStart) });
     addText(this, 42, 21, '친구와 온라인', { size: 16, color: PX_CSS.accent, originY: 0.5 });
 
-    const rows: Array<{ title: string; note: string; onTap: () => void; gold?: boolean }> = [];
+    const rows: Array<{ title: string; note: string; onTap: () => void; gold?: boolean; rematch?: boolean }> = [];
     const saved = savedRoom.get('hula');
     if (saved) {
       rows.push({
@@ -822,11 +830,22 @@ export class HulaScene extends MiniGameScene {
         onTap: () => this.scene.restart({ room: { code: saved.code, token: saved.token } } satisfies HulaStart),
       });
     }
+    const again = friendStore.rematch('hula');
+    let rematchRow: { title: Phaser.GameObjects.Text; note: Phaser.GameObjects.Text } | null = null;
+    if (again && again.code !== saved?.code) {
+      rows.push({
+        title: `${withAnd(shortName(again.foe, 8))} 한 판 더`,
+        note: '같은 방으로 다시 불러요 · 코드는 필요 없어요',
+        gold: true,
+        onTap: () => this.acceptRematch(),
+        rematch: true,
+      });
+    }
     rows.push(
       { title: '방 만들기', note: '코드를 받아 친구에게 보내요', onTap: () => this.makeRoom() },
       { title: '코드로 들어가기', note: '친구가 보낸 여섯 글자를 넣어요', onTap: () => this.joinByCode() },
     );
-    const rowHeight = 48;
+    const rowHeight = again ? 44 : 48;
     let y = 48;
     for (const row of rows) {
       const top = y;
@@ -836,10 +855,27 @@ export class HulaScene extends MiniGameScene {
         pxBox(g, MARGIN, top + (pressed ? 1 : 0), WIDTH, rowHeight, pressed ? PX.navy : PX.charcoal, row.gold ? PX.yellow : PX.ink);
       };
       draw(false);
-      addText(this, MARGIN + 10, top + 8, row.title, { size: 14, color: row.gold ? PX_CSS.accent : PX_CSS.text });
-      addText(this, MARGIN + 10, top + 28, row.note, { size: 10, color: PX_CSS.sub });
+      const title = addText(this, MARGIN + 10, top + 7, row.title, { size: 14, color: row.gold ? PX_CSS.accent : PX_CSS.text });
+      const note = addText(this, MARGIN + 10, top + rowHeight - 20, row.note, { size: 10, color: PX_CSS.sub });
+      if (row.rematch) rematchRow = { title, note };
       addTapZone(this, MARGIN, top, WIDTH, rowHeight, draw, row.onTap);
       y += rowHeight + 6;
+    }
+    if (again && rematchRow) this.watchRematch(again, rematchRow.title, rematchRow.note);
+
+    // 친구 전적: 같이 한 친구들을 최근 순으로 몇 줄
+    const friends = friendStore.friends('hula');
+    if (friends.length > 0) {
+      const shown = friends.slice(0, 3);
+      addText(this, MARGIN + 2, y + 2, '친구 전적', { size: 11, color: PX_CSS.text });
+      if (friends.length > shown.length) addText(this, MARGIN + WIDTH, y + 3, `외 ${friends.length - shown.length}명`, { size: 9, color: PX_CSS.faint, originX: 1 });
+      y += 20;
+      for (const friend of shown) {
+        const record = friend.games.hula ?? { wins: 0, losses: 0 };
+        addText(this, MARGIN + 10, y, shortName(friend.name, 10), { size: 10, color: PX_CSS.sub });
+        addText(this, MARGIN + WIDTH - 8, y, recordText(record), { size: 10, color: record.wins > record.losses ? PX_CSS.accent : PX_CSS.sub, originX: 1 });
+        y += 15;
+      }
     }
 
     this.status = addText(this, GAME_WIDTH / 2, y + 4, '', { size: 10, color: PX_CSS.text, originX: 0.5, align: 'center', wrapWidth: WIDTH - 8 });
@@ -849,7 +885,7 @@ export class HulaScene extends MiniGameScene {
       '두 사람 모두 인터넷이 있어야 해요',
       '30분 동안 아무도 안 두면 방이 닫혀요',
     ];
-    const boxTop = y + 40;
+    const boxTop = y + (friends.length > 0 ? 30 : 40);
     const lineHeight = 15;
     const boxHeight = notes.length * lineHeight + 12;
     const box = this.add.graphics();
@@ -867,6 +903,54 @@ export class HulaScene extends MiniGameScene {
       size: 11,
       onTap: () => this.scene.restart({ friends: 'local' } satisfies HulaStart),
     });
+  }
+
+  /** 마지막으로 같이 한 친구의 방을 몇 초마다 들여다보고, 친구가 먼저 다시 하자고 했으면 알린다. */
+  private watchRematch(saved: NonNullable<ReturnType<typeof friendStore.rematch>>, title: Phaser.GameObjects.Text, note: Phaser.GameObjects.Text): void {
+    const show = (state: RematchState): void => {
+      if (!this.alive || this.mode !== 'friends') return;
+      if (state === 'invited') {
+        title.setText(`${withSubject(shortName(saved.foe, 8))} 한 판 더 하재요!`);
+        note.setText('눌러서 바로 시작해요').setColor(PX_CSS.good);
+        sfx.coin();
+        vibrate(30);
+      } else if (state === 'asked') {
+        note.setText('다시 하자고 했어요 · 눌러서 방으로 가요').setColor(PX_CSS.sub);
+      } else if (state === 'gone') {
+        friendStore.clearRematch();
+        title.setColor(PX_CSS.faint);
+        note.setText('방이 사라졌어요 · 방을 새로 만들어 주세요').setColor(PX_CSS.faint);
+      }
+    };
+    this.rematch = new RematchWatch<HulaView>(api, saved, readHulaView, show);
+  }
+
+  /** 다시 하자: 같은 방을 다시 열어 친구를 부르고 그 방으로 들어간다. 친구가 먼저 불렀으면 바로 새 판이 시작된다. */
+  private acceptRematch(): void {
+    const watch = this.rematch;
+    if (!watch || watch.state === 'gone') return;
+    void whileBlocked(this, async () => {
+      if (navigator.onLine === false) return this.menuFail('offline');
+      this.menuSay(watch.state === 'invited' ? '방에 들어가는 중이에요…' : `${withAnd(watch.saved.foe)} 할 방을 여는 중이에요…`);
+      const result = await watch.accept();
+      if (!this.alive) return;
+      if (!result.ok) {
+        if (result.reason === 'notfound' || result.reason === 'invalid') {
+          friendStore.clearRematch();
+          this.menuSay('방이 사라졌어요.\n방을 새로 만들어 주세요.', true);
+        } else this.menuFail(result.reason);
+        return;
+      }
+      const { code, token } = watch.saved;
+      savedRoom.set('hula', code, token);
+      friendStore.clearRematch();
+      this.scene.restart({ room: { code, token, view: result.data } } satisfies HulaStart);
+    });
+  }
+
+  /** 온라인 판 하나의 결과를 전적(훌라의 친구 전적과 친구마다)에 넣는다. 이미 센 판이면 넘어간다. */
+  private countFriend(room: RoomView<HulaView>, won: boolean | null, key = roundKey(room)): void {
+    if (friendStore.addFriendResult('hula', room as RoomView<unknown>, won, key)) hulaStore.addFriendResult(won);
   }
 
   /** 방 고르기 화면에 알리는 글 */
@@ -904,7 +988,7 @@ export class HulaScene extends MiniGameScene {
       const name = await this.askName();
       if (!name || !this.alive) return;
       this.menuSay('방을 만드는 중이에요…');
-      const result = await api.openRoom('hula', name, readHulaView);
+      const result = await api.openRoom('hula', name, readHulaView, friendStore.id());
       if (!this.alive) return;
       if (!result.ok) return this.menuFail(result.reason);
       const { token, room } = result.data;
@@ -932,7 +1016,7 @@ export class HulaScene extends MiniGameScene {
       const name = await this.askName();
       if (!name || !this.alive) return;
       this.menuSay('방에 들어가는 중이에요…');
-      const result = await api.joinRoom(asked.value, name, readHulaView);
+      const result = await api.joinRoom(asked.value, name, readHulaView, friendStore.id());
       if (!this.alive) return;
       if (!result.ok) {
         if (result.reason === 'notfound') this.menuSay('없는 방이거나 이미 둘이 들어간 방이에요.\n코드를 다시 확인해 주세요.', true);
@@ -998,12 +1082,19 @@ export class HulaScene extends MiniGameScene {
    */
   private closeFriends(): void {
     this.alive = false;
+    this.rematch?.stop();
     const match = this.match;
     if (!match) return;
-    if (match.kind === 'online') {
+    if (match.kind === 'online' && !this.reopening) {
+      const room = match.room;
       // 친구가 자리를 비운 사이에 나가면 친구가 판을 버린 것으로 친다(서버도 그렇게 센다).
-      if (match.room.status === 'playing') hulaStore.addFriendResult(match.awayUntil !== null);
-      if (match.room.status !== 'closed') match.leave();
+      if (room.status === 'playing') this.countFriend(room, match.awayUntil !== null, roundKey(room, 1));
+      // 같이 한 판이라도 했으면, 친구와 온라인 화면에서 같은 방으로 다시 부를 수 있게 적어 둔다.
+      const online = match as OnlineMatch<HulaView, HulaMove>;
+      if (room.names[1] !== null && room.game !== null && (room.status !== 'closed' || online.reopenable)) {
+        friendStore.setRematch('hula', room.code, online.token, room.names[foeSeat(room)] ?? '친구');
+      }
+      if (room.status !== 'closed') match.leave();
       savedRoom.clear();
     }
     match.stop();
@@ -1048,6 +1139,16 @@ export class HulaScene extends MiniGameScene {
     }
     if (room.status === 'closed') {
       this.showClosed(room);
+      return;
+    }
+    if (this.closedShown && match.kind === 'online') {
+      // 닫혔던 방을 누군가 "다시 하자"로 다시 열었다. 화면을 처음부터 다시 그린다.
+      this.reopening = true;
+      this.scene.restart({ room: { code: room.code, token: (match as OnlineMatch<HulaView, HulaMove>).token, view: room } } satisfies HulaStart);
+      return;
+    }
+    if (room.status === 'over' && room.rematch) {
+      this.showRematch(room);
       return;
     }
     const view = room.game;
@@ -1161,6 +1262,50 @@ export class HulaScene extends MiniGameScene {
     this.tweens.add({ targets: dots, alpha: 0.25, duration: 700, yoyo: true, repeat: -1 });
   }
 
+  /**
+   * 다시 연 방에서 새 판을 기다리는 화면: 누구와 하는지, 지금까지의 전적, "한 판 더"와 "나가기".
+   * 판은 닫히기 전의 것이라(끝나지 않았을 수도 있다) 그리지 않는다. 둘 다 누르면 새 판이 시작된다.
+   */
+  private showRematch(room: RoomView<HulaView>): void {
+    this.mode = 'room';
+    this.clearScreen();
+    const { height } = this.scale;
+    const foe = this.foeName;
+    const mine = room.again[room.seat];
+    const theirs = room.again[foeSeat(room)];
+    this.drawScreenHeader('다시 하자');
+    const top = 56;
+    pxBox(this.screen(this.add.graphics()), MARGIN, top, WIDTH, 112, PX.charcoal, PX.yellow);
+    this.screen(addText(this, GAME_WIDTH / 2, top + 12, '훌라 · 같은 방', { size: 11, color: PX_CSS.sub, originX: 0.5 }));
+    this.screen(addText(this, GAME_WIDTH / 2, top + 32, `${withAnd(shortName(foe, 8))} 한 판 더`, { size: 20, color: PX_CSS.accent, originX: 0.5 }));
+    this.screen(addText(this, GAME_WIDTH / 2, top + 66, `이 방에서 ${this.scoreLine(room)}`, { size: 10, color: PX_CSS.text, originX: 0.5 }));
+    const record = friendStore.versus('hula', room as RoomView<unknown>);
+    this.screen(addText(this, GAME_WIDTH / 2, top + 84, `${withAnd(shortName(foe, 6))} 전적 ${recordText(record)}`, { size: 10, color: PX_CSS.sub, originX: 0.5 }));
+    let y = top + 124;
+    this.againButton = null;
+    if (!mine) {
+      const again = new PxButton(this, { x: MARGIN, y, width: WIDTH, height: 36, label: '한 판 더', style: 'green', onTap: () => this.askAgain() });
+      this.againButton = again;
+      this.screen({ destroy: () => again.destroy() } as unknown as Phaser.GameObjects.GameObject);
+      y += 44;
+    }
+    const out = new PxButton(this, { x: MARGIN, y, width: WIDTH, height: 30, label: '나가기', size: 11, onTap: () => this.exitFriends() });
+    this.screen({ destroy: () => out.destroy() } as unknown as Phaser.GameObjects.GameObject);
+    const trouble = this.match?.trouble;
+    const line = trouble
+      ? `${failureText(trouble)}\n다시 잇는 중이에요…`
+      : mine
+        ? `${withSubject(foe)} 한 판 더를 누르면 시작해요`
+        : theirs
+          ? `${withSubject(foe)} 다시 하재요!`
+          : '';
+    this.status = this.screen(addText(this, GAME_WIDTH / 2, Math.min(height - 40, y + 48), line, { size: 11, color: trouble ? PX_CSS.bad : theirs && !mine ? PX_CSS.good : PX_CSS.text, originX: 0.5, align: 'center', wrapWidth: WIDTH - 8 }));
+    if (mine) {
+      const dots = this.screen(addText(this, GAME_WIDTH / 2, Math.min(height - 22, y + 68), '●  ●  ●', { size: 10, color: PX_CSS.faint, originX: 0.5 }));
+      this.tweens.add({ targets: dots, alpha: 0.25, duration: 700, yoyo: true, repeat: -1 });
+    }
+  }
+
   /** 방 코드를 메신저로 보낸다. 보내기를 못 하는 브라우저면 복사할 수 있게 크게 보여 준다. */
   private async shareCode(code: string): Promise<void> {
     const text = `포켓 아케이드에서 훌라 같이 해요! 방 코드: ${formatRoomCode(code)}`;
@@ -1181,15 +1326,26 @@ export class HulaScene extends MiniGameScene {
     const wasPlaying = this.mode === 'round';
     if (this.closedShown) return;
     this.closedShown = true;
-    this.match?.stop();
-    const { title, note, foeLeft, meDropped } = closedText(room, this.foeName, wasPlaying);
-    if (wasPlaying && this.match?.kind === 'online' && (foeLeft || meDropped)) hulaStore.addFriendResult(foeLeft);
+    const online = this.match?.kind === 'online' ? (this.match as OnlineMatch<HulaView, HulaMove>) : null;
+    // 다시 열 수 있는 방이면 소식 묻기를 멈추지 않는다: 친구가 먼저 "다시 하자"를 누르면 곧바로 알게 된다.
+    const reopenable = online?.reopenable === true;
+    if (!reopenable) this.match?.stop();
+    const closed = closedText(room, this.foeName, wasPlaying);
+    const { title, foeLeft, meDropped } = closed;
+    const note = reopenable && !wasPlaying ? '다시 하자를 누르면 같은 방으로 불러요' : closed.note;
+    if (wasPlaying && online && (foeLeft || meDropped)) this.countFriend(room, foeLeft);
+    const half = Math.floor((WIDTH - 40 - 6) / 2);
 
     if (!this.roundBuilt) {
       this.clearScreen();
       this.drawScreenHeader('방이 닫혔어요');
       this.status = this.screen(addText(this, GAME_WIDTH / 2, this.scale.height / 2 - 20, `${title}\n${note}`, { size: 11, color: PX_CSS.text, originX: 0.5, originY: 0.5, align: 'center', wrapWidth: WIDTH - 8 }));
-      const out = new PxButton(this, { x: MARGIN, y: this.scale.height / 2 + 20, width: WIDTH, height: 34, label: '나가기', onTap: () => this.exitFriends() });
+      if (reopenable) {
+        const again = new PxButton(this, { x: MARGIN, y: this.scale.height / 2 + 20, width: WIDTH, height: 34, label: '다시 하자', style: 'green', onTap: () => this.askReopen() });
+        this.againButton = again;
+        this.screen({ destroy: () => again.destroy() } as unknown as Phaser.GameObjects.GameObject);
+      }
+      const out = new PxButton(this, { x: MARGIN, y: this.scale.height / 2 + (reopenable ? 62 : 20), width: WIDTH, height: reopenable ? 30 : 34, label: '나가기', onTap: () => this.exitFriends() });
       this.screen({ destroy: () => out.destroy() } as unknown as Phaser.GameObjects.GameObject);
       return;
     }
@@ -1209,7 +1365,19 @@ export class HulaScene extends MiniGameScene {
     pxBox(g, MARGIN + 10, boxTop, WIDTH - 20, boxHeight, PX.charcoal, PX.slate);
     this.end(addText(this, GAME_WIDTH / 2, boxTop + 10, title, { size: 15, color: PX_CSS.text, originX: 0.5 }).setDepth(21));
     this.end(addText(this, GAME_WIDTH / 2, boxTop + 32, note, { size: 10, color: PX_CSS.sub, originX: 0.5 }).setDepth(21));
-    const out = new PxButton(this, { x: MARGIN + 20, y: boxTop + boxHeight - 44, width: WIDTH - 40, height: 32, label: '나가기', onTap: () => this.exitFriends() }).setDepth(22);
+    if (reopenable) {
+      const again = new PxButton(this, { x: MARGIN + 20, y: boxTop + boxHeight - 44, width: half, height: 32, label: '다시 하자', style: 'green', onTap: () => this.askReopen() }).setDepth(22);
+      this.againButton = again;
+      this.end({ destroy: () => again.destroy() } as unknown as Phaser.GameObjects.GameObject);
+    }
+    const out = new PxButton(this, {
+      x: reopenable ? MARGIN + WIDTH - 20 - half : MARGIN + 20,
+      y: boxTop + boxHeight - 44,
+      width: reopenable ? half : WIDTH - 40,
+      height: 32,
+      label: '나가기',
+      onTap: () => this.exitFriends(),
+    }).setDepth(22);
     this.end({ destroy: () => out.destroy() } as unknown as Phaser.GameObjects.GameObject);
     this.say(title, foeLeft);
   }
@@ -1241,7 +1409,7 @@ export class HulaScene extends MiniGameScene {
     this.sortButton.setEnabled(false);
 
     const won = result.winner === null ? null : result.winner === 'me';
-    if (match.kind === 'online') hulaStore.addFriendResult(won);
+    if (match.kind === 'online') this.countFriend(room, won);
     const me = this.myName;
     const foe = this.foeName;
     const local = match.kind === 'local';
@@ -1264,7 +1432,8 @@ export class HulaScene extends MiniGameScene {
     if (result.shutout) extra.push('박 ×2');
 
     const { tableTop, tableBottom } = this.layout;
-    const boxHeight = 118;
+    const online = match.kind === 'online';
+    const boxHeight = online ? 130 : 118;
     const boxTop = Math.max(tableTop + 2, Math.round((tableTop + tableBottom) / 2 - boxHeight / 2));
     const g = this.end(this.add.graphics().setDepth(20));
     const bright = local ? won !== null : won === true;
@@ -1280,6 +1449,10 @@ export class HulaScene extends MiniGameScene {
       color: PX_CSS.text,
       originX: 0.5,
     }).setDepth(21));
+    if (online) {
+      const versus = `${withAnd(shortName(foe, 6))} 전적 ${recordText(friendStore.versus('hula', room as RoomView<unknown>))}`;
+      this.end(addText(this, GAME_WIDTH / 2, boxTop + 61, versus, { size: 9, color: PX_CSS.sub, originX: 0.5 }).setDepth(21));
+    }
     const half = Math.floor((WIDTH - 40 - 6) / 2);
     const again = new PxButton(this, {
       x: MARGIN + 20,
@@ -1334,6 +1507,24 @@ export class HulaScene extends MiniGameScene {
       if (match.trouble) {
         this.againButton?.setEnabled(true);
         this.say(failureText(match.trouble), true);
+      }
+    });
+  }
+
+  /** 친구가 나가 닫힌 방에서 "다시 하자": 같은 방을 다시 열고 친구가 한 판 더를 누르기를 기다린다. */
+  private askReopen(): void {
+    const match = this.match;
+    if (!match) return;
+    this.againButton?.setEnabled(false).setLabel('부르는 중');
+    void match.again().then(() => {
+      if (!this.alive || this.match !== match) return;
+      // 다시 열렸으면 onRoomChange가 화면을 다시 그린다. 여기까지 왔으면 열지 못한 것이다.
+      if (match.room.status !== 'closed') return;
+      if (match.trouble) {
+        this.againButton?.setEnabled(true).setLabel('다시 하자');
+        this.say(failureText(match.trouble), true);
+      } else {
+        this.againButton?.setEnabled(false).setLabel('방이 사라졌어요');
       }
     });
   }

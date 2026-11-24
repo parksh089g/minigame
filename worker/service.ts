@@ -61,9 +61,9 @@ export interface BoardApi {
   stash(ip: string, bundle: string): Limited<StashResult | null> | Promise<Limited<StashResult | null>>;
   take(ip: string, code: string): Limited<string | null> | Promise<Limited<string | null>>;
   /** 친구와 하는 방을 만든다. 방이 너무 많이 열려 있으면 null */
-  openRoom(ip: string, game: RoomGame, name: string): Limited<RoomTicket | null> | Promise<Limited<RoomTicket | null>>;
+  openRoom(ip: string, game: RoomGame, name: string, id?: string | null): Limited<RoomTicket | null> | Promise<Limited<RoomTicket | null>>;
   /** 코드로 방에 들어간다. 그런 방이 없거나 이미 찼으면 null */
-  joinRoom(ip: string, code: string, name: string): Limited<RoomTicket | null> | Promise<Limited<RoomTicket | null>>;
+  joinRoom(ip: string, code: string, name: string, id?: string | null): Limited<RoomTicket | null> | Promise<Limited<RoomTicket | null>>;
   /** 내 자리에서 본 방. 방이 없거나 열쇠가 틀리면 null */
   lookRoom(ip: string, code: string, token: string): Limited<RoomView | null> | Promise<Limited<RoomView | null>>;
   moveRoom(
@@ -160,14 +160,14 @@ export class BoardService implements BoardApi {
     return this.db.take(code, this.now());
   }
 
-  openRoom(ip: string, game: RoomGame, name: string): Limited<RoomTicket | null> {
+  openRoom(ip: string, game: RoomGame, name: string, id: string | null = null): Limited<RoomTicket | null> {
     if (!this.allow('roomOpen', ip)) return TOO_FAST;
-    return this.rooms.create(game, name, this.now(), randomBytes);
+    return this.rooms.create(game, name, this.now(), randomBytes, id);
   }
 
-  joinRoom(ip: string, code: string, name: string): Limited<RoomTicket | null> {
+  joinRoom(ip: string, code: string, name: string, id: string | null = null): Limited<RoomTicket | null> {
     if (!this.allow('roomJoin', ip)) return TOO_FAST;
-    return this.rooms.join(code, name, this.now(), randomBytes, this.random);
+    return this.rooms.join(code, name, this.now(), randomBytes, this.random, id);
   }
 
   lookRoom(ip: string, code: string, token: string): Limited<RoomView | null> {
