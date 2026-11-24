@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createRoom, joinRoom, playMove, roomView } from '../../versus/room';
-import { HANDS, options, START_CHIPS } from './rules';
-import { pokerTurn, pokerVersus, readPokerMove, readPokerView, seatPlan, type PokerMatch, type PokerVersusMove } from './versus';
+import { act, createTable, HANDS, options, shownAtShowdown, startHand, START_CHIPS } from './rules';
+import { pokerCanPlay, pokerTurn, pokerVersus, turnTable, readPokerMove, readPokerView, seatPlan, type PokerMatch, type PokerVersusMove } from './versus';
 
 function seeded(seed = 11): () => number {
   let value = seed;
@@ -117,5 +117,44 @@ describe('친구와 하는 포커', () => {
       return;
     }
     throw new Error('쇼다운까지 간 판이 없다');
+  });
+
+  it('올인했다가 져서 칩을 다 잃은 사람의 카드도 쇼다운에서 보인다', () => {
+    const table = createTable(['a', 'b']);
+    table.seats[0].chips = 4;
+    startHand(table, seeded(9));
+    table.seats[0].hole = [{ rank: 2, suit: 'club' }, { rank: 7, suit: 'diamond' }];
+    table.seats[1].hole = [{ rank: 1, suit: 'spade' }, { rank: 1, suit: 'heart' }];
+    table.deck = [{ rank: 1, suit: 'club' }, { rank: 13, suit: 'diamond' }, { rank: 9, suit: 'heart' }, { rank: 5, suit: 'spade' }, { rank: 3, suit: 'club' }];
+    expect(act(table, 0, { type: 'allin' })).toBe(true);
+    expect(table.result?.showdown).toBe(true);
+    expect(table.seats[0].out).toBe(true);
+    expect(shownAtShowdown(table, 0)).toBe(true);
+    // 이긴 사람 쪽에서 봐도 진 사람의 카드가 펼쳐져 있다.
+    expect(turnTable(table, 1).seats[1].hole).toEqual(table.seats[0].hole);
+  });
+
+  it('핸드가 끝나면 두 사람 누구나 다음 판을 나눌 수 있다', () => {
+    // 첫 핸드에 판이 끝나 버리지 않는(누구도 칩을 다 잃지 않은) seed를 고른다.
+    let state = pokerVersus.start(seeded(1), 0);
+    for (let seed = 1; seed < 30; seed += 1) {
+      state = pokerVersus.start(seeded(seed), 0);
+      expect(pokerCanPlay(state, 1)).toBe(false);
+      pokerVersus.play(state, 0, { type: 'deal', bots: 1 });
+      for (let step = 0; step < 40 && state.table!.phase === 'betting'; step += 1) {
+        const { seat, move } = easyMove(state);
+        expect(pokerCanPlay(state, seat === 0 ? 1 : 0)).toBe(false);
+        pokerVersus.play(state, seat, move);
+      }
+      if (pokerTurn(state) !== null) break;
+    }
+    expect(state.table!.phase).toBe('done');
+    const other = state.dealer === 0 ? 1 : 0;
+    expect(pokerCanPlay(state, 0)).toBe(true);
+    expect(pokerCanPlay(state, 1)).toBe(true);
+    expect(pokerVersus.play(state, other, { type: 'deal' })).toBe(true);
+    expect(state.table!.handNo).toBe(2);
+    // 이미 나눴으니 다른 사람이 또 눌러도 받지 않는다.
+    expect(pokerVersus.play(state, state.dealer === 0 ? 1 : 0, { type: 'deal' })).toBe(false);
   });
 });

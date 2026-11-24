@@ -20,12 +20,12 @@ import {
   createTable,
   currentHand,
   HANDS,
-  inHand,
   options,
   POKER_GAME_ID,
   potTotal,
   runOver,
   seatsInPlay,
+  shownAtShowdown,
   startHand,
   START_CHIPS,
   type Card,
@@ -34,7 +34,7 @@ import {
   type PokerTable,
   type Street,
 } from './rules';
-import { pokerTurn, pokerVersus, readPokerView, seatPlan, type PokerLog, type PokerVersusMove, type PokerView } from './versus';
+import { pokerCanPlay, pokerTurn, pokerVersus, readPokerView, seatPlan, type PokerLog, type PokerVersusMove, type PokerView } from './versus';
 
 /** 씬을 열 때 넘기는 값. solo면 준비 화면을 건너뛰고 컴퓨터와 하는 판을 연다. */
 export interface PokerStart extends FriendsStart {
@@ -177,7 +177,8 @@ export class PokerScene extends MiniGameScene {
       title: '포커',
       rules: pokerVersus,
       readView: readPokerView,
-      isMyTurn: (room) => !!room.game && pokerTurn(room.game) === room.seat,
+      // 핸드 사이에는 두 사람 모두 "다음 판"을 누를 수 있다.
+      isMyTurn: (room) => !!room.game && pokerCanPlay(room.game, room.seat),
       // 남의 손패를 가려야 하므로 한 폰으로 할 때는 차례가 바뀌면 화면을 가린다.
       cover: true,
       onRoom: (room, fresh) => this.onRoom(room, fresh),
@@ -548,9 +549,9 @@ export class PokerScene extends MiniGameScene {
     table.board.forEach((card, index) => {
       drawn.push({ key: `b${index}`, card, hidden: false, x: this.boardX(index), y: this.boardY, size: 'board', dim: false, glow: glow.has(card) });
     });
-    const reveal = table.result?.showdown ?? false;
     table.seats.forEach((seat, index) => {
-      if (seat.hole.length === 0 || seat.out) return;
+      // 이번 핸드에 칩을 다 잃은 사람도 쇼다운에서는 카드를 펼쳐 보인다(전에 빠진 사람은 카드가 없다).
+      if (seat.hole.length === 0 || (seat.out && !shownAtShowdown(table, index))) return;
       if (index === ME) {
         seat.hole.forEach((card, i) => {
           drawn.push({
@@ -567,7 +568,7 @@ export class PokerScene extends MiniGameScene {
         return;
       }
       const center = this.seatLeft(index) + this.seatWidth() / 2;
-      const show = reveal && inHand(seat);
+      const show = shownAtShowdown(table, index);
       seat.hole.forEach((card, i) => {
         drawn.push({
           key: `c${index}-${i}`,
@@ -692,8 +693,11 @@ export class PokerScene extends MiniGameScene {
   private seatLabel(index: number): { text: string; color: string } {
     const { table } = this;
     const seat = table.seats[index];
-    if (seat.out) return { text: '탈락', color: PX_CSS.faint };
     const result = table.result;
+    if (seat.out) {
+      const value = result?.values[index];
+      return { text: value ? `${rankInfo(value.category).name} · 탈락` : '탈락', color: PX_CSS.faint };
+    }
     if (result) {
       const value = result.values[index];
       const gain = result.payouts[index] - seat.committed;
@@ -1095,7 +1099,7 @@ export class PokerScene extends MiniGameScene {
 
   private updateVersus(room: RoomView<PokerView>, view: PokerView): void {
     const { table } = this;
-    const mine = room.status === 'playing' && pokerTurn(view) === room.seat;
+    const mine = room.status === 'playing' && pokerCanPlay(view, room.seat);
     const turn = pokerTurn(view);
     const other = turn === null ? '' : this.friends.nameOf(turn);
     const who = this.friends.kind === 'local' ? this.friends.nameOf(room.seat) : '내';

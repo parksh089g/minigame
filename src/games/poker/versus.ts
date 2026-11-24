@@ -22,6 +22,7 @@ import {
   createTable,
   HANDS,
   seatsInPlay,
+  shownAtShowdown,
   startHand,
   type Card,
   type HandResult,
@@ -115,6 +116,17 @@ export function pokerTurn(state: { table: PokerTable | null; humans: readonly nu
   return seat === 0 || seat === 1 ? seat : null;
 }
 
+/**
+ * seat가 지금 수를 둘 수 있는지. 핸드와 핸드 사이에는 두 사람 누구나 "다음 판"을 눌러 딜할 수 있다
+ * (온라인에서 한 사람만 누를 수 있으면 그 사람이 자리를 비웠을 때 판이 멈춘다). 그 밖에는 차례인 사람만 둔다.
+ */
+export function pokerCanPlay(state: { table: PokerTable | null; humans: readonly number[]; dealer: RoomSeat }, seat: RoomSeat): boolean {
+  const turn = pokerTurn(state);
+  if (turn === null) return false;
+  if (state.table && state.table.phase !== 'betting') return true;
+  return turn === seat;
+}
+
 const isHuman = (state: PokerMatch, index: number): boolean => state.humans.includes(index);
 
 /** 컴퓨터의 차례가 이어지는 동안 대신 둔다. */
@@ -137,7 +149,7 @@ function note(state: PokerMatch, index: number): void {
 }
 
 function play(state: PokerMatch, seat: RoomSeat, move: PokerVersusMove): boolean {
-  if (pokerTurn(state) !== seat) return false;
+  if (!pokerCanPlay(state, seat)) return false;
   const random = seededRandom(state);
   if (move.type === 'deal') {
     if (!state.table) {
@@ -185,7 +197,6 @@ export function turnTable(table: PokerTable, viewer: number): PokerTable {
   const count = table.seats.length;
   const to = (index: number): number => (index - viewer + count) % count;
   const order = table.seats.map((_, i) => (i + viewer) % count);
-  const reveal = table.result?.showdown ?? false;
   const result: HandResult | null = table.result && {
     showdown: table.result.showdown,
     pots: table.result.pots.map((pot) => ({ amount: pot.amount, eligible: pot.eligible.map(to), winners: pot.winners.map(to) })),
@@ -201,7 +212,7 @@ export function turnTable(table: PokerTable, viewer: number): PokerTable {
     board: table.board.map(copyCard),
     seats: order.map((i): PokerSeat => {
       const seat = table.seats[i];
-      const open = i === viewer || (reveal && !seat.folded && !seat.out);
+      const open = i === viewer || shownAtShowdown(table, i);
       return { ...seat, last: seat.last && { ...seat.last }, hole: seat.hole.map((card) => (open ? copyCard(card) : { ...HIDDEN })) };
     }),
     button: table.button < 0 ? -1 : to(table.button),
