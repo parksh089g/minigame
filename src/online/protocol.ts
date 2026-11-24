@@ -41,6 +41,7 @@ export const RANKED_GAMES = [
   'solitaire',
   'one-card',
   'pyramid',
+  'omok',
 ] as const;
 
 export type RankedGame = (typeof RANKED_GAMES)[number];

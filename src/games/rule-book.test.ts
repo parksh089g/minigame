@@ -23,8 +23,8 @@ function fontSyllables(): Set<string> {
   return syllables;
 }
 
-/** 안내서가 있어야 하는 카드 게임 */
-const CARD_GAMES = ['solitaire', 'pyramid', 'hula', 'one-card', 'high-low', 'blackjack', 'poker'];
+/** 안내서가 있어야 하는 게임: 카드 게임과 오목 */
+const CARD_GAMES = ['solitaire', 'pyramid', 'hula', 'one-card', 'high-low', 'blackjack', 'poker', 'omok'];
 
 describe('규칙 안내서', () => {
   it('카드 게임마다 안내서가 있고, 없는 게임의 안내서는 없다', () => {
@@ -78,6 +78,10 @@ describe('규칙 안내서', () => {
     expect(parseToken('>')).toEqual({ kind: 'arrow' });
     expect(parseToken('13')).toEqual({ kind: 'text', text: '13' });
     expect(parseToken('-')).toEqual({ kind: 'text', text: '-' });
+    expect(parseToken('B')).toEqual({ kind: 'stone', color: 'black', mark: 'none' });
+    expect(parseToken('*W')).toEqual({ kind: 'stone', color: 'white', mark: 'focus' });
+    expect(parseToken('.')).toEqual({ kind: 'stone', color: 'empty', mark: 'none' });
+    expect(parseToken('constructor')).toEqual({ kind: 'text', text: 'constructor' });
   });
 
   it('글꼴에 들어 있는 한글만 쓴다', () => {

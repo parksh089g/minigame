@@ -3,7 +3,7 @@ import { FONT_SIZE, GAME_WIDTH, SCENE, THEME, THEME_CSS } from '../config';
 import type { BackAware } from '../core/app-events';
 import { addPanel, addScrim, addText, Pager, PAGER_HEIGHT, PixelButton } from '../core/ui';
 import { getGame } from '../games/registry';
-import { markRuleBookSeen, parseToken, ruleBookFor, type ParsedToken, type RulePage, type Suit } from '../games/rule-book';
+import { markRuleBookSeen, parseToken, ruleBookFor, type Mark, type ParsedToken, type RulePage, type StoneColor, type Suit } from '../games/rule-book';
 
 /** 규칙 안내서를 열 때 넘기는 것 */
 export interface RuleBookData {
@@ -208,6 +208,8 @@ export class RuleBookScene extends Phaser.Scene implements BackAware {
       return 16;
     }
 
+    if (token.kind === 'stone') return this.drawStone(container, token.color, token.mark, x);
+
     const y = token.mark === 'focus' ? -CARD.lift : 0;
     const g = this.add.graphics();
     if (token.mark === 'focus') {
@@ -264,7 +266,36 @@ export class RuleBookScene extends Phaser.Scene implements BackAware {
     }
     return CARD.w;
   }
+
+  /**
+   * 오목의 돌 하나를 나무 판 한 칸 위에 그린다. 빈 점은 줄이 만나는 자리만 보인다.
+   * 눈에 띄게 한 돌(방금 둔 수)은 노란 테를 두른다.
+   */
+  private drawStone(container: Phaser.GameObjects.Container, color: StoneColor, mark: Mark, x: number): number {
+    const size = CARD.w;
+    const top = (CARD.h - size) / 2;
+    const cx = x + size / 2;
+    const cy = top + size / 2;
+    const g = this.add.graphics();
+    g.fillStyle(STONE.wood, 1).fillRect(x - CARD.gap / 2, top, size + CARD.gap, size);
+    g.fillStyle(STONE.line, 1).fillRect(x - CARD.gap / 2, cy - 0.5, size + CARD.gap, 1).fillRect(cx - 0.5, top, 1, size);
+    const r = size / 2 - 2;
+    if (mark === 'focus') g.fillStyle(THEME.gold, 1).fillCircle(cx, cy, r + 2.5);
+    if (color === 'black') {
+      g.fillStyle(STONE.black, 1).fillCircle(cx, cy, r);
+      g.fillStyle(STONE.blackShine, 1).fillCircle(cx - r * 0.35, cy - r * 0.35, r * 0.28);
+    } else if (color === 'white') {
+      g.fillStyle(STONE.whiteEdge, 1).fillCircle(cx, cy, r);
+      g.fillStyle(THEME.white, 1).fillCircle(cx - 0.5, cy - 0.8, r - 1.2);
+    }
+    if (mark === 'dim') g.setAlpha(0.35);
+    container.add(g);
+    return size;
+  }
 }
+
+/** 규칙 안내서의 오목 그림에 쓰는 색 */
+const STONE = { wood: 0xffd08a, line: 0xb07a3c, black: 0x3a2d3a, blackShine: 0x8a7590, whiteEdge: 0xc9bcf8 } as const;
 
 /** 무늬 하나를 (cx, cy)를 가운데로 size 크기에 칠한다. 색은 미리 fillStyle로 정해 둔다. */
 function drawSuit(g: Phaser.GameObjects.Graphics, suit: Suit, cx: number, cy: number, size: number): void {
