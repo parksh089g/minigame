@@ -239,7 +239,7 @@ export class HighLowScene extends MiniGameScene {
       addTapZone(this, MARGIN, top, GAME_WIDTH - MARGIN * 2, cardHeight, draw, mode.onTap);
       y += cardHeight + 10;
     }
-    addText(this, GAME_WIDTH / 2, y + 6, '친구와는 같은 카드 순서로 칩 걸기를 겨뤄요', { size: 10, color: PX_CSS.faint, originX: 0.5 });
+    addText(this, GAME_WIDTH / 2, y + 6, '친구와는 저마다 섞은 카드로 칩 걸기를 겨뤄요', { size: 10, color: PX_CSS.faint, originX: 0.5 });
     addText(this, GAME_WIDTH / 2, y + 22, '칩은 게임 안에서만 쓰여서 코인을 잃지 않아요', { size: 10, color: PX_CSS.faint, originX: 0.5 });
     this.friends.lobbyButton(MARGIN, height - MARGIN - 36, GAME_WIDTH - MARGIN * 2, 36);
   }
@@ -727,7 +727,7 @@ export class HighLowScene extends MiniGameScene {
     const view = room?.game;
     if (!room || !view) return '';
     if (room.status !== 'playing') return '';
-    if (chipRunOver(view.mine)) return `${withSubject(this.friends.foeName)} 같은 카드로 하는 중이에요`;
+    if (chipRunOver(view.mine)) return `${withSubject(this.friends.foeName)} 자기 카드로 하는 중이에요`;
     return `${withSubject(this.friends.foeName)} 먼저 하는 중이에요`;
   }
 
@@ -736,7 +736,7 @@ export class HighLowScene extends MiniGameScene {
     const foe = view.foe;
     const name = this.friends.foeName;
     if (foe.done) return `${name}: 끝! ${foe.chips}칩 남김`;
-    if (foe.round === 0 && !chipRunOver(view.mine)) return `${name}: 내가 다 하면 같은 카드로 해요`;
+    if (foe.round === 0 && !chipRunOver(view.mine)) return `${name}: 내가 다 하면 이어서 해요`;
     return `${name}: ${foe.round}/${CHIP_ROUNDS}번째 · ${foe.chips}칩`;
   }
 
@@ -897,7 +897,7 @@ export class HighLowScene extends MiniGameScene {
   /** 폰을 넘길 때 다음 사람에게 보일 한 줄: 앞사람이 남긴 칩 */
   private coverNote(): string | null {
     const view = this.friends.room?.game;
-    if (!view || !view.foe.done) return '같은 카드 순서로 칩을 더 많이 남기면 이겨요';
+    if (!view || !view.foe.done) return '카드는 저마다 섞여요 · 칩을 더 남기면 이겨요';
     return `${withSubject(this.friends.foeName)} ${view.foe.chips}칩을 남겼어요. 넘어 봐요!`;
   }
 

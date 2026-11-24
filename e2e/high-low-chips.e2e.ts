@@ -1,6 +1,6 @@
 /**
  * 하이로우 칩 걸기와 친구와 하기: 준비 화면에서 모드를 고르고, 칩을 걸어 열두 번 고르면 결과 화면이 뜨는지,
- * 한 폰으로 두 사람이 같은 카드 순서로 차례로 하고 결과가 나오는지 본다.
+ * 한 폰으로 두 사람이 저마다 섞인 카드로 차례로 하고 결과가 나오는지 본다.
  */
 import './app-globals';
 import { expect, type Page } from '@playwright/test';
@@ -57,7 +57,7 @@ it('하이로우 칩 걸기: 칩을 걸고 열두 번 고르면 결과 화면이
     .toBe(true);
 });
 
-it('하이로우 한 폰으로: 두 사람이 같은 카드로 차례로 하고 칩을 견준다', async ({ page }) => {
+it('하이로우 한 폰으로: 두 사람이 저마다 섞인 카드로 차례로 하고 칩을 견준다', async ({ page }) => {
   await openApp(page);
   await startScene(page, SCENE.highLow);
   await tapText(page, SCENE.highLow, '친구와 함께');
