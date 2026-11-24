@@ -57,7 +57,7 @@ export interface ChipRun {
   history: ChipStep[];
 }
 
-/** 칩 걸기 한 판을 시작한다. deck을 주면(친구와 같은 순서로 할 때) 그 순서를 쓴다. 맨 끝이 첫 카드다. */
+/** 칩 걸기 한 판을 시작한다. deck을 주면(친구와 하기에서 판이 섞어 둔 묶음) 그 순서를 쓴다. 맨 끝이 첫 카드다. */
 export function startChipRun(random: () => number = Math.random, deck?: readonly Card[]): ChipRun {
   const cards = deck ? deck.map((card) => ({ ...card })) : newDeck(random);
   const current = cards.pop() as Card;

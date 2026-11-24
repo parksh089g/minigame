@@ -2,9 +2,11 @@
  * 친구와 함께하는 하이로우: 공용 방 규칙(versus/room.ts)에 칩 걸기 하이로우를 끼우는 부분.
  * Phaser에 기대지 않아서 서버도 그대로 쓴다.
  *
- * 두 사람이 같은 순서로 섞인 카드 묶음으로 칩 걸기 한 판(chips.ts)을 차례로 한다. 먼저 하는 사람이 다 하면
- * 다음 사람이 같은 카드로 한다. 남은 칩이 더 많은 사람이 이기고, 같으면 비긴다.
- * 뒤에 하는 사람이 앞사람의 카드를 미리 보면 안 되므로, 자기 판을 마치기 전에는 상대가 본 카드를 가린다(칩과 맞힌 수만 보인다).
+ * 두 사람이 저마다 따로 섞인 카드 묶음으로 칩 걸기 한 판(chips.ts)을 차례로 한다. 먼저 하는 사람이 다 하면
+ * 다음 사람이 자기 카드로 한다. 남은 칩이 더 많은 사람이 이기고, 같으면 비긴다.
+ * 카드 순서를 따로 섞는 까닭: 한 폰으로 번갈아 할 때 뒷사람은 앞사람의 화면을 옆에서 볼 수 있다. 같은 순서였다면
+ * 나올 카드를 다 알고 하게 된다. 온라인도 같은 규칙을 써서 옆에 앉아 함께 하더라도 엿볼 것이 없다.
+ * 그래도 자기 판을 마치기 전에는 상대가 본 카드를 가린다(칩과 맞힌 수만 보인다).
  * 남은 카드 묶음은 순서 없이(정렬해서) 보낸다. 배당과 확률을 셈하는 데는 무슨 카드가 남았는지만 있으면 된다.
  */
 import type { Seat } from '../../versus/protocol';
@@ -59,8 +61,10 @@ export function readHighLowMove(raw: unknown): HighLowMove | null {
 
 export function startHighLow(random: () => number, first: Seat): HighLowMatch {
   const state = { seed: seedFrom(random) };
-  const deck = newDeck(seededRandom(state));
-  return { runs: [startChipRun(Math.random, deck), startChipRun(Math.random, deck)], first, seed: state.seed, moves: 0 };
+  const shuffle = seededRandom(state);
+  // 두 사람의 카드 묶음을 따로 섞는다. 한 사람의 순서를 알아도 다른 사람의 카드는 알 수 없다.
+  const decks = [newDeck(shuffle), newDeck(shuffle)];
+  return { runs: [startChipRun(Math.random, decks[0]), startChipRun(Math.random, decks[1])], first, seed: state.seed, moves: 0 };
 }
 
 export function highLowTurn(state: HighLowMatch): Seat | null {
