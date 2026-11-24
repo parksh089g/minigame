@@ -24,6 +24,7 @@ import { coinsFor as highLowCoins, GAME_ID as HIGH_LOW_ID } from './high-low/rul
 import { BLACKJACK_GAME_ID, coinsFor as blackjackCoins } from './blackjack/rules';
 import { coinsFor as pokerCoins, POKER_GAME_ID } from './poker/rules';
 import { HULA_GAME_ID, HULA_SCENE } from './hula/data';
+import { OMOK_GAME_ID, OMOK_SCENE } from './omok/text';
 import { coinsFor as solitaireCoins, SOLITAIRE_GAME_ID, SOLITAIRE_SCENE } from './solitaire/rules';
 import { PYRAMID_GAME_ID, PYRAMID_SCENE } from './pyramid/data';
 import { coinsFor as towerCoins, recordLabel as towerRecord } from './cloud-tower/run';
@@ -360,6 +361,17 @@ export const GAMES: readonly MiniGameInfo[] = [
     // 점수는 이긴 판에서 컴퓨터가 낸 점수에 난이도를 곱한 것이다. 진 판은 0점이다.
     coinsFor: (score) => Math.floor(score / 10),
     // 카드 운이 커서 목표 점수를 정하기 어려워 오늘의 도전에는 넣지 않는다.
+    dailyTargets: [],
+    genre: 'puzzle',
+  },
+  {
+    id: OMOK_GAME_ID,
+    title: '오목',
+    icon: 'icon-omok',
+    sceneKey: OMOK_SCENE,
+    // 컴퓨터를 이기면 실력에 따라 100~300점에 빨리 이긴 만큼 더한다. 지면 0점, 비기면 절반이다.
+    coinsFor: (score) => Math.floor(score / 50),
+    // 승패로 끝나는 게임이라 목표 점수를 정하기 어려워 오늘의 도전에는 넣지 않는다.
     dailyTargets: [],
     genre: 'puzzle',
   },

@@ -1,5 +1,5 @@
 /**
- * 카드 게임의 규칙 안내서. 규칙을 모르는 사람이 처음부터 따라 읽을 수 있게, 몇 쪽에 걸쳐 그림 카드와 함께 풀어 쓴다.
+ * 카드 게임(과 오목)의 규칙 안내서. 규칙을 모르는 사람이 처음부터 따라 읽을 수 있게, 몇 쪽에 걸쳐 그림 카드와 함께 풀어 쓴다.
  * 일시정지 화면의 "방법 보기"(how-to.ts)가 이미 아는 사람을 위한 요약이라면, 여기는 처음 하는 사람을 위한 설명이다.
  * 준비 화면의 "규칙" 버튼과 일시정지 화면의 "방법 보기 → 규칙 자세히"에서 열리고(RuleBookScene),
  * 처음 하는 게임이면 한 번 저절로 열린다. 규칙을 바꾸면 여기도 같이 고친다.
@@ -11,6 +11,7 @@ import { HULA_GAME_ID } from './hula/data';
 import { GAME_ID as HIGH_LOW_ID } from './high-low/rules';
 import { BLACKJACK_GAME_ID } from './blackjack/rules';
 import { POKER_GAME_ID } from './poker/rules';
+import { OMOK_GAME_ID } from './omok/text';
 import { ONE_CARD_GAME_ID } from './one-card/text';
 import { PYRAMID_GAME_ID } from './pyramid/data';
 import { SOLITAIRE_GAME_ID } from './solitaire/rules';
@@ -26,6 +27,7 @@ export const RULE_BOOK_MAX_TOKENS = 7;
  * - 카드: 숫자(A, 2~10, J, Q, K) 뒤에 무늬(S 스페이드, H 하트, D 다이아, C 클로버). 예: "7H", "10S"
  * - 조커: "BJ"(흑백 조커), "CJ"(컬러 조커). 뒷면: "back"
  * - 화살표: ">". 그 밖의 짧은 글(예: "+", "=", "13", "...")은 그대로 적는다.
+ * - 오목의 돌: "B"(검은 돌), "W"(흰 돌), "."(빈 점)
  * 카드 앞에 "*"를 붙이면 눈에 띄게(살짝 들어 올리고 테를 두른다), "-"를 붙이면 흐리게 그린다.
  */
 export type RuleToken = string;
@@ -48,10 +50,14 @@ export type ParsedToken =
   | { kind: 'card'; rank: string; suit: Suit; mark: Mark }
   | { kind: 'joker'; color: boolean; mark: Mark }
   | { kind: 'back'; mark: Mark }
+  | { kind: 'stone'; color: StoneColor; mark: Mark }
   | { kind: 'arrow' }
   | { kind: 'text'; text: string };
 
 export type Mark = 'none' | 'focus' | 'dim';
+export type StoneColor = 'black' | 'white' | 'empty';
+
+const STONES: Readonly<Record<string, StoneColor>> = { B: 'black', W: 'white', '.': 'empty' };
 
 const CARD_PATTERN = /^(A|[2-9]|10|J|Q|K)([SHDC])$/;
 
@@ -61,6 +67,7 @@ export function parseToken(token: RuleToken): ParsedToken {
   const mark: Mark = token.startsWith('*') ? 'focus' : token.startsWith('-') && token.length > 1 ? 'dim' : 'none';
   const body = mark === 'none' ? token : token.slice(1);
   if (body === 'back') return { kind: 'back', mark };
+  if (Object.hasOwn(STONES, body)) return { kind: 'stone', color: STONES[body], mark };
   if (body === 'BJ' || body === 'CJ') return { kind: 'joker', color: body === 'CJ', mark };
   const card = CARD_PATTERN.exec(body);
   if (card) return { kind: 'card', rank: card[1], suit: card[2] as Suit, mark };
@@ -163,6 +170,53 @@ export const RULE_BOOK: Readonly<Record<string, readonly RulePage[]>> = {
         '더미를 넘기지 않고 이어 치우면 덤이 붙어요',
         '다 치우면 150점에 남은 돌리기마다 50점',
         '빨리 다 치울수록 점수가 더 붙어요',
+      ],
+    },
+  ],
+  [OMOK_GAME_ID]: [
+    {
+      title: '무엇을 하나요?',
+      rows: [{ cards: ['B', 'B', 'B', 'B', 'B'], note: '가로, 세로, 대각선 어느 쪽이든 돼요' }],
+      lines: [
+        '검은 돌과 흰 돌을 하나씩 번갈아 놓아요',
+        '같은 색 다섯 개를 한 줄로 이으면 이겨요',
+        '검은 돌이 먼저 둬요',
+      ],
+    },
+    {
+      title: '돌 놓기',
+      lines: [
+        '판의 줄이 만나는 점에 돌을 놓아요',
+        '점을 누르면 흐린 돌이 미리 보여요',
+        '같은 점을 한 번 더 누르면 놓아요',
+        '아래의 두기 버튼을 눌러도 돼요',
+        '한 번 놓은 돌은 옮기거나 뺄 수 없어요',
+      ],
+    },
+    {
+      title: '막아야 할 때',
+      rows: [
+        { cards: ['B', 'W', 'W', 'W', 'W', '*B'], note: '넷이 되면 남은 끝을 바로 막아요' },
+        { cards: ['*B', 'W', 'W', 'W', '.'], note: '양쪽이 열린 셋도 미리 막아요' },
+      ],
+      lines: ['양쪽이 열린 넷은 막을 수 없어요', '공격하면서 막는 수가 가장 좋아요'],
+    },
+    {
+      title: '이 앱의 규칙',
+      lines: [
+        '다섯 개 넘게 이어도 이긴 것으로 쳐요',
+        '쌍삼처럼 금지된 자리는 없어요',
+        '판이 가득 차면 비겨요',
+        '컴퓨터와 할 때는 세 번까지 무를 수 있어요',
+      ],
+    },
+    {
+      title: '친구와 함께',
+      lines: [
+        '방 코드를 보내 각자의 폰으로 둬요',
+        '한 폰으로 번갈아 둘 수도 있어요',
+        '판마다 흑과 백을 바꿔서 둬요',
+        '이긴 판 수는 화면 위에 적혀요',
       ],
     },
   ],

@@ -5,7 +5,7 @@
 import { CODE_ALPHABET } from '../online/protocol';
 
 /** 친구와 함께할 수 있는 게임의 id. versus/games.ts에 규칙이 있어야 한다(games.test.ts가 확인한다). */
-export const ROOM_GAMES = ['hula', 'one-card', 'blackjack', 'high-low', 'poker'] as const;
+export const ROOM_GAMES = ['hula', 'one-card', 'blackjack', 'high-low', 'poker', 'omok'] as const;
 export type RoomGame = (typeof ROOM_GAMES)[number];
 
 export function isRoomGame(value: unknown): value is RoomGame {
