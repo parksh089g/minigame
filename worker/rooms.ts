@@ -112,11 +112,11 @@ export class RoomDb {
   }
 
   /** 방을 만들고 0번 자리에 앉는다. 방이 너무 많이 열려 있으면 null */
-  create(game: RoomGame, name: string, now: number, randomBytes: RandomBytes): RoomTicket | null {
+  create(game: RoomGame, name: string, now: number, randomBytes: RandomBytes, id: string | null = null): RoomTicket | null {
     this.sql.exec('DELETE FROM rooms WHERE expires <= ?', now);
     const open = this.sql.exec<{ n: number }>('SELECT COUNT(*) AS n FROM rooms').toArray()[0]?.n ?? 0;
     if (open >= MAX_ROOMS) return null;
-    const room = createRoom(game, name);
+    const room = createRoom(game, name, id);
     markSeen(room, 0, now);
     const token = seatTokenFrom(randomBytes(16));
     // 코드가 겹칠 일은 거의 없지만, 겹치면 다시 뽑는다.
@@ -137,10 +137,10 @@ export class RoomDb {
   }
 
   /** 코드로 기다리는 방에 들어가 1번 자리에 앉는다. 그런 방이 없거나 이미 둘이 찼으면 null */
-  join(code: string, name: string, now: number, randomBytes: RandomBytes, random: () => number): RoomTicket | null {
+  join(code: string, name: string, now: number, randomBytes: RandomBytes, random: () => number, id: string | null = null): RoomTicket | null {
     const row = this.load(code, now);
     if (!row || row.tokens[1] !== null) return null;
-    if (!joinRoom(row.room, TURN_GAMES[row.room.game], name, random, now)) return null;
+    if (!joinRoom(row.room, TURN_GAMES[row.room.game], name, random, now, id)) return null;
     const token = seatTokenFrom(randomBytes(16));
     row.tokens[1] = token;
     this.save(code, row, now);
@@ -173,13 +173,13 @@ export class RoomDb {
     return { ok, room: this.view(row, seat, code, now) };
   }
 
-  /** 판이 끝난 뒤 "한 판 더"를 누른다. 둘 다 누르면 새 판이 시작된다. */
+  /** 판이 끝난 뒤 "한 판 더"를 누른다. 둘 다 누르면 새 판이 시작된다. 누가 나가서 닫힌 방이면 다시 연다(room.ts의 askAgain). */
   again(code: string, token: string, now: number, random: () => number): RoomView | null {
     const row = this.load(code, now);
     const seat = row && this.seatOf(row, token);
     if (!row || seat === null) return null;
     this.arrive(code, row, seat, now);
-    if (askAgain(row.room, TURN_GAMES[row.room.game], seat, random)) this.save(code, row, now);
+    if (askAgain(row.room, TURN_GAMES[row.room.game], seat, random, now)) this.save(code, row, now);
     return this.view(row, seat, code, now);
   }
 

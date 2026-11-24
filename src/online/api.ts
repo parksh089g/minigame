@@ -194,18 +194,18 @@ export function createApi(
     take: (code: string): Promise<ApiResult<string>> =>
       call('/api/transfer/take', asBundle, 'POST', { code }),
     /** 친구와 하는 방을 만들고 0번 자리에 앉는다. */
-    openRoom: <V>(game: RoomGame, name: string, readGame: ReadGame<V>): Promise<ApiResult<RoomTicket<V>>> =>
-      call('/api/room', asTicket(readGame), 'POST', { game, name }),
+    openRoom: <V>(game: RoomGame, name: string, readGame: ReadGame<V>, id: string | null = null): Promise<ApiResult<RoomTicket<V>>> =>
+      call('/api/room', asTicket(readGame), 'POST', id ? { game, name, id } : { game, name }),
     /** 코드로 친구의 방에 들어간다. 없는 방이거나 이미 찼으면 notfound */
-    joinRoom: <V>(code: string, name: string, readGame: ReadGame<V>): Promise<ApiResult<RoomTicket<V>>> =>
-      call('/api/room/join', asTicket(readGame), 'POST', { code, name }),
+    joinRoom: <V>(code: string, name: string, readGame: ReadGame<V>, id: string | null = null): Promise<ApiResult<RoomTicket<V>>> =>
+      call('/api/room/join', asTicket(readGame), 'POST', id ? { code, name, id } : { code, name }),
     /** 방의 소식을 묻는다. version은 마지막으로 본 방의 번호이고, 그대로면 'same'이 온다. */
     lookRoom: <V>(code: string, token: string, version: number, readGame: ReadGame<V>): Promise<ApiResult<RoomView<V> | 'same'>> =>
       call('/api/room/look', asLook(readGame), 'POST', { code, token, version }),
     /** 수를 둔다. 서버가 받지 않았으면 ok가 false이고, 그때도 지금 방의 모습이 온다. */
     moveRoom: <V>(code: string, token: string, version: number, move: unknown, readGame: ReadGame<V>): Promise<ApiResult<MoveResult<V>>> =>
       call('/api/room/move', asMove(readGame), 'POST', { code, token, version, move }),
-    /** 판이 끝난 뒤 "한 판 더"를 누른다. */
+    /** 판이 끝난 뒤 "한 판 더"를 누른다. 누가 나가서 닫힌 방이면 다시 열어 상대를 부른다. */
     againRoom: <V>(code: string, token: string, readGame: ReadGame<V>): Promise<ApiResult<RoomView<V>>> =>
       call('/api/room/again', asRoom(readGame), 'POST', { code, token }),
     /** 방을 나간다. */

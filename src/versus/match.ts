@@ -23,7 +23,7 @@ export interface Match<V, M> {
   myTurn(): boolean;
   /** 수를 둔다. 받아들였으면 true */
   send(move: M): Promise<boolean>;
-  /** 판이 끝난 뒤 "한 판 더" */
+  /** 판이 끝난 뒤 "한 판 더". 온라인에서 누가 나가 닫힌 방이면 같은 방을 다시 열어 상대를 부른다. */
   again(): Promise<void>;
   /** 방을 나간다. 그 뒤로는 아무 소식도 오지 않는다. */
   leave(): void;
@@ -107,7 +107,7 @@ export const POLL_MS = {
   waiting: 2000,
   /** 내 차례일 때. 친구가 나갔는지, 자리를 비웠는지 본다. 내가 묻는 것으로 서버가 내가 아직 있는 줄 안다. */
   mine: 4000,
-  /** 판이 끝나고 "한 판 더"를 기다릴 때 */
+  /** 판이 끝나고 "한 판 더"를 기다릴 때. 닫힌 방에서 상대가 "다시 하자"를 누르는지 볼 때도 */
   over: 2500,
   /** 서버에 닿지 못했을 때 다시 묻기까지 */
   retry: 4000,
@@ -136,6 +136,8 @@ export class OnlineMatch<V, M> implements Match<V, M> {
   private stopped = false;
   /** 보낸 수의 답을 기다리는 중이면 true. 그동안 온 소식은 묵은 것일 수 있어서 받지 않는다. */
   private sending = false;
+  /** 서버에서 방이 사라졌다(시간이 지났다). 그 뒤로는 묻지 않는다. */
+  private gone = false;
 
   constructor(
     private readonly api: Pick<Api, 'lookRoom' | 'moveRoom' | 'againRoom' | 'leaveRoom'>,
@@ -164,6 +166,14 @@ export class OnlineMatch<V, M> implements Match<V, M> {
     return this.current.code;
   }
 
+  /**
+   * 닫힌 방을 "다시 하자"로 되살릴 수 있는지. 둘이 한 판이라도 했고 방이 아직 서버에 있으면 된다.
+   * 그동안은 상대가 먼저 다시 하자고 하는지 천천히 계속 묻는다.
+   */
+  get reopenable(): boolean {
+    return this.current.status === 'closed' && !this.gone && this.current.names[1] !== null && this.current.game !== null;
+  }
+
   myTurn(): boolean {
     return this.current.status === 'playing' && this.isMyTurn(this.current);
   }
@@ -190,6 +200,7 @@ export class OnlineMatch<V, M> implements Match<V, M> {
   /** 서버에 닿지 못했다. 방이 사라졌으면(notfound) 닫힌 방으로 보고 더 묻지 않는다. */
   private fail(reason: ApiFailure): void {
     if (reason === 'notfound' || reason === 'invalid') {
+      this.gone = true;
       this.current = { ...this.current, status: 'closed', version: this.current.version + 1 };
       this.awayUntil = null;
       this.trouble = null;
@@ -205,13 +216,13 @@ export class OnlineMatch<V, M> implements Match<V, M> {
     if (this.stopped) return;
     if (this.timer !== null) this.timers.clear(this.timer);
     this.timer = null;
-    if (this.current.status === 'closed') return;
+    if (this.current.status === 'closed' && !this.reopenable) return;
     const ms =
       this.trouble !== null
         ? POLL_MS.retry
         : this.awayUntil !== null
           ? POLL_MS.waiting
-          : this.current.status === 'over'
+          : this.current.status === 'over' || this.current.status === 'closed'
           ? POLL_MS.over
           : this.myTurn()
             ? POLL_MS.mine
@@ -221,7 +232,7 @@ export class OnlineMatch<V, M> implements Match<V, M> {
 
   /** 소식을 한 번 묻는다. 화면이 다시 보일 때처럼 바로 묻고 싶을 때도 부른다. */
   async poll(): Promise<void> {
-    if (this.stopped || this.current.status === 'closed') return;
+    if (this.stopped || (this.current.status === 'closed' && !this.reopenable)) return;
     if (this.sending) return this.schedule();
     const asked = this.current.version;
     const result = await this.api.lookRoom(this.current.code, this.token, asked, this.readGame);
@@ -229,7 +240,9 @@ export class OnlineMatch<V, M> implements Match<V, M> {
     // 묻는 사이에 내가 수를 둬서 방이 바뀌었으면 이 답은 묵은 것이다.
     if (!this.sending && this.current.version === asked) {
       if (!result.ok) this.fail(result.reason);
-      else if (result.data === 'same') this.take(this.current);
+      // 'same'은 서버가 상대가 자리에 있다고 볼 때만 온다(자리를 비웠으면 남은 시간을 실어 보낸다).
+      // 그러니 자리를 비웠던 상대가 돌아온 것이다: 띠를 내린다.
+      else if (result.data === 'same') this.take({ ...this.current, away: null });
       else this.take(result.data);
     }
     this.schedule();
@@ -255,7 +268,7 @@ export class OnlineMatch<V, M> implements Match<V, M> {
   }
 
   async again(): Promise<void> {
-    if (this.stopped || this.current.status !== 'over') return;
+    if (this.stopped || (this.current.status !== 'over' && !this.reopenable)) return;
     const result = await this.api.againRoom(this.current.code, this.token, this.readGame);
     if (this.stopped) return;
     if (result.ok) this.take(result.data);

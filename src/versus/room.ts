@@ -40,6 +40,8 @@ export interface RoomState<S = unknown> {
   game: RoomGame;
   status: RoomStatus;
   names: [string, string | null];
+  /** 자리마다의 친구 표. 예전에 저장된 방과 한 폰으로 할 때는 없다. */
+  ids?: [string | null, string | null];
   wins: [number, number];
   again: [boolean, boolean];
   left: Seat | null;
@@ -49,6 +51,8 @@ export interface RoomState<S = unknown> {
   seen?: [number, number];
   /** 자리마다, 자리를 비웠다가 다시 돌아온 시각(ms). 돌아오자마자 상대를 내보내지 않으려고 쓴다. */
   back?: [number, number];
+  /** 닫혔던 방을 "다시 하자"로 다시 열고 아직 새 판을 나누지 않았으면 true */
+  reopened?: boolean;
   /** 지난 판에 먼저 둔 자리. 다음 판은 번갈아 상대가 먼저 둔다. */
   first: Seat;
   round: S | null;
@@ -56,11 +60,12 @@ export interface RoomState<S = unknown> {
 }
 
 /** 방을 만든다. 만든 사람은 0번 자리에 앉아 친구를 기다린다. */
-export function createRoom<S>(game: RoomGame, name: string): RoomState<S> {
+export function createRoom<S>(game: RoomGame, name: string, id: string | null = null): RoomState<S> {
   return {
     game,
     status: 'waiting',
     names: [name, null],
+    ids: [id, null],
     wins: [0, 0],
     again: [false, false],
     left: null,
@@ -76,6 +81,7 @@ function deal<S>(room: RoomState<S>, rules: TurnGame<S, unknown, unknown>, rando
   room.round = rules.start(random, first);
   room.status = 'playing';
   room.again = [false, false];
+  room.reopened = false;
 }
 
 /**
@@ -89,9 +95,11 @@ export function joinRoom<S>(
   name: string,
   random: () => number,
   now?: number,
+  id: string | null = null,
 ): boolean {
   if (room.status !== 'waiting') return false;
   room.names[1] = name;
+  room.ids = [room.ids?.[0] ?? null, id];
   if (now !== undefined) {
     room.seen = [now, now];
     room.back = [0, 0];
@@ -187,8 +195,29 @@ export function dropAwayFoe<S>(room: RoomState<S>, seat: Seat, now: number): boo
   return true;
 }
 
-/** 판이 끝난 뒤 seat가 "한 판 더"를 누른다. 둘 다 눌렀으면 새 판을 나눈다. 받아들이지 않았으면 false. */
-export function askAgain<S>(room: RoomState<S>, rules: TurnGame<S, unknown, unknown>, seat: Seat, random: () => number): boolean {
+/** 둘이 한 판이라도 했던 방이 닫혔으면, "다시 하자"로 되살릴 수 있다. */
+export function canReopen<S>(room: Pick<RoomState<S>, 'status' | 'names' | 'round'>): boolean {
+  return room.status === 'closed' && room.names[1] !== null && room.round !== null;
+}
+
+/**
+ * 판이 끝난 뒤 seat가 "한 판 더"를 누른다. 둘 다 눌렀으면 새 판을 나눈다. 받아들이지 않았으면 false.
+ * 누가 나가서 닫힌 방이어도, 둘이 한 판이라도 했던 방이면 "다시 하자"로 되살린다: 판이 끝난 방(over)으로 돌리고
+ * seat가 한 판 더를 누른 것으로 친다. 상대가 같은 방 코드로 한 판 더를 누르면 새 판이 시작되므로 코드를 다시 주고받지 않는다.
+ * now(서버만 넘긴다)가 있으면 두 사람 모두 지금 본 것으로 쳐서, 나갔던 상대를 곧바로 자리를 비운 것으로 보지 않는다.
+ */
+export function askAgain<S>(room: RoomState<S>, rules: TurnGame<S, unknown, unknown>, seat: Seat, random: () => number, now?: number): boolean {
+  if (canReopen(room)) {
+    room.status = 'over';
+    room.reopened = true;
+    room.left = null;
+    room.dropped = false;
+    room.again = [false, false];
+    if (now !== undefined) {
+      room.seen = [now, now];
+      room.back = [0, 0];
+    }
+  }
   if (room.status !== 'over') return false;
   if (room.again[seat]) return true;
   room.again[seat] = true;
@@ -216,8 +245,10 @@ export function roomView<S, V>(room: RoomState<S>, rules: TurnGame<S, unknown, V
     status: room.status,
     version: room.version,
     names: [room.names[0], room.names[1]],
+    ids: [room.ids?.[0] ?? null, room.ids?.[1] ?? null],
     wins: [room.wins[0], room.wins[1]],
     again: [room.again[0], room.again[1]],
+    rematch: room.status === 'over' && room.reopened === true,
     left: room.left,
     dropped: room.dropped === true,
     away: now === undefined ? null : foeAwayLeft(room, seat, now),
