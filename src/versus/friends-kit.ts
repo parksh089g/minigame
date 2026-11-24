@@ -21,6 +21,7 @@ import { PX, PX_CSS } from '../games/high-low/art';
 import { api, failureText, type ApiFailure } from '../online/api';
 import { cleanName, NAME_MAX, NAME_MIN } from '../online/protocol';
 import { friendStore } from './friend-store';
+import { AwayBanner } from './away-banner';
 import { foeSeat, LocalMatch, OnlineMatch, type Match } from './match';
 import { cleanRoomCode, formatRoomCode, type RoomGame, type RoomView, type Seat } from './protocol';
 import type { TurnGame } from './room';
@@ -35,6 +36,36 @@ export interface FriendsStart {
   room?: { code: string; token: string; view?: RoomView<unknown> };
 }
 
+/**
+ * 방이 닫혔을 때 적을 말. 친구가 나갔거나, 누군가 자리를 오래 비워 판을 버린 것으로 쳤거나, 오래 두지 않아 방이 사라졌다.
+ * foeLeft: 친구가 나가서(또는 자리를 비워서) 닫혔다. meDropped: 내가 자리를 오래 비워서 닫혔다.
+ */
+export function closedText(
+  room: Pick<RoomView<unknown>, 'left' | 'seat' | 'dropped'>,
+  foe: string,
+  wasPlaying: boolean,
+): { title: string; note: string; foeLeft: boolean; meDropped: boolean } {
+  const foeLeft = room.left !== null && room.left !== room.seat;
+  const meDropped = room.left === room.seat && room.dropped;
+  if (foeLeft) {
+    return {
+      title: room.dropped ? `${withSubject(foe)} 돌아오지 않았어요` : `${withSubject(foe)} 나갔어요`,
+      note: wasPlaying ? '하던 판은 내가 이긴 것으로 쳐요' : '다시 하려면 방을 새로 만들어요',
+      foeLeft,
+      meDropped,
+    };
+  }
+  if (meDropped) {
+    return {
+      title: '자리를 오래 비워서 방이 닫혔어요',
+      note: wasPlaying ? '하던 판은 진 것으로 쳐요' : '다시 하려면 방을 새로 만들어요',
+      foeLeft,
+      meDropped,
+    };
+  }
+  return { title: '방이 닫혔어요', note: '30분 동안 아무도 하지 않으면 방이 사라져요', foeLeft, meDropped };
+}
+
 /** 한 폰으로 번갈아 할 때의 두 사람 이름 */
 export const LOCAL_NAMES = ['1P', '2P'] as const;
 const NAME_RULE = `${NAME_MIN}~${NAME_MAX}자의 한글, 영문, 숫자로 지어 주세요.`;
@@ -42,6 +73,8 @@ const MARGIN = 8;
 const WIDTH = GAME_WIDTH - MARGIN * 2;
 /** 판 위에 뜨는 것들의 깊이: 결과 판, 폰 넘기기 판 */
 const DEPTH = { screen: 60, end: 80, cover: 100 } as const;
+/** 친구가 자리를 비웠을 때 띄우는 띠의 위쪽 끝. 판 머리(점수 줄) 바로 아래다. */
+const AWAY_Y = 44;
 
 /** 판이 끝났을 때 결과 판에 적는 것 */
 export interface FriendsResult {
@@ -74,6 +107,8 @@ export interface FriendsOptions<V, M> {
   onClosed?: () => void;
   /** 판 화면에 알림을 띄운다(서버에 닿지 못할 때) */
   say?: (text: string, warn: boolean) => void;
+  /** 친구가 자리를 비웠을 때 띄우는 띠의 위쪽 끝. 없으면 판 머리 바로 아래(AWAY_Y)다. 상대의 패를 가리지 않는 곳으로 고른다. */
+  awayTop?: () => number;
   /** 폰을 넘길 때 가림 판에 덧붙일 한 줄(상대가 한 일) */
   coverNote?: () => string | null;
   /** 씬을 시작 값과 함께 다시 연다. */
@@ -96,6 +131,8 @@ export class FriendsKit<V, M> {
   private endLayer: Phaser.GameObjects.GameObject[] = [];
   private coverLayer: Phaser.GameObjects.GameObject[] = [];
   private status: Phaser.GameObjects.Text | null = null;
+  /** 친구가 자리를 비웠을 때 남은 초를 세는 띠(온라인 방에서만) */
+  away: AwayBanner | null = null;
   private againButton: PixelButton | null = null;
   private shownSeat: Seat | null = null;
   private settledVersion = -1;
@@ -366,6 +403,7 @@ export class FriendsKit<V, M> {
     };
     document.addEventListener('visibilitychange', onVisible);
     this.scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => document.removeEventListener('visibilitychange', onVisible));
+    this.away = new AwayBanner(this.scene, () => ({ match: this.match as Match<unknown, unknown> | null, foe: this.foeName, poll: () => void match.poll() }), this.options.awayTop?.() ?? AWAY_Y, DEPTH.end + 5);
     this.onChange();
   }
 
@@ -382,7 +420,8 @@ export class FriendsKit<V, M> {
     const match = this.match;
     if (!match) return;
     if (match.kind === 'online') {
-      if (match.room.status === 'playing') friendStore.addResult(this.options.game, false);
+      // 친구가 자리를 비운 사이에 나가면 친구가 판을 버린 것으로 친다(서버도 그렇게 센다).
+      if (match.room.status === 'playing') friendStore.addResult(this.options.game, match.awayUntil !== null);
       if (match.room.status !== 'closed') match.leave();
       savedRoom.clear();
     }
@@ -420,7 +459,9 @@ export class FriendsKit<V, M> {
 
   /** 그만하기 전에 한 번 더 물을 말 */
   quitWarning(): string | null {
-    if (this.kind === 'online' && this.room?.status === 'playing') return '지금 나가면 진 판으로 치고 방이 닫혀요';
+    if (this.kind === 'online' && this.room?.status === 'playing') {
+      return this.match?.awayUntil != null ? '친구가 자리를 비워서, 지금 나가면 내가 이긴 판이 돼요' : '지금 나가면 진 판으로 치고 방이 닫혀요';
+    }
     return null;
   }
 
@@ -454,6 +495,7 @@ export class FriendsKit<V, M> {
     const match = this.match;
     if (!match || !this.alive) return;
     const room = match.room;
+    this.away?.refresh();
     if (match.kind === 'online') {
       if (room.status === 'closed') savedRoom.clear();
       else savedRoom.set(this.options.game, room.code, (match as OnlineMatch<V, M>).token);
@@ -549,10 +591,8 @@ export class FriendsKit<V, M> {
     this.closedShown = true;
     const wasPlaying = this.inRound && this.lastStatus === 'playing';
     this.match?.stop();
-    const foeLeft = room.left !== null && room.left !== room.seat;
-    if (wasPlaying && foeLeft && this.kind === 'online') friendStore.addResult(this.options.game, true);
-    const title = foeLeft ? `${withSubject(this.foeName)} 나갔어요` : '방이 닫혔어요';
-    const note = foeLeft ? (wasPlaying ? '하던 판은 내가 이긴 것으로 쳐요' : '다시 하려면 방을 새로 만들어요') : '30분 동안 아무도 하지 않으면 방이 사라져요';
+    const { title, note, foeLeft, meDropped } = closedText(room, this.foeName, wasPlaying);
+    if (wasPlaying && this.kind === 'online' && (foeLeft || meDropped)) friendStore.addResult(this.options.game, foeLeft);
     const scene = this.scene;
 
     if (!this.inRound) {

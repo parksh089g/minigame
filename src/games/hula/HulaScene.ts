@@ -8,6 +8,8 @@ import { store } from '../../core/store';
 import { addTapZone, addText, fadeToScene, whileBlocked } from '../../core/ui';
 import { api, failureText, type ApiFailure } from '../../online/api';
 import { cleanName, NAME_MAX, NAME_MIN } from '../../online/protocol';
+import { AwayBanner } from '../../versus/away-banner';
+import { closedText } from '../../versus/friends-kit';
 import { foeSeat, LocalMatch, OnlineMatch, type Match } from '../../versus/match';
 import { cleanRoomCode, formatRoomCode, type RoomView } from '../../versus/protocol';
 import { savedRoom } from '../../versus/saved-room';
@@ -39,6 +41,7 @@ import {
 import { hulaStore } from './store';
 import { drawBackdrop, pxBox, PxButton } from './ui';
 import { hulaVersus, readHulaView, type HulaMove, type HulaStep, type HulaView } from './versus';
+
 
 /** 씬을 열 때 넘기는 값. level이 있으면 준비 화면을 건너뛰고 바로 그 난이도로 시작한다(결과 화면의 "다시 하기"). */
 export interface HulaStart {
@@ -161,6 +164,7 @@ export class HulaScene extends MiniGameScene {
     this.coverLayer = [];
     this.settledRound = -1;
     this.closedShown = false;
+    this.awayBanner = null;
     this.alive = true;
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.closeFriends());
     if (data.room) this.connectRoom(data.room.code, data.room.token, data.room.view ?? null);
@@ -289,6 +293,7 @@ export class HulaScene extends MiniGameScene {
   protected override quitWarning(): string | null {
     if (this.mode !== 'round') return null;
     if (this.match?.kind === 'local') return null;
+    if (this.match?.awayUntil != null) return '친구가 자리를 비워서, 지금 나가면 내가 이긴 판이 돼요';
     if (this.match) return '지금 나가면 진 판으로 치고 방이 닫혀요';
     return '지금 나가면 진 판으로 쳐요';
   }
@@ -976,6 +981,7 @@ export class HulaScene extends MiniGameScene {
     };
     document.addEventListener('visibilitychange', onVisible);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => document.removeEventListener('visibilitychange', onVisible));
+    this.awayBanner = new AwayBanner(this, () => ({ match: this.match as Match<unknown, unknown> | null, foe: this.foeName, poll: () => void match.poll() }), this.layout.tableTop + 6, 30);
     this.onRoomChange();
   }
 
@@ -995,7 +1001,8 @@ export class HulaScene extends MiniGameScene {
     const match = this.match;
     if (!match) return;
     if (match.kind === 'online') {
-      if (match.room.status === 'playing') hulaStore.addFriendResult(false);
+      // 친구가 자리를 비운 사이에 나가면 친구가 판을 버린 것으로 친다(서버도 그렇게 센다).
+      if (match.room.status === 'playing') hulaStore.addFriendResult(match.awayUntil !== null);
       if (match.room.status !== 'closed') match.leave();
       savedRoom.clear();
     }
@@ -1030,6 +1037,7 @@ export class HulaScene extends MiniGameScene {
     const match = this.match;
     if (!match || !this.alive) return;
     const room = match.room;
+    this.awayBanner?.refresh();
     if (match.kind === 'online') {
       if (room.status === 'closed') savedRoom.clear();
       else savedRoom.set('hula', room.code, (match as OnlineMatch<HulaView, HulaMove>).token);
@@ -1174,15 +1182,8 @@ export class HulaScene extends MiniGameScene {
     if (this.closedShown) return;
     this.closedShown = true;
     this.match?.stop();
-    const foeLeft = room.left !== null && room.left !== room.seat;
-    const foe = this.foeName;
-    if (wasPlaying && foeLeft && this.match?.kind === 'online') hulaStore.addFriendResult(true);
-    const title = foeLeft ? `${withSubject(foe)} 나갔어요` : '방이 닫혔어요';
-    const note = foeLeft
-      ? wasPlaying
-        ? '하던 판은 내가 이긴 것으로 쳐요'
-        : '다시 하려면 방을 새로 만들어요'
-      : '30분 동안 아무도 두지 않으면 방이 사라져요';
+    const { title, note, foeLeft, meDropped } = closedText(room, this.foeName, wasPlaying);
+    if (wasPlaying && this.match?.kind === 'online' && (foeLeft || meDropped)) hulaStore.addFriendResult(foeLeft);
 
     if (!this.roundBuilt) {
       this.clearScreen();
@@ -1215,6 +1216,8 @@ export class HulaScene extends MiniGameScene {
 
   /** 방이 닫힌 것을 이미 알렸는지 */
   private closedShown = false;
+  /** 친구가 자리를 비웠을 때 남은 초를 세는 띠(온라인 방에서만) */
+  awayBanner: AwayBanner | null = null;
 
   private end<T extends Phaser.GameObjects.GameObject>(object: T): T {
     this.endLayer.push(object);

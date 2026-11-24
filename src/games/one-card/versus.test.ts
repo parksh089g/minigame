@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { createRoom, joinRoom, playMove, roomView } from '../../versus/room';
+import { createRoom, joinRoom, playMove, roomView, tickRoom } from '../../versus/room';
 import { canPlay, type GameState } from './rules';
-import { oneCardTurn, oneCardVersus, readOneCardMove, readOneCardView, type OneCardMatch } from './versus';
+import { CALL_GRACE_MS, CALL_WINDOW_MS, oneCardTurn, oneCardVersus, readOneCardMove, readOneCardView, type OneCardMatch } from './versus';
 
 function seeded(seed = 7): () => number {
   let value = seed;
@@ -66,6 +66,53 @@ describe('친구와 하는 원카드', () => {
     expect(oneCardVersus.play(state, 0, { type: 'miss' })).toBe(true);
     expect(game.players[0].hand).toHaveLength(2);
     expect(oneCardVersus.turnOf(state)).toBe(1);
+  });
+
+  it('원카드를 외칠 시간은 서버가 재고, 마감이 지나면 대신 한 장을 준다', () => {
+    const room = createRoom<OneCardMatch>('one-card', '민수');
+    joinRoom(room, oneCardVersus, '지원', seeded(), 1000);
+    const state = room.round!;
+    const game = state.game;
+    const seat = oneCardTurn(game)!;
+    const top = game.discard[game.discard.length - 1];
+    const same = game.deck.find((card) => card.suit === top.suit && card.rank >= 4 && card.rank <= 6)!;
+    game.deck = game.deck.filter((card) => card !== same);
+    game.players[seat].hand = [same, game.players[seat].hand[0]];
+    const now = 10_000;
+    expect(playMove(room, oneCardVersus, seat, { type: 'play', card: same.id }, now)).toBe(true);
+    expect(game.oneCard).toBe(seat);
+    expect(state.callBy).toBe(now + CALL_WINDOW_MS + CALL_GRACE_MS);
+    // 마감 전에는 아무것도 하지 않는다. 마감 시각은 화면에 보내지 않는다.
+    const version = room.version;
+    expect(tickRoom(room, oneCardVersus, now + CALL_WINDOW_MS)).toBe(false);
+    expect(room.version).toBe(version);
+    expect(JSON.stringify(roomView(room, oneCardVersus, 0, 'ABCDEF'))).not.toContain('callBy');
+    // 외칠 사람이 앱을 내려 두어 'miss'가 오지 않아도, 마감이 지나면 한 장을 받고 차례가 넘어간다.
+    expect(tickRoom(room, oneCardVersus, now + CALL_WINDOW_MS + CALL_GRACE_MS)).toBe(true);
+    expect(room.version).toBe(version + 1);
+    expect(game.oneCard).toBeNull();
+    expect(state.callBy).toBeNull();
+    expect(game.players[seat].hand).toHaveLength(2);
+    expect(oneCardVersus.turnOf(state)).toBe(seat === 0 ? 1 : 0);
+    expect(state.events.map((event) => event.k)).toContain('caught');
+    // 늦게 온 'call'은 받지 않는다.
+    expect(playMove(room, oneCardVersus, seat, { type: 'call' }, now + 6000)).toBe(false);
+  });
+
+  it('시간 안에 외치면 마감이 지워진다', () => {
+    const state = oneCardVersus.start(seeded(), 0);
+    const game = state.game;
+    const top = game.discard[game.discard.length - 1];
+    const same = game.deck.find((card) => card.suit === top.suit && card.rank >= 4 && card.rank <= 6)!;
+    game.deck = game.deck.filter((card) => card !== same);
+    game.players[0].hand = [same, game.players[0].hand[0]];
+    oneCardVersus.play(state, 0, { type: 'play', card: same.id });
+    expect(oneCardVersus.tick!(state, 100)).toBe(false);
+    expect(state.callBy).toBe(100 + CALL_WINDOW_MS + CALL_GRACE_MS);
+    expect(oneCardVersus.play(state, 0, { type: 'call' })).toBe(true);
+    expect(oneCardVersus.tick!(state, 99_999)).toBe(false);
+    expect(state.callBy).toBeNull();
+    expect(game.players[0].hand).toHaveLength(1);
   });
 
   it('방 규칙과 함께 판을 끝까지 하면 이긴 자리가 정해진다', () => {

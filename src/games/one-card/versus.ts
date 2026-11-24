@@ -8,6 +8,8 @@
  * 원카드 외치기: 컴퓨터와 할 때는 누가 먼저 누르는지 겨루지만, 친구와는 각자의 폰이라 그렇게 겨룰 수 없다.
  * 그래서 카드가 한 장 남은 사람이 정해진 시간 안에 "원카드!"를 누르는지로 한다. 그동안 차례는 그 사람에게 머물고,
  * 시간 안에 누르면 'call', 놓치면 화면이 'miss'를 보내 한 장을 받는다.
+ * 시간은 서버가 잰다(tick). 그 사람이 앱을 내려 두어 'miss'를 보내지 못해도, 마감이 지나면 서버가 대신 한 장을 준다.
+ * 그래서 상대가 끝없이 기다리지 않는다. 한 폰으로 할 때는 서버가 없으니 화면이 잰 대로 한다.
  */
 import type { Seat } from '../../versus/protocol';
 import type { TurnGame } from '../../versus/room';
@@ -28,8 +30,10 @@ import {
   type Suit,
 } from './rules';
 
-/** 원카드를 외칠 수 있는 시간(ms). 화면이 잰다. */
+/** 원카드를 외칠 수 있는 시간(ms). 화면이 남은 초를 보여 준다. */
 export const CALL_WINDOW_MS = 3000;
+/** 서버가 재는 마감에 덧붙이는 여유(ms). 화면이 시간 안에 누른 'call'이 늦게 닿아도 받아 준다. */
+export const CALL_GRACE_MS = 1500;
 
 export type OneCardMove =
   | { type: 'play'; card: number }
@@ -45,6 +49,8 @@ export interface OneCardMatch {
   events: GameEvent[];
   /** 둔 수의 수. 화면이 새로 일어난 일인지 가린다. */
   moves: number;
+  /** 원카드를 외칠 마감 시각(서버의 ms). 외칠 사람이 없으면 없다. 서버만 적고 화면에는 보내지 않는다. */
+  callBy?: number | null;
 }
 
 /** 한 자리가 보는 판. game은 보는 자리가 0번이다. */
@@ -203,6 +209,28 @@ export function readOneCardView(raw: unknown): OneCardView | null {
   return { game: state, events: raw.events as GameEvent[], moves: raw.moves };
 }
 
+/**
+ * 서버의 시계: 원카드를 외칠 사람이 생기면 마감을 적고, 마감이 지나도록 외치지 않았으면 대신 한 장을 준다.
+ * 대신 준 것이 있으면 true
+ */
+export function tickOneCard(state: OneCardMatch, now: number): boolean {
+  const game = state.game;
+  if (game.oneCard === null || game.winner !== null) {
+    if (state.callBy != null) state.callBy = null;
+    return false;
+  }
+  if (state.callBy == null) {
+    state.callBy = now + CALL_WINDOW_MS + CALL_GRACE_MS;
+    return false;
+  }
+  if (now < state.callBy) return false;
+  state.callBy = null;
+  if (!catchOneCard(game, game.oneCard === 0 ? 1 : 0)) return false;
+  state.events = takeEvents(game);
+  state.moves += 1;
+  return true;
+}
+
 export const oneCardVersus: TurnGame<OneCardMatch, OneCardMove, OneCardView> = {
   id: 'one-card',
   start: startOneCard,
@@ -228,4 +256,5 @@ export const oneCardVersus: TurnGame<OneCardMatch, OneCardMove, OneCardView> = {
     };
   },
   readView: readOneCardView,
+  tick: tickOneCard,
 };

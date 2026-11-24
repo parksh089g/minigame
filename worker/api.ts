@@ -243,7 +243,8 @@ async function handleRoom(path: string, request: Request, board: BoardApi, ip: s
   if (path === '/api/room/look') {
     const result = await board.lookRoom(ip, code, token);
     // 앱이 이미 본 번호와 같으면 방의 모습을 다시 싣지 않는다. 기다리는 동안 2초마다 묻기 때문이다.
-    if (result !== null && result !== TOO_FAST && result.version === body.version) {
+    // 다만 상대가 자리를 비웠으면 남은 시간이 바뀌므로 그대로 싣는다.
+    if (result !== null && result !== TOO_FAST && result.version === body.version && result.away === null) {
       return json({ same: true, version: result.version });
     }
     return answer(result, (room) => ({ room }));
