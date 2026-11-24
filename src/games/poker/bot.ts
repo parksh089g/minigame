@@ -27,6 +27,11 @@ export const BOT_STYLES: readonly BotStyle[] = [
 
 /** 승률을 어림할 때 깔아 보는 횟수 */
 export const SAMPLES = 220;
+/**
+ * 친구와 하는 판(서버가 컴퓨터의 수를 대신 둔다)에서 깔아 보는 횟수. 서버는 한 요청에 쓸 수 있는 시간이 짧아서 줄인다.
+ * 이만큼이면 승률이 몇 % 안쪽으로 흔들릴 뿐이라 컴퓨터의 성격은 그대로 드러난다.
+ */
+export const VERSUS_SAMPLES = 60;
 
 /**
  * 내 카드가 이길 몫(0~1). 비기면 나눈 만큼 센다.
@@ -76,12 +81,18 @@ function roundTo(value: number, step: number): number {
 }
 
 /** 그 자리의 컴퓨터가 둘 수. 차례가 아니면 null */
-export function chooseMove(table: PokerTable, index: number, style: BotStyle, random: () => number = Math.random): Move | null {
+export function chooseMove(
+  table: PokerTable,
+  index: number,
+  style: BotStyle,
+  random: () => number = Math.random,
+  samples = SAMPLES,
+): Move | null {
   const can = options(table, index);
   if (!can.check && !can.fold) return null;
   const seat = table.seats[index];
   const opponents = table.seats.filter((other, i) => i !== index && inHand(other)).length;
-  const equity = estimateEquity(seat.hole, table.board, opponents, random);
+  const equity = estimateEquity(seat.hole, table.board, opponents, random, samples);
   // 상대 수와 상관없이 "보통의 몫"이 1이 되게 바꾼다.
   const strength = equity * (opponents + 1);
   const pot = potTotal(table);

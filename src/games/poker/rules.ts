@@ -472,17 +472,24 @@ export function coinsFor(score: number): number {
 export const HIDDEN_CARD: Card = { rank: 0, suit: 'spade' };
 
 /**
+ * 쇼다운에서 손패를 펼치는 자리: 끝까지 남아 족보를 겨룬 사람. 올인했다가 져서 이번 핸드에 칩을 다 잃은(out) 사람도 들어간다.
+ * 족보(result.values)는 쇼다운 때 남은 사람에게만 적히므로 그것으로 가린다.
+ */
+export function shownAtShowdown(table: PokerTable, index: number): boolean {
+  return !!table.result?.showdown && table.result.values[index] != null && table.seats[index].hole.length > 0;
+}
+
+/**
  * 한 자리에서 보이는 탁자: 남은 카드 묶음과 남의 손패를 가린다. 쇼다운에서 끝까지 남은 사람의 손패는 보인다.
  * 여럿이 하는 판에서 서버가 이 모양으로 보내면 화면은 컴퓨터와 할 때와 같은 코드로 그릴 수 있다.
  */
 export function viewFor(table: PokerTable, viewer: number): PokerTable {
-  const reveal = table.result?.showdown ?? false;
   return {
     ...table,
     deck: [],
     seats: table.seats.map((seat, i) => ({
       ...seat,
-      hole: i === viewer || (reveal && inHand(seat)) ? seat.hole.map((card) => ({ ...card })) : seat.hole.map(() => HIDDEN_CARD),
+      hole: i === viewer || shownAtShowdown(table, i) ? seat.hole.map((card) => ({ ...card })) : seat.hole.map(() => HIDDEN_CARD),
     })),
     board: table.board.map((card) => ({ ...card })),
   };
