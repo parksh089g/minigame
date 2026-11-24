@@ -31,3 +31,6 @@ export function shortName(name: string, max = 6): string {
   const chars = [...name];
   return chars.length <= max ? name : `${chars.slice(0, max - 1).join('')}…`;
 }
+
+/** 이름 + 와/과. 예: "민수와", "지원과" */
+export const withAnd = (name: string): string => `${name}${endsWithFinal(name) ? '과' : '와'}`;

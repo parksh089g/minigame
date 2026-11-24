@@ -61,12 +61,12 @@ export class ArcadeBoard extends DurableObject<NoBindings> implements BoardApi {
     return this.service.take(ip, code);
   }
 
-  openRoom(ip: string, game: RoomGame, name: string): Limited<RoomTicket | null> {
-    return this.service.openRoom(ip, game, name);
+  openRoom(ip: string, game: RoomGame, name: string, id: string | null = null): Limited<RoomTicket | null> {
+    return this.service.openRoom(ip, game, name, id);
   }
 
-  joinRoom(ip: string, code: string, name: string): Limited<RoomTicket | null> {
-    return this.service.joinRoom(ip, code, name);
+  joinRoom(ip: string, code: string, name: string, id: string | null = null): Limited<RoomTicket | null> {
+    return this.service.joinRoom(ip, code, name, id);
   }
 
   lookRoom(ip: string, code: string, token: string): Limited<RoomView | null> {

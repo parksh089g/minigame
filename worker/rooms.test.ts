@@ -62,3 +62,28 @@ describe('원카드 방: 원카드 외치기 마감', () => {
     expect(late.ok).toBe(false);
   });
 });
+
+describe('친구 표와 다시 하자', () => {
+  it('친구 표를 자리마다 싣고, 나간 뒤에도 같은 코드로 다시 열어 새 판을 시작한다', () => {
+    const sql = memorySql();
+    const rooms = new RoomDb(sql);
+    let now = 1_800_000_000_000;
+    const host = rooms.create('high-low', '민수', now, bytes, '0123456789abcdef')!;
+    const code = host.room.code;
+    const guest = rooms.join(code, '지원', now, bytes, random, 'fedcba9876543210')!;
+    expect(guest.room.ids).toEqual(['0123456789abcdef', 'fedcba9876543210']);
+
+    // 친구가 나가서 방이 닫힌다. 몇 분 뒤 친구가 친구 고르기 화면에서 같은 방으로 다시 하자고 한다.
+    rooms.leave(code, guest.token, now);
+    expect(rooms.look(code, host.token, now)!.status).toBe('closed');
+    now += 5 * 60 * 1000;
+    const asked = rooms.again(code, guest.token, now, random)!;
+    expect(asked.status).toBe('over');
+    expect(asked.again).toEqual([false, true]);
+    // 오래 안 왔던 나도 곧바로 자리를 비운 것으로 치지 않는다.
+    expect(asked.away).toBeNull();
+    const started = rooms.again(code, host.token, now + 1000, random)!;
+    expect(started.status).toBe('playing');
+    expect(started.left).toBeNull();
+  });
+});

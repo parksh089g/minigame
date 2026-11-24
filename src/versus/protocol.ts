@@ -59,6 +59,21 @@ export function seatTokenFrom(bytes: Uint8Array): string {
   return Array.from(bytes.slice(0, 16), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
+/**
+ * 친구 표: 기기마다 한 번 뽑아 두는 무작위 값. 방에 들어갈 때 같이 보내서, 상대 기기가 "같은 친구"를 알아보고
+ * 친구마다 전적을 따로 쌓게 한다. 랭킹에 쓰는 기기 id와는 다른 값이라, 친구가 알아도 내 랭킹 기록을 건드릴 수 없다.
+ */
+const FRIEND_ID = /^[0-9a-f]{16}$/;
+
+/** 보내온 친구 표를 확인한다. 없거나 모양이 맞지 않으면 null(예전 앱은 보내지 않는다) */
+export function cleanFriendId(value: unknown): string | null {
+  return typeof value === 'string' && FRIEND_ID.test(value) ? value : null;
+}
+
+export function friendIdFrom(bytes: Uint8Array): string {
+  return Array.from(bytes.slice(0, 8), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 /** 아무도 두지 않고 이만큼 지나면 방이 사라진다. */
 export const ROOM_IDLE_MS = 30 * 60 * 1000;
 /**
@@ -77,7 +92,7 @@ export const MAX_MOVE_CHARS = 400;
 /**
  * 방의 지금 상태.
  * waiting: 친구를 기다림, playing: 판을 하는 중, over: 판이 끝나 "한 판 더"를 기다림,
- * closed: 누군가 나갔거나 방이 사라짐(더 둘 수 없다).
+ * closed: 누군가 나갔거나 방이 사라짐. 둘이 한 판이라도 했던 방이면 누구든 "다시 하자"로 over로 되돌릴 수 있다(room.ts의 askAgain).
  */
 export type RoomStatus = 'waiting' | 'playing' | 'over' | 'closed';
 
@@ -91,10 +106,17 @@ export interface RoomView<V = unknown> {
   version: number;
   /** 자리마다의 이름. 아직 아무도 없는 자리는 null */
   names: [string, string | null];
+  /** 자리마다의 친구 표(cleanFriendId). 보내지 않은 자리는 null */
+  ids: [string | null, string | null];
   /** 자리마다 이긴 판 수 */
   wins: [number, number];
   /** 판이 끝난 뒤 "한 판 더"를 누른 자리 */
   again: [boolean, boolean];
+  /**
+   * 누가 나가 닫혔던 방을 "다시 하자"로 다시 연 것이면 true(status는 over). 판(game)은 닫히기 전의 것이라
+   * 끝나지 않았을 수도 있으니, 앱은 결과 판 대신 "다시 하자" 화면을 보여 준다.
+   */
+  rematch: boolean;
   /** 방을 나간 자리. 아무도 안 나갔으면 null */
   left: Seat | null;
   /** left가 스스로 나간 것이 아니라 자리를 오래 비워서 판을 버린 것으로 쳤으면 true */
@@ -115,7 +137,7 @@ const STATUSES: readonly RoomStatus[] = ['waiting', 'playing', 'over', 'closed']
 /** 서버가 보낸 방의 모습을 확인하며 읽는다. 게임의 판(game)은 그 게임의 readView가 따로 확인한다. */
 export function readRoomView<V>(raw: unknown, readGame: (value: unknown) => V | null): RoomView<V> | null {
   if (!isObject(raw)) return null;
-  const { code, seat, status, version, names, wins, again, left, dropped, away, game } = raw;
+  const { code, seat, status, version, names, ids, wins, again, rematch, left, dropped, away, game } = raw;
   if (typeof code !== 'string' || !isSeat(seat) || !STATUSES.includes(status as RoomStatus) || !isCount(version)) return null;
   if (!Array.isArray(names) || names.length !== 2 || typeof names[0] !== 'string') return null;
   if (names[1] !== null && typeof names[1] !== 'string') return null;
@@ -124,7 +146,11 @@ export function readRoomView<V>(raw: unknown, readGame: (value: unknown) => V | 
   if (left !== null && !isSeat(left)) return null;
   // dropped와 away는 나중에 더한 것이라, 없으면(예전 서버) 비우지 않은 것으로 읽는다.
   if (dropped !== undefined && typeof dropped !== 'boolean') return null;
+  if (rematch !== undefined && typeof rematch !== 'boolean') return null;
   if (away !== undefined && away !== null && !(typeof away === 'number' && Number.isFinite(away) && away >= 0)) return null;
+  // ids도 나중에 더한 것이라, 없으면(예전 서버) 모르는 친구로 읽는다.
+  if (ids !== undefined && !(Array.isArray(ids) && ids.length === 2)) return null;
+  const idPair: [string | null, string | null] = Array.isArray(ids) ? [cleanFriendId(ids[0]), cleanFriendId(ids[1])] : [null, null];
   let board: V | null = null;
   if (game !== null) {
     board = readGame(game);
@@ -136,8 +162,10 @@ export function readRoomView<V>(raw: unknown, readGame: (value: unknown) => V | 
     status: status as RoomStatus,
     version,
     names: [names[0], names[1] as string | null],
+    ids: idPair,
     wins: [wins[0], wins[1]],
     again: [again[0], again[1]],
+    rematch: rematch === true,
     left,
     dropped: dropped === true,
     away: typeof away === 'number' ? away : null,

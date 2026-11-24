@@ -5,7 +5,8 @@
  * - 준비 화면에 놓는 "친구와 함께" 버튼 두 개(온라인 · 방 코드, 한 폰으로)
  * - 온라인 방 고르기(방 만들기, 코드로 들어가기, 하던 방으로 돌아가기), 친구 기다리기, 방이 닫힌 화면
  * - 한 폰으로 할 때 차례가 바뀌면 화면을 가리고 폰을 넘기게 하는 판(가릴 게 있는 게임만)
- * - 판이 끝난 뒤의 결과 판("한 판 더", "나가기")과, 친구가 나갔을 때의 알림
+ * - 판이 끝난 뒤의 결과 판("한 판 더", "나가기")과, 친구가 나갔을 때의 알림("다시 하자", "나가기")
+ * - 친구마다의 전적(결과 판과 친구와 함께 화면), 방에서 나온 뒤 같은 친구를 코드 없이 다시 부르기(rematch.ts)
  * - 씬을 떠날 때 방에서 나가기
  *
  * 판 자체를 그리는 일은 게임 씬이 한다. 방이 바뀔 때마다 onRoom으로 지금 방을 넘겨준다.
@@ -20,13 +21,14 @@ import { addTapZone, addText, drawPanel, PixelButton, whileBlocked } from '../co
 import { PX, PX_CSS } from '../games/high-low/art';
 import { api, failureText, type ApiFailure } from '../online/api';
 import { cleanName, NAME_MAX, NAME_MIN } from '../online/protocol';
-import { friendStore } from './friend-store';
+import { friendStore, recordText, roundKey } from './friend-store';
 import { AwayBanner } from './away-banner';
 import { foeSeat, LocalMatch, OnlineMatch, type Match } from './match';
 import { cleanRoomCode, formatRoomCode, type RoomGame, type RoomView, type Seat } from './protocol';
 import type { TurnGame } from './room';
+import { RematchWatch, type RematchState } from './rematch';
 import { savedRoom } from './saved-room';
-import { shortName, withSubject } from './text';
+import { shortName, withAnd, withSubject } from './text';
 
 /** 씬을 열 때 넘기는 값 가운데 친구와 하기에 쓰는 것. 게임마다의 시작 값이 이것을 덧붙여 쓴다. */
 export interface FriendsStart {
@@ -141,6 +143,10 @@ export class FriendsKit<V, M> {
   private alive = true;
   /** 지난번에 본 방의 상태. 판이 끝났다가 다시 시작되면 새 판이다. */
   private lastStatus: string | null = null;
+  /** 친구와 함께 화면에서 마지막으로 같이 한 친구의 방을 들여다보는 것 */
+  rematch: RematchWatch<V> | null = null;
+  /** 같은 방을 새 화면으로 다시 여는 중이면 true. 씬을 떠나도 방에서 나가지 않는다. */
+  private reopening = false;
 
   constructor(
     private readonly scene: Phaser.Scene,
@@ -226,7 +232,7 @@ export class FriendsKit<V, M> {
     const scene = this.scene;
     this.header(`${this.options.title} · 친구와 함께`, () => this.options.restart({}));
 
-    type Row = { title: string; note: string; onTap: () => void; gold?: boolean };
+    type Row = { title: string; note: string; onTap: () => void; gold?: boolean; texts?: (title: Phaser.GameObjects.Text, note: Phaser.GameObjects.Text) => void };
     const local: Row = { title: '한 폰으로 번갈아 하기', note: '인터넷 없이 한 폰을 주고받아요', onTap: () => this.options.restart({ friends: 'local' }) };
     const online: Row[] = [];
     const saved = savedRoom.get(this.options.game);
@@ -236,6 +242,16 @@ export class FriendsKit<V, M> {
         note: `방 코드 ${formatRoomCode(saved.code)}`,
         gold: true,
         onTap: () => this.options.restart({ room: { code: saved.code, token: saved.token } }),
+      });
+    }
+    const again = friendStore.rematch(this.options.game);
+    if (again && again.code !== saved?.code) {
+      online.push({
+        title: `${withAnd(shortName(again.foe, 8))} 한 판 더`,
+        note: '같은 방으로 다시 불러요 · 코드는 필요 없어요',
+        gold: true,
+        onTap: () => this.acceptRematch(),
+        texts: (title, note) => this.watchRematch(again, title, note),
       });
     }
     online.push(
@@ -256,8 +272,9 @@ export class FriendsKit<V, M> {
         });
       };
       draw(false);
-      this.screen(addText(scene, MARGIN + 10, top + 7, row.title, { size: 14, color: row.gold ? PX_CSS.accent : PX_CSS.text }));
-      this.screen(addText(scene, MARGIN + 10, top + 27, row.note, { size: 10, color: PX_CSS.sub }));
+      const title = this.screen(addText(scene, MARGIN + 10, top + 7, row.title, { size: 14, color: row.gold ? PX_CSS.accent : PX_CSS.text }));
+      const note = this.screen(addText(scene, MARGIN + 10, top + 27, row.note, { size: 10, color: PX_CSS.sub }));
+      row.texts?.(title, note);
       this.screen(addTapZone(scene, MARGIN, top, WIDTH, rowHeight, draw, row.onTap) as unknown as Phaser.GameObjects.GameObject);
     };
 
@@ -274,6 +291,7 @@ export class FriendsKit<V, M> {
       drawRow(row, y);
       y += rowHeight + 6;
     }
+    y = this.drawFriendRecords(y + 4);
     this.status = this.screen(addText(scene, GAME_WIDTH / 2, y + 2, '', { size: 10, color: PX_CSS.text, originX: 0.5, align: 'center', wrapWidth: WIDTH - 8 }));
 
     const notes = ['두 사람 모두 인터넷이 있어야 해요', '30분 동안 아무도 안 하면 방이 닫혀요'];
@@ -282,6 +300,69 @@ export class FriendsKit<V, M> {
     const boxTop = Math.max(y + 34, scene.scale.height - 8 - boxHeight);
     drawPanel(this.screen(scene.add.graphics()), MARGIN, boxTop, WIDTH, boxHeight, { fill: PX.ink, border: PX.edge, shadow: null, radius: 4 });
     notes.forEach((line, i) => this.screen(addText(scene, MARGIN + 8, boxTop + 7 + i * lineHeight, `· ${line}`, { size: 10, color: PX_CSS.sub })));
+  }
+
+  /** 친구 전적: 이 게임을 같이 한 친구들을 최근 순으로 몇 줄. 다 그린 뒤의 y를 돌려준다. */
+  private drawFriendRecords(top: number): number {
+    const friends = friendStore.friends(this.options.game);
+    if (friends.length === 0) return top;
+    const scene = this.scene;
+    const shown = friends.slice(0, 3);
+    this.screen(addText(scene, MARGIN + 2, top, '친구 전적', { size: 11, color: PX_CSS.text }));
+    if (friends.length > shown.length) {
+      this.screen(addText(scene, MARGIN + WIDTH, top + 1, `외 ${friends.length - shown.length}명`, { size: 9, color: PX_CSS.faint, originX: 1 }));
+    }
+    let y = top + 18;
+    for (const friend of shown) {
+      const record = friend.games[this.options.game] ?? { wins: 0, losses: 0 };
+      this.screen(addText(scene, MARGIN + 10, y, shortName(friend.name, 10), { size: 10, color: PX_CSS.sub }));
+      this.screen(addText(scene, MARGIN + WIDTH - 8, y, recordText(record), { size: 10, color: record.wins > record.losses ? PX_CSS.accent : PX_CSS.sub, originX: 1 }));
+      y += 15;
+    }
+    return y;
+  }
+
+  /** 마지막으로 같이 한 친구의 방을 몇 초마다 들여다보고, 친구가 먼저 다시 하자고 했으면 알린다. */
+  private watchRematch(saved: NonNullable<ReturnType<typeof friendStore.rematch>>, title: Phaser.GameObjects.Text, note: Phaser.GameObjects.Text): void {
+    const show = (state: RematchState): void => {
+      if (!this.alive || this.screenMode !== 'menu') return;
+      if (state === 'invited') {
+        title.setText(`${withSubject(shortName(saved.foe, 8))} 한 판 더 하재요!`);
+        note.setText('눌러서 바로 시작해요').setColor(PX_CSS.good);
+        sfx.coin();
+        vibrate(30);
+      } else if (state === 'asked') {
+        note.setText('다시 하자고 했어요 · 눌러서 방으로 가요').setColor(PX_CSS.sub);
+      } else if (state === 'gone') {
+        friendStore.clearRematch();
+        title.setColor(PX_CSS.faint);
+        note.setText('방이 사라졌어요 · 방을 새로 만들어 주세요').setColor(PX_CSS.faint);
+      }
+    };
+    this.rematch = new RematchWatch<V>(api, saved, this.options.readView, show);
+  }
+
+  /** 다시 하자: 같은 방을 다시 열어 친구를 부르고 그 방으로 들어간다. 친구가 먼저 불렀으면 바로 새 판이 시작된다. */
+  private acceptRematch(): void {
+    const watch = this.rematch;
+    if (!watch || watch.state === 'gone') return;
+    void whileBlocked(this.scene, async () => {
+      if (navigator.onLine === false) return this.menuFail('offline');
+      this.menuSay(watch.state === 'invited' ? '방에 들어가는 중이에요…' : `${withAnd(watch.saved.foe)} 할 방을 여는 중이에요…`);
+      const result = await watch.accept();
+      if (!this.alive) return;
+      if (!result.ok) {
+        if (result.reason === 'notfound' || result.reason === 'invalid') {
+          friendStore.clearRematch();
+          this.menuSay('방이 사라졌어요.\n방을 새로 만들어 주세요.', true);
+        } else this.menuFail(result.reason);
+        return;
+      }
+      const { code, token } = watch.saved;
+      savedRoom.set(this.options.game, code, token);
+      friendStore.clearRematch();
+      this.options.restart({ room: { code, token, view: result.data } });
+    });
   }
 
   private menuSay(text: string, warn = false): void {
@@ -318,7 +399,7 @@ export class FriendsKit<V, M> {
       const name = await this.askName();
       if (!name || !this.alive) return;
       this.menuSay('방을 만드는 중이에요…');
-      const result = await api.openRoom(this.options.game, name, this.options.readView);
+      const result = await api.openRoom(this.options.game, name, this.options.readView, friendStore.id());
       if (!this.alive) return;
       if (!result.ok) return this.menuFail(result.reason);
       const { token, room } = result.data;
@@ -346,7 +427,7 @@ export class FriendsKit<V, M> {
       const name = await this.askName();
       if (!name || !this.alive) return;
       this.menuSay('방에 들어가는 중이에요…');
-      const result = await api.joinRoom(asked.value, name, this.options.readView);
+      const result = await api.joinRoom(asked.value, name, this.options.readView, friendStore.id());
       if (!this.alive) return;
       if (!result.ok) {
         if (result.reason === 'notfound') this.menuSay('없는 방이거나 이미 둘이 들어간 방이에요.\n다른 게임의 방일 수도 있어요.', true);
@@ -417,15 +498,27 @@ export class FriendsKit<V, M> {
   /** 씬을 떠날 때. 온라인 방이면 방을 나간다. 판을 하는 중에 나가면 진 판으로 센다. */
   private close(): void {
     this.alive = false;
+    this.rematch?.stop();
     const match = this.match;
     if (!match) return;
-    if (match.kind === 'online') {
+    if (match.kind === 'online' && !this.reopening) {
+      const room = match.room;
       // 친구가 자리를 비운 사이에 나가면 친구가 판을 버린 것으로 친다(서버도 그렇게 센다).
-      if (match.room.status === 'playing') friendStore.addResult(this.options.game, match.awayUntil !== null);
-      if (match.room.status !== 'closed') match.leave();
+      if (room.status === 'playing') this.count(room, match.awayUntil !== null, roundKey(room, 1));
+      // 같이 한 판이라도 했으면, 친구와 함께 화면에서 같은 방으로 다시 부를 수 있게 적어 둔다.
+      const online = match as OnlineMatch<V, M>;
+      if (room.names[1] !== null && room.game !== null && (room.status !== 'closed' || online.reopenable)) {
+        friendStore.setRematch(this.options.game, room.code, online.token, room.names[foeSeat(room)] ?? '친구');
+      }
+      if (room.status !== 'closed') match.leave();
       savedRoom.clear();
     }
     match.stop();
+  }
+
+  /** 온라인 판 하나의 결과를 전적(게임마다 합친 것과 친구마다)에 넣는다. 이미 센 판이면 넘어간다. */
+  private count(room: RoomView<V>, won: boolean | null, key = roundKey(room)): void {
+    if (friendStore.addFriendResult(this.options.game, room as RoomView<unknown>, won, key)) friendStore.addResult(this.options.game, won);
   }
 
   /** 방에서 나가 방 고르기(온라인) 또는 준비 화면(한 폰)으로 간다. */
@@ -508,6 +601,16 @@ export class FriendsKit<V, M> {
       this.showClosed(room);
       return;
     }
+    if (this.closedShown && match.kind === 'online') {
+      // 닫혔던 방을 누군가 "다시 하자"로 다시 열었다. 화면을 처음부터 다시 그린다.
+      this.reopening = true;
+      this.options.restart({ room: { code: room.code, token: (match as OnlineMatch<V, M>).token, view: room as RoomView<unknown> } });
+      return;
+    }
+    if (room.status === 'over' && room.rematch) {
+      this.showRematch(room);
+      return;
+    }
     if (!room.game) return;
     let fresh = false;
     if (!this.inRound) {
@@ -571,6 +674,56 @@ export class FriendsKit<V, M> {
     scene.tweens.add({ targets: dots, alpha: 0.25, duration: 700, yoyo: true, repeat: -1 });
   }
 
+  /**
+   * 다시 연 방에서 새 판을 기다리는 화면: 누구와 하는지, 지금까지의 전적, "한 판 더"와 "나가기".
+   * 판은 닫히기 전의 것이라(끝나지 않았을 수도 있다) 그리지 않는다. 둘 다 누르면 새 판이 시작된다.
+   */
+  private showRematch(room: RoomView<V>): void {
+    this.screenMode = 'room';
+    this.clearScreen();
+    const scene = this.scene;
+    const { height } = scene.scale;
+    const foe = this.foeName;
+    const mine = room.again[room.seat];
+    const theirs = room.again[foeSeat(room)];
+    this.header('다시 하자', () => this.exit());
+    const top = 56;
+    drawPanel(this.screen(scene.add.graphics()), MARGIN, top, WIDTH, 112, { fill: PX.panel, border: PX.yellow, shadow: PX.ink, radius: 4 });
+    this.screen(addText(scene, GAME_WIDTH / 2, top + 12, `${this.options.title} · 같은 방`, { size: 11, color: PX_CSS.sub, originX: 0.5 }));
+    this.screen(addText(scene, GAME_WIDTH / 2, top + 32, `${withAnd(shortName(foe, 8))} 한 판 더`, { size: 20, color: PX_CSS.accent, originX: 0.5 }));
+    this.screen(addText(scene, GAME_WIDTH / 2, top + 66, `이 방에서 ${this.scoreLine()}`, { size: 10, color: PX_CSS.text, originX: 0.5 }));
+    const record = friendStore.versus(this.options.game, room as RoomView<unknown>);
+    this.screen(addText(scene, GAME_WIDTH / 2, top + 84, `${withAnd(shortName(foe, 6))} 전적 ${recordText(record)}`, { size: 10, color: PX_CSS.sub, originX: 0.5 }));
+    let y = top + 124;
+    this.againButton = null;
+    if (!mine) {
+      this.againButton = this.button({ x: MARGIN, y, width: WIDTH, height: 36, label: '한 판 더', style: 'green', onTap: () => this.askAgain() });
+      y += 44;
+    }
+    this.button({ x: MARGIN, y, width: WIDTH, height: 30, label: '나가기', onTap: () => this.exit() });
+    const trouble = this.match?.trouble;
+    const line = trouble
+      ? `${failureText(trouble)}\n다시 잇는 중이에요…`
+      : mine
+        ? `${withSubject(foe)} 한 판 더를 누르면 시작해요`
+        : theirs
+          ? `${withSubject(foe)} 다시 하재요!`
+          : '';
+    this.status = this.screen(
+      addText(scene, GAME_WIDTH / 2, Math.min(height - 40, y + 48), line, {
+        size: 11,
+        color: trouble ? PX_CSS.bad : theirs && !mine ? PX_CSS.good : PX_CSS.text,
+        originX: 0.5,
+        align: 'center',
+        wrapWidth: WIDTH - 8,
+      }),
+    );
+    if (mine) {
+      const dots = this.screen(addText(scene, GAME_WIDTH / 2, Math.min(height - 22, y + 68), '●  ●  ●', { size: 10, color: PX_CSS.faint, originX: 0.5 }));
+      scene.tweens.add({ targets: dots, alpha: 0.25, duration: 700, yoyo: true, repeat: -1 });
+    }
+  }
+
   /** 방 코드를 메신저로 보낸다. 보내기를 못 하는 브라우저면 복사할 수 있게 크게 보여 준다. */
   private async shareCode(code: string): Promise<void> {
     const text = `포켓 아케이드에서 ${this.options.title} 같이 해요! 방 코드: ${formatRoomCode(code)}`;
@@ -590,10 +743,16 @@ export class FriendsKit<V, M> {
     if (this.closedShown) return;
     this.closedShown = true;
     const wasPlaying = this.inRound && this.lastStatus === 'playing';
-    this.match?.stop();
-    const { title, note, foeLeft, meDropped } = closedText(room, this.foeName, wasPlaying);
-    if (wasPlaying && this.kind === 'online' && (foeLeft || meDropped)) friendStore.addResult(this.options.game, foeLeft);
+    const online = this.match?.kind === 'online' ? (this.match as OnlineMatch<V, M>) : null;
+    // 다시 열 수 있는 방이면 소식 묻기를 멈추지 않는다: 친구가 먼저 "다시 하자"를 누르면 곧바로 알게 된다.
+    const reopenable = online?.reopenable === true;
+    if (!reopenable) this.match?.stop();
+    const closed = closedText(room, this.foeName, wasPlaying);
+    const { title, foeLeft, meDropped } = closed;
+    const note = reopenable && !wasPlaying ? '다시 하자를 누르면 같은 방으로 불러요' : closed.note;
+    if (wasPlaying && online && (foeLeft || meDropped)) this.count(room, foeLeft);
     const scene = this.scene;
+    const half = Math.floor((WIDTH - 40 - 6) / 2);
 
     if (!this.inRound) {
       this.clearScreen();
@@ -608,7 +767,12 @@ export class FriendsKit<V, M> {
           wrapWidth: WIDTH - 8,
         }),
       );
-      this.button({ x: MARGIN, y: scene.scale.height / 2 + 20, width: WIDTH, height: 34, label: '나가기', onTap: () => this.exit() });
+      if (reopenable) {
+        this.againButton = this.button({ x: MARGIN, y: scene.scale.height / 2 + 20, width: WIDTH, height: 34, label: '다시 하자', style: 'green', onTap: () => this.askReopen() });
+        this.button({ x: MARGIN, y: scene.scale.height / 2 + 62, width: WIDTH, height: 30, label: '나가기', onTap: () => this.exit() });
+      } else {
+        this.button({ x: MARGIN, y: scene.scale.height / 2 + 20, width: WIDTH, height: 34, label: '나가기', onTap: () => this.exit() });
+      }
       return;
     }
     this.hideCover();
@@ -619,7 +783,12 @@ export class FriendsKit<V, M> {
     this.endBox(boxTop, boxHeight, false);
     this.end(addText(scene, GAME_WIDTH / 2, boxTop + 12, title, { size: 15, color: PX_CSS.text, originX: 0.5 }).setDepth(DEPTH.end + 1));
     this.end(addText(scene, GAME_WIDTH / 2, boxTop + 34, note, { size: 10, color: PX_CSS.sub, originX: 0.5 }).setDepth(DEPTH.end + 1));
-    this.endButton({ x: MARGIN + 20, y: boxTop + boxHeight - 44, width: WIDTH - 40, height: 32, label: '나가기', onTap: () => this.exit() });
+    if (reopenable) {
+      this.againButton = this.endButton({ x: MARGIN + 20, y: boxTop + boxHeight - 44, width: half, height: 32, label: '다시 하자', style: 'green', onTap: () => this.askReopen() });
+      this.endButton({ x: MARGIN + WIDTH - 20 - half, y: boxTop + boxHeight - 44, width: half, height: 32, label: '나가기', onTap: () => this.exit() });
+    } else {
+      this.endButton({ x: MARGIN + 20, y: boxTop + boxHeight - 44, width: WIDTH - 40, height: 32, label: '나가기', onTap: () => this.exit() });
+    }
     if (foeLeft) sfx.deny();
   }
 
@@ -629,12 +798,13 @@ export class FriendsKit<V, M> {
     this.hideCover();
     this.clearEnd();
     const result = this.options.result(room);
-    if (this.kind === 'online') friendStore.addResult(this.options.game, result.won);
+    const online = this.kind === 'online';
+    if (online) this.count(room, result.won);
     const scene = this.scene;
     const lineHeight = 15;
-    // 제목, 작은 줄들, 이긴 판 수, 버튼 차례로 쌓는다.
+    // 제목, 작은 줄들, 이긴 판 수, (온라인이면) 이 친구와의 전적, 버튼 차례로 쌓는다.
     const scoreY = 34 + result.lines.length * lineHeight + 2;
-    const boxHeight = scoreY + 14 + 8 + 34 + 10;
+    const boxHeight = scoreY + 14 + (online ? 13 : 0) + 8 + 34 + 10;
     const boxTop = Math.round(scene.scale.height / 2 - boxHeight / 2);
     this.endBox(boxTop, boxHeight, result.bright);
     this.end(
@@ -648,6 +818,10 @@ export class FriendsKit<V, M> {
       this.end(addText(scene, GAME_WIDTH / 2, boxTop + 34 + index * lineHeight, line, { size: 10, color: index === 0 ? PX_CSS.text : PX_CSS.sub, originX: 0.5 }).setDepth(DEPTH.end + 1)),
     );
     this.end(addText(scene, GAME_WIDTH / 2, boxTop + scoreY, this.scoreLine(), { size: 9, color: PX_CSS.faint, originX: 0.5 }).setDepth(DEPTH.end + 1));
+    if (online) {
+      const versus = `${withAnd(shortName(this.foeName, 6))} 전적 ${recordText(friendStore.versus(this.options.game, room as RoomView<unknown>))}`;
+      this.end(addText(scene, GAME_WIDTH / 2, boxTop + scoreY + 13, versus, { size: 9, color: PX_CSS.sub, originX: 0.5 }).setDepth(DEPTH.end + 1));
+    }
     const half = Math.floor((WIDTH - 40 - 6) / 2);
     this.againButton = this.endButton({ x: MARGIN + 20, y: boxTop + boxHeight - 44, width: half, height: 34, label: '한 판 더', style: 'green', onTap: () => this.askAgain() });
     this.endButton({ x: MARGIN + WIDTH - 20 - half, y: boxTop + boxHeight - 44, width: half, height: 34, label: '나가기', onTap: () => this.exit() });
@@ -682,6 +856,24 @@ export class FriendsKit<V, M> {
       if (match.trouble) {
         this.againButton?.setEnabled(true);
         this.options.say?.(failureText(match.trouble), true);
+      }
+    });
+  }
+
+  /** 친구가 나가 닫힌 방에서 "다시 하자": 같은 방을 다시 열고 친구가 한 판 더를 누르기를 기다린다. */
+  private askReopen(): void {
+    const match = this.match;
+    if (!match) return;
+    this.againButton?.setEnabled(false).setLabel('부르는 중');
+    void match.again().then(() => {
+      if (!this.alive || this.match !== match) return;
+      // 다시 열렸으면 onChange가 화면을 다시 그린다. 여기까지 왔으면 열지 못한 것이다.
+      if (match.room.status !== 'closed') return;
+      if (match.trouble) {
+        this.againButton?.setEnabled(true).setLabel('다시 하자');
+        this.options.say?.(failureText(match.trouble), true);
+      } else {
+        this.againButton?.setEnabled(false).setLabel('방이 사라졌어요');
       }
     });
   }
