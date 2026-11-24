@@ -152,6 +152,8 @@ export class OneCardScene extends MiniGameScene {
       game: 'one-card',
       title: TEXT.title,
       rules: oneCardVersus,
+      // 알림 줄과 내 패 사이의 빈 곳. 위쪽은 상대의 패와 더미가 붙어 있어서 짧은 화면에서는 자리가 없다.
+      awayTop: () => (this.layout ?? this.computeLayout()).messageTop + 34,
       readView: readOneCardView,
       isMyTurn: (room) => {
         const game = room.game?.game;

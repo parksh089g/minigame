@@ -15,7 +15,18 @@ import {
   type RoomView,
   type Seat,
 } from '../src/versus/protocol';
-import { askAgain, createRoom, joinRoom, leaveRoom, playMove, roomView, type RoomState } from '../src/versus/room';
+import {
+  askAgain,
+  createRoom,
+  dropAwayFoe,
+  joinRoom,
+  leaveRoom,
+  markSeen,
+  playMove,
+  roomView,
+  tickRoom,
+  type RoomState,
+} from '../src/versus/room';
 import type { SqlRunner } from './board-db';
 
 /** 한꺼번에 열려 있을 수 있는 방의 수. 넘으면 새로 만들지 않는다. */
@@ -58,6 +69,27 @@ export class RoomDb {
     }
   }
 
+  /** 방이 바뀐 것은 아니고 누가 언제 왔는지(마감 시각 같은 보이지 않는 것)만 적는다. 방이 사라지는 시각은 그대로 둔다. */
+  private touch(code: string, row: Row): void {
+    this.sql.exec('UPDATE rooms SET state = ? WHERE code = ?', JSON.stringify(row.room), code);
+  }
+
+  /**
+   * seat에서 요청이 왔다: 본 시각을 적고, 시간이 지나 정리할 것을 정리한다.
+   * 마감이 지나 게임이 대신 둔 수(원카드를 외치지 못함)가 있거나, 상대가 너무 오래 자리를 비워 판을 버린 것으로 쳤으면
+   * 방이 바뀐 것이니 저장한다. 그 밖에는 본 시각만 가끔 적는다.
+   */
+  private arrive(code: string, row: Row, seat: Seat, now: number): void {
+    const before = row.room.version;
+    const seen = markSeen(row.room, seat, now);
+    const rules = TURN_GAMES[row.room.game];
+    const quiet = JSON.stringify(row.room.round);
+    tickRoom(row.room, rules, now);
+    dropAwayFoe(row.room, seat, now);
+    if (row.room.version !== before) this.save(code, row, now);
+    else if (seen || JSON.stringify(row.room.round) !== quiet) this.touch(code, row);
+  }
+
   private save(code: string, row: Row, now: number): void {
     this.sql.exec(
       'UPDATE rooms SET state = ?, tokens = ?, expires = ? WHERE code = ?',
@@ -75,8 +107,8 @@ export class RoomDb {
     return null;
   }
 
-  private view(row: Row, seat: Seat, code: string): RoomView {
-    return roomView(row.room, TURN_GAMES[row.room.game], seat, code);
+  private view(row: Row, seat: Seat, code: string, now: number): RoomView {
+    return roomView(row.room, TURN_GAMES[row.room.game], seat, code, now);
   }
 
   /** 방을 만들고 0번 자리에 앉는다. 방이 너무 많이 열려 있으면 null */
@@ -85,6 +117,7 @@ export class RoomDb {
     const open = this.sql.exec<{ n: number }>('SELECT COUNT(*) AS n FROM rooms').toArray()[0]?.n ?? 0;
     if (open >= MAX_ROOMS) return null;
     const room = createRoom(game, name);
+    markSeen(room, 0, now);
     const token = seatTokenFrom(randomBytes(16));
     // 코드가 겹칠 일은 거의 없지만, 겹치면 다시 뽑는다.
     for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -98,7 +131,7 @@ export class RoomDb {
         token,
         now + ROOM_IDLE_MS,
       );
-      return { token, room: roomView(room, TURN_GAMES[game], 0, code) };
+      return { token, room: roomView(room, TURN_GAMES[game], 0, code, now) };
     }
     return null;
   }
@@ -107,18 +140,20 @@ export class RoomDb {
   join(code: string, name: string, now: number, randomBytes: RandomBytes, random: () => number): RoomTicket | null {
     const row = this.load(code, now);
     if (!row || row.tokens[1] !== null) return null;
-    if (!joinRoom(row.room, TURN_GAMES[row.room.game], name, random)) return null;
+    if (!joinRoom(row.room, TURN_GAMES[row.room.game], name, random, now)) return null;
     const token = seatTokenFrom(randomBytes(16));
     row.tokens[1] = token;
     this.save(code, row, now);
-    return { token, room: this.view(row, 1, code) };
+    return { token, room: this.view(row, 1, code, now) };
   }
 
   /** 내 자리에서 본 방. 방이 없거나(시간이 지났거나) 열쇠가 맞지 않으면 null */
   look(code: string, token: string, now: number): RoomView | null {
     const row = this.load(code, now);
     const seat = row && this.seatOf(row, token);
-    return row && seat !== null ? this.view(row, seat, code) : null;
+    if (!row || seat === null) return null;
+    this.arrive(code, row, seat, now);
+    return this.view(row, seat, code, now);
   }
 
   /**
@@ -129,11 +164,13 @@ export class RoomDb {
     const row = this.load(code, now);
     const seat = row && this.seatOf(row, token);
     if (!row || seat === null) return null;
+    // 마감이 지나 정리된 것이 있으면 방의 번호가 올라서, 그 전에 본 판에 둔 수는 받지 않는다.
+    this.arrive(code, row, seat, now);
     const rules = TURN_GAMES[row.room.game];
     const move = rules.readMove(raw);
-    const ok = move !== null && row.room.version === version && playMove(row.room, rules, seat, move);
+    const ok = move !== null && row.room.version === version && playMove(row.room, rules, seat, move, now);
     if (ok) this.save(code, row, now);
-    return { ok, room: this.view(row, seat, code) };
+    return { ok, room: this.view(row, seat, code, now) };
   }
 
   /** 판이 끝난 뒤 "한 판 더"를 누른다. 둘 다 누르면 새 판이 시작된다. */
@@ -141,16 +178,21 @@ export class RoomDb {
     const row = this.load(code, now);
     const seat = row && this.seatOf(row, token);
     if (!row || seat === null) return null;
+    this.arrive(code, row, seat, now);
     if (askAgain(row.room, TURN_GAMES[row.room.game], seat, random)) this.save(code, row, now);
-    return this.view(row, seat, code);
+    return this.view(row, seat, code, now);
   }
 
-  /** 방을 나간다. 남은 사람은 "친구가 나갔어요"를 보게 된다. 방은 시간이 지나면 지워진다. */
+  /**
+   * 방을 나간다. 남은 사람은 "친구가 나갔어요"를 보게 된다. 방은 시간이 지나면 지워진다.
+   * 상대가 자리를 비운 사이에 나가는 것이면 자리를 비운 상대가 판을 버린 것으로 친다.
+   */
   leave(code: string, token: string, now: number): boolean {
     const row = this.load(code, now);
     const seat = row && this.seatOf(row, token);
     if (!row || seat === null) return false;
-    leaveRoom(row.room, seat);
+    this.arrive(code, row, seat, now);
+    leaveRoom(row.room, seat, now);
     this.save(code, row, now);
     return true;
   }

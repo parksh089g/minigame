@@ -142,4 +142,41 @@ describe('온라인으로 하기', () => {
     expect(match.room.status).toBe('closed');
     expect(clock.next).toBeNull();
   });
+
+  it('친구가 자리를 비우면 남은 시간을 이 폰의 시계로 알리고 자주 묻고, 친구가 돌아오면 다시 알린다', async () => {
+    const server = fakeServer();
+    server.room.round!.round.turn = 'me';
+    const clock = manualTimers();
+    let now = 5_000;
+    const timers = { ...clock.timers, now: () => now };
+    let away: number | null = null;
+    const api = {
+      ...server.api,
+      lookRoom: async () => ({ ok: true, data: { ...server.view(), away } }) as const,
+    };
+    const match = new OnlineMatch(api as typeof server.api, 'a'.repeat(32), server.view(), readHulaView, (room) => room.game?.round.turn === 'me', timers);
+    let changes = 0;
+    match.onChange(() => (changes += 1));
+    expect(match.awayUntil).toBeNull();
+    expect(clock.next).toBe(POLL_MS.mine);
+    away = 30_000;
+    await clock.fire();
+    expect(changes).toBe(1);
+    expect(match.awayUntil).toBe(35_000);
+    expect(clock.next).toBe(POLL_MS.waiting);
+    // 남은 시간만 줄어든 것은 다시 알리지 않는다(띠가 스스로 센다).
+    now = 7_000;
+    away = 28_000;
+    await clock.fire();
+    expect(changes).toBe(1);
+    away = null;
+    await clock.fire();
+    expect(changes).toBe(2);
+    expect(match.awayUntil).toBeNull();
+    match.stop();
+  });
+
+  it('한 폰으로 할 때는 자리를 비우는 일이 없다', () => {
+    expect(new LocalMatch(hulaVersus, ['1P', '2P'], half).awayUntil).toBeNull();
+  });
 });

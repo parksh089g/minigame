@@ -792,6 +792,69 @@ describe('친구와 하는 방', () => {
     expect(seen.room).toMatchObject({ status: 'closed', left: 1, wins: [1, 0] });
   });
 
+  it('친구가 앱을 닫으면 남은 사람에게 남은 시간을 보여 주고, 1분이 지나면 친구가 판을 버린 것으로 친다', async () => {
+    const { call, wait } = server();
+    const { code, host } = await pair(call);
+    type Seen = { room: Room & { left: number | null; dropped: boolean; away: number | null } };
+    const look = async (version?: number) => (await call('POST', '/api/room/look', { code, token: host, version })).body as Seen & { same?: true };
+    // 앱을 잠깐 내려 둔 정도(20초 안)는 자리를 비운 것으로 보지 않는다.
+    wait(15_000);
+    expect((await look()).room.away).toBeNull();
+    wait(10_000);
+    const first = await look(0);
+    expect(first.room).toMatchObject({ status: 'playing', left: null });
+    expect(first.room.away).toBe(35_000);
+    // 남은 시간이 바뀌므로 같은 번호로 물어도 방을 싣는다.
+    const counting = await look(first.room.version);
+    expect(counting.same).toBeUndefined();
+    expect(counting.room.away).toBe(35_000);
+    for (let i = 0; i < 17; i += 1) {
+      wait(2_000);
+      await look(first.room.version);
+    }
+    wait(2_000);
+    const closed = await look(first.room.version);
+    expect(closed.room).toMatchObject({ status: 'closed', left: 1, dropped: true, away: null, wins: [1, 0] });
+  });
+
+  it('친구가 시간 안에 돌아오면 판이 이어진다', async () => {
+    const { call, wait } = server();
+    const { code, host, guest } = await pair(call);
+    for (let i = 0; i < 10; i += 1) {
+      wait(4_000);
+      await call('POST', '/api/room/look', { code, token: host });
+    }
+    const hostLook = (await call('POST', '/api/room/look', { code, token: host })).body as { room: Room & { away: number | null } };
+    expect(hostLook.room.away).toBe(20_000);
+    await call('POST', '/api/room/look', { code, token: guest });
+    const back = (await call('POST', '/api/room/look', { code, token: host })).body as { room: Room & { away: number | null; status: string } };
+    expect(back.room).toMatchObject({ status: 'playing', away: null });
+  });
+
+  it('친구가 자리를 비운 사이에 기다리다 나가면, 나간 사람이 아니라 자리를 비운 친구가 진다', async () => {
+    const { call, wait } = server();
+    const { code, host, guest } = await pair(call);
+    for (let i = 0; i < 12; i += 1) {
+      wait(2_000);
+      await call('POST', '/api/room/look', { code, token: host });
+    }
+    expect((await call('POST', '/api/room/leave', { code, token: host })).body).toEqual({ ok: true });
+    const seen = (await call('POST', '/api/room/look', { code, token: guest })).body as { room: Room & { left: number; dropped: boolean } };
+    expect(seen.room).toMatchObject({ status: 'closed', left: 1, dropped: true, wins: [1, 0] });
+  });
+
+  it('둘 다 자리를 비웠다가 먼저 돌아온 사람이 바로 이기지는 않는다', async () => {
+    const { call, wait } = server();
+    const { code, host, guest } = await pair(call);
+    wait(5 * 60 * 1000);
+    const first = (await call('POST', '/api/room/look', { code, token: host })).body as { room: Room & { away: number | null } };
+    expect(first.room).toMatchObject({ status: 'playing', away: 40_000 });
+    wait(30_000);
+    await call('POST', '/api/room/look', { code, token: guest });
+    const after = (await call('POST', '/api/room/look', { code, token: host })).body as { room: Room & { away: number | null } };
+    expect(after.room).toMatchObject({ status: 'playing', away: null });
+  });
+
   it('30분 동안 아무도 두지 않으면 방이 사라진다', async () => {
     const { call, wait } = server();
     const { code, host } = await pair(call);

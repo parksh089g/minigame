@@ -5,7 +5,7 @@
 import './app-globals';
 import { expect, type Page } from '@playwright/test';
 import { ONE_CARD_SCENE } from '../src/games/one-card/text';
-import { collectErrors, hiddenTexts, it, openApp, startScene, tapAt, tapText } from './app';
+import { collectErrors, hiddenTexts, it, openApp, startScene, tapAt, tapText, textPoint } from './app';
 
 const WAIT = { timeout: 20_000 } as const;
 
@@ -103,4 +103,38 @@ it('원카드 온라인: 방을 만들고 코드로 들어온 친구와 서로 �
   await tapText(page, ONE_CARD_SCENE, '지원이 나갔어요');
   expect(friendErrors).toEqual([]);
   await context.close();
+});
+
+it('원카드 온라인: 친구가 앱을 닫으면 남은 시간을 보여 주고, 시간이 지나면 내가 이긴 것으로 방이 닫힌다', async ({ page, browser }) => {
+  // 서버가 자리를 비운 것으로 보기까지 20초, 판을 버린 것으로 치기까지 60초를 실제로 기다린다.
+  it.setTimeout(150_000);
+  const context = await browser.newContext({ viewport: page.viewportSize() ?? undefined, isMobile: true, hasTouch: true, serviceWorkers: 'block' });
+  const friend = await context.newPage();
+
+  await openApp(page);
+  await startScene(page, ONE_CARD_SCENE);
+  await tapText(page, ONE_CARD_SCENE, '친구와 함께');
+  await tapText(page, ONE_CARD_SCENE, '방 만들기');
+  await answer(page, '내 이름', '민수');
+  await expect.poll(async () => (await look(page)).status, WAIT).toBe('waiting');
+  const code = (await look(page)).code!;
+
+  await openApp(friend);
+  await startScene(friend, ONE_CARD_SCENE);
+  await tapText(friend, ONE_CARD_SCENE, '친구와 함께');
+  await tapText(friend, ONE_CARD_SCENE, '코드로 들어가기');
+  await answer(friend, '방 코드', code);
+  await answer(friend, '내 이름', '지원');
+  await expect.poll(async () => (await look(page)).status, WAIT).toBe('playing');
+
+  // 친구가 "나가기" 없이 앱을 닫는다(서버에 아무것도 보내지 않는다).
+  await context.close();
+  await expect.poll(() => textPoint(page, ONE_CARD_SCENE, '지원이 자리를 비웠어요'), { timeout: 40_000 }).not.toBeNull();
+  expect(await hiddenTexts(page, ONE_CARD_SCENE), '자리를 비웠다는 띠').toEqual([]);
+  expect(await page.evaluate((key) => (window.__pocketArcade?.scene.getScene(key) as unknown as { friends: { quitWarning(): string | null } }).friends.quitWarning(), ONE_CARD_SCENE)).toContain(
+    '내가 이긴 판',
+  );
+  await expect.poll(async () => (await look(page)).status, { timeout: 70_000 }).toBe('closed');
+  await tapText(page, ONE_CARD_SCENE, '지원이 돌아오지 않았어요');
+  expect(await textPoint(page, ONE_CARD_SCENE, '지원이 자리를 비웠어요')).toBeNull();
 });

@@ -17,6 +17,8 @@ export interface Match<V, M> {
   readonly room: RoomView<V>;
   /** 서버에 닿지 못하고 있으면 그 이유. 한 폰으로 할 때는 늘 null */
   readonly trouble: ApiFailure | null;
+  /** 상대가 자리를 비웠으면, 상대가 판을 버린 것으로 칠 때(이 폰의 시계, ms). 상대가 있으면 null */
+  readonly awayUntil: number | null;
   /** 지금 보는 자리가 둘 차례인지 */
   myTurn(): boolean;
   /** 수를 둔다. 받아들였으면 true */
@@ -35,6 +37,7 @@ export interface Match<V, M> {
 export class LocalMatch<S, M, V> implements Match<V, M> {
   readonly kind = 'local';
   readonly trouble = null;
+  readonly awayUntil = null;
   private readonly state: RoomState<S>;
   private seat: Seat = 0;
   private listeners: Array<() => void> = [];
@@ -102,8 +105,8 @@ export class LocalMatch<S, M, V> implements Match<V, M> {
 export const POLL_MS = {
   /** 친구가 들어오기를, 또는 친구가 두기를 기다릴 때 */
   waiting: 2000,
-  /** 내 차례일 때. 친구가 나갔는지만 가끔 본다. */
-  mine: 8000,
+  /** 내 차례일 때. 친구가 나갔는지, 자리를 비웠는지 본다. 내가 묻는 것으로 서버가 내가 아직 있는 줄 안다. */
+  mine: 4000,
   /** 판이 끝나고 "한 판 더"를 기다릴 때 */
   over: 2500,
   /** 서버에 닿지 못했을 때 다시 묻기까지 */
@@ -113,6 +116,8 @@ export const POLL_MS = {
 export interface Timers {
   set(callback: () => void, ms: number): unknown;
   clear(handle: unknown): void;
+  /** 지금 시각(ms). 없으면 Date.now() */
+  now?(): number;
 }
 
 const browserTimers: Timers = {
@@ -124,6 +129,7 @@ const browserTimers: Timers = {
 export class OnlineMatch<V, M> implements Match<V, M> {
   readonly kind = 'online';
   trouble: ApiFailure | null = null;
+  awayUntil: number | null = null;
   private current: RoomView<V>;
   private listeners: Array<() => void> = [];
   private timer: unknown = null;
@@ -141,7 +147,13 @@ export class OnlineMatch<V, M> implements Match<V, M> {
     private readonly timers: Timers = browserTimers,
   ) {
     this.current = room;
+    this.awayUntil = this.awayFrom(room);
     this.schedule();
+  }
+
+  /** 서버가 알려 준 남은 시간을 이 폰의 시계로 바꾼다. */
+  private awayFrom(room: RoomView<V>): number | null {
+    return room.away === null || room.status === 'closed' ? null : (this.timers.now?.() ?? Date.now()) + room.away;
   }
 
   get room(): RoomView<V> {
@@ -167,8 +179,10 @@ export class OnlineMatch<V, M> implements Match<V, M> {
   /** 새로 받은 방을 쓴다. 번호가 거꾸로 가는 묵은 답은 버린다. */
   private take(room: RoomView<V>): void {
     if (room.version < this.current.version) return;
-    const changed = room.version !== this.current.version || this.trouble !== null;
+    const awayUntil = this.awayFrom(room);
+    const changed = room.version !== this.current.version || this.trouble !== null || (awayUntil === null) !== (this.awayUntil === null);
     this.current = room;
+    this.awayUntil = awayUntil;
     this.trouble = null;
     if (changed) this.notify();
   }
@@ -177,6 +191,7 @@ export class OnlineMatch<V, M> implements Match<V, M> {
   private fail(reason: ApiFailure): void {
     if (reason === 'notfound' || reason === 'invalid') {
       this.current = { ...this.current, status: 'closed', version: this.current.version + 1 };
+      this.awayUntil = null;
       this.trouble = null;
       this.notify();
       return;
@@ -194,7 +209,9 @@ export class OnlineMatch<V, M> implements Match<V, M> {
     const ms =
       this.trouble !== null
         ? POLL_MS.retry
-        : this.current.status === 'over'
+        : this.awayUntil !== null
+          ? POLL_MS.waiting
+          : this.current.status === 'over'
           ? POLL_MS.over
           : this.myTurn()
             ? POLL_MS.mine
