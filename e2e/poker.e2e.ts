@@ -49,7 +49,7 @@ it('포커: 몇 판을 체크와 콜로 한다', async ({ page }) => {
   // 컴퓨터 셋이 차례마다 잠깐 생각해서 한 판에 15초쯤 걸린다. CI의 느린 기계에서도 넉넉하게 둔다.
   it.setTimeout(120_000);
   await openApp(page);
-  await startScene(page, SCENE.poker);
+  await startScene(page, SCENE.poker, { solo: true });
   expect(await hiddenTexts(page, SCENE.poker), '시작 화면').toEqual([]);
 
   // 족보표의 줄을 누르면 예가 뜬다.
@@ -89,7 +89,7 @@ it('포커: 몇 판을 체크와 콜로 한다', async ({ page }) => {
 
 it('포커: 칩을 다 잃으면 결과 화면이 뜬다', async ({ page }) => {
   await openApp(page);
-  await startScene(page, SCENE.poker);
+  await startScene(page, SCENE.poker, { solo: true });
   // 내 칩을 빅 블라인드만큼으로 줄인다. 첫 판에 나는 버튼이라 블라인드를 내지 않는다.
   await page.evaluate((key) => {
     const scene = window.__pocketArcade?.scene.getScene(key) as unknown as { table: { seats: { chips: number }[] } };
@@ -128,7 +128,7 @@ it('포커: 칩을 다 잃으면 결과 화면이 뜬다', async ({ page }) => {
 
 it('포커: 처음 하면 규칙 안내서가 뜨고, 모든 쪽의 글이 보인다', async ({ page }) => {
   await openApp(page, '/', 'Hub', { ruleBooks: 'fresh' });
-  await startScene(page, SCENE.poker);
+  await startScene(page, SCENE.poker, { solo: true });
   await waitForScene(page, SCENE.ruleBook);
   expect(await activeScenes(page)).toEqual([SCENE.ruleBook]);
   const pages = RULE_BOOK.poker;

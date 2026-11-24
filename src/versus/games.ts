@@ -7,6 +7,7 @@ import { blackjackVersus } from '../games/blackjack/versus';
 import { highLowVersus } from '../games/high-low/versus';
 import { hulaVersus } from '../games/hula/versus';
 import { oneCardVersus } from '../games/one-card/versus';
+import { pokerVersus } from '../games/poker/versus';
 import type { RoomGame } from './protocol';
 import type { AnyTurnGame } from './room';
 
@@ -15,4 +16,5 @@ export const TURN_GAMES: Readonly<Record<RoomGame, AnyTurnGame>> = {
   'one-card': oneCardVersus,
   blackjack: blackjackVersus,
   'high-low': highLowVersus,
+  poker: pokerVersus,
 };

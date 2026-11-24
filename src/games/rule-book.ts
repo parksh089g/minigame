@@ -379,7 +379,7 @@ export const RULE_BOOK: Readonly<Record<string, readonly RulePage[]>> = {
         { cards: ['QS', 'JD', '7C', '4H', '2S'], note: '가운데 다섯 장은 모두 같이 써요' },
       ],
       lines: [
-        '컴퓨터 셋과 칩을 걸고 겨뤄요',
+        '컴퓨터나 친구와 칩을 걸고 겨뤄요',
         '7장 중 가장 센 5장으로 족보를 만들어요',
         '끝까지 남아 족보가 가장 세면 팟을 가져요',
       ],
